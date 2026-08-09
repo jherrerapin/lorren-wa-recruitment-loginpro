@@ -102,7 +102,7 @@ test('el check de almuerzo registra inicio y fin y descuenta el intervalo real',
   assert.equal(reviews[0].metadata.manualBreakEndAt, '2026-08-09T18:00:00.000Z');
 });
 
-test('el runtime quita el motivo y muestra el check que habilita horas de almuerzo', () => {
+test('la vista muestra el almuerzo manual y el runtime solo controla su interacción', () => {
   const runtime = fs.readFileSync(
     new URL('../src/public/attendance-admin-manual-workday.js', import.meta.url),
     'utf8'
@@ -115,14 +115,65 @@ test('el runtime quita el motivo y muestra el check que habilita horas de almuer
     new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url),
     'utf8'
   );
+  const view = fs.readFileSync(
+    new URL('../src/views/operacionesAsistencia.ejs', import.meta.url),
+    'utf8'
+  );
+  const manualForm = view.match(/<form class="review-form" method="post" action="\/admin\/operaciones\/asistencia\/assignments\/<%= row\.assignmentId %>\/manual"[\s\S]*?<\/form>/)?.[0] || '';
 
-  assert.match(runtime, /form\.querySelector\('input\[name="reason"\]'\)\?\.remove\(\)/);
-  assert.match(runtime, /checkbox\.name = 'breakTaken'/);
-  assert.match(runtime, /Tomó almuerzo/);
-  assert.match(runtime, /createDateTimeField\('breakStartAt', 'Inicio de almuerzo'\)/);
-  assert.match(runtime, /createDateTimeField\('breakEndAt', 'Fin de almuerzo'\)/);
+  assert.match(manualForm, /data-manual-workday-form="true"/);
+  assert.match(manualForm, /name="breakTaken"/);
+  assert.match(manualForm, /Tomó almuerzo/);
+  assert.match(manualForm, /name="breakStartAt"/);
+  assert.match(manualForm, /Inicio de almuerzo/);
+  assert.match(manualForm, /name="breakEndAt"/);
+  assert.match(manualForm, /Fin de almuerzo/);
+  assert.doesNotMatch(manualForm, /name="reason"/);
+
+  assert.match(runtime, /form\.querySelector\('\[data-manual-break-toggle\]'\)/);
+  assert.match(runtime, /breakFields\.hidden = !checkbox\.checked/);
+  assert.match(runtime, /startInput\.required = checkbox\.checked/);
+  assert.match(runtime, /endInput\.required = checkbox\.checked/);
+  assert.doesNotMatch(runtime, /createDateTimeField/);
+  assert.doesNotMatch(runtime, /document\.createElement/);
+
   assert.match(loader, /attendance-admin-manual-workday\.js/);
   assert.match(route, /breakTaken: req\.body\.breakTaken/);
   assert.match(route, /breakStartAt: req\.body\.breakStartAt/);
   assert.match(route, /breakEndAt: req\.body\.breakEndAt/);
+});
+
+test('la tarjeta comprimida muestra solo identificación operativa esencial', () => {
+  const view = fs.readFileSync(
+    new URL('../src/views/operacionesAsistencia.ejs', import.meta.url),
+    'utf8'
+  );
+  const summary = view.match(/<summary class="attendance-summary">[\s\S]*?<\/summary>/)?.[0] || '';
+
+  assert.match(summary, /row\.workerName/);
+  assert.match(summary, /Ciudad/);
+  assert.match(summary, /row\.cityName/);
+  assert.match(summary, /Operación/);
+  assert.match(summary, /row\.operationPointName/);
+  assert.match(summary, /Documento/);
+  assert.match(summary, /row\.documentType/);
+  assert.match(summary, /row\.documentNumber/);
+
+  assert.doesNotMatch(summary, /row\.phone/);
+  assert.doesNotMatch(summary, /row\.address/);
+  assert.doesNotMatch(summary, /row\.serviceDateLabel/);
+  assert.doesNotMatch(summary, /row\.scheduleLabel/);
+  assert.doesNotMatch(summary, /row\.statusLabel/);
+  assert.doesNotMatch(summary, /row\.arrivalReportedLabel/);
+  assert.doesNotMatch(summary, /row\.departureReportedLabel/);
+  assert.doesNotMatch(summary, /row\.overtimeLabel/);
+  assert.doesNotMatch(summary, /row\.riskScore/);
+
+  assert.doesNotMatch(view, /row\.phone/);
+  assert.doesNotMatch(view, /row\.address/);
+  assert.match(view, /Llegada reportada/);
+  assert.match(view, /Inicio de almuerzo/);
+  assert.match(view, /Fin de almuerzo/);
+  assert.match(view, /Salida reportada/);
+  assert.match(view, /Almuerzo descontado/);
 });
