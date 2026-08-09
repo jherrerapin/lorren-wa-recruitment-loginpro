@@ -7,8 +7,9 @@ import {
 import { reviewAttendanceSession } from './adminAttendance.js';
 
 const BOGOTA_TIME_ZONE = 'America/Bogota';
-const VALID_WORKDAY_REVIEW_ACTIONS = new Set(['VALIDATE', 'REJECT', 'REOPEN']);
+const VALID_WORKDAY_REVIEW_ACTIONS = new Set(['VALIDATE', 'REJECT', 'REOPEN', 'CLEAR']);
 const VALID_PUNCTUALITY_STATUSES = new Set(['ON_TIME', 'LATE']);
+const CLEAR_MARKS_REVIEW_REASON = 'Marcaciones eliminadas por coordinación para corregir la jornada.';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -215,6 +216,100 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
   };
 }
 
+function clearedSessionData() {
+  return {
+    attendanceStatus: 'PENDING',
+    validationStatus: 'PENDING',
+    punctualityStatus: null,
+    riskScore: 0,
+    riskFlags: [],
+    arrivalReportedAt: null,
+    arrivalValidatedAt: null,
+    departureReportedAt: null,
+    departureValidatedAt: null,
+    workedMinutes: null
+  };
+}
+
+async function clearAttendanceWorkdayMarks(prisma, input = {}) {
+  const sessionId = requireString(input.sessionId, 'attendance_review_session_id', { maxLength: 120 });
+  const actorUsername = requireString(input.actorUsername, 'attendance_review_actor', { maxLength: 120 });
+  const actorRole = normalizeString(input.actorRole)?.slice(0, 60) || null;
+  const now = input.now instanceof Date ? input.now : new Date();
+  if (Number.isNaN(now.getTime())) throw new Error('attendance_review_now_invalid');
+  if (typeof prisma.$transaction !== 'function') throw new Error('attendance_workday_transaction_required');
+
+  return prisma.$transaction(async (tx) => {
+    if (!tx?.dispatchAttendanceSession || typeof tx.dispatchAttendanceSession.findUnique !== 'function' || typeof tx.dispatchAttendanceSession.update !== 'function') {
+      throw new Error('attendance_workday_session_writer_required');
+    }
+    if (!tx?.dispatchAttendanceMark || typeof tx.dispatchAttendanceMark.deleteMany !== 'function') {
+      throw new Error('attendance_workday_mark_delete_required');
+    }
+    if (!tx?.dispatchAttendanceReview || typeof tx.dispatchAttendanceReview.create !== 'function') {
+      throw new Error('attendance_workday_review_writer_required');
+    }
+
+    const session = await tx.dispatchAttendanceSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        marks: { orderBy: { serverReceivedAt: 'asc' } },
+        assignment: {
+          include: { worker: true, serviceRequest: true }
+        }
+      }
+    });
+    if (!session) throw new Error('attendance_review_session_not_found');
+    const marks = Array.isArray(session.marks) ? session.marks : [];
+    if (!marks.length && !session.arrivalReportedAt && !session.departureReportedAt) {
+      throw new Error('attendance_review_no_marks_to_clear');
+    }
+
+    const removedMarks = marks.map((mark) => ({
+      markType: mark.markType || null,
+      capturedAt: markMoment(mark)?.toISOString() || null,
+      decision: mark.decision || null,
+      hadEvidence: Boolean(mark.evidenceStorageKey)
+    }));
+    const next = clearedSessionData();
+
+    await tx.dispatchAttendanceMark.deleteMany({
+      where: { attendanceSessionId: session.id }
+    });
+    const updated = await tx.dispatchAttendanceSession.update({
+      where: { id: session.id },
+      data: next
+    });
+    await tx.dispatchAttendanceReview.create({
+      data: {
+        attendanceSessionId: session.id,
+        action: 'WORKDAY_CLEAR_MARKS',
+        previousAttendanceStatus: session.attendanceStatus,
+        newAttendanceStatus: next.attendanceStatus,
+        previousValidationStatus: session.validationStatus,
+        newValidationStatus: next.validationStatus,
+        reason: CLEAR_MARKS_REVIEW_REASON,
+        notes: null,
+        actorUsername,
+        actorRole,
+        metadata: {
+          workerId: session.assignment?.workerId || null,
+          workerName: session.assignment?.worker?.fullName || null,
+          serviceRequestId: session.assignment?.serviceRequestId || null,
+          assignmentId: session.assignmentId,
+          removedMarkCount: marks.length,
+          removedMarks,
+          previousArrivalReportedAt: session.arrivalReportedAt?.toISOString?.() || null,
+          previousDepartureReportedAt: session.departureReportedAt?.toISOString?.() || null,
+          previousWorkedMinutes: Number.isInteger(session.workedMinutes) ? session.workedMinutes : null,
+          clearedAt: now.toISOString()
+        }
+      }
+    });
+    return updated;
+  });
+}
+
 function workdayTransition(session, action, now, requestedAttendanceStatus, workedMinutes) {
   if (action === 'VALIDATE') {
     const punctualityStatus = requireString(
@@ -254,6 +349,12 @@ function workdayTransition(session, action, now, requestedAttendanceStatus, work
 
 export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
   const sessionId = requireString(input.sessionId, 'attendance_review_session_id', { maxLength: 120 });
+  const action = requireString(input.action, 'attendance_review_action', { maxLength: 40 }).toUpperCase();
+  if (!VALID_WORKDAY_REVIEW_ACTIONS.has(action)) throw new Error('attendance_review_action_invalid');
+  if (action === 'CLEAR') {
+    return clearAttendanceWorkdayMarks(prisma, { ...input, sessionId });
+  }
+
   if (!prisma?.dispatchAttendanceSession || typeof prisma.dispatchAttendanceSession.findUnique !== 'function') {
     throw new Error('attendance_workday_session_reader_required');
   }
@@ -264,8 +365,6 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
   if (!snapshot) throw new Error('attendance_review_session_not_found');
   if (!snapshot.departureReportedAt) return reviewAttendanceSession(prisma, input);
 
-  const action = requireString(input.action, 'attendance_review_action', { maxLength: 40 }).toUpperCase();
-  if (!VALID_WORKDAY_REVIEW_ACTIONS.has(action)) throw new Error('attendance_review_action_invalid');
   const reason = requireString(input.reason, 'attendance_review_reason', { minLength: 5, maxLength: 500 });
   const notes = normalizeString(input.notes)?.slice(0, 1000) || null;
   const actorUsername = requireString(input.actorUsername, 'attendance_review_actor', { maxLength: 120 });
