@@ -33,7 +33,8 @@ function attendanceFixture() {
     departureReportedAt: new Date('2026-08-09T22:00:00.000Z'),
     departureValidatedAt: new Date('2026-08-09T22:00:05.000Z'),
     workedMinutes: 480,
-    marks
+    marks,
+    reviews: []
   };
   const assignment = {
     id: 'assignment-test',
@@ -103,8 +104,14 @@ function attendanceFixture() {
     },
     dispatchAttendanceReview: {
       async create({ data }) {
+        const review = {
+          id: `review-${state.reviews.length + 1}`,
+          createdAt: new Date(`2026-08-09T23:${String(state.reviews.length).padStart(2, '0')}:30.000Z`),
+          ...data
+        };
         state.reviews.push(data);
-        return { id: `review-${state.reviews.length}`, ...data };
+        session.reviews.unshift(review);
+        return review;
       }
     }
   };
@@ -244,6 +251,24 @@ for (const correction of individualCases) {
   });
 }
 
+test('no permite agregar una marcación ausente si no fue eliminada previamente para corregirla', async () => {
+  const { prisma, session } = attendanceFixture();
+  session.marks.splice(session.marks.findIndex((mark) => mark.markType === 'BREAK_START'), 1);
+
+  await assert.rejects(
+    reviewAttendanceWorkdaySession(prisma, {
+      sessionId: session.id,
+      action: 'ADD_MARK',
+      markType: 'BREAK_START',
+      reportedAt: '2026-08-09T12:00',
+      actorUsername: 'coordinacion-prueba',
+      actorRole: 'admin',
+      now: new Date('2026-08-09T23:15:00.000Z')
+    }),
+    /attendance_review_mark_not_pending_correction/
+  );
+});
+
 test('eliminar inicio de almuerzo conserva fin y salida pero deja la sesión fuera de nómina hasta reponer la marca', async () => {
   const { prisma, session } = attendanceFixture();
   const result = await reviewAttendanceWorkdaySession(prisma, {
@@ -263,7 +288,76 @@ test('eliminar inicio de almuerzo conserva fin y salida pero deja la sesión fue
   assert.equal(result.workedMinutes, null);
 });
 
-test('el panel ofrece eliminar y reponer cada marca individual usando la misma ruta administrativa', () => {
+test('eliminar fin de almuerzo conserva inicio y salida pero no aplica penalización mientras la corrección está pendiente', async () => {
+  const { prisma, session } = attendanceFixture();
+  const result = await reviewAttendanceWorkdaySession(prisma, {
+    sessionId: session.id,
+    action: 'DELETE_MARK',
+    markType: 'BREAK_END',
+    markId: 'mark-break-end',
+    actorUsername: 'coordinacion-prueba',
+    actorRole: 'admin',
+    now: new Date('2026-08-09T23:21:00.000Z')
+  });
+
+  assert.deepEqual(session.marks.map((mark) => mark.markType), ['ARRIVAL', 'BREAK_START', 'DEPARTURE']);
+  assert.equal(result.attendanceStatus, 'DEPARTURE_REPORTED');
+  assert.equal(result.validationStatus, 'REVIEW_REQUIRED');
+  assert.equal(result.departureReportedAt, null);
+  assert.equal(result.workedMinutes, null);
+});
+
+test('eliminar un inicio de almuerzo sin fin previo tampoco convierte la corrección en una jornada sin almuerzo', async () => {
+  const { prisma, session } = attendanceFixture();
+  session.marks.splice(session.marks.findIndex((mark) => mark.markType === 'BREAK_END'), 1);
+
+  const result = await reviewAttendanceWorkdaySession(prisma, {
+    sessionId: session.id,
+    action: 'DELETE_MARK',
+    markType: 'BREAK_START',
+    markId: 'mark-break-start',
+    actorUsername: 'coordinacion-prueba',
+    actorRole: 'admin',
+    now: new Date('2026-08-09T23:22:00.000Z')
+  });
+
+  assert.deepEqual(session.marks.map((mark) => mark.markType), ['ARRIVAL', 'DEPARTURE']);
+  assert.equal(result.validationStatus, 'REVIEW_REQUIRED');
+  assert.equal(result.departureReportedAt, null);
+  assert.equal(result.workedMinutes, null);
+});
+
+test('eliminar entrada conserva la salida persistida y evita reconstruir la jornada completa sobre marcas parciales', async () => {
+  const { prisma, session } = attendanceFixture();
+  const result = await reviewAttendanceWorkdaySession(prisma, {
+    sessionId: session.id,
+    action: 'DELETE_MARK',
+    markType: 'ARRIVAL',
+    markId: 'mark-arrival',
+    actorUsername: 'coordinacion-prueba',
+    actorRole: 'admin',
+    now: new Date('2026-08-09T23:23:00.000Z')
+  });
+
+  assert.equal(result.arrivalReportedAt, null);
+  assert.equal(result.departureReportedAt.toISOString(), '2026-08-09T22:00:00.000Z');
+  assert.equal(result.validationStatus, 'REVIEW_REQUIRED');
+
+  await assert.rejects(
+    registerManualAttendance(prisma, {
+      assignmentId: 'assignment-test',
+      arrivalReportedAt: '2026-08-09T08:15',
+      departureReportedAt: '2026-08-09T16:15',
+      breakTaken: 'false',
+      actorUsername: 'coordinacion-prueba',
+      actorRole: 'admin',
+      now: new Date('2026-08-09T23:24:00.000Z')
+    }),
+    /attendance_manual_arrival_exists/
+  );
+});
+
+test('el panel muestra eliminar solo para marcas existentes y repone únicamente correcciones auditadas', () => {
   const ui = readFileSync(new URL('../src/public/attendance-admin-clear-marks.js', import.meta.url), 'utf8');
   const view = readFileSync(new URL('../src/views/operacionesAsistencia.ejs', import.meta.url), 'utf8');
   const runtime = readFileSync(new URL('../src/public/attendance-admin-runtime.js', import.meta.url), 'utf8');
@@ -273,14 +367,16 @@ test('el panel ofrece eliminar y reponer cada marca individual usando la misma r
 
   assert.match(ui, /correctionForm\('DELETE_MARK'/);
   assert.match(ui, /correctionForm\('ADD_MARK'/);
-  assert.match(ui, /ARRIVAL/);
-  assert.match(ui, /BREAK_START/);
-  assert.match(ui, /BREAK_END/);
-  assert.match(ui, /DEPARTURE/);
-  assert.match(ui, /Eliminar solo/);
-  assert.match(ui, /Registrar nueva/);
+  assert.match(ui, /existingMarks = markState\.filter\(\(mark\) => Boolean\(mark\.markId\)\)/);
+  assert.match(ui, /replacementMarks = markState\.filter\(\(mark\) => !mark\.markId && pendingTypes\.has\(mark\.markType\)\)/);
+  assert.match(ui, /button\.textContent = `Eliminar \$\{mark\.label\}`/);
+  assert.doesNotMatch(ui, /Eliminar solo/);
+  assert.match(ui, /Guardar nueva \$\{mark\.label\}/);
+  assert.match(ui, /correctionSessionId/);
+  assert.match(ui, /pendingCorrectionMarkTypes/);
   assert.match(ui, /window\.confirm/);
   assert.match(ui, /Las demás marcaciones de la jornada se conservarán/);
+  assert.match(ui, /Corregir jornada completa/);
   assert.match(ui, /hiddenInput\('action', 'CLEAR'\)/);
   assert.match(ui, /Eliminar todas las marcaciones/);
   assert.match(runtime, /attendance-admin-clear-marks\.js/);
@@ -289,15 +385,24 @@ test('el panel ofrece eliminar y reponer cada marca individual usando la misma r
   assert.match(view, /data-break-start-mark-id/);
   assert.match(view, /data-break-end-mark-id/);
   assert.match(view, /data-departure-mark-id/);
+  assert.match(view, /data-pending-correction-mark-types/);
+  assert.match(view, /Corrección de marcación pendiente/);
+  assert.match(view, /row\.sessionId && row\.arrivalReportedAt && !granularCorrectionActive/);
   assert.match(route, /router\.post\('\/sessions\/:sessionId\/review'/);
   assert.match(route, /markId:\s*req\.body\.markId/);
   assert.match(route, /markType:\s*req\.body\.markType/);
   assert.match(route, /reportedAt:\s*req\.body\.reportedAt/);
+  assert.match(route, /correctionMarkType/);
+  assert.match(route, /correctionSessionId/);
+  assert.match(route, /attendance_review_mark_not_pending_correction/);
   assert.match(route, /reviewAttendanceWorkdaySession/);
   assert.match(workday, /dispatchAttendanceMark\.deleteMany/);
   assert.match(workday, /dispatchAttendanceMark\.delete\(/);
   assert.match(workday, /WORKDAY_DELETE_MARK/);
   assert.match(workday, /WORKDAY_ADD_MARK/);
+  assert.match(workday, /markCorrectionPending/);
+  assert.match(workday, /attendance_review_mark_not_pending_correction/);
+  assert.match(workday, /pendingCorrectionMarkTypes/);
   assert.doesNotMatch(workday, /dispatchAttendanceSession\.delete/);
   assert.doesNotMatch(workday, /dispatchAssignment\.delete/);
   assert.match(payroll, /arrivalReportedAt:\s*\{ gte: start, lt: end \}/);
