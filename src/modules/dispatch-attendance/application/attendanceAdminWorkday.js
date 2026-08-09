@@ -100,6 +100,22 @@ function breakRuleLabel(work) {
   return `Almuerzo descontado según las marcaciones reales: ${formatDispatchMinutes(work.actualBreakMinutes)}.`;
 }
 
+function pendingCorrectionMarkTypes(reviews) {
+  const states = new Map();
+  for (const review of Array.isArray(reviews) ? reviews : []) {
+    if (['WORKDAY_CLEAR_MARKS', 'MANUAL_WORKDAY'].includes(review?.action)) break;
+    if (!['WORKDAY_DELETE_MARK', 'WORKDAY_ADD_MARK'].includes(review?.action)) continue;
+    const markType = normalizeString(review?.metadata?.markType)?.toUpperCase() || null;
+    if (!markType || !VALID_CORRECTION_MARK_TYPES.has(markType) || states.has(markType)) continue;
+    states.set(markType, review.action === 'WORKDAY_DELETE_MARK');
+  }
+  return [...states.entries()].filter(([, pending]) => pending).map(([markType]) => markType);
+}
+
+function markCorrectionPending(reviews, markType) {
+  return pendingCorrectionMarkTypes(reviews).includes(markType);
+}
+
 export async function enrichAttendanceBoardWithWorkday(prisma, board) {
   const rows = Array.isArray(board?.rows) ? board.rows : [];
   if (!rows.length) return board;
@@ -110,7 +126,10 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
     where: { id: { in: rows.map((row) => row.assignmentId) } },
     include: {
       attendanceSession: {
-        include: { marks: { orderBy: { serverReceivedAt: 'desc' } } }
+        include: {
+          marks: { orderBy: { serverReceivedAt: 'desc' } },
+          reviews: { orderBy: { createdAt: 'desc' } }
+        }
       }
     }
   });
@@ -122,6 +141,8 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
       const assignment = assignmentMap.get(row.assignmentId);
       const session = assignment?.attendanceSession || null;
       const marks = session?.marks || [];
+      const pendingCorrections = pendingCorrectionMarkTypes(session?.reviews);
+      const correctionPending = pendingCorrections.length > 0;
       const arrivalMark = latestMark(marks, 'ARRIVAL');
       const departureMark = latestMark(marks, 'DEPARTURE');
       const breakStartMark = latestMark(marks, 'BREAK_START');
@@ -134,7 +155,7 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
       const expectedEndAt = session?.expectedEndAt ? new Date(session.expectedEndAt) : null;
       const breakStartAt = markMoment(breakStartMark);
       const breakEndAt = markMoment(breakEndMark);
-      const defaultWork = arrivalAt && departureAt
+      const defaultWork = arrivalAt && departureAt && !correctionPending
         ? safeWorkCalculation({
             arrivalAt,
             departureAt,
@@ -145,7 +166,7 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
             recognizeEarlyArrival: false
           })
         : null;
-      const recognizedWork = arrivalAt && departureAt
+      const recognizedWork = arrivalAt && departureAt && !correctionPending
         ? safeWorkCalculation({
             arrivalAt,
             departureAt,
@@ -156,9 +177,9 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
             recognizeEarlyArrival: true
           })
         : null;
-      const workedMinutes = Number.isInteger(session?.workedMinutes)
-        ? session.workedMinutes
-        : defaultWork?.workedMinutes ?? null;
+      const workedMinutes = correctionPending
+        ? null
+        : (Number.isInteger(session?.workedMinutes) ? session.workedMinutes : defaultWork?.workedMinutes ?? null);
       const earlyTimeRecognized = Boolean(
         defaultWork
         && recognizedWork
@@ -179,6 +200,7 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
         departureMarkId: departureMark?.id || null,
         breakStartMarkId: breakStartMark?.id || null,
         breakEndMarkId: breakEndMark?.id || null,
+        pendingCorrectionMarkTypes: pendingCorrections,
         arrivalEvidenceAvailable: Boolean(arrivalMark?.evidenceStorageKey),
         departureEvidenceAvailable: Boolean(departureMark?.evidenceStorageKey),
         arrivalLatitude: numericCoordinate(arrivalMark?.latitude, -90, 90),
@@ -222,7 +244,7 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
         standardWorkdayLabel: formatDispatchMinutes(STANDARD_DISPATCH_WORKDAY_MINUTES),
         breakPolicy: 'ACTUAL_MARKS_WITH_INCOMPLETE_PENALTY',
         configuredUnpaidBreakMinutes: 0,
-        configuredBreakLabel: breakRuleLabel(defaultWork)
+        configuredBreakLabel: correctionPending ? 'Corrección de marcación pendiente.' : breakRuleLabel(defaultWork)
       };
     })
   };
@@ -307,13 +329,14 @@ function correctionEarlyArrivalRecognition(session, marks) {
   );
 }
 
-function correctedSessionData(session, marks, now, recognizeEarlyArrival) {
+function correctedSessionData(session, marks, now, recognizeEarlyArrival, pendingCorrectionTypes = []) {
   const arrivalAt = markMoment(latestMark(marks, 'ARRIVAL'));
   const departureAt = markMoment(latestMark(marks, 'DEPARTURE'));
   const breakStartAt = markMoment(latestMark(marks, 'BREAK_START'));
   const breakEndAt = markMoment(latestMark(marks, 'BREAK_END'));
   const expectedStartAt = dateValue(session.expectedStartAt);
   const expectedEndAt = dateValue(session.expectedEndAt);
+  const pending = new Set(pendingCorrectionTypes);
   const punctualityStatus = arrivalAt
     ? (expectedStartAt && arrivalAt.getTime() > expectedStartAt.getTime() ? 'LATE' : 'ON_TIME')
     : null;
@@ -329,9 +352,8 @@ function correctedSessionData(session, marks, now, recognizeEarlyArrival) {
   if (!arrivalAt) {
     return {
       ...base,
-      attendanceStatus: 'PENDING',
-      validationStatus: 'PENDING',
-      departureReportedAt: null
+      attendanceStatus: departureAt ? 'DEPARTURE_REPORTED' : 'PENDING',
+      validationStatus: departureAt ? 'REVIEW_REQUIRED' : 'PENDING'
     };
   }
   if (!departureAt) {
@@ -339,6 +361,14 @@ function correctedSessionData(session, marks, now, recognizeEarlyArrival) {
       ...base,
       attendanceStatus: 'ARRIVAL_REPORTED',
       validationStatus: 'REVIEW_REQUIRED'
+    };
+  }
+  if (pending.has('BREAK_START') || pending.has('BREAK_END')) {
+    return {
+      ...base,
+      attendanceStatus: 'DEPARTURE_REPORTED',
+      validationStatus: 'REVIEW_REQUIRED',
+      departureReportedAt: null
     };
   }
   if (breakEndAt && !breakStartAt) {
@@ -485,7 +515,7 @@ async function deleteAttendanceWorkdayMark(prisma, input = {}) {
       where: { id: sessionId },
       include: {
         marks: { orderBy: { serverReceivedAt: 'asc' } },
-        reviews: { orderBy: { createdAt: 'desc' }, take: 1 },
+        reviews: { orderBy: { createdAt: 'desc' } },
         assignment: { include: { worker: true, serviceRequest: true } }
       }
     });
@@ -495,7 +525,9 @@ async function deleteAttendanceWorkdayMark(prisma, input = {}) {
     if (!target) throw new Error('attendance_review_mark_not_found');
     const recognizeEarlyArrival = correctionEarlyArrivalRecognition(session, previousMarks);
     const nextMarks = previousMarks.filter((mark) => mark.id !== target.id);
-    const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival);
+    const pendingCorrections = new Set(pendingCorrectionMarkTypes(session.reviews));
+    pendingCorrections.add(markType);
+    const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival, [...pendingCorrections]);
 
     await tx.dispatchAttendanceMark.delete({ where: { id: target.id } });
     const updated = await tx.dispatchAttendanceSession.update({ where: { id: session.id }, data: next });
@@ -543,13 +575,16 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
       where: { id: sessionId },
       include: {
         marks: { orderBy: { serverReceivedAt: 'asc' } },
-        reviews: { orderBy: { createdAt: 'desc' }, take: 1 },
+        reviews: { orderBy: { createdAt: 'desc' } },
         assignment: { include: { worker: true, serviceRequest: true } }
       }
     });
     if (!session) throw new Error('attendance_review_session_not_found');
     const previousMarks = Array.isArray(session.marks) ? [...session.marks] : [];
     if (latestMark(previousMarks, markType)) throw new Error('attendance_review_mark_exists');
+    if (!markCorrectionPending(session.reviews, markType)) {
+      throw new Error('attendance_review_mark_not_pending_correction');
+    }
     const recognizeEarlyArrival = correctionEarlyArrivalRecognition(session, previousMarks);
     const correctionMark = {
       id: `pending-${randomUUID()}`,
@@ -562,7 +597,8 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
       riskFlags: []
     };
     const nextMarks = [...previousMarks, correctionMark];
-    const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival);
+    const pendingCorrections = pendingCorrectionMarkTypes(session.reviews).filter((type) => type !== markType);
+    const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival, pendingCorrections);
 
     const created = await tx.dispatchAttendanceMark.create({
       data: {
