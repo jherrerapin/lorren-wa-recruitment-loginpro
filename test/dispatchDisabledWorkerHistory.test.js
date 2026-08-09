@@ -25,6 +25,7 @@ test('desactivar auxiliar conserva filas de asignación y solo libera cobertura 
   assert.match(deactivation, /dispatchAssignment\.findMany/);
   assert.match(deactivation, /dispatchAssignment\.update/);
   assert.match(deactivation, /status:\s*a\.status === CONFIRMED_ASSIGNMENT_STATUS \? 'NO_CONFIRMO' : 'CANCELLED'/);
+  assert.match(deactivation, /notes:\s*'Auxiliar desactivado desde el modulo de personal\.'/);
   assert.doesNotMatch(deactivation, /dispatchAssignment\.delete/);
 });
 
@@ -60,6 +61,8 @@ test('la interfaz avisa el estado desactivado y mantiene acceso a los registros 
   assert.match(assignmentView, /selectedServiceRequest\.assignments\.forEach/);
   assert.match(assignmentView, /NO_CONFIRMO:'No confirmó'/);
   assert.match(assignmentView, /CANCELLED:'Cancelado'/);
+  assert.match(assignmentView, /if \(assignment\.notes\)/);
+  assert.match(assignmentView, /Nota: <%= assignment\.notes %>/);
 });
 
 test('el flujo ejecutado mantiene dispatchOpsExtras como ruta montada de personal operativo', () => {
