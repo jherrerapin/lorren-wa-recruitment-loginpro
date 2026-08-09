@@ -1,6 +1,6 @@
 export const PAYROLL_CONCEPT_CODES = Object.freeze([
   'HEDO', 'HENO', 'HEDD', 'HEND', 'HEDF', 'HENF',
-  'RNO', 'RDD', 'RND', 'RDF', 'RNF', 'RDDC', 'RNDC', 'RDFC', 'RNFC'
+  'RNO', 'RDD', 'RND', 'RDF', 'RNF', 'RDDC', 'RNDC'
 ]);
 
 export const PAYROLL_COMPENSATION_STATUS = Object.freeze({
@@ -286,6 +286,48 @@ function inRange(dateKey, range) {
   return dateKey >= range.from && dateKey <= range.to;
 }
 
+function findOverlappingSessionIds(rawRecords, novelties) {
+  const sessions = new Map();
+  for (const record of rawRecords) {
+    const sessionId = record?.session?.id;
+    if (!sessionId || sessions.has(sessionId)) continue;
+    const arrivalAt = validDate(record.session.arrivalReportedAt);
+    const departureAt = validDate(record.session.departureReportedAt);
+    if (!arrivalAt || !departureAt || departureAt <= arrivalAt) continue;
+    sessions.set(sessionId, {
+      sessionId,
+      arrivalAt,
+      departureAt,
+      workdayKey: record.workdayKey || bogotaDateKey(arrivalAt)
+    });
+  }
+
+  const ordered = [...sessions.values()].sort((left, right) => {
+    const arrivalDelta = left.arrivalAt.getTime() - right.arrivalAt.getTime();
+    if (arrivalDelta) return arrivalDelta;
+    return left.sessionId.localeCompare(right.sessionId);
+  });
+  const accepted = [];
+  const rejected = new Set();
+  for (const current of ordered) {
+    const overlapsAccepted = accepted.some((previous) => (
+      current.arrivalAt.getTime() < previous.departureAt.getTime()
+      && current.departureAt.getTime() > previous.arrivalAt.getTime()
+    ));
+    if (!overlapsAccepted) {
+      accepted.push(current);
+      continue;
+    }
+    rejected.add(current.sessionId);
+    pushNovelty(novelties, 'OVERLAPPING_ASSIGNMENTS', 'Existen jornadas superpuestas para el mismo auxiliar.', {
+      dateKey: current.workdayKey,
+      sessionId: current.sessionId,
+      blocking: true
+    });
+  }
+  return rejected;
+}
+
 function ensureWorkerSummary(map, identity) {
   if (!map.has(identity.workerId)) {
     map.set(identity.workerId, {
@@ -313,8 +355,12 @@ function ensureDaily(summary, dateKey) {
       conceptMinutes: emptyConceptMinutes(),
       clientNames: new Set(),
       operationNames: new Set(),
+      civilDateKeys: new Set(),
+      holidayDateKeys: new Set(),
+      restDateKeys: new Set(),
       isHoliday: false,
       isRestDay: false,
+      compensationDateKey: null,
       compensationStatus: null,
       novelties: []
     });
@@ -368,7 +414,6 @@ export function calculatePayrollConceptReport(input = {}) {
   const summaries = new Map();
   for (const [workerId, rawRecords] of recordsByWorker) {
     rawRecords.sort((left, right) => left.timestamp - right.timestamp);
-    const seenMinutes = new Set();
     const dailyOrdinary = new Map();
     const weeklyOrdinary = new Map();
     const rawDailyOvertime = new Map();
@@ -377,14 +422,18 @@ export function calculatePayrollConceptReport(input = {}) {
     const identity = rawRecords[0]?.worker || { workerId, fullName: 'Auxiliar sin nombre', documentType: '', documentNumber: '', phone: '' };
     const summary = ensureWorkerSummary(summaries, identity);
     summary.novelties.push(...workerNovelties);
+    const overlappingSessionIds = findOverlappingSessionIds(rawRecords, summary.novelties);
+    const seenMinutes = new Set();
 
     for (const record of rawRecords) {
+      if (overlappingSessionIds.has(record.session.id)) continue;
       const parts = bogotaClockParts(record.timestamp);
       if (!parts) continue;
+      const workdayKey = record.workdayKey || parts.dateKey;
       const minuteKey = localMinuteKey(parts);
       if (seenMinutes.has(minuteKey)) {
         pushNovelty(summary.novelties, 'OVERLAPPING_ASSIGNMENTS', 'Existen jornadas superpuestas para el mismo auxiliar.', {
-          dateKey: parts.dateKey,
+          dateKey: workdayKey,
           sessionId: record.session.id,
           blocking: true
         });
@@ -392,8 +441,7 @@ export function calculatePayrollConceptReport(input = {}) {
       }
       seenMinutes.add(minuteKey);
 
-      const workdayKey = record.workdayKey || parts.dateKey;
-      const weekKey = payrollWeekStartKey(parts.dateKey, record.policy.weekStartsOn);
+      const weekKey = payrollWeekStartKey(workdayKey, record.policy.weekStartsOn);
       const dayOrdinary = dailyOrdinary.get(workdayKey) || 0;
       const weekOrdinary = weeklyOrdinary.get(weekKey) || 0;
       const rawOvertime = dayOrdinary >= record.policy.dailyOrdinaryMinutes
@@ -434,7 +482,7 @@ export function calculatePayrollConceptReport(input = {}) {
         recognizedWeeklyOvertime.set(weekKey, (recognizedWeeklyOvertime.get(weekKey) || 0) + 1);
       }
 
-      if (!inRange(parts.dateKey, range)) continue;
+      if (!inRange(workdayKey, range)) continue;
 
       const year = Number(parts.dateKey.slice(0, 4));
       if (!holidayCache.has(year)) holidayCache.set(year, colombianHolidayKeys(year));
@@ -455,7 +503,7 @@ export function calculatePayrollConceptReport(input = {}) {
       else summary.ordinaryMinutes += 1;
       if (concept) summary.conceptMinutes[concept] += 1;
 
-      const daily = ensureDaily(summary, parts.dateKey);
+      const daily = ensureDaily(summary, workdayKey);
       daily.totalMinutes += 1;
       if (overtime) daily.overtimeMinutes += 1;
       else if (unrecognizedOvertime) daily.unrecognizedOvertimeMinutes += 1;
@@ -463,9 +511,13 @@ export function calculatePayrollConceptReport(input = {}) {
       if (concept) daily.conceptMinutes[concept] += 1;
       daily.clientNames.add(record.client.clientName);
       daily.operationNames.add(record.client.operationPointName);
+      daily.civilDateKeys.add(parts.dateKey);
+      if (holiday) daily.holidayDateKeys.add(parts.dateKey);
+      if (rest) daily.restDateKeys.add(parts.dateKey);
       daily.isHoliday = daily.isHoliday || holiday;
       daily.isRestDay = daily.isRestDay || rest;
       if (rest) {
+        daily.compensationDateKey = daily.compensationDateKey || parts.dateKey;
         daily.compensationStatus = compensationStatus;
         if (compensationStatus === PAYROLL_COMPENSATION_STATUS.PENDING) {
           pushNovelty(summary.novelties, 'COMPENSATION_PENDING', 'Define si el día de descanso obligatorio fue compensado.', {
@@ -488,7 +540,7 @@ export function calculatePayrollConceptReport(input = {}) {
       }
     }
     for (const [weekKey, minutes] of recognizedWeeklyOvertime) {
-      const policy = rawRecords.find((record) => payrollWeekStartKey(bogotaDateKey(record.timestamp), record.policy.weekStartsOn) === weekKey)?.policy || DEFAULT_PAYROLL_POLICY;
+      const policy = rawRecords.find((record) => payrollWeekStartKey(record.workdayKey || bogotaDateKey(record.timestamp), record.policy.weekStartsOn) === weekKey)?.policy || DEFAULT_PAYROLL_POLICY;
       if (minutes > policy.maxWeeklyOvertimeMinutes) {
         pushNovelty(summary.novelties, 'WEEKLY_OVERTIME_LIMIT_EXCEEDED', 'Las horas extra de la semana superan el límite configurado.', {
           dateKey: weekKey,
@@ -513,6 +565,9 @@ export function calculatePayrollConceptReport(input = {}) {
           ...daily,
           clientNames: [...daily.clientNames],
           operationNames: [...daily.operationNames],
+          civilDateKeys: [...daily.civilDateKeys],
+          holidayDateKeys: [...daily.holidayDateKeys],
+          restDateKeys: [...daily.restDateKeys],
           conceptHours: Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, minutesToDecimalHours(daily.conceptMinutes[code])])),
           totalHours: minutesToDecimalHours(daily.totalMinutes),
           ordinaryHours: minutesToDecimalHours(daily.ordinaryMinutes),

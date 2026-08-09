@@ -49,12 +49,13 @@ test('conceder Nómina exige DEV y no cambia los módulos padre', async () => {
   assert.match(source, /PAYROLL_ACCESS_DISABLED/);
 });
 
-test('la exportación incluye los quince conceptos solicitados', async () => {
+test('la exportación usa únicamente los trece conceptos canónicos vigentes', async () => {
   const engine = await read('src/modules/dispatch-payroll/domain/payrollConceptEngine.js');
   const expected = [
     'HEDO', 'HENO', 'HEDD', 'HEND', 'HEDF', 'HENF',
-    'RNO', 'RDD', 'RND', 'RDF', 'RNF', 'RDDC', 'RNDC', 'RDFC', 'RNFC'
+    'RNO', 'RDD', 'RND', 'RDF', 'RNF', 'RDDC', 'RNDC'
   ];
   for (const code of expected) assert.match(engine, new RegExp(`'${code}'`));
+  assert.doesNotMatch(engine, /RDFC|RNFC/);
   assert.match(engine, /minutesToDecimalHours/);
 });
