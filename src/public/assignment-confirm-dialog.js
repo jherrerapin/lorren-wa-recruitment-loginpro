@@ -1,17 +1,6 @@
 (() => {
-  const originalConfirm = window.confirm.bind(window);
   const ASSIGNMENT_DATE_KEY = 'loginpro.assignment.dateFilter';
   const WHATSAPP_ICON_STYLE_ID = 'dispatchWhatsappIconOnlyStyle';
-  let allowNextNativeRemovalConfirm = false;
-
-  window.confirm = function styledConfirmProxy(message) {
-    const text = String(message || '');
-    if (allowNextNativeRemovalConfirm && text.includes('Quitar este auxiliar')) {
-      allowNextNativeRemovalConfirm = false;
-      return true;
-    }
-    return originalConfirm(message);
-  };
 
   function injectWhatsappButtonStyle() {
     if (document.getElementById(WHATSAPP_ICON_STYLE_ID)) return;
@@ -212,7 +201,7 @@
       .same-day-dialog-backdrop{z-index:10001}
       .styled-confirm-backdrop.is-open,.same-day-dialog-backdrop.is-open{display:flex}
       .styled-confirm-card,.same-day-dialog-card{width:min(440px,100%);background:#fff;border:1px solid #e1e6ef;border-radius:20px;box-shadow:0 24px 70px rgba(15,23,42,.26);overflow:hidden;transform:translateY(6px) scale(.98);opacity:0;transition:opacity .16s ease,transform .16s ease}
-      .same-day-dialog-card{border-color:#fde68a}
+      .same-day-dialog-card{width:min(520px,100%);border-color:#fde68a}
       .styled-confirm-backdrop.is-open .styled-confirm-card,.same-day-dialog-backdrop.is-open .same-day-dialog-card{transform:translateY(0) scale(1);opacity:1}
       .styled-confirm-head,.same-day-dialog-head{display:flex;gap:12px;align-items:flex-start;padding:18px 18px 10px}
       .styled-confirm-icon,.same-day-dialog-icon{width:38px;height:38px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:24px;flex:0 0 auto}
@@ -220,6 +209,7 @@
       .styled-confirm-title,.same-day-dialog-title{margin:0;color:#1e2d3d;font-size:17px;line-height:1.2;font-weight:900}
       .styled-confirm-text,.same-day-dialog-text{margin:6px 0 0;color:#64748b;font-size:13px;line-height:1.45}
       .same-day-dialog-detail{margin-top:10px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:12px;padding:9px 10px;font-size:12px;font-weight:800}
+      .same-day-dialog-list{display:grid;gap:6px;margin:10px 0 0;padding:0;list-style:none;max-height:220px;overflow:auto}.same-day-dialog-list[hidden]{display:none}.same-day-dialog-list li{border:1px solid #e2e8f0;background:#f8fafc;border-radius:10px;padding:8px 10px;color:#334155;font-size:12px;font-weight:800}.same-day-dialog-list small{display:block;margin-top:2px;color:#64748b;font-size:10px;font-weight:700}
       .styled-confirm-actions,.same-day-dialog-actions{display:flex;justify-content:flex-end;gap:9px;padding:14px 18px 18px;background:#f8fafc;border-top:1px solid #eef2f7}
       .styled-confirm-btn,.same-day-dialog-btn{min-height:36px;border-radius:999px;border:1px solid #e1e6ef;background:#fff;color:#1e2d3d;padding:8px 14px;font-weight:900;font-size:13px;cursor:pointer;box-shadow:0 1px 3px rgba(15,23,42,.08)}
       .styled-confirm-btn:hover,.same-day-dialog-btn:hover{border-color:#0d7a6b;color:#0d7a6b}
@@ -269,14 +259,17 @@
     dialog.className = 'same-day-dialog-backdrop';
     dialog.setAttribute('role', 'alertdialog');
     dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'sameDayDialogTitle');
+    dialog.setAttribute('aria-describedby', 'sameDayDialogText');
     dialog.innerHTML = `
       <section class="same-day-dialog-card">
         <div class="same-day-dialog-head">
           <div class="same-day-dialog-icon" aria-hidden="true">!</div>
           <div>
-            <h2 class="same-day-dialog-title">Auxiliar ya asignado este día</h2>
-            <p class="same-day-dialog-text">Este auxiliar ya tiene una asignación activa en otra solicitud para la misma fecha.</p>
-            <div class="same-day-dialog-detail">¿Deseas asignarlo también a esta solicitud?</div>
+            <h2 class="same-day-dialog-title" id="sameDayDialogTitle">Auxiliar ya asignado este día</h2>
+            <p class="same-day-dialog-text" id="sameDayDialogText">Este auxiliar ya tiene una asignación activa en otra solicitud para la misma fecha.</p>
+            <ul class="same-day-dialog-list" data-warning-list hidden></ul>
+            <div class="same-day-dialog-detail" data-warning-detail>¿Deseas asignarlo también a esta solicitud?</div>
           </div>
         </div>
         <div class="same-day-dialog-actions">
@@ -288,11 +281,63 @@
     return dialog;
   }
 
-  function askRemovalConfirmation() {
+  function askRemovalConfirmation(options = {}) {
     const dialog = ensureDialog();
-    dialog.classList.add('is-open');
+    const title = dialog.querySelector('#styledConfirmTitle');
+    const text = dialog.querySelector('#styledConfirmText');
     const ok = dialog.querySelector('[data-ok]');
     const cancel = dialog.querySelector('[data-cancel]');
+    title.textContent = options.title || 'Quitar auxiliar';
+    text.textContent = options.text || '¿Seguro que deseas retirar este auxiliar de la solicitud? Esta acción libera el cupo para asignar a otra persona.';
+    ok.textContent = options.confirmLabel || 'Sí, quitar';
+    cancel.textContent = options.cancelLabel || 'Cancelar';
+    dialog.classList.add('is-open');
+    cancel.focus();
+    return new Promise((resolve) => {
+      const close = (value) => {
+        dialog.classList.remove('is-open');
+        ok.onclick = null;
+        cancel.onclick = null;
+        dialog.onclick = null;
+        document.onkeydown = null;
+        resolve(value);
+      };
+      ok.onclick = () => close(true);
+      cancel.onclick = () => close(false);
+      dialog.onclick = (event) => { if (event.target === dialog) close(false); };
+      document.onkeydown = (event) => { if (event.key === 'Escape') close(false); };
+    });
+  }
+
+  function askWarningConfirmation(options = {}) {
+    const dialog = ensureSameDayDialog();
+    const title = dialog.querySelector('#sameDayDialogTitle');
+    const text = dialog.querySelector('#sameDayDialogText');
+    const detail = dialog.querySelector('[data-warning-detail]');
+    const list = dialog.querySelector('[data-warning-list]');
+    const ok = dialog.querySelector('[data-same-day-ok]');
+    const cancel = dialog.querySelector('[data-same-day-cancel]');
+    title.textContent = options.title || 'Confirmar acción';
+    text.textContent = options.text || 'Esta acción requiere tu confirmación.';
+    detail.textContent = options.detail || '¿Deseas continuar?';
+    ok.textContent = options.confirmLabel || 'Sí, continuar';
+    cancel.textContent = options.cancelLabel || 'Cancelar';
+    list.replaceChildren();
+    const items = Array.isArray(options.items) ? options.items : [];
+    list.hidden = items.length === 0;
+    items.forEach((item) => {
+      const row = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = String(item?.label || item || '');
+      row.appendChild(label);
+      if (item?.detail) {
+        const secondary = document.createElement('small');
+        secondary.textContent = String(item.detail);
+        row.appendChild(secondary);
+      }
+      list.appendChild(row);
+    });
+    dialog.classList.add('is-open');
     cancel.focus();
     return new Promise((resolve) => {
       const close = (value) => {
@@ -311,25 +356,77 @@
   }
 
   function askSameDayConfirmation() {
-    const dialog = ensureSameDayDialog();
-    dialog.classList.add('is-open');
-    const ok = dialog.querySelector('[data-same-day-ok]');
-    const cancel = dialog.querySelector('[data-same-day-cancel]');
-    cancel.focus();
-    return new Promise((resolve) => {
-      const close = (value) => {
-        dialog.classList.remove('is-open');
-        ok.onclick = null;
-        cancel.onclick = null;
-        dialog.onclick = null;
-        document.onkeydown = null;
-        resolve(value);
-      };
-      ok.onclick = () => close(true);
-      cancel.onclick = () => close(false);
-      dialog.onclick = (event) => { if (event.target === dialog) close(false); };
-      document.onkeydown = (event) => { if (event.key === 'Escape') close(false); };
+    return askWarningConfirmation({
+      title: 'Auxiliar ya asignado este día',
+      text: 'Este auxiliar ya tiene una asignación activa en otra solicitud para la misma fecha.',
+      detail: '¿Deseas asignarlo también a esta solicitud?',
+      cancelLabel: 'No asignar',
+      confirmLabel: 'Sí, asignar también'
     });
+  }
+
+  function askRestConflictConfirmation(conflicts) {
+    const items = conflicts.map((conflict) => ({
+      label: conflict.workerName || 'Auxiliar',
+      detail: Number(conflict.assignmentCount || 0) > 1
+        ? `${conflict.assignmentCount} solicitudes activas en la fecha del descanso`
+        : 'Ya tiene una solicitud activa en la fecha del descanso'
+    }));
+    return askWarningConfirmation({
+      title: conflicts.length === 1 ? 'Auxiliar ya asignado en esta fecha' : 'Auxiliares ya asignados en esta fecha',
+      text: conflicts.length === 1
+        ? 'Este auxiliar ya está asignado a una solicitud para la fecha elegida como descanso.'
+        : 'Estos auxiliares ya están asignados a solicitudes para la fecha elegida como descanso.',
+      items,
+      detail: 'Si continúas, el descanso se registrará sin retirar ni modificar la asignación existente.',
+      cancelLabel: 'No asignar descanso',
+      confirmLabel: 'Sí, asignar descanso'
+    });
+  }
+
+  function restConflictCheckKey(form) {
+    const workerId = form.querySelector('[name="workerId"]')?.value || '';
+    const restDate = form.querySelector('[name="restDate"]')?.value || '';
+    return `${workerId}|${restDate}`;
+  }
+
+  function setRestOverride(form, enabled) {
+    let input = form.querySelector('input[name="allowAssignedRest"]');
+    if (!input && enabled) {
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'allowAssignedRest';
+      form.appendChild(input);
+    }
+    if (input) input.value = enabled ? 'true' : 'false';
+  }
+
+  async function checkRestConflicts(form) {
+    const key = restConflictCheckKey(form);
+    if (form.dataset.restConflictChecked === key) return true;
+    const payload = encodeForm(form);
+    payload.set('checkOnly', 'rest-conflicts');
+    payload.delete('allowAssignedRest');
+    const response = await fetch(form.action, {
+      method: 'POST',
+      body: payload,
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'X-Requested-With': 'fetch',
+        'Accept': 'application/json'
+      }
+    });
+    if (!response.ok) throw new Error('No fue posible validar si el auxiliar ya tiene una solicitud en esa fecha.');
+    const data = await response.json();
+    const conflicts = Array.isArray(data?.conflicts) ? data.conflicts : [];
+    setRestOverride(form, false);
+    if (conflicts.length) {
+      const confirmed = await askRestConflictConfirmation(conflicts);
+      if (!confirmed) return false;
+      setRestOverride(form, true);
+    }
+    form.dataset.restConflictChecked = key;
+    return true;
   }
 
   function enhanceManagedByField() {
@@ -378,6 +475,34 @@
   document.addEventListener('submit', async (event) => {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;
+
+    if (form.action.includes('/admin/operaciones/asignaciones/descansos/cancelar')) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const confirmed = await askRemovalConfirmation({
+        title: 'Retirar descanso',
+        text: '¿Seguro que deseas retirar este descanso? El registro dejará de aplicar para esta fecha.',
+        confirmLabel: 'Sí, retirar descanso'
+      });
+      if (confirmed) HTMLFormElement.prototype.submit.call(form);
+      return;
+    }
+
+    if (form.id === 'restAssignmentForm') {
+      const key = restConflictCheckKey(form);
+      if (form.dataset.restConflictChecked === key) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      try {
+        const canContinue = await checkRestConflicts(form);
+        if (canContinue) form.requestSubmit();
+      } catch (error) {
+        console.error(error);
+        showInlineToast(error.message || 'No fue posible validar el descanso.');
+      }
+      return;
+    }
+
     if (!form.dataset.asyncAssignmentAction) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -404,6 +529,17 @@
         if (card?.classList.contains('same-day-assignment')) {
           const confirmed = await askSameDayConfirmation();
           if (!confirmed) return new Response('', { status: 499, statusText: 'same_day_assignment_cancelled' });
+        }
+      }
+
+      const isRestSave = url.includes('/admin/operaciones/asignaciones/descansos') && !url.includes('/cancelar');
+      if (isRestSave && !bodyText.includes('checkOnly=rest-conflicts')) {
+        const restForm = document.getElementById('restAssignmentForm');
+        const allowAssignedRest = restForm?.querySelector('input[name="allowAssignedRest"]')?.value === 'true';
+        if (allowAssignedRest && options.body instanceof URLSearchParams) {
+          const nextBody = new URLSearchParams(options.body);
+          nextBody.set('allowAssignedRest', 'true');
+          options = { ...options, body: nextBody };
         }
       }
       return nativeFetch(resource, options);
