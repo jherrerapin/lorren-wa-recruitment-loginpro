@@ -1,0 +1,30 @@
+name: Inspect assigned rest flow
+on:
+  push:
+    branches:
+      - fix/dispatch-rest-assignment-warning-20260810
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Print relevant rest route
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/routes/dispatchOpsExtras.js')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          needles = ('saveWorkerRestAssignment', 'worker_rest_active_assignment_confirmation_required', 'allowAssignedRest', 'descansos')
+          hits = [i for i,line in enumerate(lines) if any(n in line for n in needles)]
+          shown=set()
+          for i in hits:
+            start=max(0,i-18); end=min(len(lines),i+28)
+            key=(start,end)
+            if key in shown: continue
+            shown.add(key)
+            print(f'--- lines {start+1}-{end} ---')
+            for n in range(start,end):
+              print(f'{n+1}: {lines[n]}')
+          PY
