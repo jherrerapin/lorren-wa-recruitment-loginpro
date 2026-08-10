@@ -43,6 +43,7 @@
     .incident-worker-field[hidden] { display:none; }
     .empty-state { background:#fff; border:1px solid var(--border); border-radius:18px; padding:38px 18px; text-align:center; color:var(--muted); box-shadow:var(--shadow-sm); }
     .empty-state strong { display:block; color:var(--navy); font-size:17px; margin-bottom:6px; }
+    .async-toast{position:fixed;right:18px;bottom:18px;max-width:360px;background:#172033;color:#fff;border-radius:14px;padding:11px 13px;box-shadow:var(--shadow);font-size:13px;line-height:1.35;z-index:9999;opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s}.async-toast.show{opacity:1;transform:translateY(0)}
     @media(max-width:900px){ .detail-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     @media(max-width:560px){ .detail-grid,.incident-form-grid { grid-template-columns:1fr; } .incident-form-grid .full{grid-column:auto}.toolbar .btn, .metric-tabs .btn, .card-actions .btn, .card-actions button { width:100%; } }
   </style>
@@ -209,10 +210,13 @@
       <% }) %>
     </section>
   </main>
+  <div class="async-toast" id="asyncToast" role="status" aria-live="polite"></div>
   <script src="/public/expired-service-request-modal.js"></script>
   <script src="/public/dispatch-time-format.js"></script>
   <script>
     const incidentTypesWithWorker = new Set(['INASISTENCIA', 'RETRASO', 'REEMPLAZO']);
+    const toast = document.getElementById('asyncToast');
+    function showToast(message){if(!toast)return;toast.textContent=message;toast.classList.add('show');window.clearTimeout(showToast._t);showToast._t=window.setTimeout(()=>toast.classList.remove('show'),3000);}
     document.querySelectorAll('.incident-create-form').forEach((form) => {
       const typeSelect = form.querySelector('.incident-type');
       const workerField = form.querySelector('.incident-worker-field');
@@ -239,7 +243,7 @@
         syncWorkerRequirement();
         if (workerSelect.required && !workerSelect.value) {
           event.preventDefault();
-          alert('Selecciona el auxiliar asignado relacionado con esta novedad.');
+          showToast('Selecciona el auxiliar asignado relacionado con esta novedad.');
         }
       });
       syncWorkerRequirement();
