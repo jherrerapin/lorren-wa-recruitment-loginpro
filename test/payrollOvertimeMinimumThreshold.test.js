@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
   MIN_OVERTIME_RECOGNITION_MINUTES,
+  PAYROLL_COMPENSATION_STATUS,
   calculatePayrollConceptReport
 } from '../src/modules/dispatch-payroll/domain/payrollConceptEngine.js';
 
@@ -24,8 +25,8 @@ function session({ minutes, arrivalAt = '2026-07-27T13:00:00.000Z', id = `sessio
         id: 'worker-test',
         fullName: 'Sujeto de prueba',
         documentType: 'CC',
-        documentNumber: '1000000000',
-        phone: '3000000000'
+        documentNumber: 'TEST-DOC-1',
+        phone: 'TEST-PHONE-1'
       },
       serviceRequest: {
         clientName: 'Cliente prueba',
@@ -41,63 +42,74 @@ function session({ minutes, arrivalAt = '2026-07-27T13:00:00.000Z', id = `sessio
   };
 }
 
-function reportFor(sessionValue, range = { from: '2026-07-27', to: '2026-07-27' }) {
+function reportFor(sessionValue, range, compensationByWorkerDate = new Map()) {
   return calculatePayrollConceptReport({
     sessions: [sessionValue],
     policiesByClientId: new Map(),
-    compensationByWorkerDate: new Map(),
+    compensationByWorkerDate,
     range
   }).rows[0];
 }
 
-test('el umbral mínimo de horas extra es de treinta minutos', () => {
-  assert.equal(MIN_OVERTIME_RECOGNITION_MINUTES, 30);
+test('no existe mínimo efectivo para reconocer horas extra', () => {
+  assert.equal(MIN_OVERTIME_RECOGNITION_MINUTES, 0);
 });
 
-test('veintinueve minutos de exceso no se reconocen como extra', () => {
-  const row = reportFor(session({ minutes: 7 * 60 + 29 }));
-  assert.equal(row.totalMinutes, 449);
-  assert.equal(row.ordinaryMinutes, 420);
-  assert.equal(row.overtimeMinutes, 0);
-  assert.equal(row.unrecognizedOvertimeMinutes, 29);
-  assert.equal(row.conceptMinutes.HEDO, 0);
-  assert.ok(row.novelties.some((item) => item.code === 'OVERTIME_BELOW_MINIMUM' && item.blocking === false));
-});
-
-test('desde treinta minutos se reconoce todo el exceso real', () => {
+test('un solo minuto extra se reconoce en cada concepto diurno/nocturno ordinario, dominical y festivo', () => {
   const cases = [
-    { excess: 30, expected: 30 },
-    { excess: 45, expected: 45 },
-    { excess: 60, expected: 60 }
+    { code: 'HEDO', arrivalAt: '2026-07-27T13:00:00.000Z', range: { from: '2026-07-27', to: '2026-07-27' } },
+    { code: 'HENO', arrivalAt: '2026-07-27T17:00:00.000Z', range: { from: '2026-07-27', to: '2026-07-27' } },
+    { code: 'HEDD', arrivalAt: '2026-08-02T13:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' } },
+    { code: 'HEND', arrivalAt: '2026-08-02T17:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' } },
+    { code: 'HEDF', arrivalAt: '2026-07-20T13:00:00.000Z', range: { from: '2026-07-20', to: '2026-07-20' } },
+    { code: 'HENF', arrivalAt: '2026-07-20T17:00:00.000Z', range: { from: '2026-07-20', to: '2026-07-20' } }
   ];
-  for (const { excess, expected } of cases) {
-    const row = reportFor(session({ minutes: 7 * 60 + excess, id: `session-${excess}` }));
-    assert.equal(row.ordinaryMinutes, 420);
-    assert.equal(row.overtimeMinutes, expected);
-    assert.equal(row.unrecognizedOvertimeMinutes, 0);
-    assert.equal(row.conceptMinutes.HEDO, expected);
-    assert.ok(!row.novelties.some((item) => item.code === 'OVERTIME_BELOW_MINIMUM'));
+
+  for (const item of cases) {
+    const row = reportFor(session({
+      minutes: 7 * 60 + 1,
+      arrivalAt: item.arrivalAt,
+      id: `session-${item.code}`
+    }), item.range);
+    assert.equal(row.ordinaryMinutes, 420, item.code);
+    assert.equal(row.overtimeMinutes, 1, item.code);
+    assert.equal(row.unrecognizedOvertimeMinutes, 0, item.code);
+    assert.equal(row.conceptMinutes[item.code], 1, item.code);
+    assert.ok(!row.novelties.some((novelty) => novelty.code === 'OVERTIME_BELOW_MINIMUM'), item.code);
   }
 });
 
-test('el umbral se aplica a una sola jornada aunque cruce medianoche', () => {
-  const row = reportFor(
-    session({ minutes: 8 * 60, arrivalAt: '2026-07-29T02:00:00.000Z', id: 'overnight-21-to-05' }),
-    { from: '2026-07-28', to: '2026-07-29' }
-  );
-  assert.equal(row.ordinaryMinutes, 420);
-  assert.equal(row.overtimeMinutes, 60);
-  assert.equal(row.unrecognizedOvertimeMinutes, 0);
-  assert.equal(row.conceptMinutes.RNO, 420);
-  assert.equal(row.conceptMinutes.HENO, 60);
+test('un solo minuto de recargo se suma sin importar su duración', () => {
+  const sundayCompensation = new Map([
+    ['worker-test|2026-08-02', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]
+  ]);
+  const cases = [
+    { code: 'RNO', arrivalAt: '2026-07-28T00:00:00.000Z', range: { from: '2026-07-27', to: '2026-07-27' }, compensation: new Map() },
+    { code: 'RDD', arrivalAt: '2026-08-02T15:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' }, compensation: sundayCompensation },
+    { code: 'RND', arrivalAt: '2026-08-03T00:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' }, compensation: sundayCompensation },
+    { code: 'RDF', arrivalAt: '2026-07-20T15:00:00.000Z', range: { from: '2026-07-20', to: '2026-07-20' }, compensation: new Map() },
+    { code: 'RNF', arrivalAt: '2026-07-21T00:00:00.000Z', range: { from: '2026-07-20', to: '2026-07-20' }, compensation: new Map() }
+  ];
+
+  for (const item of cases) {
+    const row = reportFor(session({ minutes: 1, arrivalAt: item.arrivalAt, id: `recargo-${item.code}` }), item.range, item.compensation);
+    assert.equal(row.totalMinutes, 1, item.code);
+    assert.equal(row.overtimeMinutes, 0, item.code);
+    assert.equal(row.unrecognizedOvertimeMinutes, 0, item.code);
+    assert.equal(row.conceptMinutes[item.code], 1, item.code);
+  }
 });
 
-test('la pantalla muestra el tiempo extra que quedó bajo el umbral', async () => {
-  const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
-  assert.match(template, /Extra bajo umbral/);
-  assert.match(template, /report\.totals\.unrecognizedOvertimeMinutes/);
-  assert.match(template, /row\.unrecognizedOvertimeHours/);
-  assert.match(template, /day\.unrecognizedOvertimeHours/);
-  assert.match(template, /El exceso se reconoce como extra desde 30 minutos/);
-  assert.match(template, /OVERTIME_BELOW_MINIMUM/);
+test('la pantalla elimina el umbral y oculta la fecha de referencia en corte personalizado', async () => {
+  const [template, testTemplate] = await Promise.all([
+    readFile('src/views/operacionesNomina.ejs', 'utf8'),
+    readFile('src/views/operacionesPruebasNomina.ejs', 'utf8')
+  ]);
+  for (const source of [template, testTemplate]) {
+    assert.doesNotMatch(source, /Bajo umbral|Extra bajo umbral/i);
+  }
+  assert.doesNotMatch(template, /desde 30 minutos|OVERTIME_BELOW_MINIMUM/);
+  assert.match(template, /id="anchorDateField"/);
+  assert.match(template, /anchorDateField\.style\.display = custom \? 'none' : 'flex'/);
+  assert.match(template, /customDates\.forEach\(\(field\) => \{ field\.style\.display = custom \? 'flex' : 'none'; \}\)/);
 });
