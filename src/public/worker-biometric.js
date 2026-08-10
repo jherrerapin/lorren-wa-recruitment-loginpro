@@ -243,7 +243,7 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
     });
 
     document.body.classList.add('portal-filters-ready');
-    setPreset('all');
+    setPreset('today');
     return true;
   }
 
