@@ -133,7 +133,7 @@ function applyNoStore(res) {
 
 function validAttendanceEvidenceKey(value) {
   return typeof value === 'string'
-    && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
+    && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120}\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
 }
 
 function validDate(value) {
