@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   loadWorkerPortalAssignmentForArrival,
   loadWorkerPortalAssignments
@@ -8,6 +9,7 @@ import {
 const NOW = new Date('2026-07-22T13:00:00.000Z');
 
 function assignmentFixture(overrides = {}) {
+  const { serviceRequest: serviceRequestOverrides = {}, ...assignmentOverrides } = overrides;
   return {
     id: 'assignment-1',
     workerId: 'worker-1',
@@ -29,9 +31,9 @@ function assignmentFixture(overrides = {}) {
         attendanceEnabled: true,
         attendancePhotoPolicy: 'RISK_ONLY'
       },
-      ...overrides.serviceRequest
+      ...serviceRequestOverrides
     },
-    ...overrides
+    ...assignmentOverrides
   };
 }
 
@@ -48,8 +50,19 @@ function sessionFixture(overrides = {}) {
   };
 }
 
-function prismaWithAssignments(methods) {
-  return { dispatchAssignment: methods };
+function prismaWithAssignments(methods, worker = {}) {
+  return {
+    dispatchAssignment: methods,
+    dispatchWorker: {
+      async findUnique() {
+        return {
+          fullName: 'Auxiliar Prueba',
+          documentNumber: 'TEST-DOC-001',
+          ...worker
+        };
+      }
+    }
+  };
 }
 
 test('lista asignaciones activas y permite llegada sin ventana temporal', async () => {
@@ -63,6 +76,39 @@ test('lista asignaciones activas y permite llegada sin ventana temporal', async 
   assert.match(assignments[0].breakLabel, /si no toma almuerzo/i);
   assert.equal(assignments[0].photoRequired, false);
   assert.equal(assignments[0].workerId, undefined);
+  assert.deepEqual(assignments.workerIdentity, {
+    fullName: 'Auxiliar Prueba',
+    documentNumber: 'TEST-DOC-001'
+  });
+});
+
+test('conserva la fecha operativa de registros históricos y modernos sin desplazarlos al día anterior', async () => {
+  const prisma = prismaWithAssignments({
+    async findMany() {
+      return [
+        assignmentFixture({ id: 'legacy', serviceRequest: { serviceDate: new Date('2026-07-22T00:00:00.000Z') } }),
+        assignmentFixture({ id: 'modern', serviceRequest: { serviceDate: new Date('2026-07-22T05:00:00.000Z') } })
+      ];
+    }
+  });
+
+  const assignments = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: NOW });
+  assert.equal(assignments.length, 2);
+  for (const assignment of assignments) {
+    assert.match(assignment.dateLabel, /22 de julio de 2026/i);
+    assert.doesNotMatch(assignment.dateLabel, /21 de julio de 2026/i);
+    assert.equal(assignment.expectedStartAt, '2026-07-22T13:30:00.000Z');
+  }
+});
+
+test('el encabezado de Mi jornada presenta nombre y documento obtenidos en servidor', async () => {
+  const view = await readFile(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
+  const activeHeader = view.match(/<% } else if \(mode === 'active'\) \{ %>[\s\S]*?<\/header>/)?.[0] || '';
+
+  assert.match(activeHeader, /const portalWorkerIdentity = portalAssignments\.workerIdentity \|\| null/);
+  assert.match(activeHeader, /<h1>Mi jornada<\/h1>/);
+  assert.match(activeHeader, /portalWorkerIdentity\.fullName/);
+  assert.match(activeHeader, /Documento: <%= portalWorkerIdentity\.documentNumber \|\| 'No registrado' %>/);
 });
 
 test('conserva una jornada finalizada aunque haya pasado más de un día', async () => {
