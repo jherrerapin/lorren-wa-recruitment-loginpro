@@ -592,7 +592,10 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
     const previousMarks = Array.isArray(session.marks) ? [...session.marks] : [];
     if (latestMark(previousMarks, markType)) throw new Error('attendance_review_mark_exists');
     const correctionPending = markCorrectionPending(session.reviews, markType);
-    const manualAddition = !correctionPending;
+    const manualAddition = !correctionPending && input.manualAddition === true;
+    if (!correctionPending && !manualAddition) {
+      throw new Error('attendance_review_mark_not_pending_correction');
+    }
     if (manualAddition && session.assignment?.serviceRequest?.operationPoint?.manualAttendanceAllowed !== true) {
       throw new Error('attendance_manual_not_allowed');
     }
