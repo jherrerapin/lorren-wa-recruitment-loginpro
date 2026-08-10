@@ -17,6 +17,7 @@ const VALID_CORRECTION_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_EN
 const CLEAR_MARKS_REVIEW_REASON = 'Marcaciones eliminadas por coordinación para corregir la jornada.';
 const DELETE_MARK_REVIEW_REASON = 'Marcación individual eliminada por coordinación para corregir la jornada.';
 const ADD_MARK_REVIEW_REASON = 'Marcación individual registrada por coordinación para corregir la jornada.';
+const MANUAL_MARK_REVIEW_REASON = 'Marcación manual individual registrada por coordinación.';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -579,14 +580,21 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
       include: {
         marks: { orderBy: { serverReceivedAt: 'asc' } },
         reviews: { orderBy: { createdAt: 'desc' } },
-        assignment: { include: { worker: true, serviceRequest: true } }
+        assignment: {
+          include: {
+            worker: true,
+            serviceRequest: { include: { operationPoint: true } }
+          }
+        }
       }
     });
     if (!session) throw new Error('attendance_review_session_not_found');
     const previousMarks = Array.isArray(session.marks) ? [...session.marks] : [];
     if (latestMark(previousMarks, markType)) throw new Error('attendance_review_mark_exists');
-    if (!markCorrectionPending(session.reviews, markType)) {
-      throw new Error('attendance_review_mark_not_pending_correction');
+    const correctionPending = markCorrectionPending(session.reviews, markType);
+    const manualAddition = !correctionPending;
+    if (manualAddition && session.assignment?.serviceRequest?.operationPoint?.manualAttendanceAllowed !== true) {
+      throw new Error('attendance_manual_not_allowed');
     }
     const recognizeEarlyArrival = correctionEarlyArrivalRecognition(session, previousMarks);
     const correctionMark = {
@@ -606,7 +614,9 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
       breakEndAt: markMoment(latestMark(nextMarks, 'BREAK_END')),
       departureAt: markMoment(latestMark(nextMarks, 'DEPARTURE'))
     });
-    const pendingCorrections = pendingCorrectionMarkTypes(session.reviews).filter((type) => type !== markType);
+    const pendingCorrections = correctionPending
+      ? pendingCorrectionMarkTypes(session.reviews).filter((type) => type !== markType)
+      : pendingCorrectionMarkTypes(session.reviews);
     const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival, pendingCorrections);
 
     const created = await tx.dispatchAttendanceMark.create({
@@ -626,12 +636,12 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
     await tx.dispatchAttendanceReview.create({
       data: {
         attendanceSessionId: session.id,
-        action: 'WORKDAY_ADD_MARK',
+        action: manualAddition ? 'MANUAL_MARK' : 'WORKDAY_ADD_MARK',
         previousAttendanceStatus: session.attendanceStatus,
         newAttendanceStatus: next.attendanceStatus,
         previousValidationStatus: session.validationStatus,
         newValidationStatus: next.validationStatus,
-        reason: ADD_MARK_REVIEW_REASON,
+        reason: manualAddition ? MANUAL_MARK_REVIEW_REASON : ADD_MARK_REVIEW_REASON,
         notes: null,
         actorUsername,
         actorRole,
@@ -639,7 +649,8 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
           markId: created.id,
           markType,
           addedCapturedAt: reportedAt.toISOString(),
-          recognizeEarlyArrival
+          recognizeEarlyArrival,
+          manualAddition
         })
       }
     });
