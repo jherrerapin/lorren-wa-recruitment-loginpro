@@ -12,6 +12,8 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
   const workerFormView = fs.readFileSync('src/views/operacionesPersonalNuevo.ejs', 'utf8');
   const assignmentsView = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
+  const operationsSummaryView = fs.readFileSync('src/views/dispatch/operations-summary.ejs', 'utf8');
+  const requestsSummaryView = fs.readFileSync('src/views/operacionesSolicitudesResumen.ejs', 'utf8');
   const editRequestView = fs.readFileSync('src/views/operacionesSolicitudEditar.ejs', 'utf8');
   const publicRequestView = fs.readFileSync('src/views/publicDispatchRequest.ejs', 'utf8');
 
@@ -66,6 +68,14 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(personalView, />Acciones<\/th>/);
   assert.match(personalView, /<th>Estado<\/th>/);
   assert.match(personalView, /operationalStatus === 'CONTRATADO'/);
+
+  for (const view of [assignmentsView, operationsSummaryView, requestsSummaryView]) {
+    assert.doesNotMatch(view, /\b(?:window\.)?alert\s*\(/, 'Operaciones no debe usar alertas nativas del navegador.');
+    assert.match(view, /showToast\s*\(/, 'La vista debe usar una notificación visual controlada por la aplicación.');
+  }
+  assert.match(assignmentsView, /id="asyncToast"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(operationsSummaryView, /id="asyncToast"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(requestsSummaryView, /id="asyncToast"[^>]*role="status"[^>]*aria-live="polite"/);
 
   assert.doesNotMatch(dispatchRoute, /DISPATCH_MODULE_URL/);
   assert.doesNotMatch(publicRoute, /conversationEngine|webhook|whatsapp/i);

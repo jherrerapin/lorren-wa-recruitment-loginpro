@@ -217,7 +217,7 @@
         commitCustomReporter();
         syncWorkerRequirement();
         if (workerSelect.required && !workerSelect.value) {
-          alert('Selecciona el auxiliar asignado relacionado con esta novedad.');
+          showToast('Selecciona el auxiliar asignado relacionado con esta novedad.');
           return;
         }
         const button = form.querySelector('button[type="submit"]');
