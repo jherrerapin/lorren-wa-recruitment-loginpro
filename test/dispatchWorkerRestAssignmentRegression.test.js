@@ -137,30 +137,68 @@ test('Suspensión y No remunerada descuentan un día; los demás motivos no', ()
   assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.REMUNERADO), 0);
 });
 
-test('el backend guarda descanso auditable solo para contrato Directo', async () => {
+test('el backend guarda descanso para ambos contratos y solo exige motivo a Directo', async () => {
   const direct = makePrisma();
-  const saved = await saveWorkerRestAssignment(direct.prisma, {
+  const savedDirect = await saveWorkerRestAssignment(direct.prisma, {
     workerId: 'TEST-WORKER-1', restDate: '2026-08-11', reason: WORKER_REST_REASONS.SUSPENSION,
     actorUsername: 'TEST-ADMIN'
   });
-  assert.equal(saved.dayAdjustment, -1);
-  const active = await loadWorkerRestAssignments(direct.prisma, {
+  assert.equal(savedDirect.dayAdjustment, -1);
+  assert.equal(savedDirect.requiresJustification, true);
+  const activeDirect = await loadWorkerRestAssignments(direct.prisma, {
     workerIds: ['TEST-WORKER-1'], from: '2026-08-11', to: '2026-08-11'
   });
-  assert.equal(active.length, 1);
-  assert.equal(active[0].reason, WORKER_REST_REASONS.SUSPENSION);
+  assert.equal(activeDirect.length, 1);
+  assert.equal(activeDirect[0].reason, WORKER_REST_REASONS.SUSPENSION);
   assert.ok(direct.events.some((event) => (
     event.entityType === WORKER_REST_ENTITY_TYPE && event.action === WORKER_REST_ACTION && event.metadata?.dayAdjustment === -1
   )));
 
-  const contractor = makePrisma({ contractType: 'CONTRATISTA' });
+  const directWithoutReason = makePrisma();
   await assert.rejects(
-    saveWorkerRestAssignment(contractor.prisma, {
-      workerId: 'TEST-WORKER-1', restDate: '2026-08-11', reason: WORKER_REST_REASONS.VACACIONES
+    saveWorkerRestAssignment(directWithoutReason.prisma, {
+      workerId: 'TEST-WORKER-1', restDate: '2026-08-11'
     }),
-    /worker_rest_direct_contract_required/
+    /worker_rest_invalid/
   );
-  assert.equal(contractor.events.length, 0);
+  assert.equal(directWithoutReason.events.length, 0);
+
+  const contractor = makePrisma({ contractType: 'CONTRATISTA' });
+  const savedContractor = await saveWorkerRestAssignment(contractor.prisma, {
+    workerId: 'TEST-WORKER-1', restDate: '2026-08-11',
+    reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-09'
+  });
+  assert.equal(savedContractor.reason, null);
+  assert.equal(savedContractor.originSundayDate, null);
+  assert.equal(savedContractor.dayAdjustment, 0);
+  assert.equal(savedContractor.requiresJustification, false);
+  const activeContractor = await loadWorkerRestAssignments(contractor.prisma, {
+    workerIds: ['TEST-WORKER-1'], from: '2026-08-11', to: '2026-08-11'
+  });
+  assert.equal(activeContractor.length, 1);
+  assert.equal(activeContractor[0].reason, null);
+  assert.equal(activeContractor[0].originSundayDate, null);
+  assert.equal(activeContractor[0].dayAdjustment, 0);
+});
+
+test('el día de descanso no puede ser domingo ni festivo', async () => {
+  const sunday = makePrisma();
+  await assert.rejects(
+    saveWorkerRestAssignment(sunday.prisma, {
+      workerId: 'TEST-WORKER-1', restDate: '2026-08-09', reason: WORKER_REST_REASONS.VACACIONES
+    }),
+    /worker_rest_invalid/
+  );
+  assert.equal(sunday.events.length, 0);
+
+  const holiday = makePrisma();
+  await assert.rejects(
+    saveWorkerRestAssignment(holiday.prisma, {
+      workerId: 'TEST-WORKER-1', restDate: '2026-07-20', reason: WORKER_REST_REASONS.VACACIONES
+    }),
+    /worker_rest_invalid/
+  );
+  assert.equal(holiday.events.length, 0);
 });
 
 test('Remunerado exige domingo anterior trabajado y no permite reutilizarlo', async () => {
@@ -282,7 +320,7 @@ test('Nómina refleja días trabajados, descontados y netos', async () => {
   assert.equal(report.totals.netWorkedDays, 0);
 });
 
-test('Asignaciones expone zona de descansos, todos los motivos y validación Directo', async () => {
+test('Asignaciones usa fecha operativa, justifica Directos y muestra calendario solo para Remunerado', async () => {
   const [route, view] = await Promise.all([
     readFile('src/routes/dispatchOpsExtras.js', 'utf8'),
     readFile('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8')
@@ -293,7 +331,17 @@ test('Asignaciones expone zona de descansos, todos los motivos y validación Dir
   assert.match(route, /router\.post\('\/asignaciones\/descansos\/cancelar'/);
   assert.match(view, /id="restDropZone"/);
   assert.match(view, /data-contract-type="<%= worker\.contractType %>"/);
-  assert.match(view, /card\.dataset\.contractType!=='DIRECTO'/);
+  assert.doesNotMatch(view, /card\.dataset\.contractType!=='DIRECTO'/);
+  assert.match(view, /type="hidden" name="restDate" id="restDateValue"/);
+  assert.doesNotMatch(view, /id="restDateInput"/);
+  assert.match(view, /id="restReasonField"/);
+  assert.match(view, /const direct=contractType==='DIRECTO'/);
+  assert.match(view, /reasonField\.hidden=!direct/);
+  assert.match(view, /reasonInput\.required=direct/);
+  assert.match(view, /const remunerado=direct&&reasonInput\?\.value==='REMUNERADO'/);
+  assert.match(view, /field\.hidden=!remunerado/);
+  assert.match(view, /origin\.required=remunerado/);
+  assert.match(view, /Sin justificación requerida/);
   assert.match(view, /VACACIONES:'Vacaciones'/);
   assert.match(view, /INCAPACIDAD_EPS:'Incapacidad EPS'/);
   assert.match(view, /SUSPENSION:'Suspensión'/);
