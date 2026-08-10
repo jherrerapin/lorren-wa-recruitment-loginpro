@@ -9,7 +9,7 @@ export const PAYROLL_COMPENSATION_STATUS = Object.freeze({
   NOT_COMPENSATED: 'NOT_COMPENSATED'
 });
 
-export const MIN_OVERTIME_RECOGNITION_MINUTES = 30;
+export const MIN_OVERTIME_RECOGNITION_MINUTES = 0;
 
 export const DEFAULT_PAYROLL_POLICY = Object.freeze({
   weeklyOrdinaryMinutes: 42 * 60,
