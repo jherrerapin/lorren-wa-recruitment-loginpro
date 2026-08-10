@@ -9,6 +9,7 @@ import {
   normalizePayrollPolicy,
   payrollWeekStartKey
 } from '../domain/payrollConceptEngine.js';
+import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../../../services/dispatchOperationalCoverage.js';
 
 export const PAYROLL_POLICY_ENTITY_TYPE = 'DISPATCH_PAYROLL_POLICY';
 export const PAYROLL_POLICY_ACTION = 'PAYROLL_POLICY_UPDATED';
@@ -88,6 +89,7 @@ function normalizeWorkerRestEvent(event) {
     originSundayDate: reason === WORKER_REST_REASONS.REMUNERADO ? originSundayDate : null,
     dayAdjustment: workerRestDayAdjustment(reason),
     requiresJustification: metadata.requiresJustification === true || Boolean(reason),
+    assignmentConflictOverride: metadata.assignmentConflictOverride === true,
     createdAt: event.createdAt || null
   };
 }
@@ -235,6 +237,46 @@ export async function loadWorkerRestAssignments(prisma, options = {}) {
     .sort((left, right) => right.restDate.localeCompare(left.restDate) || left.workerId.localeCompare(right.workerId));
 }
 
+export async function findWorkerRestAssignmentConflicts(prisma, input = {}) {
+  const restDate = validDateKey(input.restDate);
+  const sourceWorkerIds = Array.isArray(input.workerIds) ? input.workerIds : [input.workerId];
+  const workerIds = [...new Set(sourceWorkerIds.map((workerId) => normalizeString(workerId, 120)).filter(Boolean))];
+  if (!restDate || !workerIds.length) return [];
+
+  const start = new Date(`${restDate}T00:00:00.000Z`);
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 1);
+  const assignments = await prisma.dispatchAssignment.findMany({
+    where: {
+      workerId: { in: workerIds },
+      status: { in: ACTIVE_DISPATCH_ASSIGNMENT_STATUSES },
+      serviceRequest: { serviceDate: { gte: start, lt: end } }
+    },
+    select: {
+      workerId: true,
+      worker: { select: { fullName: true } },
+      serviceRequest: { select: { id: true } }
+    }
+  });
+
+  const byWorker = new Map();
+  for (const assignment of assignments) {
+    if (!assignment.workerId) continue;
+    const current = byWorker.get(assignment.workerId) || {
+      workerId: assignment.workerId,
+      workerName: assignment.worker?.fullName || 'Auxiliar',
+      serviceRequestIds: []
+    };
+    if (assignment.serviceRequest?.id && !current.serviceRequestIds.includes(assignment.serviceRequest.id)) {
+      current.serviceRequestIds.push(assignment.serviceRequest.id);
+    }
+    byWorker.set(assignment.workerId, current);
+  }
+  return [...byWorker.values()]
+    .map((conflict) => ({ ...conflict, assignmentCount: conflict.serviceRequestIds.length }))
+    .sort((left, right) => left.workerName.localeCompare(right.workerName, 'es'));
+}
+
 async function inSerializableTransaction(prisma, callback) {
   if (typeof prisma.$transaction !== 'function') return callback(prisma);
   return prisma.$transaction(callback, { isolationLevel: 'Serializable' });
@@ -245,6 +287,7 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
   const restDate = validDateKey(input.restDate);
   const requestedReason = normalizeString(input.reason, 40)?.toUpperCase();
   const requestedOriginSundayDate = validDateKey(input.originSundayDate);
+  const allowAssignedRest = input.allowAssignedRest === true;
   if (!workerId || !restDate || isSundayDateKey(restDate) || holidayDateKey(restDate)) throw new Error('worker_rest_invalid');
 
   return inSerializableTransaction(prisma, async (tx) => {
@@ -262,6 +305,11 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       if (!originSundayDate || !isSundayDateKey(originSundayDate) || holidayDateKey(originSundayDate)) {
         throw new Error('worker_rest_origin_sunday_invalid');
       }
+    }
+
+    const assignmentConflicts = await findWorkerRestAssignmentConflicts(tx, { workerIds: [worker.id], restDate });
+    if (assignmentConflicts.length && !allowAssignedRest) {
+      throw new Error('worker_rest_active_assignment_confirmation_required');
     }
 
     const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
@@ -283,7 +331,8 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       status,
       originSundayDate,
       dayAdjustment,
-      requiresJustification
+      requiresJustification,
+      assignmentConflictOverride: assignmentConflicts.length > 0 && allowAssignedRest
     };
     await tx.devAuditEvent.create({
       data: {
