@@ -538,7 +538,7 @@ export async function registerManualAttendance(prisma, input = {}) {
     throw new Error('attendance_manual_status_invalid');
   }
   const reason = manualWorkday
-    ? (normalizeString(input.reason)?.slice(0, 500) || 'Jornada manual registrada por coordinación.')
+    ? (normalizeString(input.reason)?.slice(0, 500) || 'Marcación manual registrada por coordinación.')
     : requireString(input.reason, 'attendance_manual_reason', { minLength: 5, maxLength: 500 });
   const notes = normalizeString(input.notes)?.slice(0, 1000) || null;
   const actorUsername = requireString(input.actorUsername, 'attendance_manual_actor', { maxLength: 120 });
@@ -547,16 +547,16 @@ export async function registerManualAttendance(prisma, input = {}) {
     ? manualDateTime(input.arrivalReportedAt, 'attendance_manual_arrival_reported_at')
     : (input.reportedAt ? new Date(input.reportedAt) : (input.now instanceof Date ? input.now : new Date()));
   if (Number.isNaN(arrivalAt.getTime())) throw new Error('attendance_manual_reported_at_invalid');
-  const departureAt = manualWorkday
+  const departureAt = manualWorkday && normalizeString(input.departureReportedAt)
     ? manualDateTime(input.departureReportedAt, 'attendance_manual_departure_reported_at')
     : null;
-  const breakTaken = manualWorkday && enabledFlag(input.breakTaken);
-  const breakStartAt = breakTaken
+  const breakStartAt = manualWorkday && normalizeString(input.breakStartAt)
     ? manualDateTime(input.breakStartAt, 'attendance_manual_break_start_at')
     : null;
-  const breakEndAt = breakTaken
+  const breakEndAt = manualWorkday && normalizeString(input.breakEndAt)
     ? manualDateTime(input.breakEndAt, 'attendance_manual_break_end_at')
     : null;
+  const breakTaken = Boolean(breakStartAt || breakEndAt || (manualWorkday && enabledFlag(input.breakTaken)));
   const validationAt = input.now instanceof Date ? new Date(input.now.getTime()) : new Date();
   if (Number.isNaN(validationAt.getTime())) throw new Error('attendance_manual_now_invalid');
 
@@ -593,7 +593,8 @@ export async function registerManualAttendance(prisma, input = {}) {
     const punctualityStatus = manualWorkday
       ? (arrivalAt.getTime() > expected.expectedStartAt.getTime() ? 'LATE' : 'ON_TIME')
       : attendanceStatus;
-    const work = manualWorkday
+    const completeWorkday = Boolean(manualWorkday && departureAt && (!breakEndAt || breakStartAt));
+    const work = completeWorkday
       ? calculateDispatchWorkedTime({
           arrivalAt,
           departureAt,
@@ -604,20 +605,25 @@ export async function registerManualAttendance(prisma, input = {}) {
           recognizeEarlyArrival: false
         })
       : null;
-    const nextAttendanceStatus = manualWorkday ? 'COMPLETED' : attendanceStatus;
+    const nextAttendanceStatus = manualWorkday
+      ? (completeWorkday ? 'COMPLETED' : (departureAt ? 'DEPARTURE_REPORTED' : 'ARRIVAL_REPORTED'))
+      : attendanceStatus;
+    const nextValidationStatus = manualWorkday
+      ? (completeWorkday ? 'MANUAL_VALIDATED' : 'REVIEW_REQUIRED')
+      : 'MANUAL_VALIDATED';
     const sessionData = {
       attendanceStatus: nextAttendanceStatus,
-      validationStatus: 'MANUAL_VALIDATED',
+      validationStatus: nextValidationStatus,
       punctualityStatus,
       arrivalReportedAt: arrivalAt,
-      arrivalValidatedAt: manualWorkday ? validationAt : arrivalAt,
+      arrivalValidatedAt: completeWorkday ? validationAt : (manualWorkday ? null : arrivalAt),
       source: 'MANUAL',
       riskScore: 0,
       riskFlags: [],
-      ...(manualWorkday ? {
-        departureReportedAt: departureAt,
-        departureValidatedAt: validationAt,
-        workedMinutes: work.workedMinutes
+      ...(manualWorkday && departureAt ? {
+        departureReportedAt: completeWorkday ? departureAt : null,
+        departureValidatedAt: completeWorkday ? validationAt : null,
+        workedMinutes: work?.workedMinutes ?? null
       } : {})
     };
     const session = assignment.attendanceSession
@@ -641,27 +647,25 @@ export async function registerManualAttendance(prisma, input = {}) {
         idempotencyKey: `manual-${randomUUID()}`,
         serverReceivedAt: manualWorkday ? validationAt : arrivalAt,
         clientCapturedAt: capturedAt,
-        decision: 'MANUAL_VALIDATED',
+        decision: completeWorkday || !manualWorkday ? 'MANUAL_VALIDATED' : 'REVIEW_REQUIRED',
         riskScore: 0,
         riskFlags: []
       }
     });
 
     await createManualMark('ARRIVAL', arrivalAt);
-    if (breakTaken) {
-      await createManualMark('BREAK_START', breakStartAt);
-      await createManualMark('BREAK_END', breakEndAt);
-    }
-    if (manualWorkday) await createManualMark('DEPARTURE', departureAt);
+    if (breakStartAt) await createManualMark('BREAK_START', breakStartAt);
+    if (breakEndAt) await createManualMark('BREAK_END', breakEndAt);
+    if (departureAt) await createManualMark('DEPARTURE', departureAt);
 
     await tx.dispatchAttendanceReview.create({
       data: {
         attendanceSessionId: session.id,
-        action: manualWorkday ? 'MANUAL_WORKDAY' : 'MANUAL_MARK',
+        action: completeWorkday ? 'MANUAL_WORKDAY' : 'MANUAL_MARK',
         previousAttendanceStatus: assignment.attendanceSession?.attendanceStatus || null,
         newAttendanceStatus: nextAttendanceStatus,
         previousValidationStatus: assignment.attendanceSession?.validationStatus || null,
-        newValidationStatus: 'MANUAL_VALIDATED',
+        newValidationStatus: nextValidationStatus,
         reason,
         notes,
         actorUsername,
@@ -673,11 +677,11 @@ export async function registerManualAttendance(prisma, input = {}) {
           assignmentId: assignment.id,
           ...(manualWorkday ? {
             manualArrivalReportedAt: arrivalAt.toISOString(),
-            manualDepartureReportedAt: departureAt.toISOString(),
+            manualDepartureReportedAt: departureAt?.toISOString() || null,
             breakTaken,
             manualBreakStartAt: breakStartAt?.toISOString() || null,
             manualBreakEndAt: breakEndAt?.toISOString() || null,
-            workedMinutes: work.workedMinutes,
+            workedMinutes: work?.workedMinutes ?? null,
             punctualityStatus
           } : {
             manualReportedAt: arrivalAt.toISOString()
