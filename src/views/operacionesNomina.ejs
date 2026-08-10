@@ -166,7 +166,7 @@
 
     <% if (role === 'dev') { %>
       <section class="panel">
-        <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada. El máximo ordinario es 42 horas semanales y 7 horas diarias. Todo minuto de exceso se reconoce como hora extra según su concepto.</p></div></div>
+        <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada. El máximo ordinario es 42 horas semanales y 7 horas diarias. Las horas extra se reconocen desde 30 minutos; los recargos se contabilizan desde el primer minuto.</p></div></div>
         <form method="post" action="/admin/operaciones/asistencia/nomina/policy">
           <input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" />
           <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
