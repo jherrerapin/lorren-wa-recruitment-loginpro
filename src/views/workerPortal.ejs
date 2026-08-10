@@ -122,8 +122,8 @@
         grid-template-rows: auto auto minmax(0, 1fr) auto;
         overflow: hidden;
       }
-      #camera-step[hidden] { display: none; }
-      #camera-step .face-stage { width: 100%; max-width: none; min-height: 0; height: 100%; margin: 8px auto 0; aspect-ratio: auto; }
+      #mark-dialog #camera-step[hidden] { display: none; }
+      #mark-dialog .face-stage { width: 100%; max-width: none; min-height: 0; height: 100%; margin: 8px auto 0; aspect-ratio: auto; }
       #location-step { grid-row: 5; margin: 0; padding: 9px 12px; }
       #location-step .step-title { display: inline; margin-right: 6px; }
       #location-step .step-copy { display: inline; }
@@ -186,11 +186,16 @@
       </section>
     <% } else if (mode === 'active') { %>
       <% const portalAssignments = Array.isArray(assignments) ? assignments : []; %>
+      <% const portalWorkerIdentity = portalAssignments.workerIdentity || null; %>
       <% const pendingAssignments = portalAssignments.filter((assignment) => !assignment.arrivalReported && !assignment.departureReported).length; %>
       <% const inProgressAssignments = portalAssignments.filter((assignment) => assignment.arrivalReported && !assignment.departureReported).length; %>
       <% const completedAssignments = portalAssignments.filter((assignment) => assignment.departureReported).length; %>
       <header class="portal-header">
-        <div><p class="brand">Lórren · Portal del Auxiliar</p><h1>Mi jornada</h1></div>
+        <div>
+          <p class="brand">Lórren · Portal del Auxiliar</p>
+          <h1>Mi jornada</h1>
+          <% if (portalWorkerIdentity) { %><p><strong><%= portalWorkerIdentity.fullName %></strong><br/>Documento: <%= portalWorkerIdentity.documentNumber || 'No registrado' %></p><% } %>
+        </div>
         <span class="session-chip">Dispositivo verificado</span>
       </header>
       <section id="portal-connectivity" class="connectivity-bar" aria-live="polite">
