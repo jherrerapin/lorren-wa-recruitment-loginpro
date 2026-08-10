@@ -192,7 +192,7 @@ export async function resolveAttendanceReviewReason(prisma, input = {}) {
 function reviewSuccessMessage(action) {
   const normalized = normalizeString(action)?.toUpperCase();
   if (normalized === 'DELETE_MARK') return 'La marcación fue eliminada. Las demás se conservaron; ahora puedes registrar la hora corregida.';
-  if (normalized === 'ADD_MARK') return 'La nueva hora quedó registrada en la misma jornada y la corrección quedó auditada.';
+  if (normalized === 'ADD_MARK') return 'La nueva hora quedó registrada en la misma jornada y quedó auditada.';
   if (normalized === 'CLEAR') return 'Las marcaciones de la jornada fueron eliminadas. La sesión y la auditoría se conservaron.';
   return 'La decisión y el tiempo trabajado quedaron guardados con auditoría.';
 }
@@ -287,7 +287,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, { success: 'La jornada manual quedó registrada con entrada, salida y auditoría.' });
+      return redirectToBoard(res, req.body, { success: 'La marcación manual quedó registrada y auditada.' });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_MANUAL_FAILED]', { code: error?.message, assignmentId: req.params.assignmentId });
       return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
