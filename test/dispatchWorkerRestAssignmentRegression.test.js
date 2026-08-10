@@ -67,7 +67,7 @@ function payrollSession({
   };
 }
 
-function makePrisma({ contractType = 'DIRECTO', sessions = [], auditEvents = [] } = {}) {
+function makePrisma({ contractType = 'DIRECTO', sessions = [], auditEvents = [], assignments = [] } = {}) {
   const events = [...auditEvents];
   let sequence = events.length;
   const prisma = {
@@ -81,6 +81,24 @@ function makePrisma({ contractType = 'DIRECTO', sessions = [], auditEvents = [] 
           id: 'TEST-WORKER-1', fullName: 'Auxiliar de prueba', documentType: 'CC',
           documentNumber: 'TEST-DOC-1', phone: 'TEST-PHONE-1', contractType, isTestProfile: false
         }];
+      }
+    },
+    dispatchAssignment: {
+      async findMany({ where }) {
+        const workerIds = Array.isArray(where?.workerId?.in) ? where.workerId.in : [];
+        const statuses = Array.isArray(where?.status?.in) ? where.status.in : [];
+        const gte = where?.serviceRequest?.serviceDate?.gte;
+        const lt = where?.serviceRequest?.serviceDate?.lt;
+        return assignments
+          .filter((item) => !workerIds.length || workerIds.includes(item.workerId))
+          .filter((item) => !statuses.length || statuses.includes(item.status))
+          .filter((item) => !gte || new Date(item.serviceDate) >= gte)
+          .filter((item) => !lt || new Date(item.serviceDate) < lt)
+          .map((item) => ({
+            workerId: item.workerId,
+            worker: { fullName: item.workerName || 'Auxiliar de prueba' },
+            serviceRequest: { id: item.serviceRequestId || 'TEST-REQUEST-1' }
+          }));
       }
     },
     dispatchAttendanceSession: {
@@ -180,6 +198,39 @@ test('el backend guarda descanso para ambos contratos y solo exige motivo a Dire
   assert.equal(activeContractor[0].reason, null);
   assert.equal(activeContractor[0].originSundayDate, null);
   assert.equal(activeContractor[0].dayAdjustment, 0);
+});
+
+test('un descanso con solicitud activa exige confirmación explícita sin desasignar al auxiliar', async () => {
+  const activeAssignment = {
+    workerId: 'TEST-WORKER-1',
+    workerName: 'Auxiliar de prueba',
+    serviceRequestId: 'TEST-REQUEST-A',
+    serviceDate: '2026-08-11T00:00:00.000Z',
+    status: 'CONFIRMED'
+  };
+  const blocked = makePrisma({ assignments: [activeAssignment] });
+  await assert.rejects(
+    saveWorkerRestAssignment(blocked.prisma, {
+      workerId: 'TEST-WORKER-1', restDate: '2026-08-11', reason: WORKER_REST_REASONS.VACACIONES
+    }),
+    /worker_rest_active_assignment_confirmation_required/
+  );
+  assert.equal(blocked.events.length, 0);
+
+  const approved = makePrisma({ assignments: [activeAssignment] });
+  const saved = await saveWorkerRestAssignment(approved.prisma, {
+    workerId: 'TEST-WORKER-1', restDate: '2026-08-11', reason: WORKER_REST_REASONS.VACACIONES,
+    allowAssignedRest: true
+  });
+  assert.equal(saved.assignmentConflictOverride, true);
+  assert.equal(approved.events.length, 1);
+
+  const inactive = makePrisma({ assignments: [{ ...activeAssignment, status: 'CANCELLED' }] });
+  const savedInactive = await saveWorkerRestAssignment(inactive.prisma, {
+    workerId: 'TEST-WORKER-1', restDate: '2026-08-11', reason: WORKER_REST_REASONS.VACACIONES
+  });
+  assert.equal(savedInactive.assignmentConflictOverride, false);
+  assert.equal(inactive.events.length, 1);
 });
 
 test('el día de descanso no puede ser domingo ni festivo', async () => {
@@ -332,14 +383,19 @@ test('Nómina refleja días trabajados, descontados y netos', async () => {
   assert.equal(report.totals.netWorkedDays, 0);
 });
 
-test('Asignaciones ofrece fecha editable, motivo solo para Directos y descanso múltiple', async () => {
-  const [route, view, payroll] = await Promise.all([
+test('Asignaciones ofrece fecha editable, motivo solo para Directos, descanso múltiple y confirmación visual de conflictos', async () => {
+  const [route, view, payroll, confirmUi] = await Promise.all([
     readFile('src/routes/dispatchOpsExtras.js', 'utf8'),
     readFile('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8'),
-    readFile('src/modules/dispatch-payroll/application/payrollReport.js', 'utf8')
+    readFile('src/modules/dispatch-payroll/application/payrollReport.js', 'utf8'),
+    readFile('src/public/assignment-confirm-dialog.js', 'utf8')
   ]);
   assert.match(route, /saveWorkerRestAssignment/);
   assert.match(route, /cancelWorkerRestAssignment/);
+  assert.match(route, /findWorkerRestAssignmentConflicts/);
+  assert.match(route, /ACTIVE_DISPATCH_ASSIGNMENT_STATUSES/);
+  assert.match(route, /checkOnly.*rest-conflicts/);
+  assert.match(route, /allowAssignedRest/);
   assert.match(route, /router\.post\('\/asignaciones\/descansos'/);
   assert.match(route, /String\(req\.body\.workerId \|\| ''\)\.split\(','\)/);
   assert.match(route, /for \(const workerId of workerIds\)/);
@@ -369,9 +425,21 @@ test('Asignaciones ofrece fecha editable, motivo solo para Directos y descanso m
   assert.doesNotMatch(view, /dateBefore\(|origin\.max=|origin>=restDateValue/);
   assert.match(view, /Descuenta 1 día/);
 
+  assert.match(payroll, /ACTIVE_DISPATCH_ASSIGNMENT_STATUSES/);
+  assert.match(payroll, /worker_rest_active_assignment_confirmation_required/);
+  assert.match(payroll, /assignmentConflictOverride/);
   assert.doesNotMatch(payroll, /workedSundayIsEligible/);
   assert.doesNotMatch(payroll, /originSundayDate >= restDate/);
   assert.doesNotMatch(payroll, /worker_rest_origin_sunday_not_worked/);
+
+  assert.match(confirmUi, /askRestConflictConfirmation/);
+  assert.match(confirmUi, /checkOnly.*rest-conflicts/);
+  assert.match(confirmUi, /allowAssignedRest/);
+  assert.match(confirmUi, /No asignar descanso/);
+  assert.match(confirmUi, /Sí, asignar descanso/);
+  assert.match(confirmUi, /descansos\/cancelar/);
+  assert.doesNotMatch(confirmUi, /\b(?:window\.)?alert\s*\(/);
+  assert.doesNotMatch(confirmUi, /window\.confirm\s*=/);
 });
 
 test('la vista de Nómina muestra descanso, descuento y domingo sin selector manual', async () => {
