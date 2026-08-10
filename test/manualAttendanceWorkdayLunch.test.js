@@ -305,7 +305,7 @@ test('la tarjeta comprimida muestra solo identificación operativa esencial', ()
 
   assert.doesNotMatch(summary, /row\.phone/);
   assert.doesNotMatch(summary, /row\.address/);
-  assert.doesNotMatch(summary, /row\.scheduleLabel/);
+  assert.match(summary, /row\.scheduleLabel/);
   assert.doesNotMatch(summary, /row\.statusLabel/);
   assert.doesNotMatch(summary, /row\.arrivalReportedLabel/);
   assert.doesNotMatch(summary, /row\.departureReportedLabel/);
