@@ -78,15 +78,16 @@ function normalizeWorkerRestEvent(event) {
   const reason = normalizeString(metadata.reason, 40)?.toUpperCase();
   const status = normalizeString(metadata.status, 40)?.toUpperCase();
   const originSundayDate = validDateKey(metadata.originSundayDate);
-  if (!workerId || !restDate || !WORKER_REST_REASON_VALUES.has(reason) || !Object.values(WORKER_REST_STATUS).includes(status)) return null;
+  if (!workerId || !restDate || (reason && !WORKER_REST_REASON_VALUES.has(reason)) || !Object.values(WORKER_REST_STATUS).includes(status)) return null;
   return {
     entityId: event.entityId || workerRestKey(workerId, restDate),
     workerId,
     restDate,
-    reason,
+    reason: reason || null,
     status,
     originSundayDate: reason === WORKER_REST_REASONS.REMUNERADO ? originSundayDate : null,
     dayAdjustment: workerRestDayAdjustment(reason),
+    requiresJustification: metadata.requiresJustification === true || Boolean(reason),
     createdAt: event.createdAt || null
   };
 }
@@ -278,14 +279,9 @@ async function inSerializableTransaction(prisma, callback) {
 export async function saveWorkerRestAssignment(prisma, input = {}) {
   const workerId = normalizeString(input.workerId, 120);
   const restDate = validDateKey(input.restDate);
-  const reason = normalizeString(input.reason, 40)?.toUpperCase();
-  const originSundayDate = validDateKey(input.originSundayDate);
-  if (!workerId || !restDate || !WORKER_REST_REASON_VALUES.has(reason)) throw new Error('worker_rest_invalid');
-  if (reason === WORKER_REST_REASONS.REMUNERADO) {
-    if (!originSundayDate || !isSundayDateKey(originSundayDate) || originSundayDate >= restDate || holidayDateKey(originSundayDate)) {
-      throw new Error('worker_rest_origin_sunday_invalid');
-    }
-  }
+  const requestedReason = normalizeString(input.reason, 40)?.toUpperCase();
+  const requestedOriginSundayDate = validDateKey(input.originSundayDate);
+  if (!workerId || !restDate || isSundayDateKey(restDate) || holidayDateKey(restDate)) throw new Error('worker_rest_invalid');
 
   return inSerializableTransaction(prisma, async (tx) => {
     const worker = await tx.dispatchWorker.findUnique({
@@ -293,7 +289,16 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       select: { id: true, fullName: true, contractType: true }
     });
     if (!worker) throw new Error('worker_rest_worker_not_found');
-    if (worker.contractType !== 'DIRECTO') throw new Error('worker_rest_direct_contract_required');
+
+    const requiresJustification = worker.contractType === 'DIRECTO';
+    if (requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    const reason = requiresJustification ? requestedReason : null;
+    const originSundayDate = reason === WORKER_REST_REASONS.REMUNERADO ? requestedOriginSundayDate : null;
+    if (reason === WORKER_REST_REASONS.REMUNERADO) {
+      if (!originSundayDate || !isSundayDateKey(originSundayDate) || originSundayDate >= restDate || holidayDateKey(originSundayDate)) {
+        throw new Error('worker_rest_origin_sunday_invalid');
+      }
+    }
 
     const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
     if (active.some((rest) => rest.restDate === restDate)) throw new Error('worker_rest_date_already_assigned');
@@ -307,14 +312,15 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     }
 
     const status = WORKER_REST_STATUS.ACTIVE;
-    const dayAdjustment = workerRestDayAdjustment(reason);
+    const dayAdjustment = requiresJustification ? workerRestDayAdjustment(reason) : 0;
     const metadata = {
       workerId: worker.id,
       restDate,
       reason,
       status,
-      originSundayDate: reason === WORKER_REST_REASONS.REMUNERADO ? originSundayDate : null,
-      dayAdjustment
+      originSundayDate,
+      dayAdjustment,
+      requiresJustification
     };
     await tx.devAuditEvent.create({
       data: {
@@ -617,8 +623,9 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
 export function buildPayrollExportRows(report) {
   return report.rows.map((row) => {
     const restSummary = (row.restAssignments || []).map((rest) => {
+      const reason = rest.reason ? ` ${rest.reason}` : '';
       const origin = rest.originSundayDate ? ` domingo:${rest.originSundayDate}` : '';
-      return `${rest.restDate} ${rest.reason}${origin}`;
+      return `${rest.restDate}${reason}${origin}`;
     }).join(' | ');
     const base = {
       Documento: row.documentNumber || '',
