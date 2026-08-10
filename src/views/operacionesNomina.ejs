@@ -50,7 +50,6 @@
     .metric small { display:block; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; }
     .metric strong { display:block; color:var(--navy); font-size:24px; margin-top:6px; }
     .metric.warn { border-color:#fcd34d; background:#fffbeb; }
-    .metric.threshold { border-color:#bfdbfe; background:#eff6ff; }
     .metric.deduction { border-color:#fecaca; background:#fff7f7; }
     .table-wrap { overflow:auto; border:1px solid var(--border); border-radius:10px; }
     table { width:max-content; min-width:100%; border-collapse:collapse; background:#fff; }
@@ -119,7 +118,7 @@
       <form method="get" action="/admin/operaciones/asistencia/nomina" class="filters" id="payroll-filters">
         <% if (role === 'dev' && report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
         <div class="field"><label for="periodType">Tipo de corte</label><select id="periodType" name="periodType"><option value="WEEKLY" <%= report.period.periodType === 'WEEKLY' ? 'selected' : '' %>>Semanal</option><option value="BIWEEKLY" <%= report.period.periodType === 'BIWEEKLY' ? 'selected' : '' %>>Quincenal</option><option value="CUSTOM" <%= report.period.periodType === 'CUSTOM' ? 'selected' : '' %>>Personalizado</option></select></div>
-        <div class="field date-picker" data-payroll-date-picker>
+        <div class="field date-picker" id="anchorDateField" data-payroll-date-picker>
           <label>Fecha de referencia</label><input id="anchor" name="anchor" type="hidden" value="<%= report.period.anchor || report.period.from %>" data-date-value />
           <button class="date-picker-trigger" type="button" data-date-trigger aria-haspopup="dialog" aria-expanded="false"></button>
           <div class="date-popover" data-date-popover role="dialog" aria-label="Seleccionar fecha de referencia">
@@ -162,13 +161,12 @@
       <article class="metric"><small>Total trabajado</small><strong><%= formatPayrollMinutes(report.totals.totalMinutes) %></strong></article>
       <article class="metric"><small>Horas ordinarias</small><strong><%= report.totals.ordinaryHours || 0 %></strong></article>
       <article class="metric"><small>Horas extra</small><strong><%= report.totals.overtimeHours || 0 %></strong></article>
-      <article class="metric threshold"><small>Extra bajo umbral</small><strong><%= formatPayrollMinutes(report.totals.unrecognizedOvertimeMinutes || 0) %></strong></article>
       <article class="metric <%= report.totals.workersWithNovelties ? 'warn' : '' %>"><small>Con novedades</small><strong><%= report.totals.workersWithNovelties %></strong></article>
     </section>
 
     <% if (role === 'dev') { %>
       <section class="panel">
-        <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada. El máximo ordinario es 42 horas semanales y 7 horas diarias. El exceso se reconoce como extra desde 30 minutos.</p></div></div>
+        <div class="policy-head"><div><h2>Política de jornada</h2><p class="sub">Se guarda por cliente y queda auditada. El máximo ordinario es 42 horas semanales y 7 horas diarias. Todo minuto de exceso se reconoce como hora extra según su concepto.</p></div></div>
         <form method="post" action="/admin/operaciones/asistencia/nomina/policy">
           <input type="hidden" name="periodType" value="<%= report.period.periodType %>" /><input type="hidden" name="from" value="<%= report.period.from %>" /><input type="hidden" name="to" value="<%= report.period.to %>" /><input type="hidden" name="anchor" value="<%= report.period.anchor %>" />
           <% if (report.filters.includeTest) { %><input type="hidden" name="includeTest" value="true" /><% } %>
@@ -194,14 +192,14 @@
       <div class="table-wrap">
         <% if (!report.rows.length) { %><div class="empty">No hay jornadas ni descansos para el periodo seleccionado.</div><% } else { %>
           <table>
-            <thead><tr><th>Auxiliar</th><th>Estado</th><th>Días trabajados</th><th>Días descontados</th><th>Días netos</th><th>Total</th><th>Ordinarias</th><th>Extra</th><th>Bajo umbral</th><% for (const code of conceptCodes) { %><th><%= code %></th><% } %><th>Detalle</th></tr></thead>
+            <thead><tr><th>Auxiliar</th><th>Estado</th><th>Días trabajados</th><th>Días descontados</th><th>Días netos</th><th>Total</th><th>Ordinarias</th><th>Extra</th><% for (const code of conceptCodes) { %><th><%= code %></th><% } %><th>Detalle</th></tr></thead>
             <tbody>
               <% for (const row of report.rows) { %>
                 <tr>
                   <td><strong><%= row.fullName %></strong><small><%= row.documentType %> <%= row.documentNumber || 'Sin documento' %></small></td>
                   <td><span class="badge <%= row.exportable ? 'badge-ok' : 'badge-warn' %>"><%= row.status %></span></td>
                   <td><%= row.workedDays || 0 %></td><td><%= row.deductedDays || 0 %></td><td><%= Number(row.netWorkedDays || 0) %></td>
-                  <td><%= row.totalHours %></td><td><%= row.ordinaryHours %></td><td><%= row.overtimeHours %></td><td><%= row.unrecognizedOvertimeHours || 0 %></td>
+                  <td><%= row.totalHours %></td><td><%= row.ordinaryHours %></td><td><%= row.overtimeHours %></td>
                   <% for (const code of conceptCodes) { %><td><%= row.conceptHours[code] || 0 %></td><% } %>
                   <td>
                     <details><summary>Ver días y descansos</summary><div class="daily">
@@ -211,7 +209,7 @@
                           <div><strong><%= day.dateKey %></strong><div class="day-flags"><% if (day.isHoliday) { %><span class="badge badge-holiday">Festivo</span><% } %><% if (day.isRestDay) { %><span class="badge badge-rest">Descanso obligatorio</span><% } %></div></div>
                           <div><%= day.clientNames.join(', ') %><small><%= day.operationNames.join(', ') %></small></div>
                           <div><%= day.totalHours %> h</div>
-                          <div><small>Ord. <%= day.ordinaryHours %></small><small>Extra <%= day.overtimeHours %></small><small>Bajo umbral <%= day.unrecognizedOvertimeHours || 0 %></small></div>
+                          <div><small>Ord. <%= day.ordinaryHours %></small><small>Extra <%= day.overtimeHours %></small></div>
                           <div>
                             <% if (day.isRestDay && day.compensationStatus) { %>
                               <% if (day.compensationManagedByRestAssignment) { %>
@@ -225,7 +223,7 @@
                               <% } %>
                             <% } %>
                             <% const dayNovelty = row.novelties.filter((item) => item.dateKey === day.dateKey || (day.civilDateKeys || []).includes(item.dateKey)); %>
-                            <% if (dayNovelty.length) { %><div class="novelty <%= dayNovelty.every((item) => item.blocking === false) ? 'info' : '' %>"><%= dayNovelty.map((item) => item.code === 'OVERTIME_BELOW_MINIMUM' ? item.message : item.code).join(' · ') %></div><% } %>
+                            <% if (dayNovelty.length) { %><div class="novelty <%= dayNovelty.every((item) => item.blocking === false) ? 'info' : '' %>"><%= dayNovelty.map((item) => item.code).join(' · ') %></div><% } %>
                           </div>
                         </div>
                       <% } %>
@@ -249,7 +247,8 @@
   <script>
     const periodType = document.getElementById('periodType');
     const customDates = document.querySelectorAll('.custom-date');
-    function syncPeriodFields() { const custom = periodType.value === 'CUSTOM'; customDates.forEach((field) => { field.style.display = custom ? 'flex' : 'none'; }); }
+    const anchorDateField = document.getElementById('anchorDateField');
+    function syncPeriodFields() { const custom = periodType.value === 'CUSTOM'; customDates.forEach((field) => { field.style.display = custom ? 'flex' : 'none'; }); if (anchorDateField) anchorDateField.style.display = custom ? 'none' : 'flex'; }
     periodType.addEventListener('change', syncPeriodFields); syncPeriodFields();
 
     const monthFormatter = new Intl.DateTimeFormat('es-CO', { month:'long', year:'numeric', timeZone:'UTC' });
