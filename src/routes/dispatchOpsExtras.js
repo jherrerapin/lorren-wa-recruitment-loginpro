@@ -4,11 +4,12 @@ import ExcelJS from 'exceljs';
 import { sendDispatchCompletionEmail } from '../services/dispatchCompletionEmail.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
-import { recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
+import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES, recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 import {
   WORKER_REST_REASONS,
   cancelWorkerRestAssignment,
+  findWorkerRestAssignmentConflicts,
   loadWorkerRestAssignments,
   saveWorkerRestAssignment
 } from '../modules/dispatch-payroll/application/payrollReport.js';
@@ -21,7 +22,7 @@ import {
 
 const TEMPLATE_KEY = 'DISPATCH_ASSIGNMENT_WHATSAPP';
 const DEFAULT_ASSIGNMENT_TEMPLATE = 'Hola {{nombre}}, te confirmamos asignacion para {{fecha}} en {{operacion}}. Direccion: {{direccion}}. Horario: {{horaInicio}} - {{horaFin}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
-const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
+const ACTIVE_ASSIGNMENT_STATUSES = ACTIVE_DISPATCH_ASSIGNMENT_STATUSES;
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const MAX_CV_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_CV_MIME_TYPES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
@@ -93,6 +94,7 @@ function workerRestErrorMessage(error) {
     worker_rest_date_already_assigned: 'El auxiliar ya tiene un descanso activo en esa fecha.',
     worker_rest_origin_sunday_invalid: 'El descanso remunerado debe vincularse a un domingo válido y no festivo.',
     worker_rest_origin_sunday_used: 'Ese domingo ya está vinculado a otro descanso remunerado.',
+    worker_rest_active_assignment_confirmation_required: 'El auxiliar ya tiene una solicitud activa en esa fecha. Confirma si deseas registrar el descanso de todas formas.',
     worker_rest_not_found: 'El descanso activo ya no existe.'
   };
   return messages[error?.message] || 'No fue posible guardar el descanso.';
@@ -348,7 +350,7 @@ export function dispatchOpsExtrasRouter(prisma) {
     const message = result.policy?.isTestClient
       ? 'Solicitud de prueba eliminada sin límite de antigüedad.'
       : 'Solicitud eliminada.';
-    return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent(message)}`);
+    return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent(message)}&deleted=1`);
   });
 
   router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }); if (activeCount >= serviceRequest.requiredWorkers) { await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmacion de los auxiliares.')); } const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (existing) { if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya esta asignado a esta solicitud.')); await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } }); } else { await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } }); } await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmacion.')); });
@@ -356,12 +358,36 @@ export function dispatchOpsExtrasRouter(prisma) {
     const serviceRequestId = normalizeString(req.body.serviceRequestId);
     const restDate = normalizeString(req.body.restDate);
     const workerIds = [...new Set(String(req.body.workerId || '').split(',').map((value) => normalizeString(value)).filter(Boolean))];
-    if (!workerIds.length) return res.redirect(redirectToAssignment(serviceRequestId, 'Selecciona al menos un auxiliar para descanso.', restDate));
+    const checkOnly = normalizeString(req.body.checkOnly) === 'rest-conflicts';
+    const allowAssignedRest = String(req.body.allowAssignedRest || '').toLowerCase() === 'true';
+    if (!workerIds.length) {
+      if (checkOnly) return res.status(400).json({ ok: false, error: 'worker_rest_worker_required', conflicts: [] });
+      return res.redirect(redirectToAssignment(serviceRequestId, 'Selecciona al menos un auxiliar para descanso.', restDate));
+    }
+
+    const conflicts = await findWorkerRestAssignmentConflicts(prisma, { workerIds, restDate });
+    if (checkOnly) return res.json({ ok: true, conflicts });
+    if (conflicts.length && !allowAssignedRest) {
+      const names = conflicts.map((conflict) => conflict.workerName).join(', ');
+      return res.redirect(redirectToAssignment(
+        serviceRequestId,
+        `${names} ${conflicts.length === 1 ? 'ya tiene una solicitud activa' : 'ya tienen solicitudes activas'} en esa fecha. Confirma si deseas registrar el descanso de todas formas.`,
+        restDate
+      ));
+    }
+
     let saved = 0;
     const failures = [];
     for (const workerId of workerIds) {
       try {
-        await saveWorkerRestAssignment(prisma, { workerId, restDate, reason: req.body.reason, originSundayDate: req.body.originSundayDate, ...assignmentActor(req) });
+        await saveWorkerRestAssignment(prisma, {
+          workerId,
+          restDate,
+          reason: req.body.reason,
+          originSundayDate: req.body.originSundayDate,
+          allowAssignedRest,
+          ...assignmentActor(req)
+        });
         saved += 1;
       } catch (error) {
         failures.push(workerRestErrorMessage(error));
