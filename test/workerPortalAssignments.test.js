@@ -9,6 +9,7 @@ import {
 const NOW = new Date('2026-07-22T13:00:00.000Z');
 
 function assignmentFixture(overrides = {}) {
+  const { serviceRequest: serviceRequestOverrides = {}, ...assignmentOverrides } = overrides;
   return {
     id: 'assignment-1',
     workerId: 'worker-1',
@@ -30,9 +31,9 @@ function assignmentFixture(overrides = {}) {
         attendanceEnabled: true,
         attendancePhotoPolicy: 'RISK_ONLY'
       },
-      ...overrides.serviceRequest
+      ...serviceRequestOverrides
     },
-    ...overrides
+    ...assignmentOverrides
   };
 }
 
