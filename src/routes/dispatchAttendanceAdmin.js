@@ -105,6 +105,8 @@ function publicErrorMessage(error) {
     attendance_manual_assignment_inactive: 'La asignación ya no está activa.',
     attendance_manual_not_allowed: 'Este punto no permite registrar asistencia manual.',
     attendance_manual_arrival_exists: 'Esta asignación ya tiene una marcación de asistencia registrada.',
+    attendance_manual_mark_required: 'Ingresa al menos una marcación manual para guardar.',
+    attendance_manual_mark_exists: 'Una de las marcaciones ingresadas ya existe. Corrígela desde la jornada si necesitas cambiar su hora.',
     attendance_manual_status_invalid: 'Selecciona si la llegada fue a tiempo o tarde.',
     attendance_manual_arrival_reported_at_required: 'Ingresa la fecha y hora de entrada.',
     attendance_manual_arrival_reported_at_invalid: 'La fecha u hora de entrada no es válida.',
@@ -114,6 +116,12 @@ function publicErrorMessage(error) {
     attendance_manual_break_start_at_invalid: 'La hora de inicio de almuerzo no es válida.',
     attendance_manual_break_end_at_required: 'Ingresa la hora en que terminó el almuerzo.',
     attendance_manual_break_end_at_invalid: 'La hora de fin de almuerzo no es válida.',
+    attendance_manual_departure_before_arrival: 'La salida no puede ser anterior a la entrada.',
+    attendance_manual_break_before_arrival: 'El almuerzo no puede quedar antes de la entrada registrada.',
+    attendance_manual_break_end_before_start: 'El fin del almuerzo no puede ser anterior a su inicio.',
+    attendance_manual_break_after_departure: 'El almuerzo no puede quedar después de la salida registrada.',
+    attendance_manual_arrival_date_mismatch: 'La entrada debe corresponder a la fecha de la asignación.',
+    attendance_manual_mark_date_outside_assignment: 'La marcación debe corresponder a la fecha operativa de la asignación.',
     attendance_manual_reason_required: 'Escribe el motivo de la marcación manual.',
     attendance_manual_reason_too_short: 'El motivo debe tener al menos 5 caracteres.',
     attendance_work_break_start_required: 'Para registrar el fin del almuerzo primero debe existir su hora de inicio.',
@@ -280,14 +288,13 @@ export function dispatchAttendanceAdminRouter(prisma) {
         reportedAt: req.body.reportedAt,
         arrivalReportedAt: req.body.arrivalReportedAt,
         departureReportedAt: req.body.departureReportedAt,
-        breakTaken: req.body.breakTaken,
         breakStartAt: req.body.breakStartAt,
         breakEndAt: req.body.breakEndAt,
         reason: req.body.reason,
         notes: req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, { success: 'La jornada manual quedó registrada con entrada, salida y auditoría.' });
+      return redirectToBoard(res, req.body, { success: 'Las marcaciones manuales ingresadas quedaron guardadas con auditoría.' });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_MANUAL_FAILED]', { code: error?.message, assignmentId: req.params.assignmentId });
       return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
