@@ -235,42 +235,6 @@ export async function loadWorkerRestAssignments(prisma, options = {}) {
     .sort((left, right) => right.restDate.localeCompare(left.restDate) || left.workerId.localeCompare(right.workerId));
 }
 
-async function workedSundayIsEligible(prisma, workerId, sundayDate) {
-  const dayStart = bogotaDayStart(sundayDate);
-  const dayEnd = bogotaDayStart(addDateKeyDays(sundayDate, 1));
-  const sessions = await prisma.dispatchAttendanceSession.findMany({
-    where: {
-      assignment: { workerId },
-      arrivalReportedAt: { lt: dayEnd },
-      departureReportedAt: { gt: dayStart },
-      validationStatus: { in: ['AUTO_VALIDATED', 'MANUAL_VALIDATED'] }
-    },
-    include: {
-      marks: { orderBy: { serverReceivedAt: 'asc' } },
-      assignment: {
-        include: {
-          worker: true,
-          serviceRequest: {
-            include: {
-              operationPoint: { include: { client: true } }
-            }
-          }
-        }
-      }
-    },
-    orderBy: { arrivalReportedAt: 'asc' }
-  });
-  if (!sessions.length) return false;
-  const report = calculatePayrollConceptReport({
-    sessions,
-    defaultPolicy: { ...DEFAULT_PAYROLL_POLICY, restDay: 0 },
-    range: { from: addDateKeyDays(sundayDate, -6), to: sundayDate }
-  });
-  return report.rows.some((row) => row.workerId === workerId && row.daily.some((day) => (
-    Number(day.totalMinutes || 0) > 0 && Array.isArray(day.restDateKeys) && day.restDateKeys.includes(sundayDate)
-  )));
-}
-
 async function inSerializableTransaction(prisma, callback) {
   if (typeof prisma.$transaction !== 'function') return callback(prisma);
   return prisma.$transaction(callback, { isolationLevel: 'Serializable' });
@@ -295,7 +259,7 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     const reason = requiresJustification ? requestedReason : null;
     const originSundayDate = reason === WORKER_REST_REASONS.REMUNERADO ? requestedOriginSundayDate : null;
     if (reason === WORKER_REST_REASONS.REMUNERADO) {
-      if (!originSundayDate || !isSundayDateKey(originSundayDate) || originSundayDate >= restDate || holidayDateKey(originSundayDate)) {
+      if (!originSundayDate || !isSundayDateKey(originSundayDate) || holidayDateKey(originSundayDate)) {
         throw new Error('worker_rest_origin_sunday_invalid');
       }
     }
@@ -308,7 +272,6 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
         rest.reason === WORKER_REST_REASONS.REMUNERADO && rest.originSundayDate === originSundayDate
       ));
       if (originAlreadyUsed) throw new Error('worker_rest_origin_sunday_used');
-      if (!(await workedSundayIsEligible(tx, worker.id, originSundayDate))) throw new Error('worker_rest_origin_sunday_not_worked');
     }
 
     const status = WORKER_REST_STATUS.ACTIVE;
