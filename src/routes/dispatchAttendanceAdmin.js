@@ -133,7 +133,7 @@ function applyNoStore(res) {
 
 function validAttendanceEvidenceKey(value) {
   return typeof value === 'string'
-    && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120}\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
+    && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
 }
 
 function validDate(value) {
@@ -237,10 +237,8 @@ export function dispatchAttendanceAdminRouter(prisma) {
 
   router.post('/sessions/:sessionId/review', formParser, async (req, res) => {
     const action = normalizeString(req.body.action)?.toUpperCase();
+    const correctionAction = ['DELETE_MARK', 'ADD_MARK', 'CLEAR'].includes(action);
     const manualMarkAddition = action === 'ADD_MARK' && req.body.manualMark === 'true';
-    const correctionAction = ['DELETE_MARK', 'CLEAR'].includes(action)
-      || (action === 'ADD_MARK' && !manualMarkAddition);
-    const focusAction = ['DELETE_MARK', 'ADD_MARK', 'CLEAR'].includes(action);
     try {
       const reason = await resolveAttendanceReviewReason(prisma, {
         sessionId: req.params.sessionId,
@@ -256,6 +254,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
         markId: req.body.markId,
         markType: req.body.markType,
         reportedAt: req.body.reportedAt,
+        manualAddition: manualMarkAddition,
         reason,
         notes: req.body.notes,
         ...actorFromRequest(req)
@@ -263,14 +262,14 @@ export function dispatchAttendanceAdminRouter(prisma) {
       return redirectToBoard(res, req.body, {
         success: reviewSuccessMessage(req.body.action),
         correctionMark: action === 'DELETE_MARK' ? req.body.markType : null,
-        correctionSession: focusAction ? req.params.sessionId : null
+        correctionSession: correctionAction ? req.params.sessionId : null
       });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_REVIEW_FAILED]', { code: error?.message, sessionId: req.params.sessionId });
       return redirectToBoard(res, req.body, {
         error: publicErrorMessage(error),
-        correctionMark: action === 'ADD_MARK' && correctionAction ? req.body.markType : null,
-        correctionSession: focusAction ? req.params.sessionId : null
+        correctionMark: action === 'ADD_MARK' && !manualMarkAddition ? req.body.markType : null,
+        correctionSession: correctionAction ? req.params.sessionId : null
       });
     }
   });
