@@ -8,6 +8,7 @@ import {
   STANDARD_DISPATCH_WORKDAY_MINUTES,
   formatDispatchMinutes
 } from '../domain/attendanceWorkdayPolicy.js';
+import { dispatchServiceDateKey } from '../../../services/dispatchDate.js';
 
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 
@@ -34,6 +35,12 @@ function requireAssignmentReader(prisma, methodName) {
   }
 }
 
+function requireWorkerReader(prisma) {
+  if (!prisma?.dispatchWorker || typeof prisma.dispatchWorker.findUnique !== 'function') {
+    throw new Error('worker_portal_worker_findUnique_required');
+  }
+}
+
 function formatDate(value) {
   return new Intl.DateTimeFormat('es-CO', {
     timeZone: BOGOTA_TIME_ZONE,
@@ -42,6 +49,12 @@ function formatDate(value) {
     month: 'long',
     year: 'numeric'
   }).format(value);
+}
+
+function formatServiceDate(value) {
+  const dateKey = dispatchServiceDateKey(value);
+  if (!dateKey) throw new Error('worker_portal_assignment_service_date_invalid');
+  return formatDate(new Date(`${dateKey}T12:00:00.000Z`));
 }
 
 function formatTime(value) {
@@ -211,7 +224,7 @@ function buildPortalAssignment(assignment) {
     operationPointName: request.operationPointName || point?.name || 'Operación por confirmar',
     cityName: request.cityName || point?.cityName || 'Ciudad por confirmar',
     address: request.address || point?.address || 'Dirección por confirmar',
-    dateLabel: formatDate(requireDate(request.serviceDate, 'worker_portal_assignment_service_date')),
+    dateLabel: formatServiceDate(request.serviceDate),
     timeLabel: expectedStartAt
       ? `${formatTime(expectedStartAt)}${expectedEndAt ? ` – ${formatTime(expectedEndAt)}` : ''}`
       : 'Horario por confirmar',
@@ -274,23 +287,42 @@ function assignmentInclude() {
 
 export async function loadWorkerPortalAssignments(prisma, input = {}) {
   requireAssignmentReader(prisma, 'findMany');
+  requireWorkerReader(prisma);
   const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
   if (input.now !== undefined) requireDate(input.now, 'worker_portal_now');
-  const records = await prisma.dispatchAssignment.findMany({
-    where: {
-      workerId,
-      status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
-    },
-    include: assignmentInclude()
-  });
+  const [records, worker] = await Promise.all([
+    prisma.dispatchAssignment.findMany({
+      where: {
+        workerId,
+        status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
+      },
+      include: assignmentInclude()
+    }),
+    prisma.dispatchWorker.findUnique({
+      where: { id: workerId },
+      select: { fullName: true, documentNumber: true }
+    })
+  ]);
 
-  return records
+  if (!worker) throw new Error('worker_portal_worker_not_found');
+  const assignments = records
     .map((record) => buildPortalAssignment(record))
     .sort((left, right) => {
       const leftTime = left.expectedStartAt ? new Date(left.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
       const rightTime = right.expectedStartAt ? new Date(right.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
       return leftTime - rightTime;
     });
+
+  Object.defineProperty(assignments, 'workerIdentity', {
+    value: Object.freeze({
+      fullName: requireNonEmptyString(worker.fullName, 'worker_portal_worker_name'),
+      documentNumber: worker.documentNumber ? String(worker.documentNumber).trim() : null
+    }),
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+  return assignments;
 }
 
 export async function loadWorkerPortalAssignmentForMark(prisma, input = {}) {
