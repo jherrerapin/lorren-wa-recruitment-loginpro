@@ -43,6 +43,11 @@ function manualDateTime(value, label) {
   return candidate;
 }
 
+function optionalManualDateTime(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  return manualDateTime(value, label);
+}
+
 function optionalTimelineDate(value, label) {
   if (value === undefined || value === null || value === '') return null;
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
@@ -51,13 +56,12 @@ function optionalTimelineDate(value, label) {
 }
 
 function hasManualWorkdayInput(input = {}) {
-  return input.arrivalReportedAt !== undefined || input.departureReportedAt !== undefined;
-}
-
-function enabledFlag(value) {
-  if (value === true) return true;
-  const normalized = normalizeString(value)?.toLowerCase();
-  return normalized === 'true' || normalized === 'on' || normalized === '1';
+  return [
+    'arrivalReportedAt',
+    'breakStartAt',
+    'breakEndAt',
+    'departureReportedAt'
+  ].some((field) => input[field] !== undefined);
 }
 
 function normalizeDateInput(value, fallback) {
@@ -527,6 +531,75 @@ export async function reviewAttendanceSession(prisma, input = {}) {
   });
 }
 
+function manualMarkMoment(mark) {
+  const value = mark?.clientCapturedAt || mark?.serverReceivedAt;
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function latestManualMark(marks, markType) {
+  return (Array.isArray(marks) ? marks : [])
+    .filter((mark) => mark?.markType === markType)
+    .sort((left, right) => (manualMarkMoment(right)?.getTime() || 0) - (manualMarkMoment(left)?.getTime() || 0))[0] || null;
+}
+
+function manualWorkdayState(session, marks, expected, validationAt, submittedMarkTypes) {
+  const arrivalAt = manualMarkMoment(latestManualMark(marks, 'ARRIVAL'))
+    || optionalTimelineDate(session?.arrivalReportedAt, 'attendance_manual_arrival_reported_at');
+  const breakStartAt = manualMarkMoment(latestManualMark(marks, 'BREAK_START'));
+  const breakEndAt = manualMarkMoment(latestManualMark(marks, 'BREAK_END'));
+  const departureAt = manualMarkMoment(latestManualMark(marks, 'DEPARTURE'))
+    || optionalTimelineDate(session?.departureReportedAt, 'attendance_manual_departure_reported_at');
+  const punctualityStatus = arrivalAt
+    ? (arrivalAt.getTime() > expected.expectedStartAt.getTime() ? 'LATE' : 'ON_TIME')
+    : null;
+  const arrivalSubmitted = submittedMarkTypes.has('ARRIVAL');
+  const completeTimeline = Boolean(arrivalAt && departureAt && !(breakEndAt && !breakStartAt));
+  const work = completeTimeline
+    ? calculateDispatchWorkedTime({
+        arrivalAt,
+        departureAt,
+        expectedStartAt: expected.expectedStartAt,
+        expectedEndAt: expected.expectedEndAt,
+        breakStartAt,
+        breakEndAt,
+        recognizeEarlyArrival: false
+      })
+    : null;
+
+  let attendanceStatus = 'PENDING';
+  let validationStatus = 'REVIEW_REQUIRED';
+  if (arrivalAt && !departureAt) attendanceStatus = 'ARRIVAL_REPORTED';
+  if (!arrivalAt && departureAt) attendanceStatus = 'DEPARTURE_REPORTED';
+  if (arrivalAt && departureAt) attendanceStatus = work ? 'COMPLETED' : 'DEPARTURE_REPORTED';
+  if (work) validationStatus = 'MANUAL_VALIDATED';
+
+  return {
+    sessionData: {
+      attendanceStatus,
+      validationStatus,
+      punctualityStatus,
+      arrivalReportedAt: arrivalAt,
+      arrivalValidatedAt: arrivalAt
+        ? (session?.arrivalValidatedAt || ((arrivalSubmitted || work) ? validationAt : null))
+        : null,
+      departureReportedAt: departureAt,
+      departureValidatedAt: work ? (session?.departureValidatedAt || validationAt) : null,
+      workedMinutes: work?.workedMinutes ?? null,
+      source: session?.source || 'MANUAL',
+      riskScore: Number.isFinite(Number(session?.riskScore)) ? Number(session.riskScore) : 0,
+      riskFlags: Array.isArray(session?.riskFlags) ? session.riskFlags : []
+    },
+    arrivalAt,
+    breakStartAt,
+    breakEndAt,
+    departureAt,
+    work,
+    punctualityStatus
+  };
+}
+
 export async function registerManualAttendance(prisma, input = {}) {
   requireAdminPrisma(prisma);
   const assignmentId = requireString(input.assignmentId, 'attendance_manual_assignment_id', { maxLength: 120 });
@@ -543,29 +616,32 @@ export async function registerManualAttendance(prisma, input = {}) {
   const notes = normalizeString(input.notes)?.slice(0, 1000) || null;
   const actorUsername = requireString(input.actorUsername, 'attendance_manual_actor', { maxLength: 120 });
   const actorRole = normalizeString(input.actorRole)?.slice(0, 60) || null;
-  const arrivalAt = manualWorkday
-    ? manualDateTime(input.arrivalReportedAt, 'attendance_manual_arrival_reported_at')
-    : (input.reportedAt ? new Date(input.reportedAt) : (input.now instanceof Date ? input.now : new Date()));
-  if (Number.isNaN(arrivalAt.getTime())) throw new Error('attendance_manual_reported_at_invalid');
-  const departureAt = manualWorkday
-    ? manualDateTime(input.departureReportedAt, 'attendance_manual_departure_reported_at')
-    : null;
-  const breakTaken = manualWorkday && enabledFlag(input.breakTaken);
-  const breakStartAt = breakTaken
-    ? manualDateTime(input.breakStartAt, 'attendance_manual_break_start_at')
-    : null;
-  const breakEndAt = breakTaken
-    ? manualDateTime(input.breakEndAt, 'attendance_manual_break_end_at')
-    : null;
   const validationAt = input.now instanceof Date ? new Date(input.now.getTime()) : new Date();
   if (Number.isNaN(validationAt.getTime())) throw new Error('attendance_manual_now_invalid');
+
+  const submittedMarks = manualWorkday
+    ? [
+        ['ARRIVAL', optionalManualDateTime(input.arrivalReportedAt, 'attendance_manual_arrival_reported_at')],
+        ['BREAK_START', optionalManualDateTime(input.breakStartAt, 'attendance_manual_break_start_at')],
+        ['BREAK_END', optionalManualDateTime(input.breakEndAt, 'attendance_manual_break_end_at')],
+        ['DEPARTURE', optionalManualDateTime(input.departureReportedAt, 'attendance_manual_departure_reported_at')]
+      ].filter(([, reportedAt]) => reportedAt)
+    : [];
+  if (manualWorkday && !submittedMarks.length) throw new Error('attendance_manual_mark_required');
+
+  const legacyArrivalAt = manualWorkday
+    ? null
+    : (input.reportedAt ? new Date(input.reportedAt) : (input.now instanceof Date ? input.now : new Date()));
+  if (!manualWorkday && Number.isNaN(legacyArrivalAt.getTime())) {
+    throw new Error('attendance_manual_reported_at_invalid');
+  }
 
   return prisma.$transaction(async (tx) => {
     const assignment = await tx.dispatchAssignment.findUnique({
       where: { id: assignmentId },
       include: {
         worker: true,
-        attendanceSession: true,
+        attendanceSession: { include: { marks: { orderBy: { serverReceivedAt: 'asc' } } } },
         serviceRequest: { include: { operationPoint: true } }
       }
     });
@@ -577,91 +653,137 @@ export async function registerManualAttendance(prisma, input = {}) {
     if (point?.manualAttendanceAllowed !== true) {
       throw new Error('attendance_manual_not_allowed');
     }
-    if (assignment.attendanceSession?.arrivalReportedAt || assignment.attendanceSession?.departureReportedAt) {
-      throw new Error('attendance_manual_arrival_exists');
+
+    if (!manualWorkday) {
+      if (assignment.attendanceSession?.arrivalReportedAt) {
+        throw new Error('attendance_manual_arrival_exists');
+      }
+      const expected = buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
+      const sessionData = {
+        attendanceStatus,
+        validationStatus: 'MANUAL_VALIDATED',
+        punctualityStatus: attendanceStatus,
+        arrivalReportedAt: legacyArrivalAt,
+        arrivalValidatedAt: legacyArrivalAt,
+        source: 'MANUAL',
+        riskScore: 0,
+        riskFlags: []
+      };
+      const session = assignment.attendanceSession
+        ? await tx.dispatchAttendanceSession.update({
+            where: { id: assignment.attendanceSession.id },
+            data: sessionData
+          })
+        : await tx.dispatchAttendanceSession.create({
+            data: {
+              assignmentId: assignment.id,
+              expectedStartAt: expected.expectedStartAt,
+              expectedEndAt: expected.expectedEndAt,
+              ...sessionData
+            }
+          });
+
+      await tx.dispatchAttendanceMark.create({
+        data: {
+          attendanceSessionId: session.id,
+          markType: 'ARRIVAL',
+          idempotencyKey: `manual-${randomUUID()}`,
+          serverReceivedAt: legacyArrivalAt,
+          clientCapturedAt: legacyArrivalAt,
+          decision: 'MANUAL_VALIDATED',
+          riskScore: 0,
+          riskFlags: []
+        }
+      });
+      await tx.dispatchAttendanceReview.create({
+        data: {
+          attendanceSessionId: session.id,
+          action: 'MANUAL_MARK',
+          previousAttendanceStatus: assignment.attendanceSession?.attendanceStatus || null,
+          newAttendanceStatus: attendanceStatus,
+          previousValidationStatus: assignment.attendanceSession?.validationStatus || null,
+          newValidationStatus: 'MANUAL_VALIDATED',
+          reason,
+          notes,
+          actorUsername,
+          actorRole,
+          metadata: {
+            workerId: assignment.workerId,
+            workerName: assignment.worker?.fullName || null,
+            serviceRequestId: assignment.serviceRequestId,
+            assignmentId: assignment.id,
+            manualReportedAt: legacyArrivalAt.toISOString()
+          }
+        }
+      });
+      return session;
     }
 
-    const timeline = manualWorkday
-      ? validateAttendanceTimelineAgainstAssignment(assignment.serviceRequest, {
-          arrivalAt,
-          departureAt,
-          breakStartAt,
-          breakEndAt
-        })
-      : { expected: buildDispatchAttendanceExpectedWindow(assignment.serviceRequest) };
-    const expected = timeline.expected;
-    const punctualityStatus = manualWorkday
-      ? (arrivalAt.getTime() > expected.expectedStartAt.getTime() ? 'LATE' : 'ON_TIME')
-      : attendanceStatus;
-    const work = manualWorkday
-      ? calculateDispatchWorkedTime({
-          arrivalAt,
-          departureAt,
-          expectedStartAt: expected.expectedStartAt,
-          expectedEndAt: expected.expectedEndAt,
-          breakStartAt,
-          breakEndAt,
-          recognizeEarlyArrival: false
-        })
-      : null;
-    const nextAttendanceStatus = manualWorkday ? 'COMPLETED' : attendanceStatus;
-    const sessionData = {
-      attendanceStatus: nextAttendanceStatus,
-      validationStatus: 'MANUAL_VALIDATED',
-      punctualityStatus,
-      arrivalReportedAt: arrivalAt,
-      arrivalValidatedAt: manualWorkday ? validationAt : arrivalAt,
-      source: 'MANUAL',
-      riskScore: 0,
-      riskFlags: [],
-      ...(manualWorkday ? {
-        departureReportedAt: departureAt,
-        departureValidatedAt: validationAt,
-        workedMinutes: work.workedMinutes
-      } : {})
+    const existingSession = assignment.attendanceSession || null;
+    const existingMarks = Array.isArray(existingSession?.marks) ? [...existingSession.marks] : [];
+    for (const [markType] of submittedMarks) {
+      const persistedByMark = latestManualMark(existingMarks, markType);
+      const persistedBySession = markType === 'ARRIVAL'
+        ? existingSession?.arrivalReportedAt
+        : (markType === 'DEPARTURE' ? existingSession?.departureReportedAt : null);
+      if (persistedByMark || persistedBySession) throw new Error('attendance_manual_mark_exists');
+    }
+
+    const syntheticMarks = submittedMarks.map(([markType, reportedAt], index) => ({
+      id: `manual-pending-${index}`,
+      markType,
+      clientCapturedAt: reportedAt,
+      serverReceivedAt: validationAt
+    }));
+    const nextMarks = [...existingMarks, ...syntheticMarks];
+    const timelineValues = {
+      arrivalAt: manualMarkMoment(latestManualMark(nextMarks, 'ARRIVAL')) || existingSession?.arrivalReportedAt || null,
+      breakStartAt: manualMarkMoment(latestManualMark(nextMarks, 'BREAK_START')),
+      breakEndAt: manualMarkMoment(latestManualMark(nextMarks, 'BREAK_END')),
+      departureAt: manualMarkMoment(latestManualMark(nextMarks, 'DEPARTURE')) || existingSession?.departureReportedAt || null
     };
-    const session = assignment.attendanceSession
+    const timeline = validateAttendanceTimelineAgainstAssignment(assignment.serviceRequest, timelineValues);
+    const submittedMarkTypes = new Set(submittedMarks.map(([markType]) => markType));
+    const state = manualWorkdayState(existingSession, nextMarks, timeline.expected, validationAt, submittedMarkTypes);
+    const session = existingSession
       ? await tx.dispatchAttendanceSession.update({
-          where: { id: assignment.attendanceSession.id },
-          data: sessionData
+          where: { id: existingSession.id },
+          data: state.sessionData
         })
       : await tx.dispatchAttendanceSession.create({
           data: {
             assignmentId: assignment.id,
-            expectedStartAt: expected.expectedStartAt,
-            expectedEndAt: expected.expectedEndAt,
-            ...sessionData
+            expectedStartAt: timeline.expected.expectedStartAt,
+            expectedEndAt: timeline.expected.expectedEndAt,
+            ...state.sessionData
           }
         });
 
-    const createManualMark = async (markType, capturedAt) => tx.dispatchAttendanceMark.create({
-      data: {
-        attendanceSessionId: session.id,
-        markType,
-        idempotencyKey: `manual-${randomUUID()}`,
-        serverReceivedAt: manualWorkday ? validationAt : arrivalAt,
-        clientCapturedAt: capturedAt,
-        decision: 'MANUAL_VALIDATED',
-        riskScore: 0,
-        riskFlags: []
-      }
-    });
-
-    await createManualMark('ARRIVAL', arrivalAt);
-    if (breakTaken) {
-      await createManualMark('BREAK_START', breakStartAt);
-      await createManualMark('BREAK_END', breakEndAt);
+    const createdMarks = [];
+    for (const [markType, reportedAt] of submittedMarks) {
+      createdMarks.push(await tx.dispatchAttendanceMark.create({
+        data: {
+          attendanceSessionId: session.id,
+          markType,
+          idempotencyKey: `manual-${randomUUID()}`,
+          serverReceivedAt: validationAt,
+          clientCapturedAt: reportedAt,
+          decision: 'MANUAL_VALIDATED',
+          riskScore: 0,
+          riskFlags: []
+        }
+      }));
     }
-    if (manualWorkday) await createManualMark('DEPARTURE', departureAt);
 
+    const fullWorkdaySubmission = submittedMarkTypes.has('ARRIVAL') && submittedMarkTypes.has('DEPARTURE');
     await tx.dispatchAttendanceReview.create({
       data: {
         attendanceSessionId: session.id,
-        action: manualWorkday ? 'MANUAL_WORKDAY' : 'MANUAL_MARK',
-        previousAttendanceStatus: assignment.attendanceSession?.attendanceStatus || null,
-        newAttendanceStatus: nextAttendanceStatus,
-        previousValidationStatus: assignment.attendanceSession?.validationStatus || null,
-        newValidationStatus: 'MANUAL_VALIDATED',
+        action: fullWorkdaySubmission ? 'MANUAL_WORKDAY' : 'MANUAL_MARK',
+        previousAttendanceStatus: existingSession?.attendanceStatus || null,
+        newAttendanceStatus: state.sessionData.attendanceStatus,
+        previousValidationStatus: existingSession?.validationStatus || null,
+        newValidationStatus: state.sessionData.validationStatus,
         reason,
         notes,
         actorUsername,
@@ -671,17 +793,14 @@ export async function registerManualAttendance(prisma, input = {}) {
           workerName: assignment.worker?.fullName || null,
           serviceRequestId: assignment.serviceRequestId,
           assignmentId: assignment.id,
-          ...(manualWorkday ? {
-            manualArrivalReportedAt: arrivalAt.toISOString(),
-            manualDepartureReportedAt: departureAt.toISOString(),
-            breakTaken,
-            manualBreakStartAt: breakStartAt?.toISOString() || null,
-            manualBreakEndAt: breakEndAt?.toISOString() || null,
-            workedMinutes: work.workedMinutes,
-            punctualityStatus
-          } : {
-            manualReportedAt: arrivalAt.toISOString()
-          })
+          addedMarkTypes: createdMarks.map((mark) => mark.markType),
+          manualArrivalReportedAt: state.arrivalAt?.toISOString() || null,
+          manualDepartureReportedAt: state.departureAt?.toISOString() || null,
+          breakTaken: Boolean(state.breakStartAt || state.breakEndAt),
+          manualBreakStartAt: state.breakStartAt?.toISOString() || null,
+          manualBreakEndAt: state.breakEndAt?.toISOString() || null,
+          workedMinutes: state.work?.workedMinutes ?? null,
+          punctualityStatus: state.punctualityStatus
         }
       }
     });
