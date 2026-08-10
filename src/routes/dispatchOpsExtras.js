@@ -91,9 +91,8 @@ function workerRestErrorMessage(error) {
     worker_rest_worker_not_found: 'El auxiliar ya no existe.',
     worker_rest_direct_contract_required: 'Los descansos solo se pueden asignar a auxiliares con contrato Directo.',
     worker_rest_date_already_assigned: 'El auxiliar ya tiene un descanso activo en esa fecha.',
-    worker_rest_origin_sunday_invalid: 'El descanso remunerado debe vincularse a un domingo trabajado anterior y no festivo.',
+    worker_rest_origin_sunday_invalid: 'El descanso remunerado debe vincularse a un domingo válido y no festivo.',
     worker_rest_origin_sunday_used: 'Ese domingo ya está vinculado a otro descanso remunerado.',
-    worker_rest_origin_sunday_not_worked: 'No se encontró trabajo validado del auxiliar en el domingo seleccionado.',
     worker_rest_not_found: 'El descanso activo ya no existe.'
   };
   return messages[error?.message] || 'No fue posible guardar el descanso.';
@@ -356,12 +355,23 @@ export function dispatchOpsExtrasRouter(prisma) {
   router.post('/asignaciones/descansos', requireOps, async (req, res) => {
     const serviceRequestId = normalizeString(req.body.serviceRequestId);
     const restDate = normalizeString(req.body.restDate);
-    try {
-      await saveWorkerRestAssignment(prisma, { workerId: req.body.workerId, restDate, reason: req.body.reason, originSundayDate: req.body.originSundayDate, ...assignmentActor(req) });
-      return res.redirect(redirectToAssignment(serviceRequestId, 'Descanso asignado.', restDate));
-    } catch (error) {
-      return res.redirect(redirectToAssignment(serviceRequestId, workerRestErrorMessage(error), restDate));
+    const workerIds = [...new Set(String(req.body.workerId || '').split(',').map((value) => normalizeString(value)).filter(Boolean))];
+    if (!workerIds.length) return res.redirect(redirectToAssignment(serviceRequestId, 'Selecciona al menos un auxiliar para descanso.', restDate));
+    let saved = 0;
+    const failures = [];
+    for (const workerId of workerIds) {
+      try {
+        await saveWorkerRestAssignment(prisma, { workerId, restDate, reason: req.body.reason, originSundayDate: req.body.originSundayDate, ...assignmentActor(req) });
+        saved += 1;
+      } catch (error) {
+        failures.push(workerRestErrorMessage(error));
+      }
     }
+    const uniqueFailures = [...new Set(failures)];
+    const parts = [];
+    if (saved) parts.push(`${saved} descanso${saved !== 1 ? 's asignados' : ' asignado'}`);
+    if (failures.length) parts.push(`${failures.length} no guardado${failures.length !== 1 ? 's' : ''}: ${uniqueFailures.join(' · ')}`);
+    return res.redirect(redirectToAssignment(serviceRequestId, parts.join('. ') || 'No fue posible guardar el descanso.', restDate));
   });
   router.post('/asignaciones/descansos/cancelar', requireOps, async (req, res) => {
     const serviceRequestId = normalizeString(req.body.serviceRequestId);
