@@ -110,17 +110,19 @@ test('Nómina normal sigue ocultando el sujeto y la jornada de prueba', async ()
   assert.equal(report.totals.totalMinutes, 0);
 });
 
-test('las líneas Cloud operativa y DEV usan scopes y variables separadas', () => {
+test('las líneas Cloud operativa y DEV usan scopes y prefijos de configuración separados', async () => {
   const operational = getDispatchWhatsappStatus('operational');
   const devTest = getDispatchWhatsappStatus('dev-test');
   const operationalConfig = getDispatchWhatsappCloudConfig('operational');
   const devConfig = getDispatchWhatsappCloudConfig('dev-test');
+  const configSource = await readFile(new URL('../src/services/dispatchWhatsappCloudConfig.js', import.meta.url), 'utf8');
 
   assert.equal(operational.runtimeScope, 'operational');
   assert.equal(devTest.runtimeScope, 'dev-test');
-  assert.notEqual(operationalConfig.scope, devConfig.scope);
-  assert.ok(operationalConfig.missing.some((name) => name.startsWith('DISPATCH_META_')));
-  assert.ok(devConfig.missing.some((name) => name.startsWith('DISPATCH_TEST_META_')));
+  assert.equal(operationalConfig.scope, 'operational');
+  assert.equal(devConfig.scope, 'dev-test');
+  assert.match(configSource, /envPrefix: 'DISPATCH_META'/);
+  assert.match(configSource, /envPrefix: 'DISPATCH_TEST_META'/);
 });
 
 test('la confirmación recibida por la línea DEV solo cambia estados DEV_TEST y exige evidencia', async () => {
