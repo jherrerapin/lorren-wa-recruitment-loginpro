@@ -33,7 +33,7 @@ test('el servidor conserva anti-spoof, liveness y comparación de identidad', ()
   assert.match(service, /validateStrictSamples\(input, verificationSampleCount/);
   assert.match(service, /REAL_THRESHOLD = 0\.55/);
   assert.match(service, /LIVE_THRESHOLD = 0\.55/);
-  assert.match(service, /MATCH_THRESHOLD = 0\.85/);
+  assert.match(service, /MATCH_THRESHOLD = 0\.82/);
   assert.match(service, /PASSIVE_CHALLENGE_KIND = 'MODEL_PASSIVE_LIVENESS_V2'/);
 });
 

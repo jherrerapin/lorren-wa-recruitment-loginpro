@@ -127,16 +127,16 @@ test('la misma identidad con desafío válido queda verificada', async () => {
   assert.equal(assessment.decision, 'VERIFIED');
   assert.equal(assessment.verified, true);
   assert.equal(assessment.similarity, 1);
-  assert.equal(assessment.matchThreshold, 0.85);
+  assert.equal(assessment.matchThreshold, 0.82);
   assert.deepEqual(assessment.riskFlags, []);
 });
 
-test('una variación legítima que fallaba con 0.90 queda verificada', async () => {
+test('una variación legítima entre 0.82 y 0.85 queda verificada', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
-  const genuineVariation = rotatedDescriptor(descriptor, 0.5);
+  const genuineVariation = rotatedDescriptor(descriptor, 0.59);
   const assessment = await assess(prisma, genuineVariation, { idempotencyKey: 'mark-key-genuine-1234' });
-  assert.ok(assessment.similarity > 0.87 && assessment.similarity < 0.9);
+  assert.ok(assessment.similarity > 0.82 && assessment.similarity < 0.85);
   assert.equal(assessment.decision, 'VERIFIED');
   assert.equal(assessment.verified, true);
   assert.deepEqual(assessment.riskFlags, []);
@@ -152,7 +152,7 @@ test('un impostor cercano permanece rechazado con el umbral conservador', async 
     randomIndex: 1,
     elapsedMs: 12_000
   });
-  assert.ok(assessment.similarity > 0.75 && assessment.similarity < 0.85);
+  assert.ok(assessment.similarity > 0.79 && assessment.similarity < 0.82);
   assert.equal(assessment.decision, 'REVIEW_REQUIRED');
   assert.equal(assessment.verified, false);
   assert.ok(assessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
@@ -190,13 +190,13 @@ test('al actualizar o revocar se borra el material biométrico anterior', async 
 });
 
 test('la similitud normalizada separa variación legítima e impostor', () => {
-  const genuineVariation = rotatedDescriptor(descriptor, 0.5);
+  const genuineVariation = rotatedDescriptor(descriptor, 0.59);
   const nearImpostor = rotatedDescriptor(descriptor, 0.65);
   assert.equal(humanFaceSimilarity(descriptor, descriptor), 1);
-  assert.ok(humanFaceSimilarity(descriptor, genuineVariation) > 0.87);
-  assert.ok(humanFaceSimilarity(descriptor, genuineVariation) < 0.9);
-  assert.ok(humanFaceSimilarity(descriptor, nearImpostor) > 0.75);
-  assert.ok(humanFaceSimilarity(descriptor, nearImpostor) < 0.85);
+  assert.ok(humanFaceSimilarity(descriptor, genuineVariation) > 0.82);
+  assert.ok(humanFaceSimilarity(descriptor, genuineVariation) < 0.85);
+  assert.ok(humanFaceSimilarity(descriptor, nearImpostor) > 0.79);
+  assert.ok(humanFaceSimilarity(descriptor, nearImpostor) < 0.82);
   assert.ok(humanFaceSimilarity(descriptor, descriptor.map((value) => value + 4)) < 0.1);
 });
 
