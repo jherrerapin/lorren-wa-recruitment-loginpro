@@ -173,3 +173,40 @@ export async function claimDispatchAssignmentConfirmation({
     };
   });
 }
+
+export async function claimDispatchAssignmentDecline({
+  scope = 'operational', assignment, responseMessageId = '', responseReceivedAt = null, prismaClient = prisma
+} = {}) {
+  const definition = dispatchWhatsappScopeDefinition(scope);
+  const evidenceMessageId = String(responseMessageId || '').trim();
+  const evidenceReceivedAt = responseReceivedAt instanceof Date
+    ? responseReceivedAt
+    : new Date(responseReceivedAt || Number.NaN);
+  if (!assignment?.id || !evidenceMessageId || Number.isNaN(evidenceReceivedAt.getTime())) {
+    return { assignmentDeclined: false, duplicate: false };
+  }
+
+  return prismaClient.$transaction(async (tx) => {
+    const duplicate = await tx.dispatchWhatsappConfirmation.findFirst({
+      where: { confirmationMessageId: evidenceMessageId }, select: { id: true }
+    });
+    if (duplicate) return { assignmentDeclined: false, duplicate: true };
+
+    const updated = await tx.dispatchAssignment.updateMany({
+      where: { id: assignment.id, status: { in: definition.pendingAssignmentStatuses } },
+      data: { status: definition.declinedAssignmentStatus, notes: 'El auxiliar indicó NO PUEDO desde WhatsApp.' }
+    });
+    if (!updated.count) return { assignmentDeclined: false, duplicate: false };
+
+    await tx.dispatchWhatsappConfirmation.updateMany({
+      where: { assignmentId: assignment.id, status: { in: INBOUND_LINK_STATUSES } },
+      data: {
+        status: 'DECLINED',
+        confirmationMessageId: evidenceMessageId,
+        confirmationReceivedAt: evidenceReceivedAt
+      }
+    });
+    return { assignmentDeclined: true, duplicate: false };
+  });
+}
+

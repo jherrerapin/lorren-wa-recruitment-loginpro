@@ -61,6 +61,10 @@ export function buildDispatchAssignmentTemplatePayload({ config, assignment, pho
         {
           type: 'button', sub_type: 'quick_reply', index: '0',
           parameters: [{ type: 'payload', payload: `dispatch_confirm:${assignment.id}` }]
+        },
+        {
+          type: 'button', sub_type: 'quick_reply', index: '1',
+          parameters: [{ type: 'payload', payload: `dispatch_decline:${assignment.id}` }]
         }
       ]
     }

@@ -4,7 +4,7 @@ const DEFAULT_DUPLICATE_WINDOW_MS = 120000;
 
 export const ACTIVE_LINK_STATUSES = ['PENDING', 'SENT', 'DELIVERED', 'READ', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'];
 export const INBOUND_LINK_STATUSES = ['PENDING', 'SENT', 'DELIVERED', 'READ', 'DELIVERY_UNKNOWN'];
-export const TERMINAL_LINK_STATUSES = new Set(['CONFIRMED', 'EXPIRED', 'FAILED']);
+export const TERMINAL_LINK_STATUSES = new Set(['CONFIRMED', 'DECLINED', 'EXPIRED', 'FAILED']);
 export const DELIVERY_RANK = new Map([
   ['PENDING', 0],
   ['SENT', 1],
@@ -19,6 +19,7 @@ export const SCOPE_DEFINITIONS = Object.freeze({
     runtimeScope: 'operational',
     pendingAssignmentStatuses: ['ASSIGNED', 'CONFIRMATION_PENDING'],
     confirmedAssignmentStatus: 'CONFIRMED',
+    declinedAssignmentStatus: 'NO_CONFIRMO',
     requestSource: null,
     requireProgrammingTemplate: true
   }),
@@ -27,6 +28,7 @@ export const SCOPE_DEFINITIONS = Object.freeze({
     runtimeScope: 'dev-test',
     pendingAssignmentStatuses: ['DEV_TEST_ASSIGNED'],
     confirmedAssignmentStatus: 'DEV_TEST_CONFIRMED',
+    declinedAssignmentStatus: 'DEV_TEST_NO_CONFIRMO',
     requestSource: 'DEV_TEST',
     requireProgrammingTemplate: false
   })

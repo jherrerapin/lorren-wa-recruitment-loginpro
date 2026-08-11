@@ -12,7 +12,7 @@ import {
   resolveDispatchWhatsappScopeByPhoneNumberId,
   setDispatchWhatsappRuntimeState
 } from './dispatchWhatsappCloudConfig.js';
-import { claimDispatchAssignmentConfirmation } from './dispatchWhatsappAssignmentService.js';
+import { claimDispatchAssignmentConfirmation, claimDispatchAssignmentDecline } from './dispatchWhatsappAssignmentService.js';
 import { dispatchWhatsappProviderErrorMessage, sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
 
 function normalizeConfirmationText(value) {
@@ -49,8 +49,19 @@ function inboundPayload(message = {}) {
     .find((value) => typeof value === 'string' && value.trim()) || '';
 }
 
+function assignmentActionFromInboundPayload(message = {}) {
+  const match = inboundPayload(message).trim().match(/^dispatch_(confirm|decline):([A-Za-z0-9_-]+)$/);
+  if (!match) return null;
+  return { action: match[1] === 'decline' ? 'DECLINE' : 'CONFIRM', assignmentId: match[2] };
+}
+
 function assignmentIdFromInboundPayload(message = {}) {
-  return inboundPayload(message).trim().match(/^dispatch_confirm:([A-Za-z0-9_-]+)$/)?.[1] || null;
+  return assignmentActionFromInboundPayload(message)?.assignmentId || null;
+}
+
+function isAutomaticDeclineReply(value) {
+  const text = normalizeConfirmationText(value);
+  return ['no puedo', 'no puedo asistir'].includes(text);
 }
 
 function inboundReceivedAt(message = {}) {
@@ -87,14 +98,31 @@ async function findConfirmationTarget({ scope, message, prismaClient }) {
 export async function processDispatchWhatsappInboundMessage({
   scope = 'operational', message = {}, prismaClient = prisma, axiosClient = axios
 } = {}) {
-  const assignmentId = assignmentIdFromInboundPayload(message);
-  if (!assignmentId && !isAutomaticConfirmationReply(inboundText(message))) {
-    return { handled: false, reason: 'not_confirmation' };
-  }
+  const buttonAction = assignmentActionFromInboundPayload(message);
+  const inbound = inboundText(message);
+  const inferredAction = buttonAction?.action
+    || (isAutomaticDeclineReply(inbound) ? 'DECLINE' : isAutomaticConfirmationReply(inbound) ? 'CONFIRM' : null);
+  if (!inferredAction) return { handled: false, reason: 'not_assignment_response' };
   const target = await findConfirmationTarget({ scope, message, prismaClient });
   if (!target) return { handled: false, reason: 'no_pending_assignment' };
   const confirmationMessageId = String(message.id || '').trim();
   if (!confirmationMessageId) return { handled: false, reason: 'missing_message_id' };
+
+  if (inferredAction === 'DECLINE') {
+    const decline = await claimDispatchAssignmentDecline({
+      scope,
+      assignment: target.assignment,
+      responseMessageId: confirmationMessageId,
+      responseReceivedAt: inboundReceivedAt(message),
+      prismaClient
+    });
+    if (decline.assignmentDeclined && scope === 'operational') {
+      await recalculateDispatchServiceRequestStatus(prismaClient, target.assignment.serviceRequestId);
+    }
+    setDispatchWhatsappRuntimeState(scope, { lastInboundAt: new Date().toISOString(), lastError: null });
+    console.info(`[dispatch-wa-cloud] Respuesta NO PUEDO procesada. scope=${scope} assignment=${target.assignment.id} changed=${decline.assignmentDeclined ? 'yes' : 'no'}.`);
+    return { handled: decline.assignmentDeclined || decline.duplicate, duplicate: decline.duplicate, assignmentDeclined: decline.assignmentDeclined, replySent: false };
+  }
 
   const claim = await claimDispatchAssignmentConfirmation({
     scope,
