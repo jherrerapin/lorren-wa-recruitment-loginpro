@@ -20,8 +20,6 @@ import {
   buildDispatchWorkerImportTemplate
 } from '../services/dispatchWorkerExcelImport.js';
 
-const TEMPLATE_KEY = 'DISPATCH_ASSIGNMENT_WHATSAPP';
-const DEFAULT_ASSIGNMENT_TEMPLATE = 'Hola {{nombre}}, te confirmamos asignacion para {{fecha}} en {{operacion}}. Direccion: {{direccion}}. Horario: {{horaInicio}} - {{horaFin}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
 const ACTIVE_ASSIGNMENT_STATUSES = ACTIVE_DISPATCH_ASSIGNMENT_STATUSES;
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const MAX_CV_SIZE_BYTES = 5 * 1024 * 1024;
@@ -192,7 +190,6 @@ async function renderWorkerFormWithError(req, res, prisma, { worker = null, mode
   return res.status(status).render('operacionesPersonalNuevo', { cities, vacancies, worker: buildWorkerFormModelFromBody(req.body, worker), mode, formAction, role: req.session?.userRole || req.userRole, error });
 }
 async function resolveDispatchService(prisma, serviceId) { const normalizedServiceId = normalizeString(serviceId); if (!normalizedServiceId) return null; return prisma.dispatchClientService.findFirst({ where: { id: normalizedServiceId, isActive: true }, include: { client: true } }); }
-async function getTemplate(prisma) { const template = await prisma.dispatchMessageTemplate.findUnique({ where: { key: TEMPLATE_KEY } }); return template?.content || DEFAULT_ASSIGNMENT_TEMPLATE; }
 async function loadDispatchCities(prisma) { return loadUnifiedCityOptions(prisma); }
 async function resolveCompatibleOperationalCityIds(prisma, operationalCityId) {
   if (!operationalCityId) return [];
@@ -409,25 +406,11 @@ export function dispatchOpsExtrasRouter(prisma) {
       return res.redirect(redirectToAssignment(serviceRequestId, workerRestErrorMessage(error), restDate));
     }
   });
-  router.post('/asignaciones/confirmar', requireOps, async (req, res) => {
-    const assignmentId = normalizeString(req.body.assignmentId);
-    const serviceRequestId = normalizeString(req.body.serviceRequestId);
-    if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos');
-    const actorUsername = normalizeString(req.session?.username || req.username);
-    await prisma.dispatchAssignment.update({ where: { id: assignmentId }, data: { status: 'CONFIRMED', notes: normalizeString(req.body.notes) } });
-    const statusResult = await recalculateServiceRequestStatus(prisma, serviceRequestId);
-    const emailMessage = statusResult?.status === 'ASSIGNMENT_COMPLETE'
-      ? await notifyIfServiceRequestCompleted(prisma, serviceRequestId, actorUsername)
-      : '';
-    return res.redirect(redirectToAssignment(serviceRequestId, `Confirmacion registrada.${emailMessage}`));
-  });
   router.post('/asignaciones/no-confirmado', requireOps, async (req, res) => { const assignmentId = normalizeString(req.body.assignmentId); const serviceRequestId = normalizeString(req.body.serviceRequestId); if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos'); await prisma.dispatchAssignment.update({ where: { id: assignmentId }, data: { status: 'NO_CONFIRMO', notes: normalizeString(req.body.notes) || 'El auxiliar no confirmo la asignacion.' } }); await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar marcado como no confirmado. Debes asignar reemplazo.')); });
   router.post('/asignaciones/unassign', requireOps, async (req, res) => { const assignmentId = normalizeString(req.body.assignmentId); const serviceRequestId = normalizeString(req.body.serviceRequestId); if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos'); await prisma.dispatchAssignment.delete({ where: { id: assignmentId } }); await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar retirado de la solicitud.')); });
 
   router.get('/novedades', requireOps, async (req, res) => { const selectedDate = normalizeDateParam(req.query.fecha || req.query.date); const status = normalizeString(req.query.status) || 'OPEN'; const { start, end } = buildUtcDayRange(selectedDate); const incidents = await prisma.dispatchIncident.findMany({ where: { ...(status === 'ALL' ? {} : { status }), serviceRequest: { serviceDate: { gte: start, lt: end } } }, include: { serviceRequest: true, worker: true, assignment: { include: { worker: true } } }, orderBy: { createdAt: 'desc' } }); return res.render('operacionesNovedades', { pageTitle: 'Novedades operativas', selectedDate, status, incidents, role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) }); });
 
-  router.get('/api/asignacion-template', requireOps, async (_req, res) => res.json({ key: TEMPLATE_KEY, content: await getTemplate(prisma) }));
-  router.post('/asignaciones/template', requireOps, async (req, res) => { const content = normalizeString(req.body.content); if (!content) return res.status(400).json({ error: 'La plantilla no puede estar vacia.' }); const username = req.session?.username || req.username || null; await prisma.dispatchMessageTemplate.upsert({ where: { key: TEMPLATE_KEY }, update: { content, updatedByUsername: username }, create: { key: TEMPLATE_KEY, content, createdByUsername: username, updatedByUsername: username } }); return res.json({ ok: true, content }); });
   router.post('/asignaciones/novedades', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const type = normalizeString(req.body.type); const description = normalizeString(req.body.description); const assignmentId = normalizeString(req.body.assignmentId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !type || !description) return res.status(400).send('Solicitud, tipo y descripcion son requeridos.'); const serviceRequest = await prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true } }); if (!serviceRequest) return res.status(404).send('Solicitud no encontrada'); await prisma.dispatchIncident.create({ data: { serviceRequestId, assignmentId: assignmentId || null, workerId: workerId || null, type, description, reportedBy: normalizeString(req.body.reportedBy), status: 'OPEN', createdByUsername: req.session?.username || req.username || null } }); return res.redirect(redirectToAssignment(serviceRequestId, 'Novedad registrada.')); });
   router.post('/asignaciones/novedades/:incidentId/resolver', requireOps, async (req, res) => { const incident = await prisma.dispatchIncident.findUnique({ where: { id: req.params.incidentId }, select: { id: true, serviceRequestId: true } }); if (!incident) return res.status(404).send('Novedad no encontrada'); await prisma.dispatchIncident.update({ where: { id: incident.id }, data: { status: 'RESOLVED', resolutionNote: normalizeString(req.body.resolutionNote), resolvedByUsername: req.session?.username || req.username || null, resolvedAt: new Date() } }); return res.redirect(redirectToAssignment(incident.serviceRequestId, 'Novedad resuelta.')); });
   router.post('/novedades/:incidentId/resolver', requireOps, async (req, res) => { const incident = await prisma.dispatchIncident.findUnique({ where: { id: req.params.incidentId }, select: { id: true } }); if (!incident) return res.status(404).send('Novedad no encontrada'); await prisma.dispatchIncident.update({ where: { id: incident.id }, data: { status: 'RESOLVED', resolutionNote: normalizeString(req.body.resolutionNote), resolvedByUsername: req.session?.username || req.username || null, resolvedAt: new Date() } }); return res.redirect(`/admin/operaciones/novedades?fecha=${encodeURIComponent(normalizeDateParam(req.body.fecha))}&status=${encodeURIComponent(normalizeString(req.body.status) || 'OPEN')}`); });

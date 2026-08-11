@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { prisma } from '../lib/prisma.js';
+import { sendDispatchCompletionEmail } from './dispatchCompletionEmail.js';
 import { recalculateDispatchServiceRequestStatus } from './dispatchOperationalCoverage.js';
 import {
   AUTOMATIC_CONFIRMATION_REPLY,
@@ -106,7 +107,13 @@ export async function processDispatchWhatsappInboundMessage({
     return { handled: claim.duplicate, duplicate: claim.duplicate, assignmentConfirmed: claim.assignmentConfirmed, replySent: false };
   }
   if (claim.assignmentConfirmed && scope === 'operational') {
-    await recalculateDispatchServiceRequestStatus(prismaClient, target.assignment.serviceRequestId);
+    const statusResult = await recalculateDispatchServiceRequestStatus(prismaClient, target.assignment.serviceRequestId);
+    if (statusResult?.status === 'ASSIGNMENT_COMPLETE') {
+      const completionEmail = await sendDispatchCompletionEmail(prismaClient, target.assignment.serviceRequestId);
+      if (completionEmail?.error) {
+        console.warn(`[dispatch-wa-cloud] Asignación completa, pero falló el correo de cierre. assignment=${target.assignment.id}.`);
+      }
+    }
   }
 
   let replySent = false;
