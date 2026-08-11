@@ -68,14 +68,15 @@ test('cada inbound reinicia la ventana, NO PUEDO alerta al dueño y Gracias perm
   assert.match(webhook, /AUTOMATIC_CONFIRMATION_REPLY/);
 });
 
-test('recordatorio es persistente, por usuario y se barre con margen superior a 20 minutos', () => {
+test('recordatorio es persistente, por usuario y conserva al menos veinte minutos de margen', () => {
   const schema = read('prisma/schema.prisma');
   const alerts = read('src/services/dispatchWhatsappAdminAlerts.js');
   const worker = read('src/workers/jobWorker.js');
   assert.match(schema, /model DispatchWhatsappContactWindow/);
   assert.match(schema, /model DispatchWhatsappWindowReminder/);
   assert.match(schema, /@@unique\(\[scope, phone, appUserId, windowStartedAt\]\)/);
-  assert.match(alerts, /DISPATCH_WINDOW_REMINDER_LEAD_MS = \(20 \* 60 \* 1000\) \+ \(30 \* 1000\)/);
+  assert.match(alerts, /DISPATCH_WINDOW_REMINDER_LEAD_MS = 25 \* 60 \* 1000/);
+  assert.match(alerts, /vence en aproximadamente 25 minutos/);
   assert.match(alerts, /dispatchWindowExpiryReminderEnabled/);
   assert.match(alerts, /dispatchWhatsappWindowReminder\.create/);
   assert.match(worker, /runDispatchWhatsappWindowReminderDispatcher/);
