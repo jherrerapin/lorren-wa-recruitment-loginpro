@@ -7,7 +7,7 @@ import {
   normalizeProgrammingDate,
   normalizeProgrammingIncludePending
 } from '../services/dispatchProgrammingPdfService.js';
-import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappWebService.js';
+import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappCloudService.js';
 
 const DEFAULT_PROGRAMMING_WHATSAPP_RECIPIENTS = [
   { name: 'Milton Rodríguez', phone: '3057680685' },
@@ -108,22 +108,16 @@ function requireOps(req, res, next) {
   return next();
 }
 
-function buildCaption({ selectedDate, summary, includedSummary, managedBy, includePending }) {
+function buildProgrammingTemplateValues({ selectedDate, summary, includedSummary, managedBy, includePending }) {
   const manager = normalizeString(managedBy) || 'Julián Herrera';
-  return [
-    includePending
-      ? 'Hola, compartimos la programación operativa del día, incluyendo solicitudes pendientes o por confirmar.'
-      : 'Hola, compartimos la programación operativa confirmada del día.',
-    '',
-    `Fecha de servicio: ${selectedDate}`,
-    `Alcance: ${includePending ? 'completas y pendientes' : 'solo solicitudes completas'}`,
-    `Solicitudes incluidas: ${includedSummary.totalRequests}`,
-    `Estado general: ${summary.completedRequests}/${summary.totalRequests} solicitudes completas`,
-    `Auxiliares incluidos: ${includedSummary.assignedWorkers}/${includedSummary.requiredWorkers}`,
-    '',
-    `Gestionado por: ${manager}`,
-    'LoginPro Operaciones'
-  ].join('\n');
+  return {
+    selectedDate,
+    scopeLabel: includePending ? 'Completas y pendientes' : 'Solo solicitudes completas',
+    requestsIncluded: String(includedSummary.totalRequests),
+    completionLabel: `${summary.completedRequests}/${summary.totalRequests} solicitudes completas`,
+    workersLabel: `${includedSummary.assignedWorkers}/${includedSummary.requiredWorkers} auxiliares incluidos`,
+    managedBy: manager
+  };
 }
 
 export function dispatchProgrammingNotificationsRouter(prisma) {
@@ -155,7 +149,7 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     const includePending = normalizeProgrammingIncludePending(req.body?.includePending, false);
     const pdf = await buildProgrammingPdfBuffer(prisma, { fecha: selectedDate, managedBy, includePending });
     const filename = buildProgrammingFilename(pdf.selectedDate, includePending ? 'con-pendientes' : 'confirmada');
-    const caption = buildCaption({
+    const templateValues = buildProgrammingTemplateValues({
       selectedDate: pdf.selectedDate,
       summary: pdf.summary,
       includedSummary: pdf.includedSummary,
@@ -169,10 +163,11 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
       try {
         const result = await sendDispatchWhatsappMediaMessage({
           phone: recipient.phone,
-          caption,
           buffer: pdf.buffer,
           filename,
-          mimeType: 'application/pdf'
+          mimeType: 'application/pdf',
+          templateValues,
+          scope: 'operational'
         });
         results.push({ name: recipient.name, phone: result.phone, ok: true, providerMessageId: result.providerMessageId });
       } catch (error) {
