@@ -12,7 +12,7 @@ ${FINAL_ASSIGNMENT_CARD_SELECTOR} .assigned-main{grid-column:1!important;grid-ro
 ${FINAL_ASSIGNMENT_CARD_SELECTOR} .assigned-actions{grid-column:2!important;grid-row:1!important;display:flex!important;justify-content:center!important;align-items:center!important;gap:0!important;margin:0!important;width:30px!important;align-self:center!important}
 ${FINAL_ASSIGNMENT_CARD_SELECTOR} strong{font-size:12px!important;line-height:1.08!important;margin:0 0 1px!important}
 ${FINAL_ASSIGNMENT_CARD_SELECTOR} .meta{font-size:10px!important;line-height:1.08!important;gap:0!important;margin:0!important}
-${FINAL_ASSIGNMENT_CARD_SELECTOR} ${FINAL_ASSIGNMENT_CARD_SELECTOR} .whatsapp-link,${FINAL_ASSIGNMENT_CARD_SELECTOR} details.incident-card,${FINAL_ASSIGNMENT_CARD_SELECTOR} .assigned-actions form:not([data-async-assignment-action="unassign"]){display:none!important}
+${FINAL_ASSIGNMENT_CARD_SELECTOR} .whatsapp-link,${FINAL_ASSIGNMENT_CARD_SELECTOR} details.incident-card,${FINAL_ASSIGNMENT_CARD_SELECTOR} .assigned-actions form:not([data-async-assignment-action="unassign"]){display:none!important}
 ${FINAL_ASSIGNMENT_CARD_SELECTOR} form[data-async-assignment-action="unassign"]{display:flex!important;margin:0!important;width:30px!important;height:30px!important}
 ${FINAL_ASSIGNMENT_CARD_SELECTOR} .icon-remove-btn{width:28px!important;height:28px!important;min-width:28px!important;min-height:28px!important;padding:0!important;font-size:18px!important}
 @media(max-width:760px){${FINAL_ASSIGNMENT_CARD_SELECTOR}{grid-template-columns:minmax(0,1fr) 30px!important}${FINAL_ASSIGNMENT_CARD_SELECTOR} .assigned-actions{justify-content:center!important}}
@@ -118,8 +118,7 @@ function compactFinalizedAssignmentCard(cardHtml) {
 
   return cardHtml
     .replace('<article class="assigned-card"', '<article class="assigned-card assignment-final-card"')
-    .replace(/<button[^>]*class="[^"]*(?:whatsapp-link|dispatch-wa-button)[^"]*"[\s\S]*?<\/button>/g, '')
-    ;
+    .replace(/<button[^>]*class="[^"]*(?:whatsapp-link|dispatch-wa-button)[^"]*"[\s\S]*?<\/button>/g, '');
 }
 
 function compactFinalizedAssignmentCards(html) {
