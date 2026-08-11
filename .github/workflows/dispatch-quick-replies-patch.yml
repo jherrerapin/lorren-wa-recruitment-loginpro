@@ -1,0 +1,41 @@
+name: Apply dispatch quick replies patch
+
+on:
+  push:
+    branches:
+      - feat/1027-dispatch-whatsapp-cloud-api
+    paths:
+      - .github/workflows/dispatch-quick-replies-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v5
+        with:
+          ref: feat/1027-dispatch-whatsapp-cloud-api
+
+      - name: Apply patch
+        run: python scripts/patch-dispatch-quick-replies.py
+
+      - name: Validate syntax and focused contracts
+        run: |
+          node --check src/services/dispatchWhatsappCloudClient.js
+          node --check src/services/dispatchWhatsappCloudConfig.js
+          node --check src/services/dispatchWhatsappAssignmentService.js
+          node --check src/services/dispatchWhatsappWebhookService.js
+          node --test test/dispatchWhatsappQuickReplies.test.js
+          node --test test/dispatchWhatsappCloudCutover.test.js
+
+      - name: Commit functional changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/views/operacionesAsignacionesConfirmacion.ejs src/services/dispatchWhatsappCloudClient.js src/services/dispatchWhatsappCloudConfig.js src/services/dispatchWhatsappAssignmentService.js src/services/dispatchWhatsappWebhookService.js test/dispatchWhatsappQuickReplies.test.js
+          git commit -m "feat(dispatch): add CONFIRMADO and NO PUEDO quick replies"
+          git push origin HEAD:feat/1027-dispatch-whatsapp-cloud-api
