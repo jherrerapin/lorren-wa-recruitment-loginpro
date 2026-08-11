@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const route = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
-const view = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
+const view = fs.readFileSync('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8');
 
 test('dispatch assignment backend limits assignments to required workers', () => {
   assert.match(route, /post\('\/asignaciones\/assign'/);
@@ -17,12 +17,13 @@ test('dispatch assignment backend limits assignments to required workers', () =>
 });
 
 test('dispatch assignment frontend blocks completed requests and displays remaining capacity', () => {
-  assert.match(view, /remainingWorkers\s*=\s*Math\.max\(selectedServiceRequest\.requiredWorkers - selectedAssignedCount, 0\)/);
-  assert.match(view, /selectedRequestComplete\s*=\s*remainingWorkers\s*===\s*0/);
+  assert.match(view, /remainingWorkers=Math\.max\(selectedServiceRequest\.requiredWorkers-selectedActiveCount,0\)/);
+  assert.match(view, /coverageComplete=selectedActiveCount>=selectedServiceRequest\.requiredWorkers/);
+  assert.match(view, /selectedRequestComplete=selectedConfirmedCount>=selectedServiceRequest\.requiredWorkers/);
   assert.match(view, /Faltan \$\{remainingWorkers\} auxiliares/);
-  assert.match(view, /Solicitud completa\. No se pueden asignar más auxiliares\./);
-  assert.match(view, /data-disabled="<%= selectedRequestComplete \? 'true' : 'false' %>"/);
-  assert.match(view, /isDropZoneDisabled/);
-  assert.match(view, /if \(isDropZoneDisabled\) return;[\s\S]*drag-over/);
-  assert.match(view, /if \(isDropZoneDisabled\) \{[\s\S]*Solicitud completa\. No se pueden asignar más auxiliares\./);
+  assert.match(view, /Cobertura completa\. Espera confirmación o marca no confirmado para liberar cupo\./);
+  assert.match(view, /data-disabled="<%= coverageComplete\?'true':'false' %>"/);
+  assert.match(view, /drop\?\.dataset\.disabled==='true'/);
+  assert.match(view, /dragover[^\n]*drop\.dataset\.disabled==='true'/);
+  assert.match(view, /drop[^\n]*dataset\.disabled==='true'[\s\S]*No puedes asignar aquí en este momento\./);
 });
