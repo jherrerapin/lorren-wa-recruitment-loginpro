@@ -58,6 +58,21 @@
     .programming-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .programming-actions .btn[disabled] { opacity: .55; cursor: not-allowed; }
     .programming-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .dispatch-alert-settings { background:#fff; border:1px solid var(--border); border-radius:18px; box-shadow:var(--shadow-sm); padding:18px; display:grid; gap:14px; }
+    .dispatch-alert-settings-head { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; flex-wrap:wrap; }
+    .dispatch-alert-settings h2 { margin:0 0 4px; color:var(--navy); font-size:18px; }
+    .dispatch-alert-settings p { margin:0; color:var(--muted); font-size:13px; line-height:1.45; }
+    .dispatch-alert-settings-form { display:grid; grid-template-columns:minmax(220px, 360px) minmax(260px, 1fr) auto; gap:12px; align-items:end; }
+    .dispatch-alert-settings-form .field label { display:block; color:var(--navy); font-size:12px; font-weight:900; margin-bottom:5px; }
+    .dispatch-alert-settings-form input[type="tel"] { width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 11px; font:inherit; }
+    .dispatch-alert-reminder { display:flex; gap:9px; align-items:flex-start; padding:10px 12px; border:1px solid #bfdbfe; background:#eff6ff; border-radius:12px; color:#1e3a8a; min-height:42px; }
+    .dispatch-alert-reminder input { margin-top:2px; width:17px; height:17px; accent-color:var(--teal); }
+    .dispatch-alert-reminder strong { display:block; font-size:12px; }
+    .dispatch-alert-reminder small { display:block; margin-top:2px; color:#475569; font-size:11px; line-height:1.3; }
+    .dispatch-settings-alert { border-radius:10px; padding:10px 12px; font-size:12px; font-weight:800; }
+    .dispatch-settings-alert.success { background:#dcfce7; color:#166534; }
+    .dispatch-settings-alert.error { background:#fee2e2; color:#991b1b; }
+    @media (max-width: 900px) { .dispatch-alert-settings-form { grid-template-columns:1fr; } }
     .async-toast{position:fixed;right:18px;bottom:18px;max-width:360px;background:#172033;color:#fff;border-radius:14px;padding:11px 13px;box-shadow:var(--shadow);font-size:13px;line-height:1.35;z-index:9999;opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s}.async-toast.show{opacity:1;transform:translateY(0)}
     @media (max-width: 1100px) { .hero > .actions { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
     @media (max-width: 900px) { .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .manager-row { grid-template-columns: 1fr; } }
@@ -115,6 +130,33 @@
           <small id="dispatchSessionHint">Revisando estado de la sesión...</small>
         </div>
       </div>
+    </section>
+
+    <section class="dispatch-alert-settings" aria-label="Configuración personal de alertas de despacho por WhatsApp">
+      <div class="dispatch-alert-settings-head">
+        <div>
+          <h2>Mis alertas de despacho por WhatsApp</h2>
+          <p>Configura el número al que quieres recibir novedades de tus auxiliares. Puedes cambiarlo en cualquier momento desde aquí.</p>
+        </div>
+      </div>
+      <% if (typeof alertSettingsMessage !== 'undefined' && alertSettingsMessage) { %><div class="dispatch-settings-alert success"><%= alertSettingsMessage %></div><% } %>
+      <% if (typeof alertSettingsError !== 'undefined' && alertSettingsError) { %><div class="dispatch-settings-alert error"><%= alertSettingsError %></div><% } %>
+      <% if (typeof dispatchAlertSettings !== 'undefined' && dispatchAlertSettings?.available) { %>
+        <form class="dispatch-alert-settings-form" method="post" action="/admin/operaciones/alertas-whatsapp">
+          <input type="hidden" name="fecha" value="<%= selectedDate %>" />
+          <div class="field">
+            <label for="dispatchAlertPhone">WhatsApp para mis alertas de despacho</label>
+            <input id="dispatchAlertPhone" name="dispatchAlertPhone" type="tel" inputmode="numeric" value="<%= dispatchAlertSettings.phone || '' %>" placeholder="3001234567" />
+          </div>
+          <label class="dispatch-alert-reminder" for="dispatchWindowExpiryReminderEnabled">
+            <input id="dispatchWindowExpiryReminderEnabled" name="dispatchWindowExpiryReminderEnabled" type="checkbox" value="true" <%= dispatchAlertSettings.reminderEnabled ? 'checked' : '' %> />
+            <span><strong>Recordarme antes de que venza la ventana de 24 horas</strong><small>Si está activo, recibirás el aviso aproximadamente 25 minutos antes. Las novedades NO PUEDO se notifican aunque este check esté apagado.</small></span>
+          </label>
+          <button class="btn btn-primary" type="submit">Guardar cambios</button>
+        </form>
+      <% } else { %>
+        <div class="dispatch-settings-alert error">No fue posible asociar esta configuración a tu usuario. Puedes seguir usando Despacho, pero las alertas personales no podrán guardarse hasta resolver el perfil.</div>
+      <% } %>
     </section>
 
     <section class="dashboard-toolbar" aria-label="Filtro de fecha del panel operativo">
