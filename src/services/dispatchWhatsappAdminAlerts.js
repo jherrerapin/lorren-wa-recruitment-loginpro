@@ -7,8 +7,8 @@ import {
 import { sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
 
 export const DISPATCH_WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
-// 30 seconds of safety margin lets the worker warn while at least ~20 minutes remain.
-export const DISPATCH_WINDOW_REMINDER_LEAD_MS = (20 * 60 * 1000) + (30 * 1000);
+// Warn about 25 minutes early so normal worker jitter still leaves at least 20 minutes.
+export const DISPATCH_WINDOW_REMINDER_LEAD_MS = 25 * 60 * 1000;
 
 function inboundReceivedAt(message = {}) {
   const timestamp = Number(message.timestamp || 0);
@@ -67,7 +67,7 @@ function declineAlertText(assignment) {
 function reminderAlertText(assignment) {
   const name = assignment?.worker?.fullName || 'el auxiliar';
   const phone = normalizeDispatchWhatsappPhone(assignment?.worker?.phone) || 'sin número';
-  return `⏰ La ventana de 24 horas con ${name} (${phone}) vence en aproximadamente 20 minutos. Si necesitas enviarle información sin plantilla, hazlo antes del vencimiento.`;
+  return `⏰ La ventana de 24 horas con ${name} (${phone}) vence en aproximadamente 25 minutos. Si necesitas enviarle información sin plantilla, hazlo antes del vencimiento.`;
 }
 
 async function alertUserByUsername(prismaClient, username) {
