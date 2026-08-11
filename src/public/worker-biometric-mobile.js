@@ -181,7 +181,7 @@
     if (humanPromise && !runtimeStale && runtimeLastUsedAt && Date.now() - runtimeLastUsedAt > RUNTIME_MAX_IDLE_MS) {
       await invalidateRuntime('runtime-idle');
     }
-    if (humanPromise && !runtimeStale) return humanPromise;
+    if (humanPromise) return humanPromise;
     if (document.visibilityState === 'hidden') throw new Error('biometric_page_not_visible');
 
     const generation = runtimeGeneration;
@@ -262,10 +262,16 @@
       human = await withTimeout(
         humanInstance(),
         RUNTIME_PREPARE_TIMEOUT_MS,
-        'biometric_runtime_unavailable'
+        'biometric_runtime_prepare_timeout'
       );
     } catch (cause) {
       if (cause?.message === 'biometric_page_not_visible') throw cause;
+      if (cause?.message === 'biometric_runtime_prepare_timeout') {
+        runtimeReason = 'prepare-timeout';
+        const error = new Error('biometric_runtime_preparing');
+        error.cause = cause;
+        throw error;
+      }
       await invalidateRuntime('prepare-failed');
       const error = new Error('biometric_runtime_unavailable');
       error.cause = cause;
