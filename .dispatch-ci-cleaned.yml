@@ -1,0 +1,408 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  state-authority:
+    name: Validate state authorities
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Validate state authority manifest
+        run: node --test test/stateAuthorityManifest.test.js
+
+      - name: Upload state authority diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-authority-observed
+          path: state-authority-observed.json
+          if-no-files-found: error
+          retention-days: 3
+
+  conversational-release-candidate:
+    name: Validate conversational release candidate
+    needs: state-authority
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Run integral conversational release candidate
+        run: >-
+          node --test
+          test/conversationalReleaseCandidatePreConsent.test.js
+          test/preConsentDataEvidence.test.js
+          test/dataConsentRevocationStabilization.test.js
+          test/dataConsentHumanPauseReplay.test.js
+          test/conversationReplayConsentAttachmentEdges.test.js
+          test/conversationReplayRecovery.test.js
+          test/conversationReplayProductionEdges.test.js
+          test/conversationHarness.test.js
+
+  validate:
+    name: Validate application
+    needs: state-authority
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find src test -type f -name '*.js' -print0)
+
+      - name: Validate transitional code and retired aliases
+        run: node --test test/transitionalCodeInventory.test.js test/webhookReadinessAliasRemoval.test.js
+
+      - name: Run vacancy age authority regressions
+        run: node --test test/readinessGuard.test.js test/candidateAgeHarnessIntegration.test.js test/structuredAgeHarnessIntegration.test.js test/vacancyAgeAuthorityIntegration.test.js
+
+      - name: Run conversation turn arbitration regressions
+        run: node --test test/conversationIntent.test.js
+
+      - name: Run flow-authority regression
+        run: node --test test/flowDecisionAuthority.test.js
+
+      - name: Run consent boundary regressions
+        run: node --test test/flexibleApplicationFlow.test.js test/consentBoundaryHardening.test.js
+
+      - name: Run consent and message authority regressions
+        run: node --test test/consentStateService.test.js test/conversationMessageRepository.test.js
+
+      - name: Run candidate state authority regressions
+        run: node --test test/candidateStateService.test.js test/candidateAdminPauseStateService.test.js test/candidateWhatsAppOpenStateService.test.js test/candidateManualOutboundStateService.test.js test/candidateSupervisorReviewStateService.test.js test/webhookCandidateStateAuthority.test.js test/adminCandidatePauseAuthority.test.js test/adminCandidateWhatsAppOpenAuthority.test.js test/adminSupervisorCandidateStateAuthority.test.js test/adminBotPause.test.js
+
+      - name: Run candidate progress authority regressions
+        run: node --test test/candidateMultilineStateService.test.js test/candidateConversationStepStateService.test.js test/candidateNoInterestStateService.test.js test/candidateRequirementRejectionStateService.test.js test/candidateExplicitPauseStateService.test.js test/candidateConsentStepStateService.test.js test/candidateVacancyFirstGateStateService.test.js test/candidateSilentProfileCaptureStateService.test.js test/consentStateService.test.js test/dataConsentGateConsentStepAuthority.test.js test/webhookVacancyFirstGateAuthority.test.js test/webhookSilentProfileCaptureAuthority.test.js test/turnOrchestratorContracts.test.js test/conversationEngineNoInterestAuthority.test.js test/conversationEngineRequirementRejectionAuthority.test.js test/conversationEngineExplicitPauseAuthority.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js
+
+      # Complete the evidence set even when a blocking focal command fails.
+      # Each command still contributes its own failure to the final job result.
+      - name: Run contextual fallback regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/contextualReply.test.js test/contextualReplyRobustness.test.js test/contextualReplyLogging.test.js test/hardeningP0.test.js test/p9CvOnlyPdfDocx.test.js test/replySimilarityPolicy.test.js test/responsePolicyRemoval.test.js
+
+      - name: Run admin session contract
+        if: ${{ !cancelled() }}
+        run: node --test test/adminSession.test.js
+
+      - name: Run interview booking authority regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js test/interviewBookingAdminStateService.test.js test/interviewBookingDeletionStateService.test.js test/adminInterviewBookingAuthority.test.js test/chatEngineInterviewBookingAuthority.test.js test/webhookInterviewBookingAuthority.test.js
+
+      - name: Run supervisor coordination regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/adminSupervisor.test.js
+
+      - name: Run admin manual outbound regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/manualOutboundDeliveryService.test.js test/manualOutboundDeliveryReconciliation.test.js test/adminManualOutboundDeliveryAuthority.test.js test/adminManualOutbound.test.js
+
+      - name: Run dispatch WhatsApp runtime regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/dispatchWhatsappRuntimeContracts.test.js
+
+      - name: Run webhook message authority regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/webhookMessageAuthority.test.js test/webhookInboundMessageAuthority.test.js test/webhookIdempotency.test.js test/webhookPersistence.test.js test/turnOrchestratorContracts.test.js
+
+      - name: Run reminder regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/reminder.test.js test/interviewBookingReminderStateService.test.js
+
+      - name: Run interview booking transition policy regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/interviewBookingTransitionPolicy.test.js
+
+      - name: Validate conversation replay fixtures
+        if: ${{ !cancelled() }}
+        run: node --test test/conversationReplayFixtures.test.js
+
+      - name: Run conversation interpretation replay
+        if: ${{ !cancelled() }}
+        run: node --test test/conversationReplayInterpretation.test.js
+
+      - name: Run conversation planning replay
+        if: ${{ !cancelled() }}
+        run: node --test test/conversationReplayPlanning.test.js
+
+      - name: Run consent and attachment edge replay
+        if: ${{ !cancelled() }}
+        run: node --test test/conversationReplayConsentAttachmentEdges.test.js
+
+      - name: Run integral replay for interest without consent
+        if: ${{ !cancelled() }}
+        env:
+          REPLAY_FIXTURE_ID: consent-interest-is-not-consent-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for vacancy question
+        if: ${{ !cancelled() }}
+        env:
+          REPLAY_FIXTURE_ID: context-question-during-data-collection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for candidate correction
+        if: ${{ !cancelled() }}
+        env:
+          REPLAY_FIXTURE_ID: context-correction-during-data-collection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for consent acceptance
+        if: ${{ !cancelled() }}
+        env:
+          REPLAY_FIXTURE_ID: consent-explicit-acceptance-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for consent rejection
+        if: ${{ !cancelled() }}
+        env:
+          REPLAY_FIXTURE_ID: consent-explicit-rejection-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run integral replay for pre-consent document
+        if: ${{ !cancelled() }}
+        env:
+          REPLAY_FIXTURE_ID: attachment-document-before-consent-v1
+        run: node --test test/conversationReplayIntegral.test.js
+
+      - name: Run conversation recovery replay
+        if: ${{ !cancelled() }}
+        run: node --test test/conversationReplayRecovery.test.js
+
+      - name: Run production edge replay
+        if: ${{ !cancelled() }}
+        run: node --test test/conversationReplayProductionEdges.test.js
+
+      # The full suite still contains inherited legacy debt tracked in issue #386.
+      # Capture the current result first, then compare its exact failing identities
+      # against the pull request base instead of trusting a numeric ceiling.
+      - name: Capture current automated test debt
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set +e
+          npm test > current-test-output.log 2>&1
+          test_exit=$?
+          set -e
+          echo "$test_exit" > current-test-exit.txt
+
+      - name: Check out base for legacy failure identity baseline
+        if: ${{ !cancelled() }}
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          path: .ci-baseline
+          persist-credentials: false
+
+      - name: Compare automated test failure identities
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          (
+            cd .ci-baseline
+            npm ci
+            npm run prisma:generate
+            set +e
+            npm test > "$GITHUB_WORKSPACE/legacy-test-output.log" 2>&1
+            legacy_test_exit=$?
+            set -e
+            echo "$legacy_test_exit" > "$GITHUB_WORKSPACE/legacy-test-exit.txt"
+          )
+
+          test_exit=$(cat current-test-exit.txt)
+          legacy_test_exit=$(cat legacy-test-exit.txt)
+          tests_count=$(awk '/^# tests [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          pass_count=$(awk '/^# pass [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          cancelled_count=$(awk '/^# cancelled [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          skipped_count=$(awk '/^# skipped [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
+          legacy_fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' legacy-test-output.log)
+
+          if ! [[ "$tests_count" =~ ^[0-9]+$ ]] || ! [[ "$fail_count" =~ ^[0-9]+$ ]]; then
+            echo "::error::The current automated test command did not produce a valid TAP summary."
+            tail -n 120 current-test-output.log
+            exit 1
+          fi
+
+          if ! [[ "$legacy_fail_count" =~ ^[0-9]+$ ]]; then
+            echo "::error::The base-branch automated test command did not produce a valid TAP summary."
+            tail -n 120 legacy-test-output.log
+            exit 1
+          fi
+
+          pass_count="${pass_count:-0}"
+          cancelled_count="${cancelled_count:-0}"
+          skipped_count="${skipped_count:-0}"
+
+          extract_failure_identities() {
+            local source_file="$1"
+            local target_file="$2"
+            awk '
+              function emit_pending() {
+                if (pending != "" && !is_subtest_container) {
+                  print pending
+                }
+                pending = ""
+                is_subtest_container = 0
+              }
+
+              /^[[:space:]]*not ok [0-9]+ - / {
+                emit_pending()
+                identity = $0
+                sub(/^[[:space:]]*not ok [0-9]+ - /, "", identity)
+                sub(/[[:space:]]+#.*$/, "", identity)
+                sub(/[[:space:]]+$/, "", identity)
+                pending = identity
+                next
+              }
+
+              pending != "" && /^[[:space:]]*failureType:[[:space:]].*subtestsFailed/ {
+                is_subtest_container = 1
+                next
+              }
+
+              END {
+                emit_pending()
+              }
+            ' "$source_file" \
+              | LC_ALL=C sort -u > "$target_file"
+          }
+
+          extract_failure_identities legacy-test-output.log legacy_test_failures.txt
+          extract_failure_identities current-test-output.log current_test_failures.txt
+          LC_ALL=C comm -23 current_test_failures.txt legacy_test_failures.txt > unexpected_failures.txt
+
+          legacy_identity_count=$(wc -l < legacy_test_failures.txt | tr -d ' ')
+          current_identity_count=$(wc -l < current_test_failures.txt | tr -d ' ')
+          unexpected_failure_count=$(wc -l < unexpected_failures.txt | tr -d ' ')
+
+          {
+            echo "## Automated test debt report"
+            echo
+            echo "The full suite is gated by exact inherited failure identities from the pull request base."
+            echo
+            echo "| Metric | Result |"
+            echo "| --- | ---: |"
+            echo "| Tests | $tests_count |"
+            echo "| Passed | $pass_count |"
+            echo "| Failed | $fail_count |"
+            echo "| Cancelled | $cancelled_count |"
+            echo "| Skipped | $skipped_count |"
+            echo "| Current process exit code | $test_exit |"
+            echo "| Base process exit code | $legacy_test_exit |"
+            echo "| Base failing identities | $legacy_identity_count |"
+            echo "| Current failing identities | $current_identity_count |"
+            echo "| Unexpected failing identities | $unexpected_failure_count |"
+            echo
+            echo "<details>"
+            echo "<summary>Unexpected failing identities</summary>"
+            echo
+            echo '```text'
+            cat unexpected_failures.txt
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Automated tests: total=$tests_count pass=$pass_count fail=$fail_count exit=$test_exit"
+          echo "Base legacy failures: fail=$legacy_fail_count identities=$legacy_identity_count exit=$legacy_test_exit"
+
+          if [ -s unexpected_failures.txt ]; then
+            while IFS= read -r unexpected_failure; do
+              echo "::error::Unexpected failing identity: $unexpected_failure"
+            done < unexpected_failures.txt
+            echo "::error::The full suite introduced failing identities that are not present on the pull request base."
+            cat unexpected_failures.txt
+            exit 1
+          fi
+
+          if [ "$test_exit" -ne 0 ] && [ "$fail_count" -eq 0 ]; then
+            echo "::error::The current test command exited with code $test_exit without reporting test failures."
+            tail -n 120 current-test-output.log
+            exit 1
+          fi
+
+          if [ "$fail_count" -gt 0 ]; then
+            echo "::warning::$fail_count test failures remain, but every failing identity is inherited from the pull request base."
+            exit 0
+          fi
+
+          echo "All automated tests passed."
