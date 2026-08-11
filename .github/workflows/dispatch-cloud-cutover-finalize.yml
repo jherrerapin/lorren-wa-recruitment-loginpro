@@ -1,4 +1,4 @@
-name: Dispatch Cloud API final structural cleanup
+name: Dispatch Cloud API final selector cleanup
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
 jobs:
   finalize:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 5
 
     steps:
       - name: Check out migration branch
@@ -21,35 +21,21 @@ jobs:
         with:
           ref: feat/1027-dispatch-whatsapp-cloud-api
 
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v5
-        with:
-          node-version: "20"
-          cache: npm
-
-      - name: Apply structural cleanup
+      - name: Apply final selector cleanup
         run: python scripts/dispatch-cloud-cutover-finalize.py
 
-      - name: Install dependencies
-        run: npm ci --no-audit --no-fund
-
-      - name: Generate Prisma Client
-        run: npm run prisma:generate
-
-      - name: Validate structural cutover
+      - name: Validate final route source
         shell: bash
         run: |
-          node --check src/routes/dispatchOpsExtras.js
           node --check src/routes/dispatchAssignmentConfirmations.js
-          node --check src/services/dispatchAuditMiddleware.js
-          node --check src/services/dispatchWhatsappWebhookService.js
-          node --test test/dispatchWhatsappCloudCutover.test.js test/dispatchWhatsappRuntimeContracts.test.js
+          ! grep -q 'assignment-message' src/routes/dispatchAssignmentConfirmations.js
+          ! grep -Fq '${FINAL_ASSIGNMENT_CARD_SELECTOR} ${FINAL_ASSIGNMENT_CARD_SELECTOR}' src/routes/dispatchAssignmentConfirmations.js
 
-      - name: Commit structural cleanup
+      - name: Commit final source cleanup
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/routes/dispatchOpsExtras.js src/routes/dispatchAssignmentConfirmations.js src/services/dispatchAuditMiddleware.js src/services/dispatchWhatsappWebhookService.js src/views/operacionesAsignacionesConfirmacion.ejs test/dispatchWhatsappCloudCutover.test.js
-          git commit -m "refactor(dispatch): make Cloud API the confirmation authority"
+          git add src/routes/dispatchAssignmentConfirmations.js
+          git commit -m "fix(dispatch): clean confirmed assignment selector after cutover"
           git push origin HEAD:feat/1027-dispatch-whatsapp-cloud-api
