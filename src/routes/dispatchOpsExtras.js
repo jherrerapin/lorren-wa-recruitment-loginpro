@@ -1,7 +1,6 @@
 import express from 'express';
 import multer from 'multer';
 import ExcelJS from 'exceljs';
-import { sendDispatchCompletionEmail } from '../services/dispatchCompletionEmail.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES, recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
@@ -212,23 +211,6 @@ async function loadActiveClientsForServiceRequestForm(prisma) {
 }
 async function recalculateServiceRequestStatus(prisma, serviceRequestId) {
   return recalculateDispatchServiceRequestStatus(prisma, serviceRequestId);
-}
-async function resolveActorEmail(prisma, username) {
-  if (!username) return null;
-  const user = await prisma.appUser.findUnique({ where: { username }, select: { email: true } });
-  return normalizeString(user?.email);
-}
-async function notifyIfServiceRequestCompleted(prisma, serviceRequestId, actorUsername) {
-  const replyTo = await resolveActorEmail(prisma, actorUsername);
-  const result = await sendDispatchCompletionEmail(prisma, serviceRequestId, {
-    replyTo,
-    managedByUsername: actorUsername || null
-  });
-  if (result?.sent) return ' Solicitud completa: correo enviado al solicitante.';
-  if (result?.reason === 'missing_requested_by_email') return ' Solicitud completa: no se envio correo porque no tiene correo del solicitante.';
-  if (result?.reason === 'missing_email_config') return ' Solicitud completa: falta configurar correo de salida.';
-  if (result?.error) return ' Solicitud completa: no fue posible enviar el correo al solicitante.';
-  return '';
 }
 async function findWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId }, include: { cities: true, vacancies: true } }); }
 async function replaceWorkerRelations(prisma, workerId, body) {
