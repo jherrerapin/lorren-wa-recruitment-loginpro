@@ -1,0 +1,64 @@
+name: Dispatch alert settings relocation patch
+
+on:
+  push:
+    branches:
+      - fix-1032-dispatch-alert-settings-location
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix-1032-dispatch-alert-settings-location
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Apply patch
+        run: python scripts/patch-dispatch-alert-settings-location.py
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/lorren_test
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/lorren_test
+
+      - name: Check changed JavaScript syntax
+        run: |
+          node --check src/routes/admin.js
+          node --check src/routes/locations.js
+          node --check src/routes/dispatchDashboardMetrics.js
+
+      - name: Run focused dispatch tests
+        run: |
+          node --test test/dispatchWhatsappAdminAlerts.test.js test/dispatchWhatsappQuickReplies.test.js test/dispatchWhatsappRuntimeContracts.test.js test/dispatchSummaryNavigation.test.js
+
+      - name: Commit validated patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src test
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "fix(dispatch): move alert settings into dispatch dashboard"
+          git push origin HEAD:fix-1032-dispatch-alert-settings-location
