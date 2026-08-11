@@ -456,6 +456,8 @@ model AppUser {
   scopeVacancy        Vacancy?        @relation("AppUserScopeVacancy", fields: [scopeVacancyId], references: [id], onDelete: SetNull)
   recoveryPhone       String?
   recoveryEmail       String?
+  dispatchAlertPhone  String?
+  dispatchWindowExpiryReminderEnabled Boolean @default(false)
   createdByUsername   String?
   lastPasswordResetAt DateTime?
   canAccessDispatch   Boolean         @default(false)
@@ -904,6 +906,7 @@ model DispatchWhatsappConfirmation {
   assignment        DispatchAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
   serviceRequestId  String?
   phone             String?
+  alertOwnerUsername String?
   chatId            String?
   providerMessageId       String?
   confirmationMessageId String?
@@ -917,7 +920,37 @@ model DispatchWhatsappConfirmation {
   @@index([phone, status, expiresAt])
   @@index([chatId, status, expiresAt])
   @@index([providerMessageId])
+  @@index([alertOwnerUsername])
   @@index([status, confirmationReceivedAt], map: "DispatchWaConfirmation_reply_evidence_idx")
+}
+
+model DispatchWhatsappContactWindow {
+  id            String   @id @default(cuid())
+  scope         String
+  phone         String
+  lastInboundAt DateTime
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([scope, phone])
+  @@index([lastInboundAt])
+}
+
+model DispatchWhatsappWindowReminder {
+  id              String    @id @default(cuid())
+  scope           String
+  phone           String
+  appUserId       String
+  windowStartedAt DateTime
+  status          String    @default("PENDING")
+  sentAt          DateTime?
+  lastError       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([scope, phone, appUserId, windowStartedAt])
+  @@index([status, windowStartedAt])
+  @@index([appUserId, createdAt])
 }
 
 model DispatchIncident {

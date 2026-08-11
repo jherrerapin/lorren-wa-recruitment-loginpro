@@ -106,13 +106,15 @@ export function dispatchWhatsappNotificationsRouter(_prisma) {
       const result = await sendDispatchWhatsappMessage({
         phone: req.body?.phone,
         context,
-        scope: 'operational'
+        scope: 'operational',
+        actorUsername: normalizeString(req.session?.username || req.username)
       });
       return res.json({
         ok: true,
         provider: result.provider,
         providerMessageId: result.providerMessageId,
         phone: result.phone,
+        deliveryMode: result.deliveryMode,
         templateName: result.templateName
       });
     } catch (error) {

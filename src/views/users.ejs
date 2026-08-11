@@ -185,6 +185,14 @@
           </div>
         </div>
         <div class="form-section">
+          <h3 class="form-section-title">Alertas de despacho por WhatsApp</h3>
+          <div class="grid">
+            <div class="field full"><label for="dispatchAlertPhone">WhatsApp del administrador para alertas</label><input id="dispatchAlertPhone" name="dispatchAlertPhone" type="tel" inputmode="numeric" placeholder="3001234567" /><span class="hint">Número independiente del teléfono de recuperación. Recibe novedades operativas como NO PUEDO.</span></div>
+            <div class="field full"><label class="dispatch-row" for="dispatchWindowExpiryReminderEnabled"><input id="dispatchWindowExpiryReminderEnabled" name="dispatchWindowExpiryReminderEnabled" type="checkbox" value="true" /><span><strong>Recordarme antes de que venza la ventana de 24 horas</strong><small>Envía un aviso por WhatsApp aproximadamente 20 minutos antes del vencimiento de la ventana de cada auxiliar gestionado por este usuario.</small></span></label></div>
+          </div>
+          <p class="hint" style="margin-top:10px;">El número de alertas también está sujeto a las reglas de ventana de WhatsApp de Meta para mensajes libres.</p>
+        </div>
+        <div class="form-section">
           <h3 class="form-section-title">Alcance inicial de reclutamiento</h3>
           <div class="grid">
             <div class="field"><label for="accessScope">Alcance</label><select id="accessScope" name="accessScope">
@@ -247,7 +255,7 @@
                     <small>Acceso anterior pendiente de convertir a vacantes específicas.</small>
                   <% } %>
                 </td>
-                <td>Reclutamiento<% if (user.canAccessDispatch) { %><small>Operaciones / Despacho</small><% } %><% if (user.canAccessAttendance) { %><small>Asistencia operativa</small><% } %><% if (user.canAccessMetaAds) { %><small>Estadísticas: Meta Ads</small><% } %><% if (user.canAccessCvAnalysis) { %><small>Estadísticas: Análisis HV</small><% } %></td>
+                <td>Reclutamiento<% if (user.canAccessDispatch) { %><small>Operaciones / Despacho</small><% } %><% if (user.canAccessAttendance) { %><small>Asistencia operativa</small><% } %><% if (user.canAccessMetaAds) { %><small>Estadísticas: Meta Ads</small><% } %><% if (user.canAccessCvAnalysis) { %><small>Estadísticas: Análisis HV</small><% } %><% if (user.dispatchAlertPhone) { %><small>Alertas despacho: <%= user.dispatchAlertPhone %></small><small>Recordatorio ventana: <%= user.dispatchWindowExpiryReminderEnabled ? 'Activo' : 'Inactivo' %></small><% } %></td>
                 <td><span class="badge <%= user.isActive ? 'badge-active' : 'badge-inactive' %>"><%= user.isActive ? 'Activo' : 'Inactivo' %></span><small>Último cambio de contraseña: <%= user.lastPasswordResetAt ? user.lastPasswordResetAt.toLocaleString('es-CO', { hour12: false }) : 'Sin registro' %></small></td>
                 <td><% if (user.username === environmentAdminUsername) { %><small>La contraseña y recuperación se administran en Railway.</small><% } else { %><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.recoveryEmail || '—' %></small><small>Recuperación disponible desde /recover.</small><% } %></td>
                 <td>
@@ -264,6 +272,8 @@
                       <div class="grid">
                         <div class="field"><label for="edit-recoveryEmail-<%= user.id %>">Correo de recuperación</label><input id="edit-recoveryEmail-<%= user.id %>" name="recoveryEmail" type="email" value="<%= user.recoveryEmail || '' %>" placeholder="correo@dominio.com" /></div>
                         <div class="field"><label for="edit-recoveryPhone-<%= user.id %>">Teléfono de recuperación</label><input id="edit-recoveryPhone-<%= user.id %>" name="recoveryPhone" type="text" value="<%= user.recoveryPhone || '' %>" placeholder="3001234567" /></div>
+                        <div class="field"><label for="edit-dispatchAlertPhone-<%= user.id %>">WhatsApp del administrador para alertas</label><input id="edit-dispatchAlertPhone-<%= user.id %>" name="dispatchAlertPhone" type="tel" inputmode="numeric" value="<%= user.dispatchAlertPhone || '' %>" placeholder="3001234567" /></div>
+                        <div class="field full"><label class="dispatch-row" for="edit-dispatchWindowExpiryReminderEnabled-<%= user.id %>"><input id="edit-dispatchWindowExpiryReminderEnabled-<%= user.id %>" name="dispatchWindowExpiryReminderEnabled" type="checkbox" value="true" <%= user.dispatchWindowExpiryReminderEnabled ? 'checked' : '' %> /><span><strong>Recordarme antes de que venza la ventana de 24 horas</strong><small>Alerta por WhatsApp aproximadamente 20 minutos antes del vencimiento.</small></span></label></div>
                         <div class="field full">
                           <label for="edit-accessScope-<%= user.id %>">Alcance de reclutamiento</label>
                           <select id="edit-accessScope-<%= user.id %>" name="accessScope" onchange="syncEditScopeVisibility('<%= user.id %>')">
