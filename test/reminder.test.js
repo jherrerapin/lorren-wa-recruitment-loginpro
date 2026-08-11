@@ -19,7 +19,8 @@ test('canScheduleReminder permite estados pendientes y bloquea DONE/RECHAZADO', 
     status: 'NUEVO',
     currentStep: 'COLLECTING_DATA',
     reminderState: 'NONE',
-    lastInboundAt: new Date()
+    lastInboundAt: new Date(),
+    dataConsentStatus: 'ACCEPTED'
   };
   assert.equal(canScheduleReminderPolicy(base), true);
   assert.equal(canScheduleReminderPolicy({ ...base, currentStep: 'DONE' }), false);
@@ -40,7 +41,8 @@ test('si está pausado no es elegible para recordatorio automático', () => {
     currentStep: 'COLLECTING_DATA',
     reminderState: 'NONE',
     lastInboundAt: new Date(),
-    botPaused: true
+    botPaused: true,
+    dataConsentStatus: 'ACCEPTED'
   };
   assert.equal(canScheduleReminderPolicy(pausedCandidate), false);
 });
@@ -135,6 +137,7 @@ test('runReminderDispatcher envía recordatorio contextualizado según lo que fa
       reminderState: 'SCHEDULED',
       reminderScheduledFor: new Date('2026-04-07T20:35:00.000Z'),
       lastInboundAt: new Date('2026-04-07T19:50:00.000Z'),
+      dataConsentStatus: 'ACCEPTED',
       fullName: 'Persona Ejemplo',
       documentType: 'CC',
       documentNumber: 'DOC-TEST-003',
@@ -372,6 +375,7 @@ test('scheduleReminderForCandidate agenda recordatorio 2 horas después del últ
       reminderScheduledFor: null,
       lastInboundAt: new Date('2026-04-07T18:00:00.000Z'),
       lastOutboundAt,
+      dataConsentStatus: 'ACCEPTED',
       fullName: 'Persona Ejemplo'
     }]
   });

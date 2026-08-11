@@ -10,6 +10,11 @@ const NOW = new Date('2026-07-28T18:00:00.000Z');
 const SESSION_TOKEN = 'S'.repeat(43);
 const DESCRIPTOR = Array.from({ length: 64 }, (_, index) => index / 1000);
 const VALID_UNTIL = new Date(NOW.getTime() + 90_000).toISOString();
+const VALID_ATTENDANCE_LOCATION = {
+  latitude: 4.7,
+  longitude: -74.1,
+  accuracyMeters: 12
+};
 
 async function withServer(options, callback) {
   const app = express();
@@ -30,7 +35,15 @@ async function withServer(options, callback) {
     loadBiometricAssignmentFn: async (workerId, assignmentId) => ({
       id: assignmentId,
       workerId,
-      serviceRequest: { operationPoint: { attendanceEnabled: true } }
+      serviceRequest: {
+        operationPoint: {
+          attendanceEnabled: true,
+          attendanceLatitude: VALID_ATTENDANCE_LOCATION.latitude,
+          attendanceLongitude: VALID_ATTENDANCE_LOCATION.longitude,
+          geofenceRadiusMeters: 150,
+          maxLocationAccuracyMeters: 100
+        }
+      }
     }),
     ...options
   }));
@@ -86,7 +99,8 @@ test('el desafío facial usa la cookie del portal y un enrolamiento v2', async (
       body: JSON.stringify({
         assignmentId: 'assignment-1',
         markType: 'ARRIVAL',
-        idempotencyKey: 'arrival_session_route_123'
+        idempotencyKey: 'arrival_session_route_123',
+        ...VALID_ATTENDANCE_LOCATION
       })
     });
     assert.equal(response.status, 200);
