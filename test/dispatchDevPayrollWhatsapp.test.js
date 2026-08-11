@@ -4,12 +4,10 @@ import { readFile } from 'node:fs/promises';
 import ejs from 'ejs';
 import { loadPayrollReport } from '../src/modules/dispatch-payroll/application/payrollReport.js';
 import {
-  getDispatchWhatsappStatus as getOperationalWhatsappStatus
-} from '../src/services/dispatchWhatsappWebServiceV6.js';
-import {
-  claimDispatchAssignmentConfirmation as claimTestConfirmation,
-  getDispatchWhatsappStatus as getTestWhatsappStatus
-} from '../src/services/dispatchWhatsappWebServiceV6.js?scope=dev-test';
+  getDispatchWhatsappCloudConfig,
+  getDispatchWhatsappStatus
+} from '../src/services/dispatchWhatsappCloudConfig.js';
+import { claimDispatchAssignmentConfirmation } from '../src/services/dispatchWhatsappAssignmentService.js';
 
 function devTestSession() {
   return {
@@ -112,50 +110,59 @@ test('Nómina normal sigue ocultando el sujeto y la jornada de prueba', async ()
   assert.equal(report.totals.totalMinutes, 0);
 });
 
-test('los runtimes operativo y DEV usan clientId y almacenamiento separados', () => {
-  const operational = getOperationalWhatsappStatus();
-  const devTest = getTestWhatsappStatus();
+test('las líneas Cloud operativa y DEV usan scopes y variables separadas', () => {
+  const operational = getDispatchWhatsappStatus('operational');
+  const devTest = getDispatchWhatsappStatus('dev-test');
+  const operationalConfig = getDispatchWhatsappCloudConfig('operational');
+  const devConfig = getDispatchWhatsappCloudConfig('dev-test');
 
   assert.equal(operational.runtimeScope, 'operational');
-  assert.equal(operational.clientId, 'dispatch');
   assert.equal(devTest.runtimeScope, 'dev-test');
-  assert.equal(devTest.clientId, 'dispatch-dev-test');
-  assert.notEqual(operational.authDataPath, devTest.authDataPath);
-  assert.match(devTest.authDataPath, /dispatch-wweb-auth-test/);
+  assert.notEqual(operationalConfig.scope, devConfig.scope);
+  assert.ok(operationalConfig.missing.some((name) => name.startsWith('DISPATCH_META_')));
+  assert.ok(devConfig.missing.some((name) => name.startsWith('DISPATCH_TEST_META_')));
 });
 
-test('la confirmación recibida por la cuenta DEV solo cambia estados DEV_TEST', async () => {
+test('la confirmación recibida por la línea DEV solo cambia estados DEV_TEST y exige evidencia', async () => {
   const calls = {};
-  const fakePrisma = {
-    $transaction: async (callback) => callback({
-      dispatchAssignment: {
-        updateMany: async (input) => {
-          calls.assignmentUpdate = input;
-          return { count: 1 };
-        },
-        findUnique: async () => ({ status: 'DEV_TEST_CONFIRMED' })
+  const tx = {
+    dispatchAssignment: {
+      updateMany: async (input) => {
+        calls.assignmentUpdate = input;
+        return { count: 1 };
       },
-      dispatchWhatsappConfirmation: {
-        updateMany: async (input) => {
-          calls.linkUpdate = input;
-          return { count: 1 };
-        },
-        create: async () => ({ id: 'link-dev-test' })
+      findUnique: async () => ({ status: 'DEV_TEST_CONFIRMED' })
+    },
+    dispatchWhatsappConfirmation: {
+      findFirst: async () => null,
+      updateMany: async (input) => {
+        calls.linkUpdate = input;
+        return { count: 1 };
       }
-    })
+    }
   };
+  const fakePrisma = { $transaction: async (callback) => callback(tx) };
 
-  const result = await claimTestConfirmation({
+  const withoutEvidence = await claimDispatchAssignmentConfirmation({
+    scope: 'dev-test',
     assignment: { id: 'assignment-dev-test', serviceRequestId: 'request-dev-test' },
-    phone: '3000000000',
-    chatId: '573000000000@c.us',
-    confirmationMessageId: 'message-dev-test',
+    prismaClient: fakePrisma
+  });
+  assert.equal(withoutEvidence.shouldReply, false);
+  assert.equal(calls.assignmentUpdate, undefined);
+
+  const result = await claimDispatchAssignmentConfirmation({
+    scope: 'dev-test',
+    assignment: { id: 'assignment-dev-test', serviceRequestId: 'request-dev-test' },
+    confirmationMessageId: 'wamid.inbound.dev-test',
     confirmationReceivedAt: new Date('2026-07-29T15:00:00.000Z'),
     prismaClient: fakePrisma
   });
 
   assert.deepEqual(calls.assignmentUpdate.where.status.in, ['DEV_TEST_ASSIGNED']);
   assert.equal(calls.assignmentUpdate.data.status, 'DEV_TEST_CONFIRMED');
+  assert.equal(calls.linkUpdate.data.status, 'CONFIRMED_REPLY_PENDING');
+  assert.equal(calls.linkUpdate.data.confirmationMessageId, 'wamid.inbound.dev-test');
   assert.equal(result.assignmentConfirmed, true);
   assert.equal(result.shouldReply, true);
 });

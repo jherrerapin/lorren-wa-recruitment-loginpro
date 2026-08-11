@@ -147,19 +147,12 @@ test('los turnos nocturnos terminan al día siguiente y el almuerzo inicia vací
   assert.equal(defaults.breakEndAt, '');
 });
 
-test('la vista permite crear solicitudes y distingue auxiliares reales de perfiles de prueba', async () => {
-  const [template, publicTemplateSync, confirmationPatch] = await Promise.all([
+test('la vista DEV conserva el flujo aislado y usa el transporte oficial sin patch de confirmación', async () => {
+  const [template, route, cloudService] = await Promise.all([
     readFile('src/views/operacionesPruebasNomina.ejs', 'utf8'),
-    readFile('src/public/assignment-template-sync.js', 'utf8'),
-    readFile('src/services/dispatchWhatsappConfirmationPatch.js', 'utf8')
+    readFile('src/routes/dispatchDevPayrollTest.js', 'utf8'),
+    readFile('src/services/dispatchWhatsappTestService.js', 'utf8')
   ]);
-  const canonicalLines = [
-    'Hola *{{nombre}}*,',
-    'Mañana: *{{fecha}}*',
-    'Llegar a: *{{operacion}}  - {{direccion}}*',
-    'Hora : *{{horaInicio}} por favor.*',
-    '*Confirmado?*'
-  ];
   const assignment = {
     id: 'assignment-real', workerId: 'worker-real', status: 'DEV_TEST_ASSIGNED', attendanceSession: null,
     worker: { id: 'worker-real', fullName: 'Auxiliar real', documentNumber: '1000000000', phone: '3000000000', isTestProfile: false }
@@ -189,11 +182,9 @@ test('la vista permite crear solicitudes y distingue auxiliares reales de perfil
   assert.match(html, /Resultado aislado de nómina/);
   assert.match(html, /name="breakStartAt" value=""/);
   assert.match(html, /name="breakEndAt" value=""/);
-  for (const line of canonicalLines) {
-    assert.ok(publicTemplateSync.includes(line));
-    assert.ok(confirmationPatch.includes(line));
-    assert.ok(template.includes(line));
-  }
+  assert.match(route, /dispatchWhatsappTestService\.js/);
+  assert.match(cloudService, /scope: 'dev-test'/);
+  await assert.rejects(() => readFile('src/services/dispatchWhatsappConfirmationPatch.js', 'utf8'), /ENOENT/);
 
   const adminHtml = ejs.render(template, {
     ...locals,

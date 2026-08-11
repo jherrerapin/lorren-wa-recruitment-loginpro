@@ -76,7 +76,7 @@ test('reportes y tablero comparten la cobertura operativa', () => {
 test('todos los recalculadores principales usan la autoridad central', () => {
   for (const path of [
     'src/routes/dispatchOpsExtras.js',
-    'src/services/dispatchWhatsappWebServiceV6.js',
+    'src/services/dispatchWhatsappWebhookService.js',
     'src/services/dispatchWorkerDeactivationAnalytics.js',
     'src/services/dispatchWorkerToggleAnySource.js',
     'src/services/dispatchWorkerExitReasons.js'
