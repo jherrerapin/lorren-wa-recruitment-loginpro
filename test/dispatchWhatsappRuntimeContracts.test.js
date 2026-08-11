@@ -65,12 +65,20 @@ test('la autoridad de despacho usa Cloud API y la plantilla se arma desde la asi
   assert.equal(payload.template.name, 'dispatch_assignment_confirmation');
   assert.equal(payload.template.language.code, 'es');
   const body = payload.template.components.find((component) => component.type === 'body');
-  assert.equal(body.parameters.length, 8);
-  assert.deepEqual(body.parameters.map((parameter) => parameter.type), Array(8).fill('text'));
-  const button = payload.template.components.find((component) => component.type === 'button');
-  assert.equal(button.sub_type, 'quick_reply');
-  assert.equal(button.index, '0');
-  assert.equal(button.parameters[0].payload, 'dispatch_confirm:assignment-1');
+  assert.equal(body.parameters.length, 5);
+  assert.deepEqual(body.parameters.map((parameter) => parameter.type), Array(5).fill('text'));
+  assert.deepEqual(body.parameters.map((parameter) => parameter.text), [
+    'Ana Pérez',
+    '12/08/2026',
+    'Punto Norte',
+    'Calle 1 # 2-3',
+    '8:00 AM'
+  ]);
+  const buttons = payload.template.components.filter((component) => component.type === 'button');
+  assert.deepEqual(buttons.map((button) => ({ index: button.index, payload: button.parameters[0].payload })), [
+    { index: '0', payload: 'dispatch_confirm:assignment-1' },
+    { index: '1', payload: 'dispatch_decline:assignment-1' }
+  ]);
 });
 
 test('programación usa plantilla oficial con documento en header', async () => {
