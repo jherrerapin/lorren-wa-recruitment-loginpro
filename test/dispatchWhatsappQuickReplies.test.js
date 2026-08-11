@@ -2,12 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-const MESSAGE = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
+const CANONICAL_MESSAGE = [
+  'Hola *{{nombre}}*,',
+  '',
+  'Mañana: *{{fecha}}*',
+  'Llegar a: *{{operacion}}  - {{direccion}}*',
+  'Hora : *{{horaInicio}} por favor.*',
+  '',
+  '',
+  '*Confirmado?*'
+].join('\n');
+const FORBIDDEN_MESSAGE = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
 function read(path) { return fs.readFileSync(path, 'utf8'); }
 
-test('el dashboard conserva literalmente el mensaje actual y muestra dos respuestas rápidas', () => {
+test('el dashboard conserva el mensaje canónico real y muestra dos respuestas rápidas', () => {
   const view = read('src/views/operacionesAsignacionesConfirmacion.ejs');
-  assert.ok(view.includes(MESSAGE));
+  const canonicalSource = read('src/public/assignment-template-sync.js');
+
+  assert.ok(view.includes(CANONICAL_MESSAGE));
+  assert.ok(canonicalSource.includes("'Hola *{{nombre}}*,'"));
+  assert.ok(canonicalSource.includes("'Mañana: *{{fecha}}*'"));
+  assert.ok(canonicalSource.includes("'Llegar a: *{{operacion}}  - {{direccion}}*'"));
+  assert.ok(canonicalSource.includes("'Hora : *{{horaInicio}} por favor.*'"));
+  assert.ok(canonicalSource.includes("CONFIRMATION_REPLY_TEXT = '*Confirmado?*'"));
+  assert.equal(view.includes(FORBIDDEN_MESSAGE), false);
   assert.match(view, />CONFIRMADO<\/span>/);
   assert.match(view, />NO PUEDO<\/span>/);
   assert.match(view, /Enviar WhatsApp a todos/);
