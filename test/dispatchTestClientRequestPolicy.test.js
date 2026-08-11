@@ -120,7 +120,8 @@ test('contratos del repositorio conectan la marca y la autoridad server-side', (
   const dashboardMetrics = fs.readFileSync('src/routes/dispatchDashboardMetrics.js', 'utf8');
   const clientsView = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
   const summaryView = fs.readFileSync('src/views/operacionesSolicitudesResumen.ejs', 'utf8');
-  const assignmentView = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
+  const legacyAssignmentView = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
+  const assignmentView = fs.readFileSync('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8');
   const browserPolicy = fs.readFileSync('src/public/expired-service-request-modal.js', 'utf8');
 
   assert.match(schema, /isTestClient\s+Boolean\s+@default\(false\)/);
@@ -128,6 +129,7 @@ test('contratos del repositorio conectan la marca y la autoridad server-side', (
   assert.match(bridgeCore, /resolveDispatchServiceRequestPolicy/);
   assert.match(bridgeCore, /isTestClient/);
   assert.match(opsExtras, /deleteDispatchServiceRequestWithPolicy/);
+  assert.match(opsExtras, /res\.render\('operacionesAsignacionesConfirmacion'/);
   assert.match(publicClient, /deleteDispatchServiceRequestWithPolicy/);
   assert.match(publicClient, /isTestClient/);
   assert.match(dashboardMetrics, /resolveDispatchServiceRequestPolicy/);
@@ -135,7 +137,8 @@ test('contratos del repositorio conectan la marca y la autoridad server-side', (
   assert.match(clientsView, /Cliente de prueba/);
   assert.match(summaryView, /policy\.canDelete/);
   assert.match(summaryView, /policy\.canEdit/);
-  assert.match(assignmentView, /resolveServiceRequestPolicy/);
+  assert.match(legacyAssignmentView, /include\('operacionesAsignacionesConfirmacion'/);
+  assert.match(assignmentView, /\/admin\/operaciones\/asignaciones/);
   assert.doesNotMatch(browserPolicy, /TWO_HOURS_MS/);
   assert.match(browserPolicy, /editLockAt/);
 });
