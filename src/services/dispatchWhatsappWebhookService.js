@@ -14,6 +14,10 @@ import {
 } from './dispatchWhatsappCloudConfig.js';
 import { claimDispatchAssignmentConfirmation, claimDispatchAssignmentDecline } from './dispatchWhatsappAssignmentService.js';
 import { dispatchWhatsappProviderErrorMessage, sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
+import {
+  recordDispatchWhatsappInboundWindow,
+  sendDispatchDeclineAdminAlert
+} from './dispatchWhatsappAdminAlerts.js';
 
 function normalizeConfirmationText(value) {
   return String(value || '')
@@ -98,6 +102,7 @@ async function findConfirmationTarget({ scope, message, prismaClient }) {
 export async function processDispatchWhatsappInboundMessage({
   scope = 'operational', message = {}, prismaClient = prisma, axiosClient = axios
 } = {}) {
+  await recordDispatchWhatsappInboundWindow({ scope, message, prismaClient });
   const buttonAction = assignmentActionFromInboundPayload(message);
   const inbound = inboundText(message);
   const inferredAction = buttonAction?.action
@@ -119,9 +124,16 @@ export async function processDispatchWhatsappInboundMessage({
     if (decline.assignmentDeclined && scope === 'operational') {
       await recalculateDispatchServiceRequestStatus(prismaClient, target.assignment.serviceRequestId);
     }
+    let adminAlertSent = false;
+    if (decline.assignmentDeclined) {
+      const adminAlert = await sendDispatchDeclineAdminAlert({
+        scope, link: target.link, assignment: target.assignment, prismaClient, axiosClient
+      }).catch((error) => ({ sent: false, error }));
+      adminAlertSent = Boolean(adminAlert?.sent);
+    }
     setDispatchWhatsappRuntimeState(scope, { lastInboundAt: new Date().toISOString(), lastError: null });
-    console.info(`[dispatch-wa-cloud] Respuesta NO PUEDO procesada. scope=${scope} assignment=${target.assignment.id} changed=${decline.assignmentDeclined ? 'yes' : 'no'}.`);
-    return { handled: decline.assignmentDeclined || decline.duplicate, duplicate: decline.duplicate, assignmentDeclined: decline.assignmentDeclined, replySent: false };
+    console.info(`[dispatch-wa-cloud] Respuesta NO PUEDO procesada. scope=${scope} assignment=${target.assignment.id} changed=${decline.assignmentDeclined ? 'yes' : 'no'} adminAlert=${adminAlertSent ? 'sent' : 'not-sent'}.`);
+    return { handled: decline.assignmentDeclined || decline.duplicate, duplicate: decline.duplicate, assignmentDeclined: decline.assignmentDeclined, adminAlertSent, replySent: false };
   }
 
   const claim = await claimDispatchAssignmentConfirmation({

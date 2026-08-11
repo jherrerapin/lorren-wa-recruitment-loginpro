@@ -61,6 +61,13 @@ function normalize(value) {
   return text.length ? text : null;
 }
 
+function normalizeDispatchAlertPhoneInput(value) {
+  const digits = String(value || '').replace(/\D+/g, '');
+  if (!digits) return null;
+  const local = digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
+  return /^3\d{9}$/.test(local) ? `57${local}` : null;
+}
+
 function normalizeMany(value) {
   const values = Array.isArray(value) ? value : [value];
   return [...new Set(values.map(normalize).filter(Boolean))];
@@ -376,12 +383,24 @@ export function locationsRouter(prisma) {
       return res.redirect(usersRedirect('error', accessUpdate.error, user.username));
     }
 
+    const dispatchAlertPhoneRaw = normalize(req.body.dispatchAlertPhone);
+    const dispatchAlertPhone = normalizeDispatchAlertPhoneInput(dispatchAlertPhoneRaw);
+    const dispatchWindowExpiryReminderEnabled = isChecked(req.body.dispatchWindowExpiryReminderEnabled);
+    if (dispatchAlertPhoneRaw && !dispatchAlertPhone) {
+      return res.redirect(usersRedirect('error', 'El WhatsApp de alertas debe ser un celular colombiano válido.', user.username));
+    }
+    if (dispatchWindowExpiryReminderEnabled && !dispatchAlertPhone) {
+      return res.redirect(usersRedirect('error', 'Configura el WhatsApp de alertas antes de activar el recordatorio de ventana.', user.username));
+    }
+
     const data = {
       accessScope: accessUpdate.accessScope,
       scopeCity: accessUpdate.scopeCity,
       scopeVacancyId: accessUpdate.scopeVacancyId,
       recoveryPhone: normalize(req.body.recoveryPhone),
-      recoveryEmail: normalize(req.body.recoveryEmail)
+      recoveryEmail: normalize(req.body.recoveryEmail),
+      dispatchAlertPhone,
+      dispatchWindowExpiryReminderEnabled
     };
     if (req.userRole === 'dev') {
       data.canAccessAttendance = isChecked(req.body.canAccessAttendance);

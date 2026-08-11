@@ -1,0 +1,70 @@
+name: Dispatch admin alerts patch
+
+on:
+  push:
+    branches:
+      - feat/1027-dispatch-whatsapp-cloud-api
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/1027-dispatch-whatsapp-cloud-api
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Apply patch
+        run: python scripts/patch-dispatch-admin-alerts.py
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/lorren_test
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        env:
+          DATABASE_URL: postgresql://user:pass@localhost:5432/lorren_test
+
+      - name: Check changed JavaScript syntax
+        run: |
+          node --check src/services/dispatchWhatsappCloudConfig.js
+          node --check src/services/dispatchWhatsappCloudClient.js
+          node --check src/services/dispatchWhatsappAssignmentService.js
+          node --check src/services/dispatchWhatsappAdminAlerts.js
+          node --check src/services/dispatchWhatsappWebhookService.js
+          node --check src/routes/dispatchWhatsappNotifications.js
+          node --check src/routes/admin.js
+          node --check src/routes/locations.js
+          node --check src/workers/jobWorker.js
+
+      - name: Run focused dispatch tests
+        run: |
+          node --test test/dispatchWhatsappAdminAlerts.test.js test/dispatchWhatsappQuickReplies.test.js test/dispatchWhatsappCloudCutover.test.js test/dispatchWhatsappRuntimeContracts.test.js test/dispatchWhatsappLoadingAndTestClientAccess.test.js
+
+      - name: Commit validated patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add prisma src test
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "feat(dispatch): add per-user WhatsApp admin alerts"
+          git push origin HEAD:feat/1027-dispatch-whatsapp-cloud-api

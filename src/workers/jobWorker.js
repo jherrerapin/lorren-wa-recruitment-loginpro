@@ -7,9 +7,12 @@ import {
 } from '../services/reminder.js';
 import { runAutoCvMigration } from '../services/cvMigration.js';
 import { ensureSupervisorWindowOpen } from '../services/adminSupervisor.js';
+import { runDispatchWhatsappWindowReminderDispatcher } from '../services/dispatchWhatsappAdminAlerts.js';
 
 const prisma = new PrismaClient();
 const POLL_MS = Number.parseInt(process.env.JOB_WORKER_POLL_MS || '5000', 10);
+const DISPATCH_WINDOW_REMINDER_SWEEP_MS = 10000;
+let lastDispatchWindowReminderSweepAt = 0;
 
 async function runJob(job) {
   if (job.type === JOB_TYPES.CANDIDATE_PROCESS_REMINDER) {
@@ -56,6 +59,13 @@ async function tick() {
   );
 
   await runReminderDispatcher(prisma, { now });
+
+  if (now.getTime() - lastDispatchWindowReminderSweepAt >= DISPATCH_WINDOW_REMINDER_SWEEP_MS) {
+    lastDispatchWindowReminderSweepAt = now.getTime();
+    await runDispatchWhatsappWindowReminderDispatcher(prisma, { now }).catch((error) =>
+      console.warn('[DISPATCH_WINDOW_REMINDER_ERROR]', error?.message || error)
+    );
+  }
 }
 
 setInterval(() => {
