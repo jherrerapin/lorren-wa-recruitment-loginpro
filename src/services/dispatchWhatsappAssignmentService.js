@@ -10,7 +10,12 @@ import {
   normalizeDispatchWhatsappPhone,
   setDispatchWhatsappRuntimeState
 } from './dispatchWhatsappCloudConfig.js';
-import { dispatchWhatsappProviderErrorMessage, sendCloudAssignmentTemplate } from './dispatchWhatsappCloudClient.js';
+import {
+  dispatchWhatsappProviderErrorMessage,
+  sendCloudAssignmentInteractive,
+  sendCloudAssignmentTemplate
+} from './dispatchWhatsappCloudClient.js';
+import { getDispatchWhatsappContactWindowStatus } from './dispatchWhatsappAdminAlerts.js';
 
 function confirmationExpiresAt(serviceDate) {
   const minimum = Date.now() + (36 * 60 * 60 * 1000);
@@ -79,10 +84,13 @@ async function ensureNoRecentConfirmationSend(prismaClient, assignmentId, duplic
 }
 
 export async function sendDispatchWhatsappMessage({
-  phone, context, scope = 'operational', axiosClient = axios, prismaClient = prisma
+  phone, context, scope = 'operational', actorUsername = null, axiosClient = axios, prismaClient = prisma
 } = {}) {
   const config = ensureDispatchWhatsappConfigured(scope);
   const validated = await validateDispatchAssignmentContext({ context, phone, scope, prismaClient });
+  const contactWindow = await getDispatchWhatsappContactWindowStatus({
+    scope, phone: validated.phone, prismaClient
+  });
   await ensureNoRecentConfirmationSend(prismaClient, validated.assignment.id, config.duplicateSendWindowMs);
   await prismaClient.dispatchWhatsappConfirmation.updateMany({
     where: { assignmentId: validated.assignment.id, status: { in: ACTIVE_LINK_STATUSES } },
@@ -94,6 +102,7 @@ export async function sendDispatchWhatsappMessage({
       assignmentId: validated.assignment.id,
       serviceRequestId: validated.assignment.serviceRequestId,
       phone: validated.phone,
+      alertOwnerUsername: String(actorUsername || validated.assignment.createdByUsername || '').trim() || null,
       chatId: null,
       providerMessageId: null,
       status: 'PENDING',
@@ -102,9 +111,27 @@ export async function sendDispatchWhatsappMessage({
   });
 
   try {
-    const { providerMessageId } = await sendCloudAssignmentTemplate({
-      scope, assignment: validated.assignment, phone: validated.phone, axiosClient
-    });
+    let providerMessageId;
+    let deliveryMode;
+    let templateName = null;
+    if (contactWindow.isOpen) {
+      ({ providerMessageId } = await sendCloudAssignmentInteractive({
+        scope, assignment: validated.assignment, phone: validated.phone, axiosClient
+      }));
+      deliveryMode = 'SESSION_INTERACTIVE';
+    } else if (config.assignmentTemplateName && config.templateLanguage) {
+      ({ providerMessageId } = await sendCloudAssignmentTemplate({
+        scope, assignment: validated.assignment, phone: validated.phone, axiosClient
+      }));
+      deliveryMode = 'TEMPLATE';
+      templateName = config.assignmentTemplateName;
+    } else {
+      throw buildDispatchWhatsappError(
+        'La ventana de 24 horas con este auxiliar está cerrada. Para enviar después del vencimiento será necesaria una plantilla aprobada.',
+        409,
+        'dispatch_whatsapp_window_closed'
+      );
+    }
     const transaction = [prismaClient.dispatchWhatsappConfirmation.update({
       where: { id: link.id }, data: { providerMessageId, status: 'SENT' }
     })];
@@ -116,8 +143,8 @@ export async function sendDispatchWhatsappMessage({
     await prismaClient.$transaction(transaction);
     const now = new Date().toISOString();
     setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
-    console.info(`[dispatch-wa-cloud] Plantilla enviada. scope=${scope} assignment=${validated.assignment.id} providerMessage=yes.`);
-    return { phone: validated.phone, providerMessageId, templateName: config.assignmentTemplateName, provider: 'META_CLOUD_API' };
+    console.info(`[dispatch-wa-cloud] Mensaje de asignación enviado. scope=${scope} assignment=${validated.assignment.id} mode=${deliveryMode}.`);
+    return { phone: validated.phone, providerMessageId, templateName, deliveryMode, provider: 'META_CLOUD_API' };
   } catch (error) {
     await prismaClient.dispatchWhatsappConfirmation.updateMany({
       where: { id: link.id, status: 'PENDING' }, data: { status: 'FAILED' }

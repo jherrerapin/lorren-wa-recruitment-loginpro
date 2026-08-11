@@ -153,6 +153,13 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeDispatchAlertPhoneInput(value) {
+  const digits = String(value || '').replace(/\D+/g, '');
+  if (!digits) return null;
+  const local = digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
+  return /^3\d{9}$/.test(local) ? `57${local}` : null;
+}
+
 function normalizeDigits(value) {
   return String(value || '').replace(/\D+/g, '');
 }
@@ -3189,6 +3196,15 @@ export function adminRouter(prisma) {
       && (req.body.canAccessDispatch === 'true' || canAccessAttendance);
     const canAccessMetaAds = req.userRole === 'dev' && req.body.canAccessMetaAds === 'true';
     const canAccessCvAnalysis = req.userRole === 'dev' && req.body.canAccessCvAnalysis === 'true';
+    const dispatchAlertPhoneRaw = normalizeString(req.body.dispatchAlertPhone);
+    const dispatchAlertPhone = normalizeDispatchAlertPhoneInput(dispatchAlertPhoneRaw);
+    const dispatchWindowExpiryReminderEnabled = req.body.dispatchWindowExpiryReminderEnabled === 'true';
+    if (dispatchAlertPhoneRaw && !dispatchAlertPhone) {
+      return res.redirect('/admin/users?error=' + encodeURIComponent('El WhatsApp de alertas debe ser un celular colombiano válido.'));
+    }
+    if (dispatchWindowExpiryReminderEnabled && !dispatchAlertPhone) {
+      return res.redirect('/admin/users?error=' + encodeURIComponent('Configura el WhatsApp de alertas antes de activar el recordatorio de ventana.'));
+    }
     const scopeResolution = await resolveRequestedUserScope(prisma, req, req.body);
     if (scopeResolution.error) {
       return res.redirect('/admin/users?error=' + encodeURIComponent(scopeResolution.error));
@@ -3219,6 +3235,8 @@ export function adminRouter(prisma) {
         canAccessCvAnalysis,
         recoveryPhone: normalizeString(req.body.recoveryPhone),
         recoveryEmail: normalizeString(req.body.recoveryEmail),
+        dispatchAlertPhone,
+        dispatchWindowExpiryReminderEnabled,
         createdByUsername: req.username || req.userRole || 'system',
         lastPasswordResetAt: new Date(),
         isActive: true

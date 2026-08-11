@@ -42,6 +42,32 @@ function assignmentTemplateValues(assignment) {
   ];
 }
 
+export function buildDispatchAssignmentMessageBody(assignment) {
+  const [name, date, operation, address, startTime] = assignmentTemplateValues(assignment);
+  return `Hola *${name}*,\n\nMañana: *${date}*\nLlegar a: *${operation}  - ${address}*\nHora : *${startTime} por favor.*\n\n\n*Confirmado?*`;
+}
+
+export function buildDispatchAssignmentInteractivePayload({ assignment, phone }) {
+  const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
+  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  return {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: normalizedPhone,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: buildDispatchAssignmentMessageBody(assignment) },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: `dispatch_confirm:${assignment.id}`, title: 'CONFIRMADO' } },
+          { type: 'reply', reply: { id: `dispatch_decline:${assignment.id}`, title: 'NO PUEDO' } }
+        ]
+      }
+    }
+  };
+}
+
 export function buildDispatchAssignmentTemplatePayload({ config, assignment, phone }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
   if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
@@ -127,8 +153,18 @@ function providerMessageIdFromResponse(response) {
 }
 
 export async function sendCloudAssignmentTemplate({ scope = 'operational', assignment, phone, axiosClient = axios }) {
-  const config = ensureDispatchWhatsappConfigured(scope);
+  const config = ensureDispatchWhatsappConfigured(scope, { assignmentTemplate: true });
   const response = await postGraph(config, buildDispatchAssignmentTemplatePayload({ config, assignment, phone }), axiosClient);
+  const providerMessageId = providerMessageIdFromResponse(response);
+  if (!providerMessageId) {
+    throw buildDispatchWhatsappError('Meta aceptó la solicitud sin devolver un identificador de mensaje.', 502, 'dispatch_whatsapp_provider_message_missing');
+  }
+  return { config, providerMessageId };
+}
+
+export async function sendCloudAssignmentInteractive({ scope = 'operational', assignment, phone, axiosClient = axios }) {
+  const config = ensureDispatchWhatsappConfigured(scope);
+  const response = await postGraph(config, buildDispatchAssignmentInteractivePayload({ assignment, phone }), axiosClient);
   const providerMessageId = providerMessageIdFromResponse(response);
   if (!providerMessageId) {
     throw buildDispatchWhatsappError('Meta aceptó la solicitud sin devolver un identificador de mensaje.', 502, 'dispatch_whatsapp_provider_message_missing');

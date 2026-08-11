@@ -106,14 +106,11 @@ export function getDispatchWhatsappCloudConfig(scope = 'operational') {
   if (!config.phoneNumberId) missing.push(envName(prefix, 'PHONE_NUMBER_ID'));
   if (!config.verifyToken) missing.push(envName(prefix, 'VERIFY_TOKEN'));
   if (!config.appSecret) missing.push(envName(prefix, 'APP_SECRET'));
-  if (!config.assignmentTemplateName) missing.push(envName(prefix, 'ASSIGNMENT_TEMPLATE_NAME'));
-  if (definition.requireProgrammingTemplate && !config.programmingTemplateName) missing.push(envName(prefix, 'PROGRAMMING_TEMPLATE_NAME'));
-  if (!config.templateLanguage) missing.push(envName(prefix, 'TEMPLATE_LANGUAGE'));
 
   return { ...config, missing, configured: missing.length === 0 };
 }
 
-export function ensureDispatchWhatsappConfigured(scope = 'operational', { programming = false } = {}) {
+export function ensureDispatchWhatsappConfigured(scope = 'operational', { programming = false, assignmentTemplate = false } = {}) {
   const config = getDispatchWhatsappCloudConfig(scope);
   const definition = dispatchWhatsappScopeDefinition(scope);
   const required = [
@@ -121,11 +118,11 @@ export function ensureDispatchWhatsappConfigured(scope = 'operational', { progra
     ['ACCESS_TOKEN', config.accessToken],
     ['PHONE_NUMBER_ID', config.phoneNumberId],
     ['VERIFY_TOKEN', config.verifyToken],
-    ['APP_SECRET', config.appSecret],
-    ['ASSIGNMENT_TEMPLATE_NAME', config.assignmentTemplateName],
-    ['TEMPLATE_LANGUAGE', config.templateLanguage]
+    ['APP_SECRET', config.appSecret]
   ];
+  if (assignmentTemplate) required.push(['ASSIGNMENT_TEMPLATE_NAME', config.assignmentTemplateName]);
   if (programming) required.push(['PROGRAMMING_TEMPLATE_NAME', config.programmingTemplateName]);
+  if (assignmentTemplate || programming) required.push(['TEMPLATE_LANGUAGE', config.templateLanguage]);
   const missing = required.filter(([, value]) => !value).map(([suffix]) => envName(definition.envPrefix, suffix));
   if (missing.length) {
     throw buildDispatchWhatsappError(
