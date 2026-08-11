@@ -16,7 +16,8 @@ test('el estado de WhatsApp refleja configuración Cloud sin loader, QR ni reini
   assert.match(view, /Configuración incompleta/);
   assert.match(view, /Variables pendientes/);
   assert.match(view, /WhatsApp Business Platform listo/);
-  assert.doesNotMatch(view, /qrImage|waitingQr|Escanea|Chromium|cerrar-sesion/);
+  assert.match(view, /no utiliza WhatsApp Web, códigos QR, Chromium ni dispositivos vinculados/);
+  assert.doesNotMatch(view, /qrImage|waitingQr|Escanea este QR|cerrar-sesion|initDispatch.*WhatsappClient/);
 });
 
 test('solo dev puede ver y persistir la marca de cliente de prueba', () => {
