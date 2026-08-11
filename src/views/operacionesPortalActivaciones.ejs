@@ -44,7 +44,23 @@
     .pill { display:inline-flex; align-items:center; min-height:28px; border-radius:999px; padding:5px 10px; font-size:12px; font-weight:850; }
     .pill-on { background:var(--green-light); color:var(--green); }
     .pill-off { background:#edf1f4; color:#596675; }
-    @media (max-width:640px) { .page { padding:18px 14px 42px; } .actions, .btn { width:100%; } }
+    .confirm-backdrop { position:fixed; inset:0; z-index:10020; display:none; align-items:center; justify-content:center; padding:18px; background:rgba(15,23,42,.52); backdrop-filter:blur(3px); }
+    .confirm-backdrop.is-open { display:flex; }
+    .confirm-card { width:min(460px,100%); overflow:hidden; border:1px solid #e1e6ef; border-radius:22px; background:#fff; box-shadow:0 28px 80px rgba(15,23,42,.28); opacity:0; transform:translateY(8px) scale(.98); transition:opacity .16s ease,transform .16s ease; }
+    .confirm-backdrop.is-open .confirm-card { opacity:1; transform:translateY(0) scale(1); }
+    .confirm-head { display:flex; gap:13px; align-items:flex-start; padding:20px 20px 12px; }
+    .confirm-icon { width:42px; height:42px; flex:0 0 auto; border-radius:999px; display:inline-flex; align-items:center; justify-content:center; font-size:22px; font-weight:900; background:#fef3c7; color:#b45309; }
+    .confirm-backdrop[data-tone="danger"] .confirm-icon { background:#fff1f2; color:#be123c; }
+    .confirm-title { margin:0; color:#172033; font-size:18px; line-height:1.2; font-weight:900; }
+    .confirm-text { margin:7px 0 0; color:#64748b; font-size:13px; line-height:1.5; }
+    .confirm-actions { display:flex; justify-content:flex-end; gap:9px; padding:15px 20px 20px; background:#f8fafc; border-top:1px solid #eef2f7; }
+    .confirm-btn { min-height:38px; border-radius:999px; border:1px solid #d8e0ea; background:#fff; color:#172033; padding:8px 15px; font-weight:900; font-size:13px; cursor:pointer; box-shadow:0 1px 3px rgba(15,23,42,.08); }
+    .confirm-btn:hover { border-color:var(--teal); color:var(--teal); }
+    .confirm-ok { background:var(--teal); border-color:var(--teal); color:#fff; }
+    .confirm-ok:hover { background:var(--teal-hover); border-color:var(--teal-hover); color:#fff; }
+    .confirm-backdrop[data-tone="danger"] .confirm-ok { background:#be123c; border-color:#be123c; }
+    .confirm-backdrop[data-tone="danger"] .confirm-ok:hover { background:#9f1239; border-color:#9f1239; }
+    @media (max-width:640px) { .page { padding:18px 14px 42px; } .actions, .btn { width:100%; } .confirm-actions { display:grid; grid-template-columns:1fr; } .confirm-btn { width:100%; } }
   </style>
 </head>
 <body>
@@ -111,6 +127,22 @@
     </section>
   </main>
 
+  <div id="portal-confirm-dialog" class="confirm-backdrop" data-tone="warning" role="alertdialog" aria-modal="true" aria-labelledby="portal-confirm-title" aria-describedby="portal-confirm-text">
+    <section class="confirm-card">
+      <div class="confirm-head">
+        <div class="confirm-icon" aria-hidden="true">!</div>
+        <div>
+          <h2 class="confirm-title" id="portal-confirm-title">Confirmar acción</h2>
+          <p class="confirm-text" id="portal-confirm-text">¿Deseas continuar?</p>
+        </div>
+      </div>
+      <div class="confirm-actions">
+        <button class="confirm-btn" type="button" data-confirm-cancel>Cancelar</button>
+        <button class="confirm-btn confirm-ok" type="button" data-confirm-ok>Continuar</button>
+      </div>
+    </section>
+  </div>
+
   <script>
     (() => {
       const form = document.getElementById('activation-form');
@@ -125,10 +157,50 @@
       const activationUrl = document.getElementById('activation-url');
       const expiresAt = document.getElementById('expires-at');
       const copyButton = document.getElementById('copy-button');
+      const confirmDialog = document.getElementById('portal-confirm-dialog');
+      const confirmTitle = document.getElementById('portal-confirm-title');
+      const confirmText = document.getElementById('portal-confirm-text');
+      const confirmOk = confirmDialog?.querySelector('[data-confirm-ok]');
+      const confirmCancel = confirmDialog?.querySelector('[data-confirm-cancel]');
 
       function showStatus(message, type) {
         status.textContent = message;
         status.className = `alert ${type === 'success' ? 'alert-success' : type === 'warning' ? 'alert-warning' : 'alert-error'}`;
+      }
+
+      function askConfirmation(options = {}) {
+        if (!confirmDialog || !confirmTitle || !confirmText || !confirmOk || !confirmCancel) return Promise.resolve(false);
+        const previousFocus = document.activeElement;
+        confirmTitle.textContent = options.title || 'Confirmar acción';
+        confirmText.textContent = options.text || '¿Deseas continuar?';
+        confirmOk.textContent = options.confirmLabel || 'Continuar';
+        confirmCancel.textContent = options.cancelLabel || 'Cancelar';
+        confirmDialog.dataset.tone = options.tone === 'danger' ? 'danger' : 'warning';
+        confirmDialog.classList.add('is-open');
+        confirmCancel.focus();
+
+        return new Promise((resolve) => {
+          let settled = false;
+          const close = (value) => {
+            if (settled) return;
+            settled = true;
+            confirmDialog.classList.remove('is-open');
+            confirmOk.removeEventListener('click', accept);
+            confirmCancel.removeEventListener('click', cancel);
+            confirmDialog.removeEventListener('click', backdrop);
+            document.removeEventListener('keydown', escape);
+            if (previousFocus instanceof HTMLElement) previousFocus.focus();
+            resolve(value);
+          };
+          const accept = () => close(true);
+          const cancel = () => close(false);
+          const backdrop = (event) => { if (event.target === confirmDialog) close(false); };
+          const escape = (event) => { if (event.key === 'Escape') close(false); };
+          confirmOk.addEventListener('click', accept);
+          confirmCancel.addEventListener('click', cancel);
+          confirmDialog.addEventListener('click', backdrop);
+          document.addEventListener('keydown', escape);
+        });
       }
 
       function selectedOption() { return workerSelect.options[workerSelect.selectedIndex] || null; }
@@ -159,7 +231,13 @@
         event.preventDefault();
         const workerId = selectedWorkerId();
         if (!workerId) return showStatus('Selecciona un auxiliar.', 'error');
-        if (!window.confirm('Se revocará cualquier enlace pendiente anterior. ¿Continuar?')) return;
+        const confirmed = await askConfirmation({
+          title: 'Generar nuevo enlace',
+          text: 'Se revocará cualquier enlace pendiente anterior para este auxiliar.',
+          confirmLabel: 'Sí, generar enlace',
+          tone: 'warning'
+        });
+        if (!confirmed) return;
         generateButton.disabled = true;
         result.classList.add('hidden');
         showStatus('Generando enlace…', 'warning');
@@ -185,7 +263,14 @@
       });
 
       revokeButton.addEventListener('click', async () => {
-        if (!selectedWorkerId() || !window.confirm('¿Eliminar la plantilla facial de este auxiliar?')) return;
+        if (!selectedWorkerId()) return;
+        const confirmed = await askConfirmation({
+          title: 'Eliminar rostro registrado',
+          text: 'Se eliminará la plantilla facial vigente. El auxiliar deberá registrar nuevamente su rostro desde el portal.',
+          confirmLabel: 'Sí, eliminar rostro',
+          tone: 'danger'
+        });
+        if (!confirmed) return;
         revokeButton.disabled = true;
         try {
           const response = await fetch('/admin/operaciones/portal-activaciones/biometria/revocar', {
