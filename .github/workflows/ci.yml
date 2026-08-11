@@ -52,8 +52,6 @@ jobs:
       OPENAI_ENABLED: "false"
       FF_RESPONSES_EXTRACTOR: "false"
       USE_CONVERSATION_ENGINE: "false"
-      DISPATCH_WWEB_AUTO_START: "false"
-      PUPPETEER_SKIP_DOWNLOAD: "true"
 
     steps:
       - name: Check out repository
@@ -100,8 +98,6 @@ jobs:
       OPENAI_ENABLED: "false"
       FF_RESPONSES_EXTRACTOR: "false"
       USE_CONVERSATION_ENGINE: "false"
-      DISPATCH_WWEB_AUTO_START: "false"
-      PUPPETEER_SKIP_DOWNLOAD: "true"
 
     steps:
       - name: Check out repository
