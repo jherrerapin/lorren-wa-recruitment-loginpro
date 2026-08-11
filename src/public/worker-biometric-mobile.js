@@ -455,13 +455,11 @@
       consecutiveFront += 1;
       const scores = biometricScores(detected.face);
       if (scores.realScore < MIN_REAL_SCORE) {
-        consecutiveFront = 0;
         onStatus?.('Validando que sea un rostro real…');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
       }
       if (scores.liveScore < MIN_LIVE_SCORE) {
-        consecutiveFront = 0;
         onStatus?.('Mueve ligeramente el rostro y vuelve al centro.');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
