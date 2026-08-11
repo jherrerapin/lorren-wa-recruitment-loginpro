@@ -63,6 +63,41 @@ function strictError(res, status, error, message) {
   return res.status(status).json({ ok: false, error, message });
 }
 
+function requireStrictAttendanceLocation(res, point, input = {}) {
+  const latitude = finiteNumber(input.latitude, { min: -90, max: 90 });
+  const longitude = finiteNumber(input.longitude, { min: -180, max: 180 });
+  const accuracyMeters = finiteNumber(input.accuracyMeters, { min: 0, max: 100_000 });
+  if (latitude === null || longitude === null || accuracyMeters === null) {
+    strictError(res, 400, 'mark_request_invalid', 'No fue posible validar la ubicación.');
+    return null;
+  }
+
+  const pointLatitude = finiteNumber(point?.attendanceLatitude, { min: -90, max: 90 });
+  const pointLongitude = finiteNumber(point?.attendanceLongitude, { min: -180, max: 180 });
+  const radiusMeters = finiteNumber(point?.geofenceRadiusMeters, { min: 1, max: 100_000 });
+  if (pointLatitude === null || pointLongitude === null || radiusMeters === null) {
+    strictError(res, 409, 'operation_geofence_required', 'La operación no tiene una geocerca válida configurada.');
+    return null;
+  }
+
+  const maxAccuracyMeters = finiteNumber(point?.maxLocationAccuracyMeters, { min: 1, max: 100_000 }) ?? 100;
+  if (accuracyMeters > maxAccuracyMeters) {
+    strictError(res, 409, 'location_accuracy_insufficient', 'La precisión del GPS no es suficiente. Intenta nuevamente al aire libre.');
+    return null;
+  }
+
+  const distanceMeters = calculateAttendanceDistanceMeters(
+    { latitude: pointLatitude, longitude: pointLongitude },
+    { latitude, longitude }
+  );
+  if (isAttendanceInsideGeofence(distanceMeters, radiusMeters) !== true) {
+    strictError(res, 409, 'outside_operation_range', 'Debes estar dentro del rango de la operación para marcar asistencia.');
+    return null;
+  }
+
+  return { latitude, longitude, accuracyMeters, distanceMeters };
+}
+
 function setBiometricRetryAfter(res, error) {
   const seconds = Number(error?.retryAfterSeconds || 0);
   if (Number.isFinite(seconds) && seconds > 0) res.set('Retry-After', String(Math.ceil(seconds)));
@@ -252,16 +287,10 @@ export function workerPortalRouter(prisma, options = {}) {
 
       const markType = markTypeFromPath(req.path);
       const idempotencyKey = normalizedString(req.body?.idempotencyKey, 120);
-      const latitude = finiteNumber(req.body?.latitude, { min: -90, max: 90 });
-      const longitude = finiteNumber(req.body?.longitude, { min: -180, max: 180 });
-      const accuracyMeters = finiteNumber(req.body?.accuracyMeters, { min: 0, max: 100_000 });
       const captureMode = normalizedString(req.body?.captureMode, 40)?.toUpperCase();
       if (
         !markType
         || !idempotencyKey
-        || latitude === null
-        || longitude === null
-        || accuracyMeters === null
         || ![ONLINE_WEB_CAPTURE_MODE, OFFLINE_WEB_CAPTURE_MODE].includes(captureMode)
       ) {
         return strictError(res, 400, 'mark_request_invalid', 'No fue posible validar la ubicación o el modo de captura.');
@@ -279,26 +308,8 @@ export function workerPortalRouter(prisma, options = {}) {
         return strictError(res, 409, 'assignment_not_available', 'La operación no está disponible para marcar asistencia.');
       }
 
-      const point = assignment.serviceRequest.operationPoint;
-      const pointLatitude = finiteNumber(point.attendanceLatitude, { min: -90, max: 90 });
-      const pointLongitude = finiteNumber(point.attendanceLongitude, { min: -180, max: 180 });
-      const radiusMeters = finiteNumber(point.geofenceRadiusMeters, { min: 1, max: 100_000 });
-      if (pointLatitude === null || pointLongitude === null || radiusMeters === null) {
-        return strictError(res, 409, 'operation_geofence_required', 'La operación no tiene una geocerca válida configurada.');
-      }
-
-      const maxAccuracyMeters = finiteNumber(point.maxLocationAccuracyMeters, { min: 1, max: 100_000 }) ?? 100;
-      if (accuracyMeters > maxAccuracyMeters) {
-        return strictError(res, 409, 'location_accuracy_insufficient', 'La precisión del GPS no es suficiente. Intenta nuevamente al aire libre.');
-      }
-
-      const distanceMeters = calculateAttendanceDistanceMeters(
-        { latitude: pointLatitude, longitude: pointLongitude },
-        { latitude, longitude }
-      );
-      if (isAttendanceInsideGeofence(distanceMeters, radiusMeters) !== true) {
-        return strictError(res, 409, 'outside_operation_range', 'Debes estar dentro del rango de la operación para marcar asistencia.');
-      }
+      const location = requireStrictAttendanceLocation(res, assignment.serviceRequest.operationPoint, req.body);
+      if (!location) return;
 
       if (BIOMETRIC_MARK_TYPES.has(markType) && captureMode === ONLINE_WEB_CAPTURE_MODE) {
         const event = await prisma.devAuditEvent.findFirst({
@@ -331,7 +342,7 @@ export function workerPortalRouter(prisma, options = {}) {
         workerId: portalSession.workerId,
         markType,
         captureMode,
-        distanceMeters,
+        distanceMeters: location.distanceMeters,
         insideGeofence: true,
         requiresReview: captureMode === OFFLINE_WEB_CAPTURE_MODE
       };
@@ -437,6 +448,12 @@ export function workerPortalRouter(prisma, options = {}) {
       if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
       const context = await requireBiometricAssignment(req, res, portalSession, now);
       if (!context) return;
+      const location = requireStrictAttendanceLocation(
+        res,
+        context.assignment.serviceRequest.operationPoint,
+        req.body
+      );
+      if (!location) return;
       const enrollment = await getEnrollmentFn(portalSession.workerId);
       if (!hasCurrentBiometricEnrollment(enrollment)) {
         return strictError(res, 409, 'biometric_enrollment_required', 'Debes renovar el registro facial antes de marcar.');

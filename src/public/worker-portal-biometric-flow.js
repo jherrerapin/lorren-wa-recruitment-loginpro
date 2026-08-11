@@ -48,6 +48,13 @@
     'biometric_baseline_timeout',
     'biometric_final_timeout'
   ]);
+  const LOCATION_PREFLIGHT_ERRORS = new Set([
+    'attendance_location_pending',
+    'mark_request_invalid',
+    'operation_geofence_required',
+    'location_accuracy_insufficient',
+    'outside_operation_range'
+  ]);
 
   let biometricReady = false;
   let enrollmentStream = null;
@@ -188,6 +195,11 @@
       attendance_biometric_liveness_low: 'No se confirmó vida facial en todas las muestras.',
       attendance_biometric_samples_inconsistent: 'Las muestras cambiaron demasiado durante la validación.',
       attendance_biometric_rate_limited: 'Se alcanzó el límite temporal de intentos. Espera antes de volver a intentar.',
+      attendance_location_pending: 'Espera a que la ubicación esté lista antes de iniciar la cámara.',
+      mark_request_invalid: 'No fue posible validar la ubicación. Actualízala e intenta nuevamente.',
+      operation_geofence_required: 'La operación no tiene una geocerca válida configurada.',
+      location_accuracy_insufficient: 'La precisión del GPS no es suficiente. Intenta nuevamente al aire libre.',
+      outside_operation_range: 'Debes estar dentro del rango de la operación para marcar asistencia.',
       biometric_enrollment_required: 'Debes registrar nuevamente tu rostro antes de marcar.',
       portal_session_required: 'Tu sesión del portal venció.',
       assignment_not_available: 'La asignación ya no está disponible para marcar.',
@@ -195,6 +207,32 @@
       biometric_challenge_failed: 'No fue posible iniciar la validación facial.'
     };
     return messages[code] || 'No fue posible confirmar tu identidad.';
+  }
+
+  function biometricRejectionMessage(error) {
+    const flags = Array.isArray(error?.payload?.riskFlags)
+      ? error.payload.riskFlags.map((flag) => String(flag))
+      : [];
+    const messages = [
+      ['BIOMETRIC_DESCRIPTOR_REPLAY', 'Se requiere una captura nueva en vivo. Vuelve a realizar la validación con la cámara.'],
+      ['BIOMETRIC_ANTISPOOF_LOW', 'No se confirmó que la captura corresponda a un rostro real. Usa la cámara en vivo y buena iluminación.'],
+      ['BIOMETRIC_LIVENESS_LOW', 'No se confirmó vida facial en todas las muestras. Mira de frente y sigue el movimiento indicado.'],
+      ['BIOMETRIC_SAMPLES_INCONSISTENT', 'Las muestras cambiaron demasiado. Mantén el rostro centrado y estable durante la validación.'],
+      ['BIOMETRIC_CHALLENGE_NOT_COMPLETED', 'No se confirmó el movimiento solicitado. Sigue la indicación y vuelve al centro.'],
+      ['BIOMETRIC_CHALLENGE_EXPIRED', 'La validación facial venció antes de terminar. Inicia un nuevo intento.'],
+      ['BIOMETRIC_CHALLENGE_INVALID', 'La validación facial perdió vigencia. Inicia un nuevo intento.'],
+      ['BIOMETRIC_CHALLENGE_EVIDENCE_INVALID', 'No se pudo validar correctamente el movimiento facial. Sigue la indicación y vuelve a intentarlo.'],
+      ['BIOMETRIC_FACE_MISMATCH', 'El rostro capturado no coincidió suficientemente con el registro. Mira de frente, usa iluminación uniforme y vuelve a intentarlo.'],
+      ['BIOMETRIC_EVIDENCE_INVALID', 'La captura facial no pudo validarse correctamente. Mantén el rostro visible y vuelve a intentarlo.'],
+      ['BIOMETRIC_DESCRIPTOR_INVALID', 'No se pudieron leer correctamente los rasgos del rostro. Mira de frente y vuelve a intentarlo.'],
+      ['BIOMETRIC_NOT_ENROLLED', 'No existe un registro facial vigente. Debes registrar nuevamente tu rostro antes de marcar.'],
+      ['BIOMETRIC_TEMPLATE_UNAVAILABLE', 'El registro facial no está disponible. Debes renovarlo antes de marcar.'],
+      ['BIOMETRIC_ENROLLMENT_UPGRADE_REQUIRED', 'Debes renovar el registro facial antes de marcar.']
+    ];
+    for (const [flag, message] of messages) {
+      if (flags.includes(flag)) return message;
+    }
+    return 'No se confirmó la identidad en este intento. Mira de frente, usa buena iluminación y vuelve a intentarlo.';
   }
 
   function currentRateLimitContext() {
@@ -424,6 +462,14 @@
       };
       locationStatus.textContent = `Ubicación lista · precisión ${Math.round(position.coords.accuracy)} m`;
       updateSubmitState();
+      if (
+        isBiometricMark()
+        && photoConsent?.checked
+        && !verificationInProgress
+        && activeRateLimitSeconds() <= 0
+      ) {
+        runAutomaticVerification();
+      }
     }, (error) => {
       if (localRunToken !== runToken || !dialog.open) return;
       locationStatus.textContent = error?.code === 1
@@ -438,11 +484,16 @@
   }
 
   async function requestBiometricChallenge() {
+    if (!state.locationEvidence) throw new Error('attendance_location_pending');
     state.idempotencyKey = newIdempotencyKey();
     const payload = await portalBiometricRequest('desafio', {
       assignmentId: state.assignmentId,
       markType: state.markType,
-      idempotencyKey: state.idempotencyKey
+      idempotencyKey: state.idempotencyKey,
+      latitude: state.locationEvidence.latitude,
+      longitude: state.locationEvidence.longitude,
+      accuracyMeters: state.locationEvidence.accuracyMeters,
+      clientCapturedAt: state.locationEvidence.clientCapturedAt
     });
     if (!payload.challenge) throw new Error('biometric_challenge_failed');
     state.biometricChallenge = payload.challenge;
@@ -582,6 +633,10 @@
       photoConsent?.focus({ preventScroll: true });
       return;
     }
+    if (!state.locationEvidence) {
+      setStatus('Esperando una ubicación válida antes de abrir la cámara…', 'neutral');
+      return;
+    }
 
     const localRunToken = runToken;
     verificationInProgress = true;
@@ -615,14 +670,19 @@
       clearVerification();
       clearPhoto();
       const code = errorCode(lastError);
+      const locationRejected = LOCATION_PREFLIGHT_ERRORS.has(code);
+      if (locationRejected) {
+        state.locationEvidence = null;
+        if (locationStatus) locationStatus.textContent = publicErrorMessage(lastError);
+      }
       const message = code === 'biometric_verification_rejected'
-        ? 'No se confirmó la identidad en este intento. Mira de frente, usa buena iluminación y vuelve a intentarlo.'
-        : `${publicErrorMessage(lastError)} Puedes intentar nuevamente.`;
+        ? biometricRejectionMessage(lastError)
+        : `${publicErrorMessage(lastError)}${locationRejected ? '' : ' Puedes intentar nuevamente.'}`;
       setStatus(message, 'danger');
       if (retryBiometricButton) {
         retryBiometricButton.hidden = false;
         retryBiometricButton.disabled = false;
-        retryBiometricButton.textContent = 'Intentar nuevamente';
+        retryBiometricButton.textContent = locationRejected ? 'Actualizar ubicación' : 'Intentar nuevamente';
         retryBiometricButton.focus({ preventScroll: true });
       }
     } finally {
@@ -862,6 +922,10 @@
   retryBiometricButton?.addEventListener('click', () => {
     if (activeRateLimitSeconds() > 0) {
       startRateLimitCountdown();
+      return;
+    }
+    if (!state.locationEvidence) {
+      requestLocation(runToken);
       return;
     }
     runAutomaticVerification();
