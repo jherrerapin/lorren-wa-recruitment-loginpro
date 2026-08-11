@@ -6,17 +6,18 @@ function read(path) {
   return fs.readFileSync(path, 'utf8');
 }
 
-test('el estado de WhatsApp recupera una inicialización atascada y no mantiene el cargador cuando existe error', () => {
-  const service = read('src/services/dispatchWhatsappWebService.js');
+test('el estado de WhatsApp refleja configuración Cloud sin loader, QR ni reinicios de Chromium', () => {
+  const config = read('src/services/dispatchWhatsappCloudConfig.js');
   const view = read('src/views/operacionesWhatsappEstado.ejs');
 
-  assert.match(service, /STALLED_INITIALIZATION_ERROR/);
-  assert.match(service, /async function recoverStalledInitialization/);
-  assert.match(service, /await recoverStalledInitialization\(status, 'status-view'\)/);
-  assert.match(service, /await restartDispatchWhatsappClient\(`stalled:\$\{reason\}`\)/);
-  assert.match(service, /lastError: status\.lastError \|\| stalledInitializationError/);
-  assert.match(view, /setHidden\(waitingQr, data\.ready \|\| Boolean\(data\.qrImage\) \|\| hasError\)/);
-  assert.match(view, /setHidden\(unavailableBox, data\.ready \|\| Boolean\(data\.qrImage\) \|\| !hasError\)/);
+  assert.match(config, /provider: 'META_CLOUD_API'/);
+  assert.match(config, /configured: config\.configured/);
+  assert.match(config, /missingConfiguration: config\.missing/);
+  assert.match(view, /Configuración incompleta/);
+  assert.match(view, /Variables pendientes/);
+  assert.match(view, /WhatsApp Business Platform listo/);
+  assert.match(view, /no utiliza WhatsApp Web, códigos QR, Chromium ni dispositivos vinculados/);
+  assert.doesNotMatch(view, /qrImage|waitingQr|Escanea este QR|cerrar-sesion|initDispatch.*WhatsappClient/);
 });
 
 test('solo dev puede ver y persistir la marca de cliente de prueba', () => {

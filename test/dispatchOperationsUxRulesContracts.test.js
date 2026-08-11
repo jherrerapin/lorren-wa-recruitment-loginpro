@@ -11,7 +11,9 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   const clientOpsView = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
   const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
   const workerFormView = fs.readFileSync('src/views/operacionesPersonalNuevo.ejs', 'utf8');
-  const assignmentsView = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
+  const assignmentsView = fs.readFileSync('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8');
+  const legacyAssignmentsView = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
+  const requestCreateView = fs.readFileSync('src/views/operacionesSolicitudes.ejs', 'utf8');
   const operationsSummaryView = fs.readFileSync('src/views/dispatch/operations-summary.ejs', 'utf8');
   const requestsSummaryView = fs.readFileSync('src/views/operacionesSolicitudesResumen.ejs', 'utf8');
   const editRequestView = fs.readFileSync('src/views/operacionesSolicitudEditar.ejs', 'utf8');
@@ -27,8 +29,8 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
 
   assert.match(publicRequestView, /id="startTime" type="time" name="startTime"/);
   assert.match(publicRequestView, /id="endTime" type="time" name="endTime"/);
-  assert.match(assignmentsView, /type="time" name="startTime"/);
-  assert.match(assignmentsView, /type="time" name="endTime"/);
+  assert.match(requestCreateView, /type="time" name="startTime"/);
+  assert.match(requestCreateView, /type="time" name="endTime"/);
   assert.match(editRequestView, /id="startTime" type="time" name="startTime"/);
   assert.match(editRequestView, /id="endTime" type="time" name="endTime"/);
   assert.match(publicRoute, /TIME_HH_MM_PATTERN/);
@@ -69,6 +71,7 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(personalView, /<th>Estado<\/th>/);
   assert.match(personalView, /operationalStatus === 'CONTRATADO'/);
 
+  assert.match(legacyAssignmentsView, /include\('operacionesAsignacionesConfirmacion'/);
   for (const view of [assignmentsView, operationsSummaryView, requestsSummaryView]) {
     assert.doesNotMatch(view, /\b(?:window\.)?alert\s*\(/, 'Operaciones no debe usar alertas nativas del navegador.');
     assert.match(view, /showToast\s*\(/, 'La vista debe usar una notificación visual controlada por la aplicación.');

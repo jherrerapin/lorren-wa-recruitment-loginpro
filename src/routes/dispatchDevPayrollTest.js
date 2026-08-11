@@ -14,11 +14,9 @@ import {
 } from '../services/testWorkspaceFeatureAccess.js';
 import { loadTestWorkspacePayrollReport } from '../services/testWorkspacePayrollReport.js';
 import {
-  closeDispatchTestWhatsappSession,
   getDispatchTestWhatsappStatusView,
-  initDispatchTestWhatsappClient,
   sendDispatchTestWhatsappMessage
-} from '../services/dispatchWhatsappWebTestService.js';
+} from '../services/dispatchWhatsappTestService.js';
 
 const ACTIVE_DEV_TEST_ASSIGNMENT_STATUSES = ['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED'];
 
@@ -213,44 +211,40 @@ export function dispatchDevPayrollTestRouter(prisma) {
 
   router.get('/whatsapp', requireDev, async (req, res) => {
     noStore(res);
-    initDispatchTestWhatsappClient();
-    const status = await getDispatchTestWhatsappStatusView({ autoStart: false });
+    const status = await getDispatchTestWhatsappStatusView();
     return res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de pruebas de despacho', role: 'dev', message: normalizeString(req.query?.message),
       isDev: true, technicalLastError: status.lastError || null, ...status,
-      whatsappTitle: 'WhatsApp de pruebas de despacho', whatsappEyebrow: 'Entorno aislado DEV',
-      whatsappDescription: 'Vincula una cuenta distinta a la línea operativa para probar envíos y confirmaciones.',
+      whatsappTitle: 'WhatsApp oficial de pruebas de despacho', whatsappEyebrow: 'Entorno aislado DEV',
+      whatsappDescription: 'Integración oficial de prueba con un Phone Number ID distinto al operativo. No usa QR, navegador automatizado ni dispositivos vinculados.',
       whatsappBasePath: '/admin/operaciones/pruebas/whatsapp', whatsappReturnHref: '/admin/operaciones/pruebas',
       whatsappReturnLabel: 'Volver al entorno de pruebas', whatsappAssignmentsHref: '/admin/operaciones/pruebas',
-      whatsappAssignmentsLabel: 'Asignaciones de prueba',
-      whatsappCloseConfirm: '¿Cerrar únicamente la sesión de WhatsApp de pruebas? La cuenta operativa no se modificará.',
-      whatsappQrInstruction: 'Escanea este QR desde la cuenta secundaria que usarás exclusivamente para las pruebas.'
+      whatsappAssignmentsLabel: 'Asignaciones de prueba'
     });
   });
 
-  router.get('/whatsapp/estado', requireDev, async (req, res) => {
+  router.get('/whatsapp/estado', requireDev, async (_req, res) => {
     noStore(res);
-    const shouldStart = !['0', 'false'].includes(String(req.query?.start || '').toLowerCase());
-    const status = await getDispatchTestWhatsappStatusView({ autoStart: shouldStart });
+    const status = await getDispatchTestWhatsappStatusView();
     return res.json({ ok: true, isDev: true, technicalLastError: status.lastError || null, ...status });
-  });
-
-  router.post('/whatsapp/cerrar-sesion', requireDev, async (_req, res) => {
-    noStore(res);
-    await closeDispatchTestWhatsappSession();
-    const message = encodeURIComponent('Sesión de WhatsApp de pruebas cerrada. La cuenta operativa continúa sin cambios.');
-    return res.redirect(`/admin/operaciones/pruebas/whatsapp?message=${message}`);
   });
 
   router.post('/whatsapp/enviar', requireDev, jsonParser, async (req, res) => {
     noStore(res);
     try {
       const result = await sendDispatchTestWhatsappMessage({
-        phone: req.body?.phone, message: req.body?.message, context: normalizeWhatsappContext(req.body?.context)
+        phone: req.body?.phone, context: normalizeWhatsappContext(req.body?.context)
       });
-      return res.json({ ok: true, providerMessageId: result.providerMessageId, phone: result.phone });
+      return res.json({
+        ok: true,
+        provider: result.provider,
+        providerMessageId: result.providerMessageId,
+        phone: result.phone,
+        templateName: result.templateName
+      });
     } catch (error) {
-      const statusCode = error?.statusCode === 503 ? 503 : 400;
+      const rawStatusCode = Number(error?.statusCode || 0);
+      const statusCode = rawStatusCode >= 400 && rawStatusCode <= 599 ? rawStatusCode : 500;
       return res.status(statusCode).json({ ok: false, message: error?.message || 'No se pudo enviar el WhatsApp de prueba.' });
     }
   });
@@ -318,7 +312,10 @@ export function dispatchDevPayrollTestRouter(prisma) {
         ]);
       }
       await prisma.dispatchWhatsappConfirmation.updateMany({
-        where: { assignmentId: assignment.id, status: { in: ['PENDING', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'] } },
+        where: {
+          assignmentId: assignment.id,
+          status: { in: ['PENDING', 'SENT', 'DELIVERED', 'READ', 'DELIVERY_UNKNOWN', 'CONFIRMED_REPLY_PENDING'] }
+        },
         data: { status: 'EXPIRED' }
       });
       await prisma.dispatchAssignment.delete({ where: { id: assignment.id } });

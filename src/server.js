@@ -15,6 +15,7 @@ import { dispatchOpsExtrasRouter } from './routes/dispatchOpsExtras.js';
 import { dispatchWorkerStatsRouter } from './routes/dispatchWorkerStats.js';
 import { dispatchBridgeRouter } from './routes/dispatchBridge.js';
 import { dispatchWhatsappNotificationsRouter } from './routes/dispatchWhatsappNotifications.js';
+import { dispatchWhatsappWebhookRouter } from './routes/dispatchWhatsappWebhook.js';
 import { dispatchProgrammingNotificationsRouter } from './routes/dispatchProgrammingNotifications.js';
 import { publicDispatchClientRouter } from './routes/publicDispatchClient.js';
 import { workerPortalRouter } from './routes/workerPortal.js';
@@ -419,6 +420,7 @@ app.use((req, res, next) => {
 });
 app.use(morgan('combined'));
 app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
+app.use('/webhook/dispatch', dispatchWhatsappWebhookRouter(prisma));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 

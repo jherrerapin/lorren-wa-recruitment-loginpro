@@ -7,11 +7,13 @@ function readSource(path) {
 }
 
 test('operacionesAsignaciones ui board contracts', () => {
-  const view = readSource('src/views/operacionesAsignaciones.ejs');
+  const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
+  const legacyView = readSource('src/views/operacionesAsignaciones.ejs');
+  assert.match(legacyView, /include\('operacionesAsignacionesConfirmacion'/);
   assert.match(view, /board-layout/);
-  assert.match(view, /workers-panel/);
-  assert.match(view, /requests-panel/);
-  assert.match(view, /assignment-panel/);
+  assert.match(view, /Auxiliares disponibles/);
+  assert.match(view, /Solicitudes de servicio/);
+  assert.match(view, /<h2>Asignación<\/h2>/);
   assert.match(view, /assignmentDropZone/);
   assert.match(view, /draggable="true"/);
   assert.match(view, /data-worker-id/);

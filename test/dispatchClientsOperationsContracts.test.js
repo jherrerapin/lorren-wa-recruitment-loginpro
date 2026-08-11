@@ -8,7 +8,8 @@ test('dispatch clients operations contracts', () => {
   const coreRoute = fs.readFileSync('src/routes/dispatchBridgeCore.js', 'utf8');
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
   const server = fs.readFileSync('src/server.js', 'utf8');
-  const view = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
+  const view = fs.readFileSync('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8');
+  const legacyView = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
 
   assert.match(schema, /model DispatchClient/);
   assert.match(schema, /model DispatchOperationPoint/);
@@ -31,8 +32,9 @@ test('dispatch clients operations contracts', () => {
   assert.match(server, /app\.use\('\/admin\/operaciones', wrapAsyncRouter\(dispatchOpsExtrasRouter\(prisma\)\)\)/);
   assert.match(server, /app\.use\('\/admin\/operaciones', dispatchErrorHandler\('\/admin\/operaciones'\)\)/);
 
-  ['worker-list', 'max-height', 'request-list', 'Clientes', 'Crear solicitud', 'Crear solicitud interna'].forEach((s) => assert.match(view, new RegExp(s)));
+  ['worker-list', 'max-height', 'request-list', 'Clientes', 'Crear solicitud'].forEach((s) => assert.match(view, new RegExp(s)));
   assert.match(view, /overflow-y:\s*auto/);
+  assert.match(legacyView, /include\('operacionesAsignacionesConfirmacion'/);
 
   const clientsView = fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8');
   const clientOpsView = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
@@ -57,10 +59,11 @@ test('dispatch action labels describe their actual destinations', () => {
   const clientOperations = fs.readFileSync('src/views/operacionesClienteOperaciones.ejs', 'utf8');
   const creationLink = /href="\/admin\/operaciones\/solicitudes">Crear solicitud<\/a>/;
 
-  [dashboard, clients, assignment, legacyAssignment].forEach((view) => {
+  [dashboard, clients, assignment].forEach((view) => {
     assert.match(view, creationLink);
     assert.doesNotMatch(view, /href="\/admin\/operaciones\/solicitudes">Solicitudes de servicio<\/a>/);
   });
+  assert.match(legacyAssignment, /include\('operacionesAsignacionesConfirmacion'/);
   assert.match(dashboard, /Abre el formulario para registrar una nueva solicitud operativa\./);
   assert.match(clientOperations, /href="\/admin\/operaciones\/asignaciones">Ir a asignación<\/a>/);
 });
