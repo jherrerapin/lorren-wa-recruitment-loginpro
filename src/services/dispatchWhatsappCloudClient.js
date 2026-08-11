@@ -35,13 +35,10 @@ function assignmentTemplateValues(assignment) {
   const request = assignment.serviceRequest || {};
   return [
     parameterText(assignment.worker?.fullName, 'Auxiliar'),
-    parameterText(request.clientName),
+    parameterText(formatServiceDate(request.serviceDate)),
     parameterText(request.operationPointName || request.serviceName || 'Operación LoginPro'),
     parameterText(request.address || request.operationPoint?.address),
-    parameterText(request.cityName || request.operationPoint?.cityName),
-    parameterText(formatServiceDate(request.serviceDate)),
-    parameterText(hourLabel(request.startTime)),
-    parameterText(request.serviceName || 'Apoyo operativo')
+    parameterText(hourLabel(request.startTime))
   ];
 }
 
