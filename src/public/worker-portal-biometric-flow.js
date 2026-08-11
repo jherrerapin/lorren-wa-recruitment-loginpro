@@ -180,7 +180,8 @@
       camera_stream_unavailable: 'La cámara no entregó imagen. Cierra otras aplicaciones que puedan estar usándola.',
       camera_stream_muted: 'La cámara quedó pausada por el teléfono. Vuelve a intentarlo con la pantalla activa.',
       biometric_page_not_visible: 'Mantén esta pantalla visible durante la validación.',
-      biometric_runtime_unavailable: 'El reconocimiento facial se reinició, pero no pudo quedar listo.',
+      biometric_runtime_preparing: 'El reconocimiento facial todavía se está preparando en este teléfono. Espera unos segundos.',
+      biometric_runtime_unavailable: 'El reconocimiento facial no pudo quedar listo.',
       biometric_detection_timeout: 'El análisis facial se demoró demasiado y fue reiniciado.',
       biometric_enrollment_timeout: 'No se obtuvieron tres capturas válidas para registrar el rostro.',
       biometric_capture_timeout: 'No se obtuvo una captura estable dentro del tiempo disponible.',
@@ -361,6 +362,7 @@
       if (status.enrolled) {
         closeEnrollmentDialog();
         setButtonsReady(true);
+        biometricApi?.prepare?.().catch(() => {});
         return;
       }
 
@@ -671,6 +673,7 @@
       clearPhoto();
       const code = errorCode(lastError);
       const locationRejected = LOCATION_PREFLIGHT_ERRORS.has(code);
+      const runtimePreparing = code === 'biometric_runtime_preparing';
       if (locationRejected) {
         state.locationEvidence = null;
         if (locationStatus) locationStatus.textContent = publicErrorMessage(lastError);
@@ -678,7 +681,7 @@
       const message = code === 'biometric_verification_rejected'
         ? biometricRejectionMessage(lastError)
         : `${publicErrorMessage(lastError)}${locationRejected ? '' : ' Puedes intentar nuevamente.'}`;
-      setStatus(message, 'danger');
+      setStatus(message, runtimePreparing ? 'warning' : 'danger');
       if (retryBiometricButton) {
         retryBiometricButton.hidden = false;
         retryBiometricButton.disabled = false;
