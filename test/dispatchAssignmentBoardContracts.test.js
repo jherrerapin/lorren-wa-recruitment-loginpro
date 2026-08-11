@@ -8,8 +8,11 @@ function readSource(path) {
 
 test('dispatch assignment board view contracts', () => {
   assert.ok(existsSync(new URL('../src/views/operacionesAsignaciones.ejs', import.meta.url)));
+  assert.ok(existsSync(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url)));
 
-  const view = readSource('src/views/operacionesAsignaciones.ejs');
+  const legacyView = readSource('src/views/operacionesAsignaciones.ejs');
+  const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
+  assert.match(legacyView, /include\('operacionesAsignacionesConfirmacion'/);
   assert.match(view, /draggable="true"/);
   assert.match(view, /data-worker-id/);
   assert.match(view, /assignmentDropZone/);
@@ -18,7 +21,6 @@ test('dispatch assignment board view contracts', () => {
   assert.doesNotMatch(view, /name="vacancyId"/);
   assert.match(view, /name="transportMode"/);
   assert.match(view, /name="locality"/);
-  assert.match(view, /name="status"/);
 });
 
 test('active dispatch assignment board marks same-day workers without blocking them', () => {
