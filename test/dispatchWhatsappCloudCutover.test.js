@@ -24,11 +24,11 @@ test('el lockfile no conserva el runtime retirado de WhatsApp Web', () => {
   }
 });
 
-test('el tablero de asignaciones usa la plantilla oficial y no mensajes libres', () => {
+test('el tablero conserva el envío de WhatsApp y usa el transporte oficial de Meta', () => {
   const view = read('src/views/operacionesAsignacionesConfirmacion.ejs');
 
   assert.match(view, /WhatsApp oficial de despacho/);
-  assert.match(view, /Enviar plantilla a todos/);
+  assert.match(view, /Enviar WhatsApp a todos/);
   assert.match(view, /JSON\.stringify\(\{phone,context\}\)/);
 
   for (const legacyPattern of [
@@ -65,18 +65,17 @@ test('los destinatarios de programación se configuran por entorno y no por cód
   }
 });
 
-
-test('la confirmación operativa queda bajo autoridad del webhook oficial', () => {
+test('la migración conserva la confirmación operativa manual además de la confirmación por webhook', () => {
   const opsRoutes = read('src/routes/dispatchOpsExtras.js');
   const audit = read('src/services/dispatchAuditMiddleware.js');
   const webhook = read('src/services/dispatchWhatsappWebhookService.js');
   const view = read('src/views/operacionesAsignacionesConfirmacion.ejs');
 
-  assert.doesNotMatch(opsRoutes, /DISPATCH_ASSIGNMENT_WHATSAPP|DEFAULT_ASSIGNMENT_TEMPLATE|dispatchMessageTemplate/);
-  assert.doesNotMatch(opsRoutes, /\/asignaciones\/confirmar|\/api\/asignacion-template|\/asignaciones\/template/);
-  assert.doesNotMatch(audit, /\/asignaciones\/confirmar|DISPATCH_ASSIGNMENT_CONFIRM/);
-  assert.doesNotMatch(view, /data-async-assignment-action="confirmar"|\/asignaciones\/confirmar/);
+  assert.match(opsRoutes, /\/asignaciones\/confirmar/);
+  assert.match(audit, /DISPATCH_ASSIGNMENT_CONFIRM/);
+  assert.match(view, /data-async-assignment-action="confirmar"/);
   assert.match(webhook, /recalculateDispatchServiceRequestStatus/);
   assert.match(webhook, /sendDispatchCompletionEmail/);
-  assert.match(view, /data-async-assignment-action="no-confirmado"/);
+  assert.match(view, /Enviar WhatsApp a todos/);
+  assert.match(view, /JSON\.stringify\(\{phone,context\}\)/);
 });

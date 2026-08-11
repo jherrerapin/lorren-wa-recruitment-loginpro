@@ -60,6 +60,7 @@ function inferAction(req) {
   if (path.includes('/pruebas')) return 'DISPATCH_DEV_TEST_CHANGE';
   if (path.includes('/whatsapp/enviar')) return 'DISPATCH_WHATSAPP_SEND';
   if (path.includes('/asignaciones/assign')) return 'DISPATCH_ASSIGNMENT_CREATE';
+  if (path.includes('/asignaciones/confirmar')) return 'DISPATCH_ASSIGNMENT_CONFIRM';
   if (path.includes('/asignaciones/no-confirmado')) return 'DISPATCH_ASSIGNMENT_NO_CONFIRM';
   if (path.includes('/asignaciones/unassign')) return 'DISPATCH_ASSIGNMENT_REMOVE';
   if (path.includes('/solicitudes') && path.includes('/eliminar')) return 'DISPATCH_SERVICE_REQUEST_DELETE';

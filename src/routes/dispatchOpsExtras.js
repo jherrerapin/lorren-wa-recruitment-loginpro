@@ -1,6 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import ExcelJS from 'exceljs';
+import { sendDispatchCompletionEmail } from '../services/dispatchCompletionEmail.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES, recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
@@ -212,6 +213,23 @@ async function loadActiveClientsForServiceRequestForm(prisma) {
 async function recalculateServiceRequestStatus(prisma, serviceRequestId) {
   return recalculateDispatchServiceRequestStatus(prisma, serviceRequestId);
 }
+async function resolveActorEmail(prisma, username) {
+  if (!username) return null;
+  const user = await prisma.appUser.findUnique({ where: { username }, select: { email: true } });
+  return normalizeString(user?.email);
+}
+async function notifyIfServiceRequestCompleted(prisma, serviceRequestId, actorUsername) {
+  const replyTo = await resolveActorEmail(prisma, actorUsername);
+  const result = await sendDispatchCompletionEmail(prisma, serviceRequestId, {
+    replyTo,
+    managedByUsername: actorUsername || null
+  });
+  if (result?.sent) return ' Solicitud completa: correo enviado al solicitante.';
+  if (result?.reason === 'missing_requested_by_email') return ' Solicitud completa: no se envio correo porque no tiene correo del solicitante.';
+  if (result?.reason === 'missing_email_config') return ' Solicitud completa: falta configurar correo de salida.';
+  if (result?.error) return ' Solicitud completa: no fue posible enviar el correo al solicitante.';
+  return '';
+}
 async function findWorkerOr404(prisma, workerId) { return prisma.dispatchWorker.findFirst({ where: { id: workerId }, include: { cities: true, vacancies: true } }); }
 async function replaceWorkerRelations(prisma, workerId, body) {
   const cityIds = normalizeStringList(body.cityIds);
@@ -387,6 +405,18 @@ export function dispatchOpsExtrasRouter(prisma) {
     } catch (error) {
       return res.redirect(redirectToAssignment(serviceRequestId, workerRestErrorMessage(error), restDate));
     }
+  });
+  router.post('/asignaciones/confirmar', requireOps, async (req, res) => {
+    const assignmentId = normalizeString(req.body.assignmentId);
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos');
+    const actorUsername = normalizeString(req.session?.username || req.username);
+    await prisma.dispatchAssignment.update({ where: { id: assignmentId }, data: { status: 'CONFIRMED', notes: normalizeString(req.body.notes) } });
+    const statusResult = await recalculateServiceRequestStatus(prisma, serviceRequestId);
+    const emailMessage = statusResult?.status === 'ASSIGNMENT_COMPLETE'
+      ? await notifyIfServiceRequestCompleted(prisma, serviceRequestId, actorUsername)
+      : '';
+    return res.redirect(redirectToAssignment(serviceRequestId, `Confirmacion registrada.${emailMessage}`));
   });
   router.post('/asignaciones/no-confirmado', requireOps, async (req, res) => { const assignmentId = normalizeString(req.body.assignmentId); const serviceRequestId = normalizeString(req.body.serviceRequestId); if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos'); await prisma.dispatchAssignment.update({ where: { id: assignmentId }, data: { status: 'NO_CONFIRMO', notes: normalizeString(req.body.notes) || 'El auxiliar no confirmo la asignacion.' } }); await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar marcado como no confirmado. Debes asignar reemplazo.')); });
   router.post('/asignaciones/unassign', requireOps, async (req, res) => { const assignmentId = normalizeString(req.body.assignmentId); const serviceRequestId = normalizeString(req.body.serviceRequestId); if (!assignmentId || !serviceRequestId) return res.status(400).send('assignmentId y serviceRequestId son requeridos'); await prisma.dispatchAssignment.delete({ where: { id: assignmentId } }); await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar retirado de la solicitud.')); });

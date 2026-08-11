@@ -26,7 +26,7 @@ const ASSIGNMENT_FINAL_CARD_SCRIPT = `<script id="dispatch-confirmed-assignment-
   function compactConfirmedCard(card){
     if (!isConfirmedAssignmentCard(card)) return;
     card.classList.add('assignment-final-card');
-    card.querySelectorAll('.whatsapp-link,.dispatch-wa-button').forEach(function(el){ el.remove(); });
+    card.querySelectorAll('.whatsapp-link,.dispatch-wa-button,form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach(function(el){ el.remove(); });
   }
   window.__compactConfirmedAssignments = function(root){
     (root || document).querySelectorAll('.assigned-card').forEach(compactConfirmedCard);
@@ -118,7 +118,8 @@ function compactFinalizedAssignmentCard(cardHtml) {
 
   return cardHtml
     .replace('<article class="assigned-card"', '<article class="assigned-card assignment-final-card"')
-    .replace(/<button[^>]*class="[^"]*(?:whatsapp-link|dispatch-wa-button)[^"]*"[\s\S]*?<\/button>/g, '');
+    .replace(/<button[^>]*class="[^"]*(?:whatsapp-link|dispatch-wa-button)[^"]*"[\s\S]*?<\/button>/g, '')
+    .replace(/<form[^>]*data-async-assignment-action="(?:confirmar|no-confirmado)"[\s\S]*?<\/form>/g, '');
 }
 
 function compactFinalizedAssignmentCards(html) {
