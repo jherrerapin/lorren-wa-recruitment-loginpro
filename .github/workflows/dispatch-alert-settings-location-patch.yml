@@ -28,6 +28,27 @@ jobs:
       - name: Apply patch
         run: python scripts/patch-dispatch-alert-settings-location.py
 
+      - name: Keep dashboard compatible with partial renders
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/views/operacionesDashboard.ejs')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              '<% if (alertSettingsMessage) { %>',
+              "<% if (typeof alertSettingsMessage !== 'undefined' && alertSettingsMessage) { %>"
+          )
+          text = text.replace(
+              '<% if (alertSettingsError) { %>',
+              "<% if (typeof alertSettingsError !== 'undefined' && alertSettingsError) { %>"
+          )
+          text = text.replace(
+              '<% if (dispatchAlertSettings?.available) { %>',
+              "<% if (typeof dispatchAlertSettings !== 'undefined' && dispatchAlertSettings?.available) { %>"
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+
       - name: Install locked dependencies
         run: npm ci
 
