@@ -13,10 +13,12 @@ const CANONICAL_MESSAGE = [
   '*Confirmado?*'
 ].join('\n');
 const FORBIDDEN_MESSAGE = 'Hola {{nombre}}, te confirmamos asignación para {{fecha}} en {{operacion}}. Dirección: {{direccion}}. Hora de inicio: {{horaInicio}}. Servicio: {{servicio}}. Cliente: {{cliente}}. Por favor confirma recibido.';
+const FORBIDDEN_LEGACY_FRAGMENT = 'te confirmamos asignacion para {{fecha}}';
 function read(path) { return fs.readFileSync(path, 'utf8'); }
 
 test('el dashboard conserva el mensaje canónico real y muestra dos respuestas rápidas', () => {
   const view = read('src/views/operacionesAsignacionesConfirmacion.ejs');
+  const legacyView = read('src/views/operacionesAsignaciones.ejs');
   const canonicalSource = read('src/public/assignment-template-sync.js');
 
   assert.ok(view.includes(CANONICAL_MESSAGE));
@@ -26,6 +28,7 @@ test('el dashboard conserva el mensaje canónico real y muestra dos respuestas r
   assert.ok(canonicalSource.includes("'Hora : *{{horaInicio}} por favor.*'"));
   assert.ok(canonicalSource.includes("CONFIRMATION_REPLY_TEXT = '*Confirmado?*'"));
   assert.equal(view.includes(FORBIDDEN_MESSAGE), false);
+  assert.equal(legacyView.toLowerCase().includes(FORBIDDEN_LEGACY_FRAGMENT), false);
   assert.match(view, />CONFIRMADO<\/span>/);
   assert.match(view, />NO PUEDO<\/span>/);
   assert.match(view, /Enviar WhatsApp a todos/);
