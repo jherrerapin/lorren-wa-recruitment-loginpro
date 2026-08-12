@@ -47,3 +47,29 @@ test('la experiencia explícita atraviesa interpretación y sanitización sin vo
   assert.equal(readiness.missingFields.includes('experienceSummary'), false);
   assert.deepEqual(readiness.missingFields, []);
 });
+
+test('un no genérico no se convierte en experiencia cuando la última pregunta era de otro campo', async () => {
+  const result = await conversationUnderstanding('no', {
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['barrio', 'experiencia (si o no)', 'en qué tiene experiencia'],
+      lastBotQuestion: '¿En qué barrio vives?'
+    },
+    aiResult: {
+      status: 'disabled',
+      intent: 'unknown',
+      parsedFields: {},
+      extraction: { turnType: 'CONFIRMATION', fieldEvidence: {} },
+      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+    },
+    runtime: {
+      localParsedData: {},
+      engineFields: {},
+      engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      fallbackIntent: 'continue_application',
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.turnInterpretation.fields.experienceInfo, undefined);
+});
