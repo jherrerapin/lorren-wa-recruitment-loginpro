@@ -330,6 +330,9 @@ function buildBoardRow(assignment, now) {
     ? dispatchServiceDateKey(expected.expectedEndAt)
     : serviceDateIso;
   const riskGroups = riskGroupsForSession(session);
+  const riskFlags = riskGroups.flatMap((group) => (
+    group.riskFlags.map((flag) => `${group.markType}::${flag}`)
+  ));
 
   return {
     assignmentId: assignment.id,
@@ -360,7 +363,7 @@ function buildBoardRow(assignment, now) {
     punctualityStatus: session?.punctualityStatus || null,
     punctualityLabel: punctualityLabel(session?.punctualityStatus),
     riskScore: Math.max(0, finiteNumber(session?.riskScore, finiteNumber(mark?.riskScore, 0))),
-    riskFlags: toRiskFlags(session?.riskFlags || mark?.riskFlags),
+    riskFlags,
     riskGroups,
     accuracyMeters: finiteNumber(mark?.accuracyMeters, null),
     distanceToPointMeters: finiteNumber(mark?.distanceToPointMeters, null),
