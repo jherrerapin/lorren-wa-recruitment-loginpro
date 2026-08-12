@@ -25,6 +25,38 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeDispatchAlertPhoneInput(value) {
+  const digits = String(value || '').replace(/\D+/g, '');
+  if (!digits) return null;
+  const local = digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
+  return /^3\d{9}$/.test(local) ? `57${local}` : null;
+}
+
+function dispatchAlertPhoneForInput(value) {
+  const digits = String(value || '').replace(/\D+/g, '');
+  return digits.startsWith('57') && digits.length === 12 ? digits.slice(2) : digits;
+}
+
+async function findCurrentDispatchAppUser(prisma, req) {
+  const userId = normalizeString(req.session?.userId || req.userId);
+  if (userId) {
+    const byId = await prisma.appUser.findUnique({ where: { id: userId } });
+    if (byId) return byId;
+  }
+  const username = normalizeString(req.session?.username || req.username);
+  if (!username) return null;
+  return prisma.appUser.findUnique({ where: { username } });
+}
+
+async function loadCurrentDispatchAlertSettings(prisma, req) {
+  const user = await findCurrentDispatchAppUser(prisma, req);
+  return {
+    available: Boolean(user),
+    phone: dispatchAlertPhoneForInput(user?.dispatchAlertPhone),
+    reminderEnabled: Boolean(user?.dispatchWindowExpiryReminderEnabled)
+  };
+}
+
 function isOpsUser(req) {
   const username = normalizeString(req.session?.username || req.username);
   return Boolean(username?.startsWith('operaciones-despacho'));
@@ -267,7 +299,7 @@ function styleStatusCell(cell, status) {
   cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 }
 
-function renderHome(res, req, selectedDate, requests, attendanceAccess) {
+function renderHome(res, req, selectedDate, requests, attendanceAccess, dispatchAlertSettings) {
   const metrics = buildOperationsDashboardMetrics(requests);
   return res.render('operacionesDashboard', {
     role: req.session?.userRole || req.userRole,
@@ -276,6 +308,9 @@ function renderHome(res, req, selectedDate, requests, attendanceAccess) {
     activeSection: 'dashboard',
     selectedDate,
     metrics,
+    dispatchAlertSettings,
+    alertSettingsMessage: normalizeString(req.query.alertSettingsMessage),
+    alertSettingsError: normalizeString(req.query.alertSettingsError),
     canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch),
     canAccessAttendanceFeature: Boolean(attendanceAccess?.allowed)
   });
@@ -386,11 +421,41 @@ export function dispatchDashboardMetricsRouter(prisma) {
 
   router.get('/', requireOps, async (req, res) => {
     const selectedDate = selectedDateFromQuery(req.query);
-    const [requests, attendanceAccess] = await Promise.all([
+    const [requests, attendanceAccess, dispatchAlertSettings] = await Promise.all([
       loadServiceRequestsForDate(prisma, selectedDate),
-      loadAttendanceAccessForDashboard(prisma, req)
+      loadAttendanceAccessForDashboard(prisma, req),
+      loadCurrentDispatchAlertSettings(prisma, req)
     ]);
-    return renderHome(res, req, selectedDate, requests, attendanceAccess);
+    return renderHome(res, req, selectedDate, requests, attendanceAccess, dispatchAlertSettings);
+  });
+
+  router.post('/alertas-whatsapp', requireOps, express.urlencoded({ extended: false }), async (req, res) => {
+    const selectedDate = selectedDateFromQuery({ fecha: req.body?.fecha });
+    const redirectWith = (key, message) => {
+      const params = new URLSearchParams({ fecha: selectedDate, [key]: message });
+      return res.redirect(`/admin/operaciones?${params.toString()}`);
+    };
+
+    const rawPhone = normalizeString(req.body?.dispatchAlertPhone);
+    const dispatchAlertPhone = normalizeDispatchAlertPhoneInput(rawPhone);
+    const dispatchWindowExpiryReminderEnabled = req.body?.dispatchWindowExpiryReminderEnabled === 'true';
+    if (rawPhone && !dispatchAlertPhone) {
+      return redirectWith('alertSettingsError', 'El WhatsApp de alertas debe ser un celular colombiano válido.');
+    }
+    if (dispatchWindowExpiryReminderEnabled && !dispatchAlertPhone) {
+      return redirectWith('alertSettingsError', 'Configura un WhatsApp de alertas antes de activar el recordatorio de ventana.');
+    }
+
+    const user = await findCurrentDispatchAppUser(prisma, req);
+    if (!user) {
+      return redirectWith('alertSettingsError', 'No fue posible identificar tu usuario para guardar esta configuración.');
+    }
+
+    await prisma.appUser.update({
+      where: { id: user.id },
+      data: { dispatchAlertPhone, dispatchWindowExpiryReminderEnabled }
+    });
+    return redirectWith('alertSettingsMessage', 'Configuración de alertas de despacho guardada.');
   });
 
   router.get('/resumen', requireOps, async (req, res) => {

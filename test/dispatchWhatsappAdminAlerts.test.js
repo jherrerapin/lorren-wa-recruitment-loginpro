@@ -17,20 +17,27 @@ function assignmentFixture() {
   };
 }
 
-test('usuario tiene WhatsApp de alertas y check independiente de recordatorio de ventana', () => {
+test('cada usuario configura sus alertas dentro de Despacho y no desde administración de usuarios', () => {
   const schema = read('prisma/schema.prisma');
-  const view = read('src/views/users.ejs');
+  const usersView = read('src/views/users.ejs');
   const admin = read('src/routes/admin.js');
   const locations = read('src/routes/locations.js');
+  const dashboard = read('src/views/operacionesDashboard.ejs');
+  const dashboardRoute = read('src/routes/dispatchDashboardMetrics.js');
   assert.match(schema, /dispatchAlertPhone\s+String\?/);
   assert.match(schema, /dispatchWindowExpiryReminderEnabled\s+Boolean\s+@default\(false\)/);
-  assert.match(view, /name="dispatchAlertPhone"/);
-  assert.match(view, /name="dispatchWindowExpiryReminderEnabled"/);
-  assert.match(view, /Recordarme antes de que venza la ventana de 24 horas/);
-  assert.match(admin, /dispatchAlertPhone,/);
-  assert.match(admin, /dispatchWindowExpiryReminderEnabled,/);
-  assert.match(locations, /dispatchAlertPhone,/);
-  assert.match(locations, /dispatchWindowExpiryReminderEnabled/);
+  assert.doesNotMatch(usersView, /name="dispatchAlertPhone"/);
+  assert.doesNotMatch(usersView, /name="dispatchWindowExpiryReminderEnabled"/);
+  assert.doesNotMatch(admin, /normalizeDispatchAlertPhoneInput/);
+  assert.doesNotMatch(locations, /normalizeDispatchAlertPhoneInput/);
+  assert.match(dashboard, /Mis alertas de despacho por WhatsApp/);
+  assert.match(dashboard, /action="\/admin\/operaciones\/alertas-whatsapp"/);
+  assert.match(dashboard, /name="dispatchAlertPhone"/);
+  assert.match(dashboard, /name="dispatchWindowExpiryReminderEnabled"/);
+  assert.match(dashboard, /Guardar cambios/);
+  assert.match(dashboardRoute, /router\.post\('\/alertas-whatsapp'/);
+  assert.match(dashboardRoute, /findCurrentDispatchAppUser/);
+  assert.match(dashboardRoute, /prisma\.appUser\.update/);
 });
 
 test('mensaje normal de asignación conserva literalmente el cuerpo canónico y usa dos botones', async () => {
