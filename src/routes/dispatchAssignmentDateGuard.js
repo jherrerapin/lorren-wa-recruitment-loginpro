@@ -8,7 +8,6 @@ import {
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const ASSIGNMENT_VIEW = 'operacionesAsignacionesConfirmacion';
 const ASSIGNMENT_PATH = '/admin/operaciones/asignaciones';
-const DATE_NAVIGATION_SCRIPT_ID = 'dispatch-assignment-date-navigation-guard';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -77,46 +76,21 @@ export async function loadAssignmentDateContext(prisma, selectedDate, requestedS
   };
 }
 
-export function buildAssignmentDateNavigationScript() {
-  return `<script id="${DATE_NAVIGATION_SCRIPT_ID}">
-(() => {
-  function navigateToDate(value, allDates) {
-    const url = new URL(window.location.href);
-    url.searchParams.delete('serviceRequestId');
-    url.searchParams.delete('message');
-    url.searchParams.delete('date');
-    if (allDates) {
-      url.searchParams.delete('fecha');
-      url.searchParams.set('allDates', '1');
-    } else if (value) {
-      url.searchParams.set('fecha', value);
-      url.searchParams.delete('allDates');
-    }
-    window.location.assign(url.toString());
+export function mergeAssignmentServiceRequests(baseRequests = [], selectedDateRequests = []) {
+  const byId = new Map();
+  for (const request of [...baseRequests, ...selectedDateRequests]) {
+    if (request?.id) byId.set(request.id, request);
   }
-
-  document.addEventListener('change', (event) => {
-    const input = event.target;
-    if (!(input instanceof HTMLInputElement) || input.id !== 'assignmentDateFilter') return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    navigateToDate(input.value, false);
-  }, true);
-
-  document.addEventListener('click', (event) => {
-    const target = event.target instanceof Element ? event.target.closest('#clearAssignmentDateFilter') : null;
-    if (!target) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    navigateToDate('', true);
-  }, true);
-})();
-</script>`;
+  return [...byId.values()].sort((left, right) => {
+    const dateDifference = new Date(right.serviceDate || 0).getTime() - new Date(left.serviceDate || 0).getTime();
+    if (dateDifference) return dateDifference;
+    return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
+  });
 }
 
-function injectDateNavigationScript(html) {
-  if (typeof html !== 'string' || html.includes(DATE_NAVIGATION_SCRIPT_ID)) return html;
-  return html.replace(/<\/body>/i, `${buildAssignmentDateNavigationScript()}\n</body>`);
+export function stripAssignmentDateStatusNote(html) {
+  if (typeof html !== 'string') return html;
+  return html.replace(/<div\s+class="date-note"\s+id="assignmentDateNote">[\s\S]*?<\/div>/i, '');
 }
 
 function installAssignmentRenderGate(req, res, next, context) {
@@ -133,7 +107,7 @@ function installAssignmentRenderGate(req, res, next, context) {
 
     const nextLocals = { ...renderLocals };
     if (context) {
-      nextLocals.serviceRequests = context.serviceRequests;
+      nextLocals.serviceRequests = mergeAssignmentServiceRequests(renderLocals.serviceRequests, context.serviceRequests);
       nextLocals.selectedServiceRequest = context.selectedServiceRequest;
       nextLocals.selectedServiceRequestId = context.selectedServiceRequest?.id || '';
       nextLocals.availableWorkers = Array.isArray(renderLocals.workers)
@@ -148,7 +122,7 @@ function installAssignmentRenderGate(req, res, next, context) {
         if (typeof renderCallback === 'function') return renderCallback(error);
         return next(error);
       }
-      const output = injectDateNavigationScript(html);
+      const output = stripAssignmentDateStatusNote(html);
       if (typeof renderCallback === 'function') return renderCallback(null, output);
       return res.send(output);
     });
