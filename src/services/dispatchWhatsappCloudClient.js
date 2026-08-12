@@ -61,7 +61,7 @@ export function buildDispatchAssignmentInteractivePayload({ assignment, phone })
       action: {
         buttons: [
           { type: 'reply', reply: { id: `dispatch_confirm:${assignment.id}`, title: 'CONFIRMADO' } },
-          { type: 'reply', reply: { id: `dispatch_decline:${assignment.id}`, title: 'NO PUEDO' } }
+          { type: 'reply', reply: { id: `dispatch_novelty:${assignment.id}`, title: 'REPORTAR NOVEDAD' } }
         ]
       }
     }
@@ -87,7 +87,7 @@ export function buildDispatchAssignmentTemplatePayload({ config, assignment, pho
         },
         {
           type: 'button', sub_type: 'quick_reply', index: '1',
-          parameters: [{ type: 'payload', payload: `dispatch_decline:${assignment.id}` }]
+          parameters: [{ type: 'payload', payload: `dispatch_novelty:${assignment.id}` }]
         }
       ]
     }
