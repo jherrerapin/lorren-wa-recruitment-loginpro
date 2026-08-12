@@ -10,6 +10,14 @@
   const TILE_TIMEOUT_MS = 5_000;
   const TILE_ERROR_LIMIT = 2;
 
+  const riskOriginLabels = Object.freeze({
+    ARRIVAL: 'Llegada',
+    BREAK_START: 'Inicio de almuerzo',
+    BREAK_END: 'Fin de almuerzo',
+    DEPARTURE: 'Salida',
+    SESSION: 'Turno · señal histórica'
+  });
+
   const riskTranslations = Object.freeze({
     'ASSIGNMENT NOT ACTIVE': {
       label: 'Asignación no activa',
@@ -57,7 +65,7 @@
     },
     'OFFLINE WEB CAPTURE': {
       label: 'Marcación guardada sin conexión',
-      help: 'La llegada se conservó primero en el celular y se envió cuando volvió la conexión.'
+      help: 'La marcación se conservó primero en el celular y se envió cuando volvió la conexión.'
     },
     'CLIENT CLOCK UNTRUSTED': {
       label: 'Hora del celular no verificable',
@@ -73,6 +81,18 @@
     return String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
   }
 
+  function riskPresentation(value) {
+    const original = normalizedText(value);
+    const separator = original.indexOf('::');
+    if (separator < 0) return { riskCode: original, originLabel: null };
+    const originCode = original.slice(0, separator).trim().replaceAll(' ', '_');
+    const riskCode = original.slice(separator + 2).trim();
+    return {
+      riskCode,
+      originLabel: riskOriginLabels[originCode] || null
+    };
+  }
+
   function riskLevel(score) {
     if (score >= 80) return 'Crítico';
     if (score >= 50) return 'Alto';
@@ -83,14 +103,17 @@
   function translateRiskSignals(root = document) {
     root.querySelectorAll?.('.risk-flag').forEach((element) => {
       if (element.dataset.riskTranslated === 'true') return;
-      const original = normalizedText(element.textContent);
-      const translation = riskTranslations[original];
+      const presentation = riskPresentation(element.textContent);
+      const translation = riskTranslations[presentation.riskCode];
       if (!translation) return;
+      const visibleLabel = presentation.originLabel
+        ? `${presentation.originLabel}: ${translation.label}`
+        : translation.label;
       element.dataset.riskTranslated = 'true';
-      element.dataset.riskCode = original.replaceAll(' ', '_');
-      element.textContent = translation.label;
+      element.dataset.riskCode = presentation.riskCode.replaceAll(' ', '_');
+      element.textContent = visibleLabel;
       element.title = translation.help;
-      element.setAttribute('aria-label', `${translation.label}. ${translation.help}`);
+      element.setAttribute('aria-label', `${visibleLabel}. ${translation.help}`);
     });
 
     root.querySelectorAll?.('.risk-score').forEach((element) => {
