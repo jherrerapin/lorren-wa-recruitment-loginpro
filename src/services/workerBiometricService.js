@@ -26,8 +26,9 @@ const MAX_DESCRIPTOR_LENGTH = 2048;
 const REAL_THRESHOLD = 0.55;
 const LIVE_THRESHOLD = 0.55;
 const MATCH_THRESHOLD = 0.82;
+const ATTENDANCE_IDENTITY_THRESHOLD = 0.60;
 const SAMPLE_CONSISTENCY_THRESHOLD = 0.78;
-const IDENTITY_CONTINUITY_THRESHOLD = 0.65;
+const IDENTITY_CONTINUITY_THRESHOLD = ATTENDANCE_IDENTITY_THRESHOLD;
 const ACTION_SAMPLE_CONSISTENCY_THRESHOLD = 0.65;
 const ACTION_IDENTITY_THRESHOLD = IDENTITY_CONTINUITY_THRESHOLD;
 const ENROLLMENT_SAMPLE_COUNT = 3;
@@ -762,6 +763,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
   let baseSimilarity = null;
   let sessionSimilarity = null;
   let referenceSource = null;
+  let identityConfidence = null;
   let hash = null;
   let captureHash = null;
   let realScore = Number(input.realScore);
@@ -852,13 +854,24 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     sessionSimilarity = sessionReference ? humanFaceSimilarity(sessionReference.descriptor, descriptor) : null;
     similarity = Math.max(baseSimilarity, sessionSimilarity ?? 0);
     const enrollmentMatched = baseSimilarity >= MATCH_THRESHOLD;
+    const enrollmentProbable = strictEvidence && baseSimilarity >= ATTENDANCE_IDENTITY_THRESHOLD;
     const sessionMatched = strictEvidence
       && markType !== 'ARRIVAL'
       && sessionSimilarity !== null
       && sessionSimilarity >= IDENTITY_CONTINUITY_THRESHOLD;
-    if (enrollmentMatched) referenceSource = 'ENROLLMENT';
-    else if (sessionMatched) referenceSource = 'SESSION';
-    if (!enrollmentMatched && !sessionMatched) addFlag(flags, 'BIOMETRIC_FACE_MISMATCH', 70, state);
+    if (enrollmentMatched) {
+      referenceSource = 'ENROLLMENT';
+      identityConfidence = 'STRONG';
+    } else if (enrollmentProbable) {
+      referenceSource = 'ENROLLMENT_PROBABLE';
+      identityConfidence = 'PROBABLE';
+    } else if (sessionMatched) {
+      referenceSource = 'SESSION';
+      identityConfidence = 'PROBABLE';
+    }
+    if (!enrollmentMatched && !enrollmentProbable && !sessionMatched) {
+      addFlag(flags, 'BIOMETRIC_FACE_MISMATCH', 70, state);
+    }
     if (await captureWasReplayed(prisma, captureHash, hash, idempotencyKey)) {
       addFlag(flags, 'BIOMETRIC_DESCRIPTOR_REPLAY', 80, state);
     }
@@ -874,7 +887,9 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     baseSimilarity,
     sessionSimilarity,
     referenceSource,
+    identityConfidence,
     matchThreshold: MATCH_THRESHOLD,
+    attendanceIdentityThreshold: ATTENDANCE_IDENTITY_THRESHOLD,
     sessionIdentityThreshold: IDENTITY_CONTINUITY_THRESHOLD,
     minimumSampleSimilarity: minimumSampleSimilarityValue,
     sampleConsistencyThreshold: SAMPLE_CONSISTENCY_THRESHOLD,
