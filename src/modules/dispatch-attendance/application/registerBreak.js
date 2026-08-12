@@ -161,27 +161,45 @@ function addRiskFlag(riskFlags, flag) {
 }
 
 function breakValidation(session, input) {
-  const riskFlags = Array.isArray(session.riskFlags) ? [...session.riskFlags] : [];
-  let riskScore = Number(session.riskScore) || 0;
+  const sessionRiskFlags = Array.isArray(session.riskFlags) ? [...session.riskFlags] : [];
+  const markRiskFlags = [];
+  let sessionRiskScore = Number(session.riskScore) || 0;
+  let markRiskScore = 0;
   let validationStatus = session.validationStatus || ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED;
 
   if (input.captureMode === OFFLINE_WEB_CAPTURE_MODE) {
-    if (addRiskFlag(riskFlags, ATTENDANCE_RISK_FLAG.OFFLINE_WEB_CAPTURE)) riskScore += 40;
-    addRiskFlag(riskFlags, ATTENDANCE_RISK_FLAG.CLIENT_CLOCK_UNTRUSTED);
-    if (!input.persistentStorageAvailable && addRiskFlag(riskFlags, ATTENDANCE_RISK_FLAG.PERSISTENT_STORAGE_UNAVAILABLE)) {
-      riskScore += 20;
+    addRiskFlag(markRiskFlags, ATTENDANCE_RISK_FLAG.OFFLINE_WEB_CAPTURE);
+    markRiskScore += 40;
+    if (addRiskFlag(sessionRiskFlags, ATTENDANCE_RISK_FLAG.OFFLINE_WEB_CAPTURE)) sessionRiskScore += 40;
+
+    addRiskFlag(markRiskFlags, ATTENDANCE_RISK_FLAG.CLIENT_CLOCK_UNTRUSTED);
+    addRiskFlag(sessionRiskFlags, ATTENDANCE_RISK_FLAG.CLIENT_CLOCK_UNTRUSTED);
+
+    if (!input.persistentStorageAvailable) {
+      addRiskFlag(markRiskFlags, ATTENDANCE_RISK_FLAG.PERSISTENT_STORAGE_UNAVAILABLE);
+      markRiskScore += 20;
+      if (addRiskFlag(sessionRiskFlags, ATTENDANCE_RISK_FLAG.PERSISTENT_STORAGE_UNAVAILABLE)) sessionRiskScore += 20;
     }
+
     const syncDelayMinutes = Math.max(0, Math.floor((input.now.getTime() - input.reportedAt.getTime()) / 60_000));
-    if (syncDelayMinutes >= 5 && addRiskFlag(riskFlags, ATTENDANCE_RISK_FLAG.DELAYED_SYNC)) {
-      riskScore += Math.min(25, 10 + Math.floor(syncDelayMinutes / 60) * 5);
+    if (syncDelayMinutes >= 5) {
+      const delayedSyncScore = Math.min(25, 10 + Math.floor(syncDelayMinutes / 60) * 5);
+      addRiskFlag(markRiskFlags, ATTENDANCE_RISK_FLAG.DELAYED_SYNC);
+      markRiskScore += delayedSyncScore;
+      if (addRiskFlag(sessionRiskFlags, ATTENDANCE_RISK_FLAG.DELAYED_SYNC)) sessionRiskScore += delayedSyncScore;
     }
     validationStatus = ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED;
   }
 
   return {
     validationStatus,
-    riskScore: Math.max(0, Math.min(100, Math.round(riskScore))),
-    riskFlags
+    riskScore: Math.max(0, Math.min(100, Math.round(sessionRiskScore))),
+    riskFlags: sessionRiskFlags,
+    markValidationStatus: markRiskFlags.length
+      ? ATTENDANCE_VALIDATION_STATUS.REVIEW_REQUIRED
+      : ATTENDANCE_VALIDATION_STATUS.AUTO_VALIDATED,
+    markRiskScore: Math.max(0, Math.min(100, Math.round(markRiskScore))),
+    markRiskFlags
   };
 }
 
@@ -268,9 +286,9 @@ async function insideTransaction(client, input) {
       installationIdHash: input.installationIdHash,
       ipAddress: input.ipAddress,
       userAgent: input.userAgent,
-      decision: validation.validationStatus,
-      riskScore: validation.riskScore,
-      riskFlags: validation.riskFlags
+      decision: validation.markValidationStatus,
+      riskScore: validation.markRiskScore,
+      riskFlags: validation.markRiskFlags
     }
   });
 
