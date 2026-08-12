@@ -201,39 +201,48 @@ export async function claimDispatchAssignmentConfirmation({
   });
 }
 
-export async function claimDispatchAssignmentDecline({
+export async function claimDispatchAssignmentNovelty({
   scope = 'operational', assignment, responseMessageId = '', responseReceivedAt = null, prismaClient = prisma
 } = {}) {
-  const definition = dispatchWhatsappScopeDefinition(scope);
   const evidenceMessageId = String(responseMessageId || '').trim();
   const evidenceReceivedAt = responseReceivedAt instanceof Date
     ? responseReceivedAt
     : new Date(responseReceivedAt || Number.NaN);
   if (!assignment?.id || !evidenceMessageId || Number.isNaN(evidenceReceivedAt.getTime())) {
-    return { assignmentDeclined: false, duplicate: false };
+    return { noveltyReported: false, duplicate: false };
   }
 
   return prismaClient.$transaction(async (tx) => {
     const duplicate = await tx.dispatchWhatsappConfirmation.findFirst({
       where: { confirmationMessageId: evidenceMessageId }, select: { id: true }
     });
-    if (duplicate) return { assignmentDeclined: false, duplicate: true };
+    if (duplicate) return { noveltyReported: false, duplicate: true };
 
-    const updated = await tx.dispatchAssignment.updateMany({
-      where: { id: assignment.id, status: { in: definition.pendingAssignmentStatuses } },
-      data: { status: definition.declinedAssignmentStatus, notes: 'El auxiliar indicó NO PUEDO desde WhatsApp.' }
-    });
-    if (!updated.count) return { assignmentDeclined: false, duplicate: false };
-
-    await tx.dispatchWhatsappConfirmation.updateMany({
+    const evidence = await tx.dispatchWhatsappConfirmation.updateMany({
       where: { assignmentId: assignment.id, status: { in: INBOUND_LINK_STATUSES } },
       data: {
-        status: 'DECLINED',
+        status: 'NOVELTY_REPORTED',
         confirmationMessageId: evidenceMessageId,
         confirmationReceivedAt: evidenceReceivedAt
       }
     });
-    return { assignmentDeclined: true, duplicate: false };
+    if (!evidence.count) return { noveltyReported: false, duplicate: false };
+
+    if (scope === 'operational' && tx.dispatchIncident?.create) {
+      await tx.dispatchIncident.create({
+        data: {
+          serviceRequestId: assignment.serviceRequestId,
+          assignmentId: assignment.id,
+          workerId: assignment.workerId || assignment.worker?.id || null,
+          type: 'WHATSAPP_NOVELTY',
+          status: 'OPEN',
+          description: 'El auxiliar reportó una novedad desde WhatsApp. El coordinador debe contactarlo para conocer el detalle.',
+          reportedBy: 'AUXILIAR_WHATSAPP',
+          createdByUsername: 'WHATSAPP_DISPATCH'
+        }
+      });
+    }
+
+    return { noveltyReported: true, duplicate: false };
   });
 }
-
