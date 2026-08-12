@@ -75,6 +75,13 @@ test('el parser local no convierte una pregunta de requisitos en experiencia del
   assert.equal(parsed.experienceSummary, undefined);
 });
 
+test('una frase de búsqueda de cargo no se convierte en experiencia del candidato', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData('Desde Bogotá para trabajo de bodega'));
+
+  assert.equal(parsed.experienceInfo, undefined);
+  assert.equal(parsed.experienceSummary, undefined);
+});
+
 test('una pregunta de experiencia junto al consentimiento no se persiste como perfil laboral', async () => {
   const candidate = {
     id: 'candidate-synthetic-experience-question',
