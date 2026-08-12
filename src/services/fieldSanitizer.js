@@ -28,7 +28,8 @@ const ALL_SANITIZED_FIELDS = [
   'transportMode',
   'medicalRestrictions',
   'experienceInfo',
-  'experienceTime'
+  'experienceTime',
+  'experienceSummary'
 ];
 
 function minFieldConfidence() {
@@ -99,7 +100,7 @@ function fieldWasPending(field, context = {}) {
     return pending.some((item) => /\b(genero|sexo|mujer|hombre)\b/.test(item));
   }
 
-  if (field === 'experienceInfo' || field === 'experienceTime') {
+  if (field === 'experienceInfo' || field === 'experienceTime' || field === 'experienceSummary') {
     return pending.some((item) => /\b(experiencia|tiempo de experiencia|trabajado|laborado)\b/.test(item));
   }
 
@@ -121,7 +122,8 @@ function lastQuestionAskedForField(field, context = {}) {
     transportMode: /\b(transporte|moto|bicicleta|bici|carro|bus)\b/,
     medicalRestrictions: /\b(restriccion|restricciones|medica|salud)\b/,
     experienceInfo: /\b(experiencia|trabajado|laborado)\b/,
-    experienceTime: /\b(experiencia|tiempo|meses|anos)\b/
+    experienceTime: /\b(experiencia|tiempo|meses|anos)\b/,
+    experienceSummary: /\b(experiencia|cargos?|funciones?|areas?|trabajado|laborado|desempenado)\b/
   };
 
   return fieldPatterns[field]?.test(question) || false;
@@ -261,7 +263,23 @@ function hasAgeEvidence(text = '') {
 }
 
 function hasExperienceEvidence(text = '') {
-  return /\b(experien|trabaj|labor|cargo|oficio)\b/.test(normalizeText(text));
+  const normalized = normalizeText(text);
+  return /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu|supervis|lider)\w*\b/.test(normalized)
+    || /\b(?:cargo|oficio|turnos?|personal|bodega)\b/.test(normalized);
+}
+
+function looksLikeQuestionText(text = '', turnType = null) {
+  if (String(turnType || '').toUpperCase() === 'QUESTION') return true;
+  const raw = String(text || '').trim();
+  if (/[¿?]/.test(raw)) return true;
+  const normalized = normalizeText(raw);
+  return /^(?:que|cual|cuales|cuanto|cuanta|cuantos|cuantas|como|donde|cuando|por que|me puedes|me podrias|puedes|podrias|quisiera saber|necesito saber)\b/.test(normalized);
+}
+
+function hasGroundedExperienceSummaryContext(text = '', context = {}, turnType = null) {
+  if (hasExplicitPositiveExperienceEvidence(text)) return true;
+  if (looksLikeQuestionText(text, turnType)) return false;
+  return fieldWasPending('experienceSummary', context) && hasExperienceEvidence(text);
 }
 
 function hasNameEvidenceCue(text = '') {
@@ -437,9 +455,30 @@ function sanitizeAge(value, text, context = {}) {
   return { ok: true, value: age };
 }
 
+function sanitizeExperienceSummary(value, evidence, text, context = {}, turnType = null) {
+  const raw = String(value || '').replace(/\s+/g, ' ').trim();
+  if (raw.length < 12) return { ok: false, reason: 'experience_summary_too_short' };
+  if (!hasGroundedExperienceSummaryContext(text, context, turnType)) {
+    return { ok: false, reason: 'missing_experience_summary_context' };
+  }
+
+  const normalizedText = normalizeText(text);
+  const normalizedValue = normalizeText(raw);
+  const valueIsGrounded = Boolean(normalizedText && normalizedValue && normalizedText.includes(normalizedValue));
+  const usableEvidence = evidenceIsUsable('experienceSummary', evidence, { allowLocalParser: true });
+  const evidenceIsGrounded = evidenceSnippetIsGrounded('experienceSummary', evidence, text);
+
+  if (!valueIsGrounded && !(usableEvidence && evidenceIsGrounded)) {
+    return { ok: false, reason: 'experience_summary_evidence_not_grounded' };
+  }
+
+  return { ok: true, value: raw.slice(0, 280) };
+}
+
 function evaluateField(field, value, evidence, text, context, turnType) {
   if (!hasValue(value)) return { ok: false, reason: 'empty' };
   if (field === 'experienceInfo') return sanitizeExperienceInfo(value, evidence, text, context, turnType);
+  if (field === 'experienceSummary') return sanitizeExperienceSummary(value, evidence, text, context, turnType);
   if (isStringCandidateValue(value) && looksLikeNonDataText(value)) return { ok: false, reason: 'non_data_text' };
 
   if (field === 'fullName') return sanitizeFullName(value, evidence, text, context, turnType);
