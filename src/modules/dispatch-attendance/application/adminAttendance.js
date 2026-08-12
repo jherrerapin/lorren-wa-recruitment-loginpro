@@ -12,6 +12,12 @@ const VALID_MANUAL_STATUSES = new Set(['ON_TIME', 'LATE']);
 const VALID_REVIEW_ACTIONS = new Set(['VALIDATE', 'REJECT', 'REOPEN']);
 const DEFAULT_ABSENCE_GRACE_MINUTES = 15;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
+const RISK_MARK_LABELS = Object.freeze({
+  ARRIVAL: 'Llegada',
+  BREAK_START: 'Inicio de almuerzo',
+  BREAK_END: 'Fin de almuerzo',
+  DEPARTURE: 'Salida'
+});
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -143,6 +149,48 @@ function formatTime(value) {
 
 function toRiskFlags(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
+}
+
+function markRiskMoment(mark) {
+  const value = mark?.clientCapturedAt || mark?.serverReceivedAt;
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function riskGroupsForSession(session) {
+  if (!session) return [];
+  const seenFlags = new Set();
+  const groups = [];
+  const marks = [...(Array.isArray(session.marks) ? session.marks : [])]
+    .sort((left, right) => (markRiskMoment(left)?.getTime() || 0) - (markRiskMoment(right)?.getTime() || 0));
+
+  for (const mark of marks) {
+    const riskFlags = [...new Set(toRiskFlags(mark?.riskFlags))]
+      .filter((flag) => !seenFlags.has(flag));
+    if (!riskFlags.length) continue;
+    riskFlags.forEach((flag) => seenFlags.add(flag));
+    groups.push({
+      markType: mark?.markType || 'UNKNOWN',
+      label: RISK_MARK_LABELS[mark?.markType] || 'Marcación',
+      riskFlags,
+      riskScore: Math.max(0, finiteNumber(mark?.riskScore, 0)),
+      occurredAtLabel: formatDateTime(markRiskMoment(mark))
+    });
+  }
+
+  const legacyFlags = [...new Set(toRiskFlags(session.riskFlags))]
+    .filter((flag) => !seenFlags.has(flag));
+  if (legacyFlags.length) {
+    groups.push({
+      markType: 'SESSION',
+      label: 'Turno · señal histórica',
+      riskFlags: legacyFlags,
+      riskScore: Math.max(0, finiteNumber(session.riskScore, 0)),
+      occurredAtLabel: null
+    });
+  }
+  return groups;
 }
 
 function latestByDate(items, fieldName) {
@@ -281,6 +329,7 @@ function buildBoardRow(assignment, now) {
   const latestManualDateIso = expected.expectedEndAt
     ? dispatchServiceDateKey(expected.expectedEndAt)
     : serviceDateIso;
+  const riskGroups = riskGroupsForSession(session);
 
   return {
     assignmentId: assignment.id,
@@ -312,6 +361,7 @@ function buildBoardRow(assignment, now) {
     punctualityLabel: punctualityLabel(session?.punctualityStatus),
     riskScore: Math.max(0, finiteNumber(session?.riskScore, finiteNumber(mark?.riskScore, 0))),
     riskFlags: toRiskFlags(session?.riskFlags || mark?.riskFlags),
+    riskGroups,
     accuracyMeters: finiteNumber(mark?.accuracyMeters, null),
     distanceToPointMeters: finiteNumber(mark?.distanceToPointMeters, null),
     insideGeofence: typeof mark?.insideGeofence === 'boolean' ? mark.insideGeofence : null,
