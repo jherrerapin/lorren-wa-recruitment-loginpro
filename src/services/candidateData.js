@@ -96,7 +96,7 @@ function mentionsSoacha(value = '') {
 function normalizeMunicipalityResidence(value = '') {
   const normalized = normalizeLooseText(value);
   for (const [municipality, residence] of Object.entries(MUNICIPALITY_RESIDENCE_VALUES)) {
-    if (new RegExp(`\\b${municipality}\\b`).test(normalized)) return residence;
+    if (new RegExp(`\b${municipality}\b`).test(normalized)) return residence;
   }
   return null;
 }
@@ -243,16 +243,16 @@ function detectTransportKeyword(text = '') {
   }
 
   const detected = [];
-  if (MOTO_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) detected.push('Moto');
-  if (CAR_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) detected.push('Carro');
-  if (BIKE_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) detected.push('Bicicleta');
+  if (MOTO_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))) detected.push('Moto');
+  if (CAR_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))) detected.push('Carro');
+  if (BIKE_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))) detected.push('Bicicleta');
   if (
-    BUS_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))
-    || RIDE_HAIL_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))
+    BUS_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))
+    || RIDE_HAIL_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))
   ) {
     detected.push('Bus');
   }
-  if (INDEPENDENT_VARIANTS.some((variant) => new RegExp(`\\b${variant}\\b`).test(normalized))) detected.push('Independiente');
+  if (INDEPENDENT_VARIANTS.some((variant) => new RegExp(`\b${variant}\b`).test(normalized))) detected.push('Independiente');
 
   if (!detected.length) return null;
   return TRANSPORT_PRIORITY.find((value) => detected.includes(value)) || detected[0];
@@ -350,7 +350,7 @@ function normalizeExperienceDuration(value = '') {
 
   let normalized = normalizedRaw;
   for (const [word, num] of Object.entries(wordToNum)) {
-    normalized = normalized.replace(new RegExp(`\\b${word}\\b`, 'i'), String(num));
+    normalized = normalized.replace(new RegExp(`\b${word}\b`, 'i'), String(num));
   }
 
   const match = normalized.match(/(\d+)\s*(mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?)/i);
@@ -412,7 +412,7 @@ function normalizeExperienceTime(value = '') {
 
   let normalized = raw;
   for (const [word, num] of Object.entries(wordToNum)) {
-    normalized = normalized.replace(new RegExp(`\\b${word}\\b`, 'i'), String(num));
+    normalized = normalized.replace(new RegExp(`\b${word}\b`, 'i'), String(num));
   }
 
   const match = normalized.match(/(\d+)\s*(mes(?:e|es)?|a[nñ]os?|semanas?)/i);
@@ -595,17 +595,35 @@ function detectRobustExperienceTime(text = '') {
   return bestDuration ? normalizeExperienceDuration(bestDuration) : null;
 }
 
+const EXPERIENCE_SUMMARY_CUE = /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/;
+const EXPERIENCE_NEGATIVE_CUE = /\b(?:sin experiencia|no tengo experiencia|ninguna experiencia|nunca he trabajado)\b/;
+const EXPERIENCE_JOB_SEARCH_CUE = /\b(?:para\s+(?:un\s+)?trabajo|busco\s+(?:un\s+)?trabajo|buscando\s+(?:un\s+)?trabajo|quiero\s+(?:un\s+)?trabajo|deseo\s+(?:un\s+)?trabajo)\b/;
+
+function cleanExperienceStatement(segment = '') {
+  const raw = String(segment || '').replace(/\s+/g, ' ').trim().replace(/^[-•\s]+/, '');
+  if (!raw) return '';
+  const cue = raw.match(/\b(?:tengo|cuento\s+con|poseo|he\s+trabajado|trabaj\w*|experien\w*|coordin\w*|operaci\w*|labor\w*)\b/i);
+  if (!cue || cue.index === undefined || cue.index <= 0) return raw;
+  return raw.slice(cue.index).trim();
+}
+
 function detectExperienceSummary(text = '') {
-  const compact = normalizeLooseText(text);
-  if (!compact) return null;
-  if (analyzeConversationTurn(text).question) return null;
-  if (!/\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/.test(compact)) return null;
-  const cleaned = String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^[-•\s]+/, '');
-  if (cleaned.length < 12) return null;
-  return cleaned.slice(0, 280);
+  const statements = String(text || '')
+    .split(/(?<=[.!?])\s+|(?=¿)|[,;\n]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .filter((segment) => {
+      const compact = normalizeLooseText(segment);
+      if (!compact || !EXPERIENCE_SUMMARY_CUE.test(compact)) return false;
+      if (EXPERIENCE_NEGATIVE_CUE.test(compact)) return false;
+      if (EXPERIENCE_JOB_SEARCH_CUE.test(compact)) return false;
+      return !analyzeConversationTurn(segment).question;
+    })
+    .map(cleanExperienceStatement)
+    .filter((segment) => normalizeLooseText(segment).length >= 12);
+
+  if (!statements.length) return null;
+  return statements.join(' ').slice(0, 280);
 }
 
 function detectLeadingName(text = '') {
