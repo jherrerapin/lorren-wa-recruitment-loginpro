@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeCandidateFields, parseNaturalData } from '../src/services/candidateData.js';
+import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
 import { conversationUnderstanding } from '../src/services/conversationUnderstanding.js';
 import { getCandidateReadiness } from '../src/services/readinessGuard.js';
 
@@ -63,6 +64,36 @@ test('el parser local no convierte una pregunta de requisitos en experiencia del
 
   assert.equal(parsed.experienceInfo, undefined);
   assert.equal(parsed.experienceSummary, undefined);
+});
+
+test('una pregunta de experiencia junto al consentimiento no se persiste como perfil laboral', async () => {
+  const candidate = {
+    id: 'candidate-synthetic-experience-question',
+    dataConsentStatus: 'ACCEPTED',
+    experienceInfo: null,
+    experienceSummary: null
+  };
+  let writeAttempted = false;
+  const prisma = {
+    candidate: {
+      updateMany: async () => {
+        writeAttempted = true;
+        return { count: 1 };
+      },
+      findUnique: async () => candidate
+    }
+  };
+
+  const result = await captureConsentedProfileData({
+    prisma,
+    candidate,
+    vacancy: { city: 'Neiva' },
+    currentText: 'Autorizo el tratamiento de mis datos. ¿Qué experiencia logística requiere la vacante?'
+  });
+
+  assert.equal(writeAttempted, false);
+  assert.equal(result.reason, 'no_new_profile_data');
+  assert.deepEqual(result.capturedFields, []);
 });
 
 test('la experiencia explícita atraviesa interpretación y sanitización sin volver a quedar pendiente', async () => {
