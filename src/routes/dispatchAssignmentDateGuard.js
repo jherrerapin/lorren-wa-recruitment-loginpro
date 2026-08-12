@@ -136,10 +136,7 @@ export function buildAssignmentAsyncNavigationScript() {
     history.replaceState(null, '', url.toString());
 
     const bridgeLink = document.querySelector('.select-request-link');
-    if (!bridgeLink) {
-      window.location.replace(url.toString());
-      return;
-    }
+    if (!bridgeLink) return;
 
     bridgeLink.href = url.toString();
     preserveBoardPositionForNextRender();
