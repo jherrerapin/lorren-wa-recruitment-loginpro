@@ -42,6 +42,7 @@ const APPOINTMENT_ACTION_INTENTS = new Set([
 const MANUAL_CONTEXT_INFORMATION_INTENTS = new Set([
   'ASK_APPLICATION_STATUS',
   'ASK_VACANCY_INFORMATION',
+  'ASK_CV_SUBMISSION',
   'ASK_INTERVIEW_AVAILABILITY',
   'ASK_INTERVIEW_ADDRESS',
   'ASK_INTERVIEW_TIME',
@@ -189,6 +190,10 @@ function buildApplicationStatusReply({ candidate = {}, vacancy = null, activeInt
   return 'Tu proceso sigue registrado. Continuaremos desde el punto pendiente y te contactaremos por este medio si hay una novedad.';
 }
 
+function buildCvSubmissionReply() {
+  return 'Puedes adjuntar tu hoja de vida aquí mismo en este chat como archivo PDF, DOC o DOCX.';
+}
+
 export function buildSafeInformationGapReply(semanticIntent = 'UNCLEAR') {
   if (semanticIntent === 'ASK_INTERVIEW_CONTACT_PERSON') {
     return 'Gracias por preguntar. Tengo registrada tu entrevista, pero no tengo confirmado el nombre de la persona que te recibirá. Conserva la información de la cita que ya recibiste.';
@@ -219,9 +224,19 @@ export function inferContextualSemanticIntent({
   if (interviewIntent === 'confirm_attendance') return 'CONFIRM_ATTENDANCE';
   if (interviewIntent === 'cancel_interview') return 'CANCEL_ATTENDANCE';
   if (interviewIntent === 'reschedule_interview') return 'REQUEST_RESCHEDULE';
-  if (hasCvAttachment || resolvedIntent === 'cv_intent') return 'SEND_CV';
-  if (['post_completion_ack', 'thanks', 'farewell'].includes(resolvedIntent)) return resolvedIntent === 'farewell' ? 'FAREWELL' : 'ACKNOWLEDGEMENT';
+
   const normalized = normalize(text);
+  const mentionsCv = /\b(hoja de vida|hv|cv|curriculum|curriculo)\b/.test(normalized);
+  const asksCvSubmission = Boolean(
+    isQuestion
+    && mentionsCv
+    && /\b(donde|como|por donde|a donde|enviar|envio|mandar|mando|adjuntar|adjunto|subir|compartir)\b/.test(normalized)
+  );
+
+  if (hasCvAttachment) return 'SEND_CV';
+  if (asksCvSubmission) return 'ASK_CV_SUBMISSION';
+  if (resolvedIntent === 'cv_intent') return 'SEND_CV';
+  if (['post_completion_ack', 'thanks', 'farewell'].includes(resolvedIntent)) return resolvedIntent === 'farewell' ? 'FAREWELL' : 'ACKNOWLEDGEMENT';
   if (/\b(me\s+perdi|estoy\s+perdid[oa]|me\s+desubique|no\s+conozco|transbord|inconveniente|me\s+demor[eo]|voy\s+tarde|llego\s+tarde|retrasad[oa]|no\s+alcanzo|se\s+me\s+hizo\s+tarde)\b/.test(normalized)) return 'REPORT_ARRIVAL_PROBLEM';
   if (resolvedIntent === 'confirmation_yes') return 'SOFT_CONFIRMATION';
   if (hasDataIntent) return 'PROVIDE_EXTRA_DATA';
@@ -274,7 +289,7 @@ export function evaluateContextualResponseGate({
     || candidate.currentStep === 'SCHEDULING'
   );
 
-  if (!vacancyAssigned && !['ASK_APPLICATION_STATUS', 'PROVIDE_EXTRA_DATA'].includes(semanticIntent)) {
+  if (!vacancyAssigned && !['ASK_APPLICATION_STATUS', 'PROVIDE_EXTRA_DATA', 'ASK_CV_SUBMISSION'].includes(semanticIntent)) {
     return decision({
       shouldReply: true,
       allowedAction: ContextualAllowedAction.ASK_VACANCY_CONFIRMATION,
@@ -298,6 +313,16 @@ export function evaluateContextualResponseGate({
       allowedAction: ContextualAllowedAction.NO_REPLY,
       reason: 'Last outbound message was manually authorized by a recruiter and the new candidate message is a contextual closing message with no real pending action.',
       responsePurpose: ContextualResponsePurpose.NONE
+    });
+  }
+
+  if (semanticIntent === 'ASK_CV_SUBMISSION') {
+    return decision({
+      shouldReply: true,
+      allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,
+      reason: 'Candidate asked how or where to submit the CV; answer the supported chat attachment channel without treating the file as received.',
+      responsePurpose: ContextualResponsePurpose.LOGISTICS_ANSWER,
+      reply: buildCvSubmissionReply()
     });
   }
 
