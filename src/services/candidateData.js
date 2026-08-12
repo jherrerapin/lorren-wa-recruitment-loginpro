@@ -500,7 +500,7 @@ function normalizeExperienceInfo(value = '') {
 function looksLikeRoleOrIntentPhrase(value = '') {
   const normalized = normalizeLooseText(value);
   if (!normalized) return false;
-  return /\b(auxiliar|coordinador|coordinadora|operacion(?:es)?|logistica|logistico|cargue|descargue|bodega|vacante|cargo|requisit|interesad|cumplo|perfil|trabajo|anuncio|experien|quedo atenta|quedo atento)\b/.test(normalized);
+  return /\b(auxiliar|coordinador|coordinadora|operacion(?:es)?|logistica|logistico|cargue|descargue|bodega|vacante|cargo|requisit|interesad|cumplo|perfil|trabajo|anuncio|experien\w*|quedo atenta|quedo atento)\b/.test(normalized);
 }
 
 function detectDocumentTypeHint(text = '') {
