@@ -170,6 +170,17 @@ test('calendar date remains the DOM source of truth and all-dates is explicit', 
   assert.match(controller, /dateInput\.value = date \|\| ''/);
 });
 
+test('legacy assignment template helper cannot hide requests already filtered by the server date authority', () => {
+  const helper = readSource('src/public/assignment-template-sync.js');
+
+  assert.doesNotMatch(helper, /function hideExpiredWithoutDate/);
+  assert.doesNotMatch(helper, /hideExpiredWithoutDate\(\)/);
+  assert.doesNotMatch(helper, /Solo se muestran solicitudes vigentes/);
+  assert.doesNotMatch(helper, /card\.hidden\s*=\s*expired/);
+  assert.match(helper, /function addRequestCrudActions\(\)/);
+  assert.match(helper, /function wrapWhatsappFetch\(\)/);
+});
+
 test('assignment date guard runs before the active assignment route and manual confirmation remains independent of WhatsApp', () => {
   const server = readSource('src/server.js');
   const workerStats = readSource('src/routes/dispatchWorkerStats.js');
