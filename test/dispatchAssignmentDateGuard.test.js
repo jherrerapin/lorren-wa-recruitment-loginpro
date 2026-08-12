@@ -4,8 +4,9 @@ import { test } from 'node:test';
 import {
   addDateToAssignmentRedirect,
   assignmentDateFromQuery,
-  buildAssignmentDateNavigationScript,
-  loadAssignmentDateContext
+  loadAssignmentDateContext,
+  mergeAssignmentServiceRequests,
+  stripAssignmentDateStatusNote
 } from '../src/routes/dispatchAssignmentDateGuard.js';
 
 function readSource(path) {
@@ -85,13 +86,36 @@ test('manual assignment redirects preserve the service date without touching unr
   assert.equal(addDateToAssignmentRedirect('/admin/operaciones', '2026-08-12'), '/admin/operaciones');
 });
 
-test('date navigation forces a server refresh and clears stale selected request', () => {
-  const script = buildAssignmentDateNavigationScript();
-  assert.match(script, /window\.location\.assign/);
-  assert.match(script, /searchParams\.delete\('serviceRequestId'\)/);
-  assert.match(script, /assignmentDateFilter/);
-  assert.match(script, /clearAssignmentDateFilter/);
-  assert.match(script, /searchParams\.set\('allDates', '1'\)/);
+test('date context is merged into the already loaded board without losing other dates', () => {
+  const merged = mergeAssignmentServiceRequests(
+    [
+      { id: 'today', serviceDate: new Date('2026-08-12T05:00:00.000Z'), createdAt: new Date('2026-08-11T12:00:00.000Z') },
+      { id: 'tomorrow', serviceDate: new Date('2026-08-13T05:00:00.000Z'), createdAt: new Date('2026-08-11T12:00:00.000Z') }
+    ],
+    [
+      { id: 'today', serviceDate: new Date('2026-08-12T05:00:00.000Z'), createdAt: new Date('2026-08-11T13:00:00.000Z') },
+      { id: 'older-exact-date', serviceDate: new Date('2026-07-01T05:00:00.000Z'), createdAt: new Date('2026-06-30T12:00:00.000Z') }
+    ]
+  );
+
+  assert.deepEqual(merged.map((request) => request.id), ['tomorrow', 'today', 'older-exact-date']);
+  assert.equal(merged.find((request) => request.id === 'today').createdAt.toISOString(), '2026-08-11T13:00:00.000Z');
+});
+
+test('assignment UI keeps its native async navigation and removes the active-filter phrase', () => {
+  const guard = readSource('src/routes/dispatchAssignmentDateGuard.js');
+  const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
+
+  assert.doesNotMatch(guard, /window\.location\.assign|stopImmediatePropagation/);
+  assert.match(view, /async function replaceBoardFromUrl/);
+  assert.match(view, /select-request-link[^\n]*addEventListener\('click'/);
+  assert.match(view, /assignmentDateFilter[^\n]*addEventListener\('change'/);
+  assert.match(view, /replaceBoardFromUrl\(url\.toString\(\),true\)/);
+
+  const rendered = '<section><div class="date-note" id="assignmentDateNote"><strong>Filtro activo:</strong> <span id="assignmentDateLabel">2026-08-12</span></div><div>tablero</div></section>';
+  const stripped = stripAssignmentDateStatusNote(rendered);
+  assert.doesNotMatch(stripped, /Filtro activo|assignmentDateNote|assignmentDateLabel/);
+  assert.match(stripped, /tablero/);
 });
 
 test('assignment date guard runs before the active assignment route and manual confirmation remains independent of WhatsApp', () => {
