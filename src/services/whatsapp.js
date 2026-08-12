@@ -1,6 +1,5 @@
 import axios from 'axios';
 import { attachAdContextToMessage } from './adContext.js';
-import { logWhatsappWebhookDiagnostics } from './whatsappWebhookDiagnostics.js';
 
 export async function sendTextMessage(to, body) {
   const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
@@ -100,14 +99,31 @@ export async function sendAudioMessage(to, audio) {
   return response.data;
 }
 
+function payloadPhoneNumberId(payload = {}) {
+  const entry = payload?.entry?.[0];
+  const change = entry?.changes?.[0];
+  return String(change?.value?.metadata?.phone_number_id || '').trim();
+}
+
+export function isRecruitmentWhatsappPayload(payload = {}, expectedPhoneNumberId = process.env.META_PHONE_NUMBER_ID) {
+  const expected = String(expectedPhoneNumberId || '').trim();
+  const received = payloadPhoneNumberId(payload);
+
+  // Fail open only when configuration or metadata is absent so existing test
+  // fixtures and non-message webhook shapes keep their historical behavior.
+  if (!expected || !received) return true;
+  return received === expected;
+}
+
 export function extractMessages(payload) {
-  logWhatsappWebhookDiagnostics(payload, '/webhook');
+  if (!isRecruitmentWhatsappPayload(payload)) return [];
   const entry = payload?.entry?.[0];
   const change = entry?.changes?.[0];
   return (change?.value?.messages || []).map(attachAdContextToMessage);
 }
 
 export function extractContacts(payload) {
+  if (!isRecruitmentWhatsappPayload(payload)) return [];
   const entry = payload?.entry?.[0];
   const change = entry?.changes?.[0];
   return change?.value?.contacts || [];
