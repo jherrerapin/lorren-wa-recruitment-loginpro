@@ -597,6 +597,7 @@ const EXPERIENCE_SUMMARY_CUE = /\b(?:experien|trabaj|labor|coordin|operaci|logis
 const EXPERIENCE_NEGATIVE_CUE = /\b(?:sin experiencia|no tengo experiencia|ninguna experiencia|nunca he trabajado)\b/;
 const EXPERIENCE_JOB_SEARCH_CUE = /\b(?:para\s+(?:un\s+)?trabajo|busco\s+(?:un\s+)?trabajo|buscando\s+(?:un\s+)?trabajo|quiero\s+(?:un\s+)?trabajo|deseo\s+(?:un\s+)?trabajo)\b/;
 const EXPERIENCE_DURATION_CUE = /\b(?:mas\s+de\s+)?(?:\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:es)?|anos?|semanas?)\b/;
+const EXPERIENCE_AFFIRMATION_PREFIX = /^experien\w*\s+(?:si|sii|sip|claro|afirmativo)\b/;
 
 function cleanExperienceStatement(segment = '') {
   return String(segment || '').replace(/\s+/g, ' ').trim().replace(/^[-•\s]+/, '');
@@ -616,6 +617,13 @@ function isExperienceAffirmationOnly(segment = '') {
   return /^experien\w*\s+(?:si|sii|sip|claro|afirmativo)$/.test(compact);
 }
 
+function hasGroundedDetailAfterExperienceAffirmation(compact = '') {
+  if (!EXPERIENCE_AFFIRMATION_PREFIX.test(compact)) return true;
+  const detail = compact.replace(EXPERIENCE_AFFIRMATION_PREFIX, '').trim();
+  if (!detail) return false;
+  return EXPERIENCE_SUMMARY_CUE.test(detail) || EXPERIENCE_DURATION_CUE.test(detail);
+}
+
 function isSafeExperienceStatement(segment = '', { requireSummaryCue = true } = {}) {
   const compact = normalizeLooseText(segment);
   if (!compact || compact.length < 12) return false;
@@ -623,6 +631,7 @@ function isSafeExperienceStatement(segment = '', { requireSummaryCue = true } = 
   if (EXPERIENCE_NEGATIVE_CUE.test(compact)) return false;
   if (EXPERIENCE_JOB_SEARCH_CUE.test(compact)) return false;
   if (isExperienceAffirmationOnly(segment)) return false;
+  if (!hasGroundedDetailAfterExperienceAffirmation(compact)) return false;
   return requireSummaryCue ? EXPERIENCE_SUMMARY_CUE.test(compact) : true;
 }
 
@@ -831,7 +840,6 @@ export function parseNaturalData(text = '') {
 
   return result;
 }
-
 const NON_RESIDENCE_NEIGHBORHOOD_TOKENS = new Set(['hola', 'buenas', 'buenos', 'dias', 'tardes', 'noches']);
 
 function looksLikeGreetingLocation(value = '') {
