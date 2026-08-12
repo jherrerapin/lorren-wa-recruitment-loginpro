@@ -27,8 +27,9 @@ const REAL_THRESHOLD = 0.55;
 const LIVE_THRESHOLD = 0.55;
 const MATCH_THRESHOLD = 0.82;
 const SAMPLE_CONSISTENCY_THRESHOLD = 0.78;
+const IDENTITY_CONTINUITY_THRESHOLD = 0.65;
 const ACTION_SAMPLE_CONSISTENCY_THRESHOLD = 0.65;
-const ACTION_IDENTITY_THRESHOLD = 0.65;
+const ACTION_IDENTITY_THRESHOLD = IDENTITY_CONTINUITY_THRESHOLD;
 const ENROLLMENT_SAMPLE_COUNT = 3;
 const VERIFICATION_SAMPLE_COUNT = 4;
 const PASSIVE_VERIFICATION_SAMPLE_COUNT = 2;
@@ -850,9 +851,14 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     const sessionReference = enrollment.sessionReferences?.find((entry) => entry.assignmentId === assignmentId) || null;
     sessionSimilarity = sessionReference ? humanFaceSimilarity(sessionReference.descriptor, descriptor) : null;
     similarity = Math.max(baseSimilarity, sessionSimilarity ?? 0);
-    if (baseSimilarity >= MATCH_THRESHOLD) referenceSource = 'ENROLLMENT';
-    else if (sessionSimilarity !== null && sessionSimilarity >= MATCH_THRESHOLD) referenceSource = 'SESSION';
-    if (similarity < MATCH_THRESHOLD) addFlag(flags, 'BIOMETRIC_FACE_MISMATCH', 70, state);
+    const enrollmentMatched = baseSimilarity >= MATCH_THRESHOLD;
+    const sessionMatched = strictEvidence
+      && markType !== 'ARRIVAL'
+      && sessionSimilarity !== null
+      && sessionSimilarity >= IDENTITY_CONTINUITY_THRESHOLD;
+    if (enrollmentMatched) referenceSource = 'ENROLLMENT';
+    else if (sessionMatched) referenceSource = 'SESSION';
+    if (!enrollmentMatched && !sessionMatched) addFlag(flags, 'BIOMETRIC_FACE_MISMATCH', 70, state);
     if (await captureWasReplayed(prisma, captureHash, hash, idempotencyKey)) {
       addFlag(flags, 'BIOMETRIC_DESCRIPTOR_REPLAY', 80, state);
     }
@@ -869,6 +875,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     sessionSimilarity,
     referenceSource,
     matchThreshold: MATCH_THRESHOLD,
+    sessionIdentityThreshold: IDENTITY_CONTINUITY_THRESHOLD,
     minimumSampleSimilarity: minimumSampleSimilarityValue,
     sampleConsistencyThreshold: SAMPLE_CONSISTENCY_THRESHOLD,
     actionIdentitySimilarity,

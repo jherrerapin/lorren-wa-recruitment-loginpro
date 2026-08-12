@@ -22,11 +22,26 @@ function unitVector(vector) {
   return vector.map((value) => value / norm);
 }
 
+function dot(left, right) {
+  return left.reduce((sum, value, index) => sum + value * right[index], 0);
+}
+
 function orthogonalDirection(vector) {
   const base = unitVector(vector);
   const seed = Array.from({ length: base.length }, (_, index) => Math.cos((index + 1) * 1.7));
-  const projection = seed.reduce((sum, value, index) => sum + value * base[index], 0);
+  const projection = dot(seed, base);
   return unitVector(seed.map((value, index) => value - projection * base[index]));
+}
+
+function secondOrthogonalDirection(baseVector, firstOrthogonal) {
+  const base = unitVector(baseVector);
+  const first = unitVector(firstOrthogonal);
+  const seed = Array.from({ length: base.length }, (_, index) => Math.sin((index + 1) * 2.3 + 0.4));
+  const baseProjection = dot(seed, base);
+  const firstProjection = dot(seed, first);
+  return unitVector(seed.map((value, index) => (
+    value - baseProjection * base[index] - firstProjection * first[index]
+  )));
 }
 
 function descriptorAtCosine(cosine, direction = 1) {
@@ -35,6 +50,24 @@ function descriptorAtCosine(cosine, direction = 1) {
   const bounded = Math.max(-1, Math.min(1, cosine));
   const angle = Math.acos(bounded) * direction;
   return base.map((value, index) => value * Math.cos(angle) + orthogonal[index] * Math.sin(angle));
+}
+
+function descriptorAtBaseAndSessionCosine(baseCosine, sessionCosine, sessionDescriptor) {
+  const base = unitVector(baseDescriptor);
+  const first = orthogonalDirection(base);
+  const second = secondOrthogonalDirection(base, first);
+  const session = unitVector(sessionDescriptor);
+  const sessionBase = dot(session, base);
+  const sessionFirst = dot(session, first);
+  assert.ok(Math.abs(dot(session, second)) < 1e-8, 'la referencia sintética debe quedar en el plano base/primera dirección');
+  const firstCoefficient = (sessionCosine - sessionBase * baseCosine) / sessionFirst;
+  const secondSquared = 1 - baseCosine ** 2 - firstCoefficient ** 2;
+  assert.ok(secondSquared > 0, 'las similitudes sintéticas solicitadas deben formar un vector unitario');
+  return unitVector(base.map((value, index) => (
+    baseCosine * value
+      + firstCoefficient * first[index]
+      + Math.sqrt(secondSquared) * second[index]
+  )));
 }
 
 function matchesWhere(event, where = {}) {
@@ -163,6 +196,7 @@ test('una llegada validada por el enrolamiento ancla el turno sin relajar 0.82',
   assert.equal(arrival.referenceSource, 'ENROLLMENT');
   assert.ok(arrival.baseSimilarity >= 0.82);
   assert.equal(arrival.matchThreshold, 0.82);
+  assert.equal(arrival.sessionIdentityThreshold, 0.65);
 
   const enrollmentEvent = prisma.events.find((event) => event.action === 'BIOMETRIC_ENROLLED');
   assert.equal(enrollmentEvent.metadata.sessionReferences.length, 1);
@@ -178,11 +212,11 @@ test('una llegada validada por el enrolamiento ancla el turno sin relajar 0.82',
   assert.ok(humanFaceSimilarity(enrollment.sessionReferences[0].descriptor, arrivalDescriptor) > 0.999);
 });
 
-test('el mismo turno tolera deriva inter-sesión usando solo el ancla creada por una llegada fuerte', async () => {
+test('el mismo turno tolera continuidad real entre 0.65 y 0.82 sin relajar la llegada', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const arrivalDescriptor = descriptorAtCosine(0.8404);
-  const breakDescriptor = descriptorAtCosine(0.7240);
+  const breakDescriptor = descriptorAtBaseAndSessionCosine(0.6658, 0.70, arrivalDescriptor);
 
   await assess(prisma, {
     descriptor: arrivalDescriptor,
@@ -198,7 +232,9 @@ test('el mismo turno tolera deriva inter-sesión usando solo el ancla creada por
   });
 
   assert.ok(breakAssessment.baseSimilarity < 0.82);
-  assert.ok(breakAssessment.sessionSimilarity > 0.82);
+  assert.ok(breakAssessment.sessionSimilarity >= 0.65);
+  assert.ok(breakAssessment.sessionSimilarity < 0.82);
+  assert.equal(breakAssessment.sessionIdentityThreshold, 0.65);
   assert.equal(breakAssessment.similarity, breakAssessment.sessionSimilarity);
   assert.equal(breakAssessment.referenceSource, 'SESSION');
   assert.equal(breakAssessment.verified, true);
@@ -208,7 +244,7 @@ test('el mismo turno tolera deriva inter-sesión usando solo el ancla creada por
   assert.equal(enrollmentEvent.metadata.sessionReferences.length, 1, 'una coincidencia secundaria no crea una cadena de plantillas');
 });
 
-test('el ancla del turno no cruza asignaciones ni acepta un rostro que no supera 0.82 contra ninguna referencia', async () => {
+test('una llegada débil no puede usar el umbral de continuidad aunque exista un ancla del turno', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const arrivalDescriptor = descriptorAtCosine(0.8404);
@@ -219,12 +255,38 @@ test('el ancla del turno no cruza asignaciones ni acepta un rostro que no supera
     now: new Date(START.getTime() + 60_000)
   });
 
+  const weakArrivalDescriptor = descriptorAtBaseAndSessionCosine(0.70, 0.75, arrivalDescriptor);
+  const weakArrival = await assess(prisma, {
+    descriptor: weakArrivalDescriptor,
+    markType: 'ARRIVAL',
+    idempotencyKey: 'TEST-weak-arrival-0003',
+    now: new Date(START.getTime() + 2 * 60_000)
+  });
+
+  assert.ok(weakArrival.baseSimilarity < 0.82);
+  assert.ok(weakArrival.sessionSimilarity >= 0.65);
+  assert.equal(weakArrival.referenceSource, null);
+  assert.equal(weakArrival.verified, false);
+  assert.ok(weakArrival.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
+});
+
+test('el ancla del turno no cruza asignaciones ni acepta un rostro por debajo de la continuidad', async () => {
+  const prisma = fakePrisma();
+  await enroll(prisma);
+  const arrivalDescriptor = descriptorAtCosine(0.8404);
+  await assess(prisma, {
+    descriptor: arrivalDescriptor,
+    markType: 'ARRIVAL',
+    idempotencyKey: 'TEST-arrival-anchor-0004',
+    now: new Date(START.getTime() + 60_000)
+  });
+
   const driftForOtherAssignment = descriptorAtCosine(0.71);
   const otherAssignment = await assess(prisma, {
     descriptor: driftForOtherAssignment,
     assignmentId: 'TEST-assignment-other',
     markType: 'BREAK_START',
-    idempotencyKey: 'TEST-other-assignment-0003',
+    idempotencyKey: 'TEST-other-assignment-0004',
     now: new Date(START.getTime() + 3 * 60 * 60_000)
   });
   assert.equal(otherAssignment.sessionSimilarity, null);
@@ -235,11 +297,11 @@ test('el ancla del turno no cruza asignaciones ni acepta un rostro que no supera
   const impostorAssessment = await assess(prisma, {
     descriptor: nearImpostor,
     markType: 'DEPARTURE',
-    idempotencyKey: 'TEST-impostor-anchor-0003',
+    idempotencyKey: 'TEST-impostor-anchor-0004',
     now: new Date(START.getTime() + 5 * 60 * 60_000)
   });
   assert.ok(impostorAssessment.baseSimilarity < 0.82);
-  assert.ok(impostorAssessment.sessionSimilarity < 0.82);
+  assert.ok(impostorAssessment.sessionSimilarity < 0.65);
   assert.equal(impostorAssessment.verified, false);
   assert.ok(impostorAssessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
 });
@@ -251,14 +313,14 @@ test('el ancla expira y la revocación redacta todo el material biométrico adic
   await assess(prisma, {
     descriptor: arrivalDescriptor,
     markType: 'ARRIVAL',
-    idempotencyKey: 'TEST-arrival-anchor-0004',
+    idempotencyKey: 'TEST-arrival-anchor-0005',
     now: new Date(START.getTime() + 60_000)
   });
 
   const expiredAttempt = await assess(prisma, {
     descriptor: descriptorAtCosine(0.724),
     markType: 'BREAK_END',
-    idempotencyKey: 'TEST-expired-anchor-0004',
+    idempotencyKey: 'TEST-expired-anchor-0005',
     now: new Date(START.getTime() + 25 * 60 * 60_000)
   });
   assert.equal(expiredAttempt.sessionSimilarity, null);
