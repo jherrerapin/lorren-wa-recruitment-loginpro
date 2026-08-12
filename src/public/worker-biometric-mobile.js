@@ -22,6 +22,7 @@
   const FINAL_TIMEOUT_MS = 14_000;
   const CAMERA_READY_TIMEOUT_MS = 10_000;
   const RUNTIME_PREPARE_TIMEOUT_MS = 30_000;
+  const RUNTIME_STALLED_LOAD_MS = 75_000;
   const RUNTIME_MAX_IDLE_MS = 12 * 60 * 60 * 1000;
   const ENROLLMENT_SAMPLES = 3;
   const VERIFICATION_STAGE_SAMPLES = 2;
@@ -30,6 +31,7 @@
   const activeStreams = new Set();
 
   let humanPromise = null;
+  let humanPromiseStartedAt = 0;
   let humanInstanceValue = null;
   let scriptPromise = null;
   let backendIndex = 0;
@@ -37,6 +39,7 @@
   let runtimeStale = true;
   let runtimeReason = 'initial';
   let runtimeLastUsedAt = 0;
+  let stalledLoadRecoveryUsed = false;
   let activeDetections = 0;
   let releaseQueue = Promise.resolve();
 
@@ -156,7 +159,7 @@
     const human = new window.Human.Human(humanConfig(backend));
     try {
       await human.load();
-      if (typeof human.warmup === 'function') await human.warmup();
+      if (!IS_ANDROID && typeof human.warmup === 'function') await human.warmup();
       return human;
     } catch (error) {
       await releaseHuman(human);
@@ -168,10 +171,12 @@
     const previous = humanInstanceValue;
     runtimeGeneration += 1;
     humanPromise = null;
+    humanPromiseStartedAt = 0;
     humanInstanceValue = null;
     runtimeStale = true;
     runtimeReason = String(reason || 'runtime-invalidated');
     runtimeLastUsedAt = 0;
+    if (options.preserveStallRecovery !== true) stalledLoadRecoveryUsed = false;
     if (options.rotateBackend === true) backendIndex = (backendIndex + 1) % BACKENDS.length;
     releaseQueue = releaseQueue.then(() => releaseHuman(previous)).catch(() => {});
     return releaseQueue;
@@ -180,6 +185,16 @@
   async function humanInstance() {
     if (humanPromise && !runtimeStale && runtimeLastUsedAt && Date.now() - runtimeLastUsedAt > RUNTIME_MAX_IDLE_MS) {
       await invalidateRuntime('runtime-idle');
+    }
+    if (
+      humanPromise
+      && runtimeStale
+      && humanPromiseStartedAt
+      && Date.now() - humanPromiseStartedAt > RUNTIME_STALLED_LOAD_MS
+      && stalledLoadRecoveryUsed === false
+    ) {
+      stalledLoadRecoveryUsed = true;
+      await invalidateRuntime('runtime-load-stalled', { preserveStallRecovery: true });
     }
     if (humanPromise) return humanPromise;
     if (document.visibilityState === 'hidden') throw new Error('biometric_page_not_visible');
@@ -200,6 +215,8 @@
           }
           backendIndex = candidateIndex;
           humanInstanceValue = human;
+          humanPromiseStartedAt = 0;
+          stalledLoadRecoveryUsed = false;
           runtimeStale = false;
           runtimeReason = null;
           runtimeLastUsedAt = Date.now();
@@ -212,10 +229,14 @@
     })();
 
     humanPromise = promise;
+    humanPromiseStartedAt = Date.now();
     try {
       return await promise;
     } catch (error) {
-      if (humanPromise === promise) humanPromise = null;
+      if (humanPromise === promise) {
+        humanPromise = null;
+        humanPromiseStartedAt = 0;
+      }
       if (generation === runtimeGeneration) {
         humanInstanceValue = null;
         runtimeStale = true;
@@ -254,9 +275,6 @@
   }
 
   async function prepare() {
-    const video = activePreparationVideo();
-    if (video && !liveStreamFor(video)) await startCamera(video);
-
     let human;
     try {
       human = await withTimeout(
