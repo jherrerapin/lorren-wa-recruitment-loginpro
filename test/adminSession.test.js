@@ -79,7 +79,7 @@ test('una sesión env de despacho sin AppUser crea un perfil persistente para al
   };
   const bcryptModule = {
     hash: async (value, rounds) => {
-      assert.equal(value, 'abcd');
+      assert.equal(value, '61626364');
       assert.equal(rounds, 10);
       return 'random-hash';
     }
