@@ -56,7 +56,8 @@ test('normalizeCandidateFields conserva campos para mensajes naturales represent
         medicalRestrictions: 'Sin restricciones médicas',
         transportMode: 'Moto',
         experienceInfo: 'Sí',
-        experienceTime: '2 años'
+        experienceTime: '2 años',
+        experienceSummary: 'tengo 2 años de experiencia'
       }
     },
     {

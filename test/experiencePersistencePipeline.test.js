@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { normalizeCandidateFields, parseNaturalData } from '../src/services/candidateData.js';
+import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
 import { conversationUnderstanding } from '../src/services/conversationUnderstanding.js';
 import { getCandidateReadiness } from '../src/services/readinessGuard.js';
 
@@ -44,6 +46,72 @@ function experienceAiResult(text) {
     usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
   };
 }
+
+test('el parser local conserva experiencia natural con flexiones laborales', () => {
+  for (const text of [
+    'He trabajado como coordinador operativo liderando equipos de logística y transporte.',
+    'Experiencia en operaciones logísticas y coordinación de equipos.',
+    'Coordinación de operaciones logísticas durante la jornada.'
+  ]) {
+    const normalized = normalizeCandidateFields(parseNaturalData(text));
+    assert.equal(normalized.experienceInfo, 'Sí', text);
+    assert.equal(normalized.experienceSummary, text, text);
+    assert.equal(normalized.fullName, undefined, text);
+  }
+});
+
+test('una pregunta concreta en el mismo turno no borra la experiencia declarada', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData(
+    'Tengo experiencia en logística y coordinación de equipos. ¿Cuál es el horario de la vacante?'
+  ));
+
+  assert.equal(parsed.experienceInfo, 'Sí');
+  assert.equal(parsed.experienceSummary, 'Tengo experiencia en logística y coordinación de equipos.');
+});
+
+test('el parser local no convierte una pregunta de requisitos en experiencia del candidato', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData('¿Qué experiencia logística requiere la vacante?'));
+
+  assert.equal(parsed.experienceInfo, undefined);
+  assert.equal(parsed.experienceSummary, undefined);
+});
+
+test('una frase de búsqueda de cargo no se convierte en experiencia del candidato', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData('Desde Bogotá para trabajo de bodega'));
+
+  assert.equal(parsed.experienceInfo, undefined);
+  assert.equal(parsed.experienceSummary, undefined);
+});
+
+test('una pregunta de experiencia junto al consentimiento no se persiste como perfil laboral', async () => {
+  const candidate = {
+    id: 'candidate-synthetic-experience-question',
+    dataConsentStatus: 'ACCEPTED',
+    experienceInfo: null,
+    experienceSummary: null
+  };
+  let writeAttempted = false;
+  const prisma = {
+    candidate: {
+      updateMany: async () => {
+        writeAttempted = true;
+        return { count: 1 };
+      },
+      findUnique: async () => candidate
+    }
+  };
+
+  const result = await captureConsentedProfileData({
+    prisma,
+    candidate,
+    vacancy: { city: 'Neiva' },
+    currentText: 'Autorizo el tratamiento de mis datos. ¿Qué experiencia logística requiere la vacante?'
+  });
+
+  assert.equal(writeAttempted, false);
+  assert.equal(result.reason, 'no_new_profile_data');
+  assert.deepEqual(result.capturedFields, []);
+});
 
 test('la experiencia explícita atraviesa interpretación y sanitización sin volver a quedar pendiente', async () => {
   const text = 'He trabajado como coordinador operativo liderando equipos de logística y transporte.';

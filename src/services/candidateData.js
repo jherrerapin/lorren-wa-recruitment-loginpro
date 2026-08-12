@@ -500,7 +500,7 @@ function normalizeExperienceInfo(value = '') {
 function looksLikeRoleOrIntentPhrase(value = '') {
   const normalized = normalizeLooseText(value);
   if (!normalized) return false;
-  return /\b(auxiliar|coordinador|coordinadora|operacion(?:es)?|logistica|logistico|cargue|descargue|bodega|vacante|cargo|requisit|interesad|cumplo|perfil|trabajo|anuncio|quedo atenta|quedo atento)\b/.test(normalized);
+  return /\b(auxiliar|coordinador|coordinadora|operacion(?:es)?|logistica|logistico|cargue|descargue|bodega|vacante|cargo|requisit|interesad|cumplo|perfil|trabajo|anuncio|experien\w*|quedo atenta|quedo atento)\b/.test(normalized);
 }
 
 function detectDocumentTypeHint(text = '') {
@@ -594,16 +594,40 @@ function detectRobustExperienceTime(text = '') {
   return bestDuration ? normalizeExperienceDuration(bestDuration) : null;
 }
 
+const EXPERIENCE_SUMMARY_CUE = /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/;
+const EXPERIENCE_NEGATIVE_CUE = /\b(?:sin experiencia|no tengo experiencia|ninguna experiencia|nunca he trabajado)\b/;
+const EXPERIENCE_JOB_SEARCH_CUE = /\b(?:para\s+(?:un\s+)?trabajo|busco\s+(?:un\s+)?trabajo|buscando\s+(?:un\s+)?trabajo|quiero\s+(?:un\s+)?trabajo|deseo\s+(?:un\s+)?trabajo)\b/;
+
+function cleanExperienceStatement(segment = '') {
+  return String(segment || '').replace(/\s+/g, ' ').trim().replace(/^[-•\s]+/, '');
+}
+
+function looksLikeExperienceQuestion(segment = '') {
+  const raw = String(segment || '').trim();
+  if (!raw) return false;
+  if (/[?¿]/.test(raw)) return true;
+  const compact = normalizeLooseText(raw);
+  return /^(?:que|cual(?:es)?|cuanto(?:s|a|as)?|cuando|donde|quien|por que)\b/.test(compact)
+    || /^(?:me puedes|me podrias|puedes|podrias|quisiera)\s+(?:decir|contar|explicar|indicar|aclarar|saber|conocer|preguntar|consultar)\b/.test(compact);
+}
+
 function detectExperienceSummary(text = '') {
-  const compact = normalizeLooseText(text);
-  if (!compact) return null;
-  if (!/\b(experien|trabaj|labor|cargo|coordin|operaci|despach|empaque|turnos?|personal)\b/.test(compact)) return null;
-  const cleaned = String(text || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^[-•\s]+/, '');
-  if (cleaned.length < 12) return null;
-  return cleaned.slice(0, 280);
+  const statements = String(text || '')
+    .split(/(?<=[.!?])\s+|(?=¿)|[,;\n]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .filter((segment) => {
+      const compact = normalizeLooseText(segment);
+      if (!compact || !EXPERIENCE_SUMMARY_CUE.test(compact)) return false;
+      if (EXPERIENCE_NEGATIVE_CUE.test(compact)) return false;
+      if (EXPERIENCE_JOB_SEARCH_CUE.test(compact)) return false;
+      return !looksLikeExperienceQuestion(segment);
+    })
+    .map(cleanExperienceStatement)
+    .filter((segment) => normalizeLooseText(segment).length >= 12);
+
+  if (!statements.length) return null;
+  return statements.join(' ').slice(0, 280);
 }
 
 function detectLeadingName(text = '') {
