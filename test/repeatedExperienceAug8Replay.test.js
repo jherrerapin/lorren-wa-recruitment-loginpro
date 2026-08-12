@@ -41,3 +41,31 @@ test('replay seudonimizado Aug-8: una declaración multilínea conserva tiempo y
     []
   );
 });
+
+test('una afirmación de experiencia no convierte una pregunta siguiente en resumen laboral', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData(
+    'Experiencia sí\n¿Qué horario manejan?'
+  ));
+
+  assert.equal(parsed.experienceInfo, 'Sí');
+  assert.equal(parsed.experienceSummary, undefined);
+});
+
+test('una afirmación de experiencia no convierte otro dato de perfil en resumen laboral', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData(
+    'Experiencia sí\nBarrio Ejemplo'
+  ));
+
+  assert.equal(parsed.experienceInfo, 'Sí');
+  assert.equal(parsed.experienceSummary, undefined);
+});
+
+test('una continuación inmediata con duración y contexto laboral sí conserva el resumen', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData(
+    'Experiencia sí\n6 meses en bodega'
+  ));
+
+  assert.equal(parsed.experienceInfo, 'Sí');
+  assert.equal(parsed.experienceTime, '6 meses');
+  assert.match(parsed.experienceSummary || '', /bodega/i);
+});
