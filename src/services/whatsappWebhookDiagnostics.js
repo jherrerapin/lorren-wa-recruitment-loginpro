@@ -1,3 +1,5 @@
+const loggedPayloadEndpoints = new WeakMap();
+
 export function collectWhatsappWebhookDiagnostics(payload = {}) {
   const diagnostics = [];
 
@@ -19,8 +21,22 @@ export function collectWhatsappWebhookDiagnostics(payload = {}) {
   return diagnostics;
 }
 
+function shouldLogPayloadEndpoint(payload, endpoint) {
+  if (!payload || typeof payload !== 'object') return true;
+  let endpoints = loggedPayloadEndpoints.get(payload);
+  if (!endpoints) {
+    endpoints = new Set();
+    loggedPayloadEndpoints.set(payload, endpoints);
+  }
+  if (endpoints.has(endpoint)) return false;
+  endpoints.add(endpoint);
+  return true;
+}
+
 export function logWhatsappWebhookDiagnostics(payload = {}, endpoint = '') {
   const normalizedEndpoint = String(endpoint || '').trim() || 'unknown';
+  if (!shouldLogPayloadEndpoint(payload, normalizedEndpoint)) return;
+
   for (const diagnostic of collectWhatsappWebhookDiagnostics(payload)) {
     console.info('[WA_WEBHOOK_DIAG]', JSON.stringify({
       endpoint: normalizedEndpoint,
