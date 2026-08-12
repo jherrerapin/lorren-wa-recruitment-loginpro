@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { normalizeCandidateFields, parseNaturalData } from '../src/services/candidateData.js';
 import { conversationUnderstanding } from '../src/services/conversationUnderstanding.js';
 import { getCandidateReadiness } from '../src/services/readinessGuard.js';
 
@@ -44,6 +45,25 @@ function experienceAiResult(text) {
     usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
   };
 }
+
+test('el parser local conserva experiencia natural con flexiones laborales', () => {
+  for (const text of [
+    'He trabajado como coordinador operativo liderando equipos de logística y transporte.',
+    'Experiencia en operaciones logísticas y coordinación de equipos.',
+    'Coordinación de operaciones logísticas durante la jornada.'
+  ]) {
+    const normalized = normalizeCandidateFields(parseNaturalData(text));
+    assert.equal(normalized.experienceInfo, 'Sí', text);
+    assert.equal(normalized.experienceSummary, text, text);
+  }
+});
+
+test('el parser local no convierte una pregunta de requisitos en experiencia del candidato', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData('¿Qué experiencia logística requiere la vacante?'));
+
+  assert.equal(parsed.experienceInfo, undefined);
+  assert.equal(parsed.experienceSummary, undefined);
+});
 
 test('la experiencia explícita atraviesa interpretación y sanitización sin volver a quedar pendiente', async () => {
   const text = 'He trabajado como coordinador operativo liderando equipos de logística y transporte.';
