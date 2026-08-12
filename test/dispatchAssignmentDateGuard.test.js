@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import {
   addDateToAssignmentRedirect,
   assignmentDateFromQuery,
+  dispatchAssignmentDateGuard,
   loadAssignmentDateContext
 } from '../src/routes/dispatchAssignmentDateGuard.js';
 
@@ -16,6 +17,40 @@ test('assignment date query uses explicit date and respects allDates', () => {
   assert.equal(assignmentDateFromQuery({ date: '2026-08-13' }), '2026-08-13');
   assert.equal(assignmentDateFromQuery({ fecha: '2026-08-12', allDates: '1' }), null);
   assert.equal(assignmentDateFromQuery({ fecha: '2026-08-12', allDates: 'true' }), null);
+});
+
+test('bare assignment entry makes today explicit for the downstream assignment route', async () => {
+  const expectedToday = assignmentDateFromQuery({});
+  const prisma = {
+    dispatchServiceRequest: { findMany: async () => [] },
+    dispatchAssignment: { findMany: async () => [] }
+  };
+  const req = { method: 'GET', query: {} };
+  const res = { render() {} };
+  let nextCalls = 0;
+
+  await dispatchAssignmentDateGuard(prisma)(req, res, () => { nextCalls += 1; });
+
+  assert.equal(nextCalls, 1);
+  assert.equal(req.query.fecha, expectedToday);
+  assert.equal(req.query.date, undefined);
+  assert.equal(req.query.serviceRequestId, undefined);
+});
+
+test('allDates remains explicit and is not replaced by today', async () => {
+  let serviceRequestQueries = 0;
+  const prisma = {
+    dispatchServiceRequest: { findMany: async () => { serviceRequestQueries += 1; return []; } },
+    dispatchAssignment: { findMany: async () => [] }
+  };
+  const req = { method: 'GET', query: { allDates: '1' } };
+  const res = { render() {} };
+
+  await dispatchAssignmentDateGuard(prisma)(req, res, () => {});
+
+  assert.equal(req.query.fecha, undefined);
+  assert.equal(req.query.allDates, '1');
+  assert.equal(serviceRequestQueries, 0);
 });
 
 test('assignment date context filters service requests in Prisma and selects a request from that date', async () => {
@@ -70,6 +105,9 @@ test('assignment date context filters service requests in Prisma and selects a r
   assert.deepEqual(captured.assignmentWhere.serviceRequestId, { not: 'request-b' });
   assert.deepEqual(captured.assignmentWhere.status, { in: ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'] });
   assert.ok(captured.assignmentWhere.serviceRequest.is.serviceDate.gte instanceof Date);
+
+  const defaultContext = await loadAssignmentDateContext(prisma, '2026-08-12');
+  assert.equal(defaultContext.selectedServiceRequest.id, 'request-a');
 });
 
 test('manual assignment redirects preserve the service date without touching unrelated URLs', () => {
@@ -89,6 +127,7 @@ test('server date guard is the sole date authority and does not inject client pa
 
   assert.match(guard, /nextLocals\.serviceRequests = context\.serviceRequests/);
   assert.match(guard, /selectedAssignmentDate: selectedDate \|\| ''/);
+  assert.match(guard, /query\.fecha = selectedDate/);
   assert.doesNotMatch(guard, /mergeAssignmentServiceRequests|buildAssignmentAsyncNavigationScript|injectAssignmentClientBehavior/);
   assert.doesNotMatch(guard, /bridgeLink|MutationObserver|stopImmediatePropagation|window\.location/);
 });
