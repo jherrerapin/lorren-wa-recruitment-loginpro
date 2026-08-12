@@ -96,7 +96,7 @@ function mentionsSoacha(value = '') {
 function normalizeMunicipalityResidence(value = '') {
   const normalized = normalizeLooseText(value);
   for (const [municipality, residence] of Object.entries(MUNICIPALITY_RESIDENCE_VALUES)) {
-    if (new RegExp(`\b${municipality}\b`).test(normalized)) return residence;
+    if (new RegExp(`\\b${municipality}\\b`).test(normalized)) return residence;
   }
   return null;
 }
@@ -243,16 +243,16 @@ function detectTransportKeyword(text = '') {
   }
 
   const detected = [];
-  if (MOTO_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))) detected.push('Moto');
-  if (CAR_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))) detected.push('Carro');
-  if (BIKE_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))) detected.push('Bicicleta');
+  if (MOTO_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) detected.push('Moto');
+  if (CAR_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) detected.push('Carro');
+  if (BIKE_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))) detected.push('Bicicleta');
   if (
-    BUS_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))
-    || RIDE_HAIL_VARIANTS.some((variant) => new RegExp(`\b${normalizeLooseText(variant)}\b`).test(normalized))
+    BUS_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))
+    || RIDE_HAIL_VARIANTS.some((variant) => new RegExp(`\\b${normalizeLooseText(variant)}\\b`).test(normalized))
   ) {
     detected.push('Bus');
   }
-  if (INDEPENDENT_VARIANTS.some((variant) => new RegExp(`\b${variant}\b`).test(normalized))) detected.push('Independiente');
+  if (INDEPENDENT_VARIANTS.some((variant) => new RegExp(`\\b${variant}\\b`).test(normalized))) detected.push('Independiente');
 
   if (!detected.length) return null;
   return TRANSPORT_PRIORITY.find((value) => detected.includes(value)) || detected[0];
@@ -350,7 +350,7 @@ function normalizeExperienceDuration(value = '') {
 
   let normalized = normalizedRaw;
   for (const [word, num] of Object.entries(wordToNum)) {
-    normalized = normalized.replace(new RegExp(`\b${word}\b`, 'i'), String(num));
+    normalized = normalized.replace(new RegExp(`\\b${word}\\b`, 'i'), String(num));
   }
 
   const match = normalized.match(/(\d+)\s*(mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?)/i);
@@ -412,7 +412,7 @@ function normalizeExperienceTime(value = '') {
 
   let normalized = raw;
   for (const [word, num] of Object.entries(wordToNum)) {
-    normalized = normalized.replace(new RegExp(`\b${word}\b`, 'i'), String(num));
+    normalized = normalized.replace(new RegExp(`\\b${word}\\b`, 'i'), String(num));
   }
 
   const match = normalized.match(/(\d+)\s*(mes(?:e|es)?|a[nñ]os?|semanas?)/i);
@@ -810,7 +810,7 @@ function looksLikeGreetingLocation(value = '') {
   const normalized = String(value || '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
