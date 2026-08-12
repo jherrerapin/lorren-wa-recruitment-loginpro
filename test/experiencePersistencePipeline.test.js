@@ -20,18 +20,19 @@ const COMPLETE_BASE_CANDIDATE = Object.freeze({
   transportMode: 'Moto'
 });
 
+const EXPERIENCE_PENDING_FIELDS = Object.freeze([
+  'experiencia (si o no)',
+  'tiempo de experiencia (1 año o más)',
+  'en qué tiene experiencia'
+]);
+
 test('la experiencia explícita atraviesa interpretación y sanitización sin volver a quedar pendiente', async () => {
   const text = 'He trabajado como coordinador operativo liderando equipos de logística y transporte.';
-  const pendingFields = [
-    'experiencia (si o no)',
-    'tiempo de experiencia (1 año o más)',
-    'en qué tiene experiencia'
-  ];
 
   const result = await conversationUnderstanding(text, {
     context: {
       currentStep: 'COLLECTING_DATA',
-      pendingFields
+      pendingFields: EXPERIENCE_PENDING_FIELDS
     }
   });
 
@@ -46,6 +47,30 @@ test('la experiencia explícita atraviesa interpretación y sanitización sin vo
 
   assert.equal(readiness.missingFields.includes('experienceSummary'), false);
   assert.deepEqual(readiness.missingFields, []);
+});
+
+test('una respuesta descriptiva al campo pendiente conserva el resumen laboral', async () => {
+  const text = 'Experiencia en operaciones logísticas y coordinación de equipos.';
+  const result = await conversationUnderstanding(text, {
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: EXPERIENCE_PENDING_FIELDS
+    }
+  });
+
+  assert.equal(result.candidateFields.experienceInfo, 'Sí');
+  assert.equal(result.candidateFields.experienceSummary, text);
+});
+
+test('una pregunta sobre requisitos de experiencia no se persiste como experiencia del candidato', async () => {
+  const result = await conversationUnderstanding('¿Qué experiencia logística requiere la vacante?', {
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: EXPERIENCE_PENDING_FIELDS
+    }
+  });
+
+  assert.equal(result.candidateFields.experienceSummary, undefined);
 });
 
 test('un no genérico no se convierte en experiencia cuando la última pregunta era de otro campo', async () => {
