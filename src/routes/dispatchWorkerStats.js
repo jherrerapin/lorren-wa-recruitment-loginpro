@@ -4,6 +4,7 @@ import {
   resetDispatchTestEnvironment,
   resetDispatchTestEnvironmentOnce
 } from '../services/dispatchTestEnvironmentReset.js';
+import { dispatchAssignmentDateGuard } from './dispatchAssignmentDateGuard.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
@@ -162,6 +163,8 @@ function installTestResetRenderGate(res, next) {
 
 export function dispatchWorkerStatsRouter(prisma) {
   const router = express.Router();
+
+  router.use('/asignaciones', requireOps, dispatchAssignmentDateGuard(prisma));
 
   router.get('/personal', requireOps, async (req, res, next) => {
     const role = req.session?.userRole || req.userRole;
