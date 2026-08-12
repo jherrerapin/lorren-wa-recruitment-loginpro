@@ -59,6 +59,15 @@ test('el parser local conserva experiencia natural con flexiones laborales', () 
   }
 });
 
+test('una pregunta concreta en el mismo turno no borra la experiencia declarada', () => {
+  const parsed = normalizeCandidateFields(parseNaturalData(
+    'Tengo experiencia en logística y coordinación de equipos. ¿Cuál es el horario de la vacante?'
+  ));
+
+  assert.equal(parsed.experienceInfo, 'Sí');
+  assert.equal(parsed.experienceSummary, 'Tengo experiencia en logística y coordinación de equipos.');
+});
+
 test('el parser local no convierte una pregunta de requisitos en experiencia del candidato', () => {
   const parsed = normalizeCandidateFields(parseNaturalData('¿Qué experiencia logística requiere la vacante?'));
 
