@@ -167,6 +167,7 @@ export function detectConversationIntent(text = '', options = {}) {
   const pureGreeting = matchesAny(GREETING_ONLY_PATTERNS, normalized);
   const greetingPrefix = GREETING_PREFIX_PATTERN.test(normalized);
   const containsData = hasDataSignal(normalized);
+  const questionSignal = hasQuestionSignal(text, normalized);
 
   if (matchesAny(NO_INTEREST_PATTERNS, normalized)) return 'no_interest';
   if (matchesAny(DEFER_PATTERNS, normalized)) return 'defer_intent';
@@ -188,6 +189,7 @@ export function detectConversationIntent(text = '', options = {}) {
   }
 
   if (matchesAny(INFO_FIRST_PATTERNS, normalized)) return 'info_request';
+  if (matchesAny(CV_PATTERNS, normalized) && questionSignal) return 'faq';
   if (matchesAny(CV_PATTERNS, normalized)) return 'cv_intent';
 
   if (matchesAny(CORRECTION_PATTERNS, normalized)) return 'confirmation_no_or_correction';
