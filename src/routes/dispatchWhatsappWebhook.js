@@ -6,6 +6,7 @@ import {
   processDispatchWhatsappWebhook,
   resolveDispatchWhatsappScopeByPhoneNumberId
 } from '../services/dispatchWhatsappCloudService.js';
+import { logWhatsappWebhookDiagnostics } from '../services/whatsappWebhookDiagnostics.js';
 
 function parsePayload(rawBody) {
   if (!Buffer.isBuffer(rawBody) || !rawBody.length) return null;
@@ -79,6 +80,7 @@ export function dispatchWhatsappWebhookRouter(prisma) {
         return res.sendStatus(401);
       }
 
+      logWhatsappWebhookDiagnostics(payload, '/webhook/dispatch');
       await processDispatchWhatsappWebhook(payload, { prismaClient: prisma });
       return res.sendStatus(200);
     } catch (error) {
