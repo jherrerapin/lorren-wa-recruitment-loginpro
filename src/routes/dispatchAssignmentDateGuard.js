@@ -8,7 +8,6 @@ import {
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const ASSIGNMENT_VIEW = 'operacionesAsignacionesConfirmacion';
 const ASSIGNMENT_PATH = '/admin/operaciones/asignaciones';
-const ASYNC_NAVIGATION_SCRIPT_ID = 'dispatch-assignment-async-navigation';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -36,6 +35,7 @@ export function addDateToAssignmentRedirect(target, dateKey) {
 
 export async function loadAssignmentDateContext(prisma, selectedDate, requestedServiceRequestId = null) {
   if (!selectedDate) return null;
+
   const serviceRequestsRaw = await prisma.dispatchServiceRequest.findMany({
     where: buildDispatchServiceDateWhere(selectedDate),
     include: {
@@ -77,90 +77,7 @@ export async function loadAssignmentDateContext(prisma, selectedDate, requestedS
   };
 }
 
-export function mergeAssignmentServiceRequests(baseRequests = [], selectedDateRequests = []) {
-  const byId = new Map();
-  for (const request of [...baseRequests, ...selectedDateRequests]) {
-    if (request?.id) byId.set(request.id, request);
-  }
-  return [...byId.values()].sort((left, right) => {
-    const dateDifference = new Date(right.serviceDate || 0).getTime() - new Date(left.serviceDate || 0).getTime();
-    if (dateDifference) return dateDifference;
-    return new Date(right.createdAt || 0).getTime() - new Date(left.createdAt || 0).getTime();
-  });
-}
-
-export function stripAssignmentDateStatusNote(html) {
-  if (typeof html !== 'string') return html;
-  return html.replace(/<div\s+class="date-note"\s+id="assignmentDateNote">[\s\S]*?<\/div>/i, '');
-}
-
-export function buildAssignmentAsyncNavigationScript() {
-  return `<script id="${ASYNC_NAVIGATION_SCRIPT_ID}">
-(() => {
-  if (window.__dispatchAssignmentAsyncNavigationInstalled) return;
-  window.__dispatchAssignmentAsyncNavigationInstalled = true;
-
-  function preserveBoardPositionForNextRender() {
-    const board = document.querySelector('.board-layout');
-    if (!board) return;
-    const pageY = window.scrollY || 0;
-    const workerScroll = document.querySelector('#workerList')?.scrollTop || 0;
-    const requestScroll = document.querySelector('#requestList')?.scrollTop || 0;
-    const observer = new MutationObserver(() => {
-      observer.disconnect();
-      window.scrollTo(0, pageY);
-      const workerList = document.querySelector('#workerList');
-      const requestList = document.querySelector('#requestList');
-      if (workerList) workerList.scrollTop = workerScroll;
-      if (requestList) requestList.scrollTop = requestScroll;
-    });
-    observer.observe(board, { childList: true });
-    window.setTimeout(() => observer.disconnect(), 2500);
-  }
-
-  document.addEventListener('change', (event) => {
-    const input = event.target;
-    if (!(input instanceof HTMLInputElement) || input.id !== 'assignmentDateFilter') return;
-    const value = input.value;
-    if (!value) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    const url = new URL(window.location.href);
-    url.searchParams.delete('serviceRequestId');
-    url.searchParams.delete('message');
-    url.searchParams.delete('date');
-    url.searchParams.delete('allDates');
-    url.searchParams.set('fecha', value);
-    history.replaceState(null, '', url.toString());
-
-    const bridgeLink = document.querySelector('.select-request-link');
-    if (!bridgeLink) return;
-
-    bridgeLink.href = url.toString();
-    preserveBoardPositionForNextRender();
-    bridgeLink.click();
-  }, true);
-
-  document.addEventListener('click', (event) => {
-    const target = event.target instanceof Element ? event.target.closest('.select-request-link') : null;
-    if (!target) return;
-    preserveBoardPositionForNextRender();
-  }, true);
-})();
-</script>`;
-}
-
-export function injectAssignmentClientBehavior(html) {
-  const withoutStatusNote = stripAssignmentDateStatusNote(html);
-  if (typeof withoutStatusNote !== 'string' || withoutStatusNote.includes(ASYNC_NAVIGATION_SCRIPT_ID)) {
-    return withoutStatusNote;
-  }
-  return withoutStatusNote.replace(/<\/body>/i, `${buildAssignmentAsyncNavigationScript()}\n</body>`);
-}
-
-function installAssignmentRenderGate(req, res, next, context) {
+function installAssignmentRenderGate(req, res, next, selectedDate, context) {
   const originalRender = res.render.bind(res);
   res.render = (view, locals, callback) => {
     let renderLocals = locals || {};
@@ -172,9 +89,13 @@ function installAssignmentRenderGate(req, res, next, context) {
 
     if (view !== ASSIGNMENT_VIEW) return originalRender(view, renderLocals, renderCallback);
 
-    const nextLocals = { ...renderLocals };
+    const nextLocals = {
+      ...renderLocals,
+      selectedAssignmentDate: selectedDate || ''
+    };
+
     if (context) {
-      nextLocals.serviceRequests = mergeAssignmentServiceRequests(renderLocals.serviceRequests, context.serviceRequests);
+      nextLocals.serviceRequests = context.serviceRequests;
       nextLocals.selectedServiceRequest = context.selectedServiceRequest;
       nextLocals.selectedServiceRequestId = context.selectedServiceRequest?.id || '';
       nextLocals.availableWorkers = Array.isArray(renderLocals.workers)
@@ -184,21 +105,14 @@ function installAssignmentRenderGate(req, res, next, context) {
       nextLocals.restDate = context.selectedDate;
     }
 
-    return originalRender(view, nextLocals, (error, html) => {
-      if (error) {
-        if (typeof renderCallback === 'function') return renderCallback(error);
-        return next(error);
-      }
-      const output = injectAssignmentClientBehavior(html);
-      if (typeof renderCallback === 'function') return renderCallback(null, output);
-      return res.send(output);
-    });
+    return originalRender(view, nextLocals, renderCallback);
   };
 }
 
 async function installAssignmentRedirectDate(prisma, req, res) {
   const serviceRequestId = normalizeString(req.body?.serviceRequestId);
   if (!serviceRequestId) return;
+
   const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
     where: { id: serviceRequestId },
     select: { serviceDate: true }
@@ -228,7 +142,7 @@ export function dispatchAssignmentDateGuard(prisma) {
         if (context?.selectedServiceRequest) req.query.serviceRequestId = context.selectedServiceRequest.id;
         else if (selectedDate) delete req.query.serviceRequestId;
 
-        installAssignmentRenderGate(req, res, next, context);
+        installAssignmentRenderGate(req, res, next, selectedDate, context);
         return next();
       }
 
