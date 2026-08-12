@@ -864,10 +864,15 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     }
   }
 
-  const decision = flags.length ? 'REVIEW_REQUIRED' : 'VERIFIED';
+  const mismatchOnlyReview = strictEvidence
+    && flags.length === 1
+    && flags[0] === 'BIOMETRIC_FACE_MISMATCH';
+  const decision = flags.length === 0 || mismatchOnlyReview ? 'VERIFIED' : 'REVIEW_REQUIRED';
   const assessment = {
     decision,
     verified: decision === 'VERIFIED',
+    requiresReview: mismatchOnlyReview,
+    identityMatched: referenceSource !== null,
     riskScore: Math.min(100, state.score),
     riskFlags: flags,
     similarity,
