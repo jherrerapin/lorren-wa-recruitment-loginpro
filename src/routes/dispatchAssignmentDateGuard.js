@@ -1,6 +1,7 @@
 import {
   buildDispatchServiceDateWhere,
   dispatchServiceDateKey,
+  filterDispatchServiceRequestsByDate,
   normalizeDispatchDateParam
 } from '../services/dispatchDate.js';
 
@@ -35,7 +36,7 @@ export function addDateToAssignmentRedirect(target, dateKey) {
 
 export async function loadAssignmentDateContext(prisma, selectedDate, requestedServiceRequestId = null) {
   if (!selectedDate) return null;
-  const serviceRequests = await prisma.dispatchServiceRequest.findMany({
+  const serviceRequestsRaw = await prisma.dispatchServiceRequest.findMany({
     where: buildDispatchServiceDateWhere(selectedDate),
     include: {
       service: true,
@@ -43,6 +44,7 @@ export async function loadAssignmentDateContext(prisma, selectedDate, requestedS
     },
     orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }]
   });
+  const serviceRequests = filterDispatchServiceRequestsByDate(serviceRequestsRaw, selectedDate);
 
   const selectedServiceRequest = requestedServiceRequestId
     ? serviceRequests.find((request) => request.id === requestedServiceRequestId) || serviceRequests[0] || null
@@ -52,16 +54,19 @@ export async function loadAssignmentDateContext(prisma, selectedDate, requestedS
     selectedServiceRequest ? selectedServiceRequest.assignments.map((assignment) => assignment.workerId) : []
   );
 
-  const sameDayAssignments = selectedServiceRequest
+  const sameDayAssignmentsRaw = selectedServiceRequest
     ? await prisma.dispatchAssignment.findMany({
         where: {
           serviceRequestId: { not: selectedServiceRequest.id },
           status: { in: ACTIVE_ASSIGNMENT_STATUSES },
-          serviceRequest: buildDispatchServiceDateWhere(selectedDate)
+          serviceRequest: { is: buildDispatchServiceDateWhere(selectedDate) }
         },
-        select: { workerId: true }
+        select: { workerId: true, serviceRequest: { select: { serviceDate: true } } }
       })
     : [];
+  const sameDayAssignments = sameDayAssignmentsRaw.filter(
+    (assignment) => dispatchServiceDateKey(assignment.serviceRequest?.serviceDate) === selectedDate
+  );
 
   return {
     selectedDate,
