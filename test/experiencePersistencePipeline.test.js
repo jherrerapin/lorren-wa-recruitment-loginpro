@@ -56,6 +56,7 @@ test('el parser local conserva experiencia natural con flexiones laborales', () 
     const normalized = normalizeCandidateFields(parseNaturalData(text));
     assert.equal(normalized.experienceInfo, 'Sí', text);
     assert.equal(normalized.experienceSummary, text, text);
+    assert.equal(normalized.fullName, undefined, text);
   }
 });
 
