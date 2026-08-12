@@ -8,6 +8,7 @@ const flow = fs.readFileSync('src/public/worker-portal-biometric-flow.js', 'utf8
 
 function createRuntimeHarness(source = mobile) {
   let constructorCount = 0;
+  let warmupCount = 0;
   let resolveLoad;
   const loadPromise = new Promise((resolve) => { resolveLoad = resolve; });
 
@@ -20,7 +21,10 @@ function createRuntimeHarness(source = mobile) {
     }
 
     load() { return loadPromise; }
-    warmup() { return Promise.resolve(); }
+    warmup() {
+      warmupCount += 1;
+      return Promise.resolve();
+    }
   }
 
   const document = {
@@ -56,7 +60,8 @@ function createRuntimeHarness(source = mobile) {
   return {
     api: window.LorrenWorkerBiometric,
     resolveLoad,
-    constructorCount: () => constructorCount
+    constructorCount: () => constructorCount,
+    warmupCount: () => warmupCount
   };
 }
 
@@ -72,6 +77,7 @@ test('la biometría permanece disponible durante una jornada completa', () => {
 
 test('la preparación biométrica acota la espera sin convertir un timeout en falla del runtime', () => {
   assert.match(mobile, /RUNTIME_PREPARE_TIMEOUT_MS = 30_000/);
+  assert.match(mobile, /RUNTIME_STALLED_LOAD_MS = 75_000/);
   assert.match(mobile, /function withTimeout\(promise, timeoutMs, errorCode\)/);
   assert.match(mobile, /withTimeout\(\s*humanInstance\(\),\s*RUNTIME_PREPARE_TIMEOUT_MS,\s*'biometric_runtime_prepare_timeout'/s);
   assert.match(mobile, /cause\?\.message === 'biometric_runtime_prepare_timeout'/);
@@ -118,6 +124,43 @@ test('un timeout de preparación conserva la carga para el reintento manual', as
 });
 
 
+test('una carga pendiente demasiado tiempo se reemplaza una sola vez', async () => {
+  const stalledSource = mobile
+    .replace('const RUNTIME_PREPARE_TIMEOUT_MS = 30_000;', 'const RUNTIME_PREPARE_TIMEOUT_MS = 12;')
+    .replace('const RUNTIME_STALLED_LOAD_MS = 75_000;', 'const RUNTIME_STALLED_LOAD_MS = 18;');
+  assert.notEqual(stalledSource, mobile);
+
+  const harness = createRuntimeHarness(stalledSource);
+  await assert.rejects(
+    harness.api.prepare(),
+    (error) => error?.message === 'biometric_runtime_preparing'
+  );
+  assert.equal(harness.constructorCount(), 1);
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const retry = harness.api.prepare();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(harness.constructorCount(), 2);
+
+  harness.resolveLoad();
+  const result = await retry;
+  assert.equal(result.backend, 'cpu');
+  assert.equal(harness.constructorCount(), 2);
+});
+
+
+test('Android CPU carga modelos sin warmup explícito', async () => {
+  const harness = createRuntimeHarness();
+  const preparing = harness.api.prepare();
+  await new Promise((resolve) => setImmediate(resolve));
+  harness.resolveLoad();
+  const result = await preparing;
+
+  assert.equal(result.backend, 'cpu');
+  assert.equal(harness.warmupCount(), 0);
+});
+
+
 test('el portal precarga modelos sin cámara cuando el enrolamiento ya está vigente', () => {
   const enrolledBranch = flow.match(/if \(status\.enrolled\) \{([\s\S]*?)\n      \}/)?.[1] || '';
   assert.match(enrolledBranch, /setButtonsReady\(true\)/);
@@ -127,9 +170,9 @@ test('el portal precarga modelos sin cámara cuando el enrolamiento ya está vig
 });
 
 
-test('la cámara se muestra antes de esperar los modelos y no se reinicia si ya está viva', () => {
-  assert.match(mobile, /const video = activePreparationVideo\(\)/);
-  assert.match(mobile, /if \(video && !liveStreamFor\(video\)\) await startCamera\(video\)/);
+test('la preparación de modelos no abre la cámara antes de que Human esté listo', () => {
+  const prepareBody = mobile.match(/async function prepare\(\) \{([\s\S]*?)\n  \}/)?.[1] || '';
+  assert.doesNotMatch(prepareBody, /startCamera\(/);
   assert.match(mobile, /const currentStream = liveStreamFor\(video\)/);
   assert.match(mobile, /if \(currentStream\) \{\s*video\.hidden = false;\s*return currentStream;/s);
 });
