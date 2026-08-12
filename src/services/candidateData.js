@@ -9,6 +9,7 @@ import { isSuspiciousFullName } from './debugTrace.js';
 import { normalizeBogotaLocalidad } from './geographyNormalization.js';
 import { normalizeTransportMode as deterministicNormalizeTransportMode } from './transportMode.js';
 import { extractExplicitAge, isWorkDurationNumber, isWorkMetricNumber } from './ageEvidence.js';
+import { analyzeConversationTurn } from './conversationIntent.js';
 
 const NAME_TOKEN_REGEX = /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/;
 const IMPLICIT_NEIGHBORHOODS = new Set([
@@ -597,7 +598,8 @@ function detectRobustExperienceTime(text = '') {
 function detectExperienceSummary(text = '') {
   const compact = normalizeLooseText(text);
   if (!compact) return null;
-  if (!/\b(experien|trabaj|labor|cargo|coordin|operaci|despach|empaque|turnos?|personal)\b/.test(compact)) return null;
+  if (analyzeConversationTurn(text).question) return null;
+  if (!/\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/.test(compact)) return null;
   const cleaned = String(text || '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -790,7 +792,7 @@ function looksLikeGreetingLocation(value = '') {
   const normalized = String(value || '')
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
