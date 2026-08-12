@@ -4,11 +4,7 @@ import { test } from 'node:test';
 import {
   addDateToAssignmentRedirect,
   assignmentDateFromQuery,
-  buildAssignmentAsyncNavigationScript,
-  injectAssignmentClientBehavior,
-  loadAssignmentDateContext,
-  mergeAssignmentServiceRequests,
-  stripAssignmentDateStatusNote
+  loadAssignmentDateContext
 } from '../src/routes/dispatchAssignmentDateGuard.js';
 
 function readSource(path) {
@@ -88,62 +84,51 @@ test('manual assignment redirects preserve the service date without touching unr
   assert.equal(addDateToAssignmentRedirect('/admin/operaciones', '2026-08-12'), '/admin/operaciones');
 });
 
-test('date context is merged into the already loaded board without losing other dates', () => {
-  const merged = mergeAssignmentServiceRequests(
-    [
-      { id: 'today', serviceDate: new Date('2026-08-12T05:00:00.000Z'), createdAt: new Date('2026-08-11T12:00:00.000Z') },
-      { id: 'tomorrow', serviceDate: new Date('2026-08-13T05:00:00.000Z'), createdAt: new Date('2026-08-11T12:00:00.000Z') }
-    ],
-    [
-      { id: 'today', serviceDate: new Date('2026-08-12T05:00:00.000Z'), createdAt: new Date('2026-08-11T13:00:00.000Z') },
-      { id: 'older-exact-date', serviceDate: new Date('2026-07-01T05:00:00.000Z'), createdAt: new Date('2026-06-30T12:00:00.000Z') }
-    ]
-  );
+test('server date guard is the sole date authority and does not inject client patches or mix dates', () => {
+  const guard = readSource('src/routes/dispatchAssignmentDateGuard.js');
 
-  assert.deepEqual(merged.map((request) => request.id), ['tomorrow', 'today', 'older-exact-date']);
-  assert.equal(merged.find((request) => request.id === 'today').createdAt.toISOString(), '2026-08-11T13:00:00.000Z');
+  assert.match(guard, /nextLocals\.serviceRequests = context\.serviceRequests/);
+  assert.match(guard, /selectedAssignmentDate: selectedDate \|\| ''/);
+  assert.doesNotMatch(guard, /mergeAssignmentServiceRequests|buildAssignmentAsyncNavigationScript|injectAssignmentClientBehavior/);
+  assert.doesNotMatch(guard, /bridgeLink|MutationObserver|stopImmediatePropagation|window\.location/);
 });
 
-test('calendar change delegates to the existing async board loader and never performs a full-page navigation', () => {
-  const script = buildAssignmentAsyncNavigationScript();
-
-  assert.match(script, /assignmentDateFilter/);
-  assert.match(script, /searchParams\.set\('fecha', value\)/);
-  assert.match(script, /searchParams\.delete\('serviceRequestId'\)/);
-  assert.match(script, /bridgeLink\.href = url\.toString\(\)/);
-  assert.match(script, /bridgeLink\.click\(\)/);
-  assert.doesNotMatch(script, /window\.location\.(?:assign|replace)|location\.href\s*=/);
-});
-
-test('selection preserves page and list positions before the async board DOM replacement', () => {
-  const script = buildAssignmentAsyncNavigationScript();
-
-  assert.match(script, /new MutationObserver/);
-  assert.match(script, /window\.scrollY/);
-  assert.match(script, /#workerList/);
-  assert.match(script, /#requestList/);
-  assert.match(script, /window\.scrollTo\(0, pageY\)/);
-  assert.match(script, /closest\('\.select-request-link'\)/);
-});
-
-test('assignment UI removes active-filter phrase and injects the async navigation guard once', () => {
-  const rendered = '<body><section><div class="date-note" id="assignmentDateNote"><strong>Filtro activo:</strong> <span id="assignmentDateLabel">2026-08-12</span></div><div>tablero</div></section></body>';
-  const stripped = stripAssignmentDateStatusNote(rendered);
-  assert.doesNotMatch(stripped, /Filtro activo|assignmentDateNote|assignmentDateLabel/);
-  assert.match(stripped, /tablero/);
-
-  const injected = injectAssignmentClientBehavior(rendered);
-  assert.match(injected, /dispatch-assignment-async-navigation/);
-  assert.equal((injected.match(/dispatch-assignment-async-navigation/g) || []).length, 1);
-  assert.equal(injectAssignmentClientBehavior(injected), injected);
-});
-
-test('assignment view retains its native async board replacement used by the bridge', () => {
+test('assignment view renders the selected date and uses one dedicated board controller', () => {
   const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
 
-  assert.match(view, /async function replaceBoardFromUrl/);
-  assert.match(view, /select-request-link[^\n]*addEventListener\('click'/);
-  assert.match(view, /replaceBoardFromUrl\(url\.toString\(\),true\)/);
+  assert.match(view, /safeAssignmentDate/);
+  assert.match(view, /id="assignmentDateFilter" value="<%= safeAssignmentDate %>"/);
+  assert.match(view, /src="\/public\/dispatch-assignment-board\.js"/);
+  assert.doesNotMatch(view, /Filtro activo:|assignmentDateNote|assignmentDateLabel/);
+  assert.doesNotMatch(view, /replaceBoardFromUrl|maybeAutoSelectFirstVisibleRequest|BOARD_POS_KEY/);
+});
+
+test('board controller fetches one server state for date/selection and updates granular regions without page navigation', () => {
+  const controller = readSource('src/public/dispatch-assignment-board.js');
+
+  assert.match(controller, /async function changeOperationalDate\(value\)/);
+  assert.match(controller, /async function selectRequest\(link\)/);
+  assert.match(controller, /await loadBoard\(url/);
+  assert.match(controller, /workerList\.innerHTML = nextWorkerList\.innerHTML/);
+  assert.match(controller, /requestList\.innerHTML = nextRequestList\.innerHTML/);
+  assert.match(controller, /currentAssignmentBody\.innerHTML = nextAssignmentBody\.innerHTML/);
+  assert.match(controller, /history\.replaceState\(null, '', url\.toString\(\)\)/);
+  assert.match(controller, /new AbortController\(\)/);
+
+  assert.doesNotMatch(controller, /bridgeLink|MutationObserver|stopImmediatePropagation/);
+  assert.doesNotMatch(controller, /window\.location\.(?:assign|replace|reload)|location\.href\s*=/);
+  assert.doesNotMatch(controller, /board\.innerHTML\s*=/);
+  assert.doesNotMatch(controller, /maybeAutoSelectFirstVisibleRequest|restoreBoardPosition|BOARD_POS_KEY/);
+});
+
+test('calendar date remains the DOM source of truth and all-dates is explicit', () => {
+  const controller = readSource('src/public/dispatch-assignment-board.js');
+
+  assert.match(controller, /return qs\('#assignmentDateFilter'\)\?\.value \|\| ''/);
+  assert.match(controller, /url\.searchParams\.set\('fecha', date\)/);
+  assert.match(controller, /url\.searchParams\.delete\('serviceRequestId'\)/);
+  assert.match(controller, /url\.searchParams\.set\('allDates', '1'\)/);
+  assert.match(controller, /dateInput\.value = date \|\| ''/);
 });
 
 test('assignment date guard runs before the active assignment route and manual confirmation remains independent of WhatsApp', () => {
