@@ -169,6 +169,21 @@ function minimumSampleSimilarity(descriptors) {
   return Math.round(minimum * 10_000) / 10_000;
 }
 
+function robustReferenceSimilarity(referenceDescriptors, verificationDescriptors) {
+  if (
+    !Array.isArray(referenceDescriptors)
+    || !referenceDescriptors.length
+    || !Array.isArray(verificationDescriptors)
+    || !verificationDescriptors.length
+  ) return null;
+  const bestByVerificationSample = verificationDescriptors.map((verificationDescriptor) => (
+    Math.max(...referenceDescriptors.map((referenceDescriptor) => (
+      humanFaceSimilarity(referenceDescriptor, verificationDescriptor)
+    )))
+  ));
+  return Math.round(Math.min(...bestByVerificationSample) * 10_000) / 10_000;
+}
+
 function validateStrictSamples(input, expectedLength, prefix) {
   const descriptors = normalizeDescriptorSamples(
     input.sampleDescriptors,
@@ -230,6 +245,18 @@ function decryptDescriptor(envelope, env) {
     decipher.final()
   ]).toString('utf8');
   return normalizeWorkerBiometricDescriptor(JSON.parse(decrypted));
+}
+
+function decryptEnrollmentReferences(value, env) {
+  if (!Array.isArray(value) || value.length !== ENROLLMENT_SAMPLE_COUNT) return [];
+  try {
+    const descriptors = value.map((entry) => decryptDescriptor(entry, env));
+    const length = descriptors[0]?.length || 0;
+    if (!length || descriptors.some((descriptor) => descriptor.length !== length)) return [];
+    return descriptors;
+  } catch {
+    return [];
+  }
 }
 
 function activeSessionReferences(value, env, now) {
@@ -310,6 +337,7 @@ async function redactHistoricalEnrollmentTemplates(prisma, workerId, now) {
       metadata: {
         ...(event.metadata && typeof event.metadata === 'object' ? event.metadata : {}),
         template: null,
+        enrollmentReferences: null,
         sessionReferences: null,
         descriptorHash: null,
         captureHash: null,
@@ -365,6 +393,7 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
 
   const strictEvidence = Number(input.evidenceVersion) === WORKER_BIOMETRIC_EVIDENCE_VERSION;
   let descriptor;
+  let enrollmentReferenceDescriptors = [];
   let realScore;
   let liveScore;
   let minimumSampleSimilarityValue = null;
@@ -381,6 +410,7 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
       max: MAX_CAPTURE_DURATION_MS
     });
     descriptor = samples.descriptor;
+    enrollmentReferenceDescriptors = samples.descriptors;
     realScore = samples.realScore;
     liveScore = samples.liveScore;
     minimumSampleSimilarityValue = samples.minimumSimilarity;
@@ -397,7 +427,9 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
   const now = options.now || new Date();
   if (!validDate(now)) throw new Error('attendance_biometric_enrollment_now_invalid');
   await redactHistoricalEnrollmentTemplates(prisma, workerId, now);
-  const encrypted = encryptDescriptor(descriptor, options.env || process.env);
+  const env = options.env || process.env;
+  const encrypted = encryptDescriptor(descriptor, env);
+  const encryptedEnrollmentReferences = enrollmentReferenceDescriptors.map((entry) => encryptDescriptor(entry, env));
   const event = await prisma.devAuditEvent.create({
     data: {
       entityType: WORKER_BIOMETRIC_ENTITY_TYPE,
@@ -411,6 +443,7 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
       userAgent: normalizeString(input.userAgent, 500),
       metadata: {
         template: encrypted,
+        enrollmentReferences: encryptedEnrollmentReferences,
         sessionReferences: [],
         descriptorHash: descriptorHash(descriptor),
         captureHash,
@@ -469,6 +502,7 @@ export async function getWorkerBiometricEnrollment(prisma, workerId, options = {
       eventId: event.id,
       workerId: normalizedWorkerId,
       descriptor: decryptDescriptor(event.metadata?.template, env),
+      enrollmentReferences: decryptEnrollmentReferences(event.metadata?.enrollmentReferences, env),
       sessionReferences: activeSessionReferences(event.metadata?.sessionReferences, env, now),
       modelVersion: event.metadata?.modelVersion || null,
       evidenceVersion: Number(event.metadata?.evidenceVersion || 1),
@@ -478,6 +512,7 @@ export async function getWorkerBiometricEnrollment(prisma, workerId, options = {
     return {
       enrolled: true,
       descriptor: null,
+      enrollmentReferences: [],
       sessionReferences: [],
       evidenceVersion: Number(event.metadata?.evidenceVersion || 1),
       templateInvalid: true
@@ -756,11 +791,14 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
   const state = { score: 0 };
   const enrollment = await getWorkerBiometricEnrollment(prisma, workerId, { ...options, now });
   let descriptor = null;
+  let verificationDescriptors = [];
   let challenge = null;
   let challengeEvidence = null;
   let publicChallengeEvidence = null;
   let similarity = null;
   let baseSimilarity = null;
+  let enrollmentReferenceSimilarity = null;
+  let enrollmentSimilarity = null;
   let sessionSimilarity = null;
   let referenceSource = null;
   let identityConfidence = null;
@@ -801,6 +839,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
         : VERIFICATION_SAMPLE_COUNT;
       const samples = validateStrictSamples(input, verificationSampleCount, 'verification');
       descriptor = samples.descriptor;
+      verificationDescriptors = samples.descriptors;
       hash = descriptorHash(descriptor);
       realScore = samples.realScore;
       liveScore = samples.liveScore;
@@ -850,11 +889,18 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
 
   if (descriptor && enrollment.descriptor) {
     baseSimilarity = humanFaceSimilarity(enrollment.descriptor, descriptor);
+    if (strictEvidence && verificationDescriptors.length && enrollment.enrollmentReferences?.length) {
+      enrollmentReferenceSimilarity = robustReferenceSimilarity(
+        enrollment.enrollmentReferences,
+        verificationDescriptors
+      );
+    }
+    enrollmentSimilarity = Math.max(baseSimilarity, enrollmentReferenceSimilarity ?? 0);
     const sessionReference = enrollment.sessionReferences?.find((entry) => entry.assignmentId === assignmentId) || null;
     sessionSimilarity = sessionReference ? humanFaceSimilarity(sessionReference.descriptor, descriptor) : null;
-    similarity = Math.max(baseSimilarity, sessionSimilarity ?? 0);
-    const enrollmentMatched = baseSimilarity >= MATCH_THRESHOLD;
-    const enrollmentProbable = strictEvidence && baseSimilarity >= ATTENDANCE_IDENTITY_THRESHOLD;
+    similarity = Math.max(enrollmentSimilarity, sessionSimilarity ?? 0);
+    const enrollmentMatched = enrollmentSimilarity >= MATCH_THRESHOLD;
+    const enrollmentProbable = strictEvidence && enrollmentSimilarity >= ATTENDANCE_IDENTITY_THRESHOLD;
     const sessionMatched = strictEvidence
       && markType !== 'ARRIVAL'
       && sessionSimilarity !== null
@@ -885,6 +931,8 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     riskFlags: flags,
     similarity,
     baseSimilarity,
+    enrollmentReferenceSimilarity,
+    enrollmentReferenceCount: enrollment.enrollmentReferences?.length || 0,
     sessionSimilarity,
     referenceSource,
     identityConfidence,
@@ -929,8 +977,8 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     assessment.verified
     && strictEvidence
     && markType === 'ARRIVAL'
-    && baseSimilarity !== null
-    && baseSimilarity >= MATCH_THRESHOLD
+    && enrollmentSimilarity !== null
+    && enrollmentSimilarity >= MATCH_THRESHOLD
     && descriptor
   ) {
     try {
