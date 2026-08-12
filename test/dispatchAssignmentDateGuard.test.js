@@ -31,6 +31,11 @@ test('assignment date context filters service requests in Prisma and selects a r
       id: 'request-b',
       serviceDate: new Date('2026-08-12T05:00:00.000Z'),
       assignments: []
+    },
+    {
+      id: 'request-next-day-legacy',
+      serviceDate: new Date('2026-08-13T00:00:00.000Z'),
+      assignments: []
     }
   ];
   const prisma = {
@@ -43,7 +48,10 @@ test('assignment date context filters service requests in Prisma and selects a r
     dispatchAssignment: {
       findMany: async (args) => {
         captured.assignmentWhere = args.where;
-        return [{ workerId: 'worker-2' }];
+        return [
+          { workerId: 'worker-2', serviceRequest: { serviceDate: new Date('2026-08-12T05:00:00.000Z') } },
+          { workerId: 'worker-3', serviceRequest: { serviceDate: new Date('2026-08-13T00:00:00.000Z') } }
+        ];
       }
     }
   };
@@ -55,12 +63,14 @@ test('assignment date context filters service requests in Prisma and selects a r
   assert.deepEqual(context.serviceRequests.map((request) => request.id), ['request-a', 'request-b']);
   assert.equal(context.blockedWorkerIds.size, 0);
   assert.equal(context.assignedWorkerIdsOnSelectedDate.has('worker-2'), true);
+  assert.equal(context.assignedWorkerIdsOnSelectedDate.has('worker-3'), false);
   assert.ok(captured.requestWhere.serviceDate.gte instanceof Date);
   assert.ok(captured.requestWhere.serviceDate.lt instanceof Date);
   assert.equal(captured.requestWhere.serviceDate.gte.toISOString(), '2026-08-12T00:00:00.000Z');
   assert.equal(captured.requestWhere.serviceDate.lt.toISOString(), '2026-08-13T05:00:00.000Z');
   assert.deepEqual(captured.assignmentWhere.serviceRequestId, { not: 'request-b' });
   assert.deepEqual(captured.assignmentWhere.status, { in: ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'] });
+  assert.ok(captured.assignmentWhere.serviceRequest.is.serviceDate.gte instanceof Date);
 });
 
 test('manual assignment redirects preserve the service date without touching unrelated URLs', () => {
