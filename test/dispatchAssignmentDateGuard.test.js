@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import {
   addDateToAssignmentRedirect,
   assignmentDateFromQuery,
+  buildAssignmentAsyncNavigationScript,
+  injectAssignmentClientBehavior,
   loadAssignmentDateContext,
   mergeAssignmentServiceRequests,
   stripAssignmentDateStatusNote
@@ -102,20 +104,46 @@ test('date context is merged into the already loaded board without losing other 
   assert.equal(merged.find((request) => request.id === 'today').createdAt.toISOString(), '2026-08-11T13:00:00.000Z');
 });
 
-test('assignment UI keeps its native async navigation and removes the active-filter phrase', () => {
-  const guard = readSource('src/routes/dispatchAssignmentDateGuard.js');
-  const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
+test('calendar change delegates to the existing async board loader and never performs a full-page navigation', () => {
+  const script = buildAssignmentAsyncNavigationScript();
 
-  assert.doesNotMatch(guard, /window\.location\.assign|stopImmediatePropagation/);
-  assert.match(view, /async function replaceBoardFromUrl/);
-  assert.match(view, /select-request-link[^\n]*addEventListener\('click'/);
-  assert.match(view, /assignmentDateFilter[^\n]*addEventListener\('change'/);
-  assert.match(view, /replaceBoardFromUrl\(url\.toString\(\),true\)/);
+  assert.match(script, /assignmentDateFilter/);
+  assert.match(script, /searchParams\.set\('fecha', value\)/);
+  assert.match(script, /searchParams\.delete\('serviceRequestId'\)/);
+  assert.match(script, /bridgeLink\.href = url\.toString\(\)/);
+  assert.match(script, /bridgeLink\.click\(\)/);
+  assert.doesNotMatch(script, /window\.location\.(?:assign|replace)|location\.href\s*=/);
+});
 
-  const rendered = '<section><div class="date-note" id="assignmentDateNote"><strong>Filtro activo:</strong> <span id="assignmentDateLabel">2026-08-12</span></div><div>tablero</div></section>';
+test('selection preserves page and list positions before the async board DOM replacement', () => {
+  const script = buildAssignmentAsyncNavigationScript();
+
+  assert.match(script, /new MutationObserver/);
+  assert.match(script, /window\.scrollY/);
+  assert.match(script, /#workerList/);
+  assert.match(script, /#requestList/);
+  assert.match(script, /window\.scrollTo\(0, pageY\)/);
+  assert.match(script, /closest\('\.select-request-link'\)/);
+});
+
+test('assignment UI removes active-filter phrase and injects the async navigation guard once', () => {
+  const rendered = '<body><section><div class="date-note" id="assignmentDateNote"><strong>Filtro activo:</strong> <span id="assignmentDateLabel">2026-08-12</span></div><div>tablero</div></section></body>';
   const stripped = stripAssignmentDateStatusNote(rendered);
   assert.doesNotMatch(stripped, /Filtro activo|assignmentDateNote|assignmentDateLabel/);
   assert.match(stripped, /tablero/);
+
+  const injected = injectAssignmentClientBehavior(rendered);
+  assert.match(injected, /dispatch-assignment-async-navigation/);
+  assert.equal((injected.match(/dispatch-assignment-async-navigation/g) || []).length, 1);
+  assert.equal(injectAssignmentClientBehavior(injected), injected);
+});
+
+test('assignment view retains its native async board replacement used by the bridge', () => {
+  const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
+
+  assert.match(view, /async function replaceBoardFromUrl/);
+  assert.match(view, /select-request-link[^\n]*addEventListener\('click'/);
+  assert.match(view, /replaceBoardFromUrl\(url\.toString\(\),true\)/);
 });
 
 test('assignment date guard runs before the active assignment route and manual confirmation remains independent of WhatsApp', () => {
