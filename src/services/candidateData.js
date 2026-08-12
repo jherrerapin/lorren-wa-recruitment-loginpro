@@ -9,7 +9,6 @@ import { isSuspiciousFullName } from './debugTrace.js';
 import { normalizeBogotaLocalidad } from './geographyNormalization.js';
 import { normalizeTransportMode as deterministicNormalizeTransportMode } from './transportMode.js';
 import { extractExplicitAge, isWorkDurationNumber, isWorkMetricNumber } from './ageEvidence.js';
-import { analyzeConversationTurn } from './conversationIntent.js';
 
 const NAME_TOKEN_REGEX = /^[A-Za-zÁÉÍÓÚÑáéíóúñ'.-]{2,}$/;
 const IMPLICIT_NEIGHBORHOODS = new Set([
@@ -55,8 +54,7 @@ const NO_MEDICAL_RESTRICTION_PATTERNS = [
   /^(?:no\s+tengo|no\s+cuento\s+con)\s+(?:ninguna\s+)?(?:restriccion(?:es)?(?:\s+medicas?)?|limitacion(?:es)?(?:\s+medicas?)?)$/i,
   /^restriccion(?:es)?(?:\s+medicas?)?\s*:?\s*(?:ninguna|no\s+tengo|sin\s+restricciones?)$/i,
   /^no,\s*ninguna$/i,
-  /^estoy\s+sano(?:a)?$/i,
-  /^(?:sano|sana)$/i
+  /^(?:estoy\s+sano(?:a)?|sano|sana)$/i
 ];
 const IMPLICIT_NO_MEDICAL_RESTRICTION_PATTERNS = [
   /^(?:no|ninguna|ninguno)$/i,
@@ -501,7 +499,7 @@ function normalizeExperienceInfo(value = '') {
 function looksLikeRoleOrIntentPhrase(value = '') {
   const normalized = normalizeLooseText(value);
   if (!normalized) return false;
-  return /\b(auxiliar|coordinador|coordinadora|operacion(?:es)?|logistica|logistico|cargue|descargue|bodega|vacante|cargo|requisit|interesad|cumplo|perfil|trabajo|anuncio|quedo atenta|quedo atento)\b/.test(normalized);
+  return /\b(auxiliar|coordinador|coordinadora|operacion(?:es)?|logistica|logistico|cargue|descargue|bodega|vacante|cargo|requisit|interesad|cumplo|perfil|trabajo|anuncio|experien|quedo atenta|quedo atento)\b/.test(normalized);
 }
 
 function detectDocumentTypeHint(text = '') {
@@ -600,11 +598,16 @@ const EXPERIENCE_NEGATIVE_CUE = /\b(?:sin experiencia|no tengo experiencia|ningu
 const EXPERIENCE_JOB_SEARCH_CUE = /\b(?:para\s+(?:un\s+)?trabajo|busco\s+(?:un\s+)?trabajo|buscando\s+(?:un\s+)?trabajo|quiero\s+(?:un\s+)?trabajo|deseo\s+(?:un\s+)?trabajo)\b/;
 
 function cleanExperienceStatement(segment = '') {
-  const raw = String(segment || '').replace(/\s+/g, ' ').trim().replace(/^[-•\s]+/, '');
-  if (!raw) return '';
-  const cue = raw.match(/\b(?:tengo|cuento\s+con|poseo|he\s+trabajado|trabaj\w*|experien\w*|coordin\w*|operaci\w*|labor\w*)\b/i);
-  if (!cue || cue.index === undefined || cue.index <= 0) return raw;
-  return raw.slice(cue.index).trim();
+  return String(segment || '').replace(/\s+/g, ' ').trim().replace(/^[-•\s]+/, '');
+}
+
+function looksLikeExperienceQuestion(segment = '') {
+  const raw = String(segment || '').trim();
+  if (!raw) return false;
+  if (/[?¿]/.test(raw)) return true;
+  const compact = normalizeLooseText(raw);
+  return /^(?:que|cual(?:es)?|cuanto(?:s|a|as)?|cuando|donde|quien|por que)\b/.test(compact)
+    || /^(?:me puedes|me podrias|puedes|podrias|quisiera)\s+(?:decir|contar|explicar|indicar|aclarar|saber|conocer|preguntar|consultar)\b/.test(compact);
 }
 
 function detectExperienceSummary(text = '') {
@@ -617,7 +620,7 @@ function detectExperienceSummary(text = '') {
       if (!compact || !EXPERIENCE_SUMMARY_CUE.test(compact)) return false;
       if (EXPERIENCE_NEGATIVE_CUE.test(compact)) return false;
       if (EXPERIENCE_JOB_SEARCH_CUE.test(compact)) return false;
-      return !analyzeConversationTurn(segment).question;
+      return !looksLikeExperienceQuestion(segment);
     })
     .map(cleanExperienceStatement)
     .filter((segment) => normalizeLooseText(segment).length >= 12);
