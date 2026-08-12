@@ -2,6 +2,30 @@ import axios from 'axios';
 import { attachAdContextToMessage } from './adContext.js';
 import { logWhatsappWebhookDiagnostics } from './whatsappWebhookDiagnostics.js';
 
+const guardedNonRecruitmentPayloads = new WeakSet();
+
+function incomingPhoneNumberId(payload) {
+  const entry = payload?.entry?.[0];
+  const change = entry?.changes?.[0];
+  return String(change?.value?.metadata?.phone_number_id || '').trim();
+}
+
+function shouldIgnoreNonRecruitmentPayload(payload) {
+  const phoneNumberId = incomingPhoneNumberId(payload);
+  const recruitmentPhoneNumberId = String(process.env.META_PHONE_NUMBER_ID || '').trim();
+  if (!phoneNumberId || !recruitmentPhoneNumberId || phoneNumberId === recruitmentPhoneNumberId) return false;
+
+  if (payload && typeof payload === 'object' && !guardedNonRecruitmentPayloads.has(payload)) {
+    guardedNonRecruitmentPayloads.add(payload);
+    console.info('[WA_WEBHOOK_ROUTE_GUARD]', JSON.stringify({
+      endpoint: '/webhook',
+      action: 'ignored_non_recruitment_phone_number_id',
+      phone_number_id: phoneNumberId
+    }));
+  }
+  return true;
+}
+
 export async function sendTextMessage(to, body) {
   const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const payload = {
@@ -102,6 +126,7 @@ export async function sendAudioMessage(to, audio) {
 
 export function extractMessages(payload) {
   logWhatsappWebhookDiagnostics(payload, '/webhook');
+  if (shouldIgnoreNonRecruitmentPayload(payload)) return [];
   const entry = payload?.entry?.[0];
   const change = entry?.changes?.[0];
   return (change?.value?.messages || []).map(attachAdContextToMessage);
