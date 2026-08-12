@@ -364,7 +364,6 @@ function normalizeExperienceDuration(value = '') {
   return `${amount} ${unit}`;
 }
 
-
 function isPositiveExperienceDuration(value = '') {
   const normalized = normalizeExperienceDuration(value);
   if (!normalized) return false;
@@ -597,6 +596,7 @@ function detectRobustExperienceTime(text = '') {
 const EXPERIENCE_SUMMARY_CUE = /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/;
 const EXPERIENCE_NEGATIVE_CUE = /\b(?:sin experiencia|no tengo experiencia|ninguna experiencia|nunca he trabajado)\b/;
 const EXPERIENCE_JOB_SEARCH_CUE = /\b(?:para\s+(?:un\s+)?trabajo|busco\s+(?:un\s+)?trabajo|buscando\s+(?:un\s+)?trabajo|quiero\s+(?:un\s+)?trabajo|deseo\s+(?:un\s+)?trabajo)\b/;
+const EXPERIENCE_DURATION_CUE = /\b(?:mas\s+de\s+)?(?:\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:es)?|anos?|semanas?)\b/;
 
 function cleanExperienceStatement(segment = '') {
   return String(segment || '').replace(/\s+/g, ' ').trim().replace(/^[-•\s]+/, '');
@@ -611,23 +611,47 @@ function looksLikeExperienceQuestion(segment = '') {
     || /^(?:me puedes|me podrias|puedes|podrias|quisiera)\s+(?:decir|contar|explicar|indicar|aclarar|saber|conocer|preguntar|consultar)\b/.test(compact);
 }
 
+function isExperienceAffirmationOnly(segment = '') {
+  const compact = normalizeLooseText(segment);
+  return /^experien\w*\s+(?:si|sii|sip|claro|afirmativo)$/.test(compact);
+}
+
+function isSafeExperienceStatement(segment = '', { requireSummaryCue = true } = {}) {
+  const compact = normalizeLooseText(segment);
+  if (!compact || compact.length < 12) return false;
+  if (looksLikeExperienceQuestion(segment)) return false;
+  if (EXPERIENCE_NEGATIVE_CUE.test(compact)) return false;
+  if (EXPERIENCE_JOB_SEARCH_CUE.test(compact)) return false;
+  if (isExperienceAffirmationOnly(segment)) return false;
+  return requireSummaryCue ? EXPERIENCE_SUMMARY_CUE.test(compact) : true;
+}
+
 function detectExperienceSummary(text = '') {
   const statements = String(text || '')
     .split(/(?<=[.!?])\s+|(?=¿)|[,;\n]+/)
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .filter((segment) => {
-      const compact = normalizeLooseText(segment);
-      if (!compact || !EXPERIENCE_SUMMARY_CUE.test(compact)) return false;
-      if (EXPERIENCE_NEGATIVE_CUE.test(compact)) return false;
-      if (EXPERIENCE_JOB_SEARCH_CUE.test(compact)) return false;
-      return !looksLikeExperienceQuestion(segment);
-    })
     .map(cleanExperienceStatement)
-    .filter((segment) => normalizeLooseText(segment).length >= 12);
+    .filter(Boolean);
+  const summaries = [];
 
-  if (!statements.length) return null;
-  return statements.join(' ').slice(0, 280);
+  for (let index = 0; index < statements.length; index += 1) {
+    const statement = statements[index];
+    if (isExperienceAffirmationOnly(statement)) {
+      const continuation = statements[index + 1];
+      const continuationCompact = normalizeLooseText(continuation || '');
+      const hasContinuationCue = EXPERIENCE_SUMMARY_CUE.test(continuationCompact)
+        || EXPERIENCE_DURATION_CUE.test(continuationCompact);
+      if (continuation && hasContinuationCue && isSafeExperienceStatement(continuation, { requireSummaryCue: false })) {
+        summaries.push(continuation);
+        index += 1;
+      }
+      continue;
+    }
+
+    if (isSafeExperienceStatement(statement)) summaries.push(statement);
+  }
+
+  if (!summaries.length) return null;
+  return summaries.join(' ').slice(0, 280);
 }
 
 function detectLeadingName(text = '') {
