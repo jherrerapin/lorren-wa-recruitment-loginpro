@@ -8,6 +8,7 @@ import {
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const ASSIGNMENT_VIEW = 'operacionesAsignacionesConfirmacion';
 const ASSIGNMENT_PATH = '/admin/operaciones/asignaciones';
+const ASYNC_NAVIGATION_SCRIPT_ID = 'dispatch-assignment-async-navigation';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -93,6 +94,75 @@ export function stripAssignmentDateStatusNote(html) {
   return html.replace(/<div\s+class="date-note"\s+id="assignmentDateNote">[\s\S]*?<\/div>/i, '');
 }
 
+export function buildAssignmentAsyncNavigationScript() {
+  return `<script id="${ASYNC_NAVIGATION_SCRIPT_ID}">
+(() => {
+  if (window.__dispatchAssignmentAsyncNavigationInstalled) return;
+  window.__dispatchAssignmentAsyncNavigationInstalled = true;
+
+  function preserveBoardPositionForNextRender() {
+    const board = document.querySelector('.board-layout');
+    if (!board) return;
+    const pageY = window.scrollY || 0;
+    const workerScroll = document.querySelector('#workerList')?.scrollTop || 0;
+    const requestScroll = document.querySelector('#requestList')?.scrollTop || 0;
+    const observer = new MutationObserver(() => {
+      observer.disconnect();
+      window.scrollTo(0, pageY);
+      const workerList = document.querySelector('#workerList');
+      const requestList = document.querySelector('#requestList');
+      if (workerList) workerList.scrollTop = workerScroll;
+      if (requestList) requestList.scrollTop = requestScroll;
+    });
+    observer.observe(board, { childList: true });
+    window.setTimeout(() => observer.disconnect(), 2500);
+  }
+
+  document.addEventListener('change', (event) => {
+    const input = event.target;
+    if (!(input instanceof HTMLInputElement) || input.id !== 'assignmentDateFilter') return;
+    const value = input.value;
+    if (!value) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const url = new URL(window.location.href);
+    url.searchParams.delete('serviceRequestId');
+    url.searchParams.delete('message');
+    url.searchParams.delete('date');
+    url.searchParams.delete('allDates');
+    url.searchParams.set('fecha', value);
+    history.replaceState(null, '', url.toString());
+
+    const bridgeLink = document.querySelector('.select-request-link');
+    if (!bridgeLink) {
+      window.location.replace(url.toString());
+      return;
+    }
+
+    bridgeLink.href = url.toString();
+    preserveBoardPositionForNextRender();
+    bridgeLink.click();
+  }, true);
+
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target.closest('.select-request-link') : null;
+    if (!target) return;
+    preserveBoardPositionForNextRender();
+  }, true);
+})();
+</script>`;
+}
+
+export function injectAssignmentClientBehavior(html) {
+  const withoutStatusNote = stripAssignmentDateStatusNote(html);
+  if (typeof withoutStatusNote !== 'string' || withoutStatusNote.includes(ASYNC_NAVIGATION_SCRIPT_ID)) {
+    return withoutStatusNote;
+  }
+  return withoutStatusNote.replace(/<\/body>/i, `${buildAssignmentAsyncNavigationScript()}\n</body>`);
+}
+
 function installAssignmentRenderGate(req, res, next, context) {
   const originalRender = res.render.bind(res);
   res.render = (view, locals, callback) => {
@@ -122,7 +192,7 @@ function installAssignmentRenderGate(req, res, next, context) {
         if (typeof renderCallback === 'function') return renderCallback(error);
         return next(error);
       }
-      const output = stripAssignmentDateStatusNote(html);
+      const output = injectAssignmentClientBehavior(html);
       if (typeof renderCallback === 'function') return renderCallback(null, output);
       return res.send(output);
     });
