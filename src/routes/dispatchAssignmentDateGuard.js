@@ -133,14 +133,24 @@ export function dispatchAssignmentDateGuard(prisma) {
   return async function assignmentDateGuard(req, res, next) {
     try {
       if (req.method === 'GET') {
-        const selectedDate = assignmentDateFromQuery(req.query || {});
-        const requestedServiceRequestId = normalizeString(req.query?.serviceRequestId);
+        const query = req.query || {};
+        const selectedDate = assignmentDateFromQuery(query);
+
+        // La fecha visible y la fecha que consume la ruta activa deben ser la misma.
+        // Cuando el usuario entra sin parámetros, assignmentDateFromQuery() resuelve hoy
+        // en America/Bogota; la hacemos explícita para todo el pipeline posterior.
+        if (selectedDate) {
+          query.fecha = selectedDate;
+          delete query.date;
+        }
+
+        const requestedServiceRequestId = normalizeString(query.serviceRequestId);
         const context = selectedDate
           ? await loadAssignmentDateContext(prisma, selectedDate, requestedServiceRequestId)
           : null;
 
-        if (context?.selectedServiceRequest) req.query.serviceRequestId = context.selectedServiceRequest.id;
-        else if (selectedDate) delete req.query.serviceRequestId;
+        if (context?.selectedServiceRequest) query.serviceRequestId = context.selectedServiceRequest.id;
+        else if (selectedDate) delete query.serviceRequestId;
 
         installAssignmentRenderGate(req, res, next, selectedDate, context);
         return next();
