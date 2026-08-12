@@ -102,22 +102,6 @@
     });
   }
 
-  function hideExpiredWithoutDate() {
-    const list = document.querySelector('.request-list');
-    if (!list || selectedDateParam()) return;
-    const now = Date.now();
-    let hidden = 0;
-    list.querySelectorAll('.request-card').forEach((card) => {
-      const start = requestStart(card);
-      const expired = start ? now > start.getTime() + TWO_HOURS_MS : false;
-      card.hidden = expired;
-      card.dataset.expiredServiceRequest = expired ? 'true' : 'false';
-      if (expired) hidden += 1;
-    });
-    const head = list.closest('.board-panel')?.querySelector('.board-panel-head p');
-    if (head && hidden) head.textContent = `Solo se muestran solicitudes vigentes. ${hidden} solicitud(es) con más de 2 horas posteriores al servicio ocultas.`;
-  }
-
   function removeDuplicatedDateFilters() {
     const forms = [...document.querySelectorAll('#assignmentDateFilter, #assignmentDateFilterForm')];
     forms.slice(1).forEach((form) => form.remove());
@@ -313,7 +297,6 @@
   function boot() {
     formatVisibleTimes();
     preserveDateOnSelectionLinks();
-    hideExpiredWithoutDate();
     runLightCleanup(document);
     wrapWhatsappFetch();
     document.addEventListener('click', rememberDispatchWhatsappContext, true);
