@@ -26,6 +26,25 @@ const EXPERIENCE_PENDING_FIELDS = Object.freeze([
   'en qué tiene experiencia'
 ]);
 
+function experienceAiResult(text) {
+  return {
+    status: 'ok',
+    intent: 'provide_data',
+    parsedFields: {
+      experienceInfo: 'Sí',
+      experienceSummary: text
+    },
+    extraction: {
+      turnType: 'DATA',
+      fieldEvidence: {
+        experienceInfo: { snippet: text, confidence: 0.99, source: 'openai' },
+        experienceSummary: { snippet: text, confidence: 0.99, source: 'openai' }
+      }
+    },
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+  };
+}
+
 test('la experiencia explícita atraviesa interpretación y sanitización sin volver a quedar pendiente', async () => {
   const text = 'He trabajado como coordinador operativo liderando equipos de logística y transporte.';
 
@@ -33,7 +52,8 @@ test('la experiencia explícita atraviesa interpretación y sanitización sin vo
     context: {
       currentStep: 'COLLECTING_DATA',
       pendingFields: EXPERIENCE_PENDING_FIELDS
-    }
+    },
+    aiResult: experienceAiResult(text)
   });
 
   assert.equal(result.candidateFields.experienceInfo, 'Sí');
@@ -49,13 +69,14 @@ test('la experiencia explícita atraviesa interpretación y sanitización sin vo
   assert.deepEqual(readiness.missingFields, []);
 });
 
-test('una respuesta descriptiva al campo pendiente conserva el resumen laboral', async () => {
+test('una respuesta descriptiva interpretada conserva el resumen laboral', async () => {
   const text = 'Experiencia en operaciones logísticas y coordinación de equipos.';
   const result = await conversationUnderstanding(text, {
     context: {
       currentStep: 'COLLECTING_DATA',
       pendingFields: EXPERIENCE_PENDING_FIELDS
-    }
+    },
+    aiResult: experienceAiResult(text)
   });
 
   assert.equal(result.candidateFields.experienceInfo, 'Sí');
