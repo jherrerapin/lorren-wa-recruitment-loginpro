@@ -42,6 +42,8 @@ const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT_INITIAL_FAILURES = 5;
 const RATE_LIMIT_BASE_DELAY_MS = 30 * 1000;
 const RATE_LIMIT_MAX_DELAY_MS = 5 * 60 * 1000;
+const SESSION_REFERENCE_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_SESSION_REFERENCES = 4;
 const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 
 function normalizeString(value, maxLength = 500) {
@@ -219,13 +221,76 @@ function encryptDescriptor(descriptor, env) {
 function decryptDescriptor(envelope, env) {
   if (!envelope || envelope.algorithm !== 'aes-256-gcm') throw new Error('attendance_biometric_template_invalid');
   const key = deriveKey(biometricSecret(env), 'biometric-template-encryption');
-  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64url'));
+  const decipher = createDecipheriv(envelope.algorithm, key, Buffer.from(envelope.iv, 'base64url'));
   decipher.setAuthTag(Buffer.from(envelope.tag, 'base64url'));
   const decrypted = Buffer.concat([
     decipher.update(Buffer.from(envelope.ciphertext, 'base64url')),
     decipher.final()
   ]).toString('utf8');
   return normalizeWorkerBiometricDescriptor(JSON.parse(decrypted));
+}
+
+function activeSessionReferences(value, env, now) {
+  if (!Array.isArray(value) || !validDate(now)) return [];
+  const minimumCapturedAt = now.getTime() - SESSION_REFERENCE_TTL_MS;
+  return value.flatMap((entry) => {
+    const assignmentId = normalizeString(entry?.assignmentId, 120);
+    const capturedAt = new Date(entry?.capturedAt);
+    if (
+      !assignmentId
+      || Number.isNaN(capturedAt.getTime())
+      || capturedAt.getTime() < minimumCapturedAt
+      || capturedAt.getTime() > now.getTime() + 60_000
+    ) return [];
+    try {
+      return [{
+        assignmentId,
+        capturedAt,
+        descriptor: decryptDescriptor(entry?.template, env)
+      }];
+    } catch {
+      return [];
+    }
+  });
+}
+
+async function persistArrivalSessionReference(prisma, enrollment, input = {}, options = {}) {
+  const assignmentId = normalizeString(input.assignmentId, 120);
+  const descriptor = input.descriptor;
+  const now = options.now || new Date();
+  if (!enrollment?.eventId || !enrollment?.workerId || !assignmentId || !descriptor || !validDate(now)) return false;
+
+  const latest = await findLatestEnrollmentEvent(prisma, enrollment.workerId);
+  if (!latest || latest.action !== WORKER_BIOMETRIC_ACTION.ENROLLED || latest.id !== enrollment.eventId) return false;
+  const metadata = latest.metadata && typeof latest.metadata === 'object' && !Array.isArray(latest.metadata)
+    ? latest.metadata
+    : {};
+  const existing = Array.isArray(metadata.sessionReferences) ? metadata.sessionReferences : [];
+  const minimumCapturedAt = now.getTime() - SESSION_REFERENCE_TTL_MS;
+  const retained = existing.filter((entry) => {
+    const capturedAt = new Date(entry?.capturedAt);
+    return normalizeString(entry?.assignmentId, 120)
+      && !Number.isNaN(capturedAt.getTime())
+      && capturedAt.getTime() >= minimumCapturedAt
+      && capturedAt.getTime() <= now.getTime() + 60_000;
+  });
+  if (retained.some((entry) => String(entry.assignmentId) === assignmentId)) return false;
+
+  const sessionReferences = [
+    ...retained,
+    {
+      assignmentId,
+      capturedAt: now.toISOString(),
+      modelVersion: WORKER_BIOMETRIC_MODEL_VERSION,
+      template: encryptDescriptor(descriptor, options.env || process.env)
+    }
+  ].slice(-MAX_SESSION_REFERENCES);
+
+  await prisma.devAuditEvent.update({
+    where: { id: latest.id },
+    data: { metadata: { ...metadata, sessionReferences } }
+  });
+  return true;
 }
 
 async function redactHistoricalEnrollmentTemplates(prisma, workerId, now) {
@@ -243,6 +308,7 @@ async function redactHistoricalEnrollmentTemplates(prisma, workerId, now) {
       metadata: {
         ...(event.metadata && typeof event.metadata === 'object' ? event.metadata : {}),
         template: null,
+        sessionReferences: null,
         descriptorHash: null,
         captureHash: null,
         redactedAt: now.toISOString()
@@ -343,6 +409,7 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
       userAgent: normalizeString(input.userAgent, 500),
       metadata: {
         template: encrypted,
+        sessionReferences: [],
         descriptorHash: descriptorHash(descriptor),
         captureHash,
         descriptorLength: descriptor.length,
@@ -393,9 +460,14 @@ export async function getWorkerBiometricEnrollment(prisma, workerId, options = {
     return { enrolled: false, descriptor: null, evidenceVersion: null };
   }
   try {
+    const env = options.env || process.env;
+    const now = options.now || new Date();
     return {
       enrolled: true,
-      descriptor: decryptDescriptor(event.metadata?.template, options.env || process.env),
+      eventId: event.id,
+      workerId: normalizedWorkerId,
+      descriptor: decryptDescriptor(event.metadata?.template, env),
+      sessionReferences: activeSessionReferences(event.metadata?.sessionReferences, env, now),
       modelVersion: event.metadata?.modelVersion || null,
       evidenceVersion: Number(event.metadata?.evidenceVersion || 1),
       enrolledAt: event.createdAt
@@ -404,6 +476,7 @@ export async function getWorkerBiometricEnrollment(prisma, workerId, options = {
     return {
       enrolled: true,
       descriptor: null,
+      sessionReferences: [],
       evidenceVersion: Number(event.metadata?.evidenceVersion || 1),
       templateInvalid: true
     };
@@ -679,12 +752,15 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
 
   const flags = [];
   const state = { score: 0 };
-  const enrollment = await getWorkerBiometricEnrollment(prisma, workerId, options);
+  const enrollment = await getWorkerBiometricEnrollment(prisma, workerId, { ...options, now });
   let descriptor = null;
   let challenge = null;
   let challengeEvidence = null;
   let publicChallengeEvidence = null;
   let similarity = null;
+  let baseSimilarity = null;
+  let sessionSimilarity = null;
+  let referenceSource = null;
   let hash = null;
   let captureHash = null;
   let realScore = Number(input.realScore);
@@ -770,7 +846,12 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
   }
 
   if (descriptor && enrollment.descriptor) {
-    similarity = humanFaceSimilarity(enrollment.descriptor, descriptor);
+    baseSimilarity = humanFaceSimilarity(enrollment.descriptor, descriptor);
+    const sessionReference = enrollment.sessionReferences?.find((entry) => entry.assignmentId === assignmentId) || null;
+    sessionSimilarity = sessionReference ? humanFaceSimilarity(sessionReference.descriptor, descriptor) : null;
+    similarity = Math.max(baseSimilarity, sessionSimilarity ?? 0);
+    if (baseSimilarity >= MATCH_THRESHOLD) referenceSource = 'ENROLLMENT';
+    else if (sessionSimilarity !== null && sessionSimilarity >= MATCH_THRESHOLD) referenceSource = 'SESSION';
     if (similarity < MATCH_THRESHOLD) addFlag(flags, 'BIOMETRIC_FACE_MISMATCH', 70, state);
     if (await captureWasReplayed(prisma, captureHash, hash, idempotencyKey)) {
       addFlag(flags, 'BIOMETRIC_DESCRIPTOR_REPLAY', 80, state);
@@ -784,6 +865,9 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     riskScore: Math.min(100, state.score),
     riskFlags: flags,
     similarity,
+    baseSimilarity,
+    sessionSimilarity,
+    referenceSource,
     matchThreshold: MATCH_THRESHOLD,
     minimumSampleSimilarity: minimumSampleSimilarityValue,
     sampleConsistencyThreshold: SAMPLE_CONSISTENCY_THRESHOLD,
@@ -818,5 +902,21 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
       createdAt: now
     }
   });
+
+  if (
+    assessment.verified
+    && strictEvidence
+    && markType === 'ARRIVAL'
+    && baseSimilarity !== null
+    && baseSimilarity >= MATCH_THRESHOLD
+    && descriptor
+  ) {
+    try {
+      await persistArrivalSessionReference(prisma, enrollment, { assignmentId, descriptor }, { ...options, now });
+    } catch {
+      // Una marcación ya verificada no depende de la persistencia auxiliar de la referencia del turno.
+    }
+  }
+
   return assessment;
 }
