@@ -57,11 +57,12 @@ function dateLabel(value) {
     .format(new Date(Date.UTC(year, month - 1, day, 12, 0, 0)));
 }
 
-function declineAlertText(assignment) {
+export function buildDispatchNoveltyAdminAlertText(assignment) {
   const request = assignment?.serviceRequest || {};
   const name = assignment?.worker?.fullName || 'Un auxiliar';
+  const phone = normalizeDispatchWhatsappPhone(assignment?.worker?.phone) || 'sin número';
   const operation = request.operationPointName || request.serviceName || 'la operación asignada';
-  return `⚠️ Novedad de despacho\n${name} indicó *NO PUEDO* para la asignación del ${dateLabel(request.serviceDate)} en ${operation}. Revisa la solicitud para asignar un reemplazo.`;
+  return `⚠️ Novedad reportada\n${name} (${phone}) reportó una novedad sobre su asignación del ${dateLabel(request.serviceDate)} en ${operation}.\nComunícate con el auxiliar para conocer qué ocurrió y gestionar lo necesario.`;
 }
 
 function reminderAlertText(assignment) {
@@ -85,15 +86,15 @@ async function alertUserByUsername(prismaClient, username) {
   });
 }
 
-export async function sendDispatchDeclineAdminAlert({ scope = 'operational', link, assignment, prismaClient = prisma, axiosClient } = {}) {
+export async function sendDispatchNoveltyAdminAlert({ scope = 'operational', link, assignment, prismaClient = prisma, axiosClient } = {}) {
   const ownerUsername = String(link?.alertOwnerUsername || assignment?.createdByUsername || '').trim();
   const user = await alertUserByUsername(prismaClient, ownerUsername);
   if (!user?.isActive || !user.dispatchAlertPhone) return { sent: false, reason: 'admin_alert_not_configured' };
   try {
-    await sendDispatchWhatsappTextMessage({ scope, phone: user.dispatchAlertPhone, text: declineAlertText(assignment), axiosClient });
+    await sendDispatchWhatsappTextMessage({ scope, phone: user.dispatchAlertPhone, text: buildDispatchNoveltyAdminAlertText(assignment), axiosClient });
     return { sent: true, userId: user.id };
   } catch (error) {
-    console.warn(`[dispatch-wa-cloud] No fue posible enviar alerta NO PUEDO al administrador ${user.username}: ${error?.message || error}`);
+    console.warn(`[dispatch-wa-cloud] No fue posible enviar alerta de novedad al administrador ${user.username}: ${error?.message || error}`);
     return { sent: false, reason: 'provider_error', error: String(error?.message || error).slice(0, 300) };
   }
 }
