@@ -54,7 +54,8 @@ const NO_MEDICAL_RESTRICTION_PATTERNS = [
   /^(?:no\s+tengo|no\s+cuento\s+con)\s+(?:ninguna\s+)?(?:restriccion(?:es)?(?:\s+medicas?)?|limitacion(?:es)?(?:\s+medicas?)?)$/i,
   /^restriccion(?:es)?(?:\s+medicas?)?\s*:?\s*(?:ninguna|no\s+tengo|sin\s+restricciones?)$/i,
   /^no,\s*ninguna$/i,
-  /^(?:estoy\s+sano(?:a)?|sano|sana)$/i
+  /^estoy\s+sano(?:a)?$/i,
+  /^(?:sano|sana)$/i
 ];
 const IMPLICIT_NO_MEDICAL_RESTRICTION_PATTERNS = [
   /^(?:no|ninguna|ninguno)$/i,
