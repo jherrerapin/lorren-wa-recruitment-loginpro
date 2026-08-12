@@ -116,7 +116,7 @@ test('un reclamo condicional perdido evita doble dispositivo y doble sesión', a
   assert.equal(writesAfterClaim, 0);
 });
 
-test('la activación exitosa consume, revoca sesiones y principal anterior, y crea una nueva sesión', async () => {
+test('la activación exitosa consume, transfiere el principal y crea una nueva sesión', async () => {
   const calls = [];
   const tx = {
     dispatchWorkerActivation: {
@@ -155,7 +155,7 @@ test('la activación exitosa consume, revoca sesiones y principal anterior, y cr
     dispatchWorkerDevice: {
       updateMany: async (input) => {
         calls.push(['revoke-device', input]);
-        return { count: 1 };
+        return { count: 2 };
       },
       upsert: async (input) => {
         calls.push(['upsert-device', input]);
@@ -190,7 +190,17 @@ test('la activación exitosa consume, revoca sesiones y principal anterior, y cr
   ]);
   assert.equal(calls[2][1].data.status, 'REVOKED');
   assert.equal(calls[2][1].data.revocationReason, 'REPLACED_BY_NEW_PORTAL_SESSION');
+  assert.equal(calls[3][1].where.authorizationType, 'PRIMARY');
+  assert.equal(calls[3][1].where.status, 'ACTIVE');
+  assert.deepEqual(calls[3][1].where.OR, [
+    { workerId: 'worker-1' },
+    { installationIdHash: 'b'.repeat(64) }
+  ]);
+  assert.equal(calls[3][1].data.status, 'REVOKED');
+  assert.equal(calls[3][1].data.revocationReason, 'PRIMARY_DEVICE_REPLACED');
   assert.equal(calls[4][1].create.authorizationType, 'PRIMARY');
+  assert.equal(calls[4][1].create.installationIdHash, 'b'.repeat(64));
+  assert.equal(calls[4][1].update.status, 'ACTIVE');
   assert.equal(calls[5][1].data.sessionTokenHash, 'c'.repeat(64));
   assert.equal(calls[5][1].data.activationId, 'activation-1');
   assert.equal(Object.hasOwn(calls[5][1].data, 'rawSessionToken'), false);

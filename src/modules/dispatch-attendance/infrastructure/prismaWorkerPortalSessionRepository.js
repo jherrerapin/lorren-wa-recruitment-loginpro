@@ -124,9 +124,12 @@ export function createPrismaWorkerPortalSessionRepository(
 
         await tx.dispatchWorkerDevice.updateMany({
           where: {
-            workerId: activation.workerId,
             authorizationType: PRIMARY_AUTHORIZATION_TYPE,
-            status: 'ACTIVE'
+            status: 'ACTIVE',
+            OR: [
+              { workerId: activation.workerId },
+              { installationIdHash: input.installationIdHash }
+            ]
           },
           data: {
             status: 'REVOKED',
