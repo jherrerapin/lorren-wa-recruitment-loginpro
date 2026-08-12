@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { attachAdContextToMessage } from './adContext.js';
+import { logWhatsappWebhookDiagnostics } from './whatsappWebhookDiagnostics.js';
 
 export async function sendTextMessage(to, body) {
   const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
@@ -100,6 +101,7 @@ export async function sendAudioMessage(to, audio) {
 }
 
 export function extractMessages(payload) {
+  logWhatsappWebhookDiagnostics(payload, '/webhook');
   const entry = payload?.entry?.[0];
   const change = entry?.changes?.[0];
   return (change?.value?.messages || []).map(attachAdContextToMessage);
