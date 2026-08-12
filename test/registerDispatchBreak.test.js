@@ -157,7 +157,37 @@ test('marca todo almuerzo offline como pendiente de revisión', async () => {
   assert.ok(result.validation.riskFlags.includes('CLIENT_CLOCK_UNTRUSTED'));
   assert.ok(result.validation.riskFlags.includes('PERSISTENT_STORAGE_UNAVAILABLE'));
   assert.ok(result.validation.riskFlags.includes('DELAYED_SYNC'));
+  assert.deepEqual(result.attendanceMark.riskFlags.sort(), [
+    'CLIENT_CLOCK_UNTRUSTED',
+    'DELAYED_SYNC',
+    'OFFLINE_WEB_CAPTURE',
+    'PERSISTENT_STORAGE_UNAVAILABLE'
+  ]);
   assert.equal(session.validationStatus, 'REVIEW_REQUIRED');
+});
+
+test('un almuerzo online limpio no hereda riesgos históricos de la sesión', async () => {
+  const historicalFlags = ['OFFLINE_WEB_CAPTURE', 'CLIENT_CLOCK_UNTRUSTED'];
+  const { prisma, session } = createFixture({
+    session: {
+      validationStatus: 'REVIEW_REQUIRED',
+      riskScore: 40,
+      riskFlags: historicalFlags
+    }
+  });
+
+  const result = await registerDispatchBreak(
+    prisma,
+    input('BREAK_START', '2026-07-25T17:30:00.000Z')
+  );
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.attendanceMark.decision, 'AUTO_VALIDATED');
+  assert.equal(result.attendanceMark.riskScore, 0);
+  assert.deepEqual(result.attendanceMark.riskFlags, []);
+  assert.equal(result.validation.validationStatus, 'REVIEW_REQUIRED');
+  assert.deepEqual(result.validation.riskFlags, historicalFlags);
+  assert.deepEqual(session.riskFlags, historicalFlags);
 });
 
 test('no permite finalizar el almuerzo sin haberlo iniciado', async () => {
