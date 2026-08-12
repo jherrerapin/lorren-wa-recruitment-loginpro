@@ -496,6 +496,8 @@ function normalizeExperienceInfo(value = '') {
   return null;
 }
 
+const EXPERIENCE_WORK_CUE = /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/;
+
 function looksLikeRoleOrIntentPhrase(value = '') {
   const normalized = normalizeLooseText(value);
   if (!normalized) return false;
@@ -518,7 +520,7 @@ function detectDocumentTypeHint(text = '') {
 
 function detectExperienceTime(text = '') {
   const compact = normalizeLooseText(text);
-  if (!compact || !/\b(experien|trabaj|labor|cargo|oficio)\b/.test(compact)) return null;
+  if (!compact || !EXPERIENCE_WORK_CUE.test(compact)) return null;
 
   const match = compact.match(/\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a[nñ]os?|semanas?))(?:\s+de\s+experiencia|\s+trabajando|\s+en\s+el\s+cargo|\s+laborando)?\b/i);
   if (!match?.[1]) return null;
@@ -541,6 +543,37 @@ function sanitizeNameCandidate(value = '') {
     .trim();
 }
 
+function getDelimitedClauseContext(text = '', index = 0) {
+  const compact = String(text || '');
+  const separators = [',', ';', '.', '!', '?'];
+  let clauseStart = 0;
+  for (const separator of separators) {
+    const boundary = compact.lastIndexOf(separator, Math.max(0, index - 1));
+    if (boundary >= 0) clauseStart = Math.max(clauseStart, boundary + 1);
+  }
+
+  let clauseEnd = compact.length;
+  for (const separator of separators) {
+    const boundary = compact.indexOf(separator, index);
+    if (boundary >= 0) clauseEnd = Math.min(clauseEnd, boundary);
+  }
+
+  const clause = compact.slice(clauseStart, clauseEnd).trim();
+  if (clauseStart <= 0) return { clause, previousClause: '' };
+
+  const beforeClause = compact.slice(0, clauseStart - 1);
+  let previousStart = 0;
+  for (const separator of separators) {
+    const boundary = beforeClause.lastIndexOf(separator);
+    if (boundary >= 0) previousStart = Math.max(previousStart, boundary + 1);
+  }
+
+  return {
+    clause,
+    previousClause: beforeClause.slice(previousStart).trim()
+  };
+}
+
 function detectRobustExperienceTime(text = '') {
   const compact = normalizeLooseText(text);
   if (!compact) return null;
@@ -560,7 +593,7 @@ function detectRobustExperienceTime(text = '') {
   if (wordDurationWithExperience?.[1]) return normalizeExperienceDuration(wordDurationWithExperience[1]);
 
   const durationRegex = /\b((?:un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|\d+)\s*(?:mes(?:e|es)?|a(?:\s*\w*)?os?|semana(?:s)?))\b/gi;
-  const hasGlobalWorkContext = /\b(experien|trabaj|labor|cargo|oficio|operaci|logistic|personal|coordin|turno)\b/.test(compact);
+  const hasGlobalWorkContext = EXPERIENCE_WORK_CUE.test(compact);
   const hasShortAffirmativeContext = /\bsi\s+tengo\b/.test(compact) || (/\bsi\b/.test(compact) && /\bmas\s+de\b/.test(compact));
   let bestDuration = null;
   let bestScore = -1;
@@ -569,19 +602,21 @@ function detectRobustExperienceTime(text = '') {
     const duration = match?.[1];
     if (!duration) continue;
     const start = match.index || 0;
-    const left = compact.slice(Math.max(0, start - 24), start);
-    const right = compact.slice(start + duration.length, Math.min(compact.length, start + duration.length + 28));
-    const nearContext = `${left} ${right}`;
+    const { clause, previousClause } = getDelimitedClauseContext(compact, start);
+    const hasLocalWorkContext = EXPERIENCE_WORK_CUE.test(clause);
+    const hasImmediateExperienceContext = normalizeExperienceInfo(previousClause) === 'Sí';
     const durationUnitLooksLikeYears = /\ba/.test(duration);
     const looksLikeAgeSnippet = durationUnitLooksLikeYears
-      && /\b(?:edad|tengo|soy\s+de)\s*$/.test(left)
-      && !/\b(experien|trabaj|labor|cargo|oficio)\b/.test(nearContext);
+      && extractExplicitAge(clause) !== null
+      && !hasLocalWorkContext
+      && !hasImmediateExperienceContext;
     if (looksLikeAgeSnippet) continue;
 
-    const hasLocalWorkContext = /\b(experien|trabaj|labor|cargo|oficio|operaci|logistic|personal|coordin|turno)\b/.test(nearContext);
     const startsText = start < 2;
-    const looksStandaloneYears = durationUnitLooksLikeYears && startsText && !hasLocalWorkContext;
-    let score = hasLocalWorkContext ? 3 : (hasShortAffirmativeContext ? 2 : (hasGlobalWorkContext ? 1 : 0));
+    const looksStandaloneYears = durationUnitLooksLikeYears && startsText && !hasLocalWorkContext && !hasImmediateExperienceContext;
+    let score = hasLocalWorkContext
+      ? 3
+      : (hasImmediateExperienceContext ? 2 : (hasShortAffirmativeContext ? 2 : (hasGlobalWorkContext ? 1 : 0)));
     if (looksStandaloneYears) score -= 2;
     if (score < 1) continue;
     if (score > bestScore) {
@@ -593,7 +628,7 @@ function detectRobustExperienceTime(text = '') {
   return bestDuration ? normalizeExperienceDuration(bestDuration) : null;
 }
 
-const EXPERIENCE_SUMMARY_CUE = /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/;
+const EXPERIENCE_SUMMARY_CUE = EXPERIENCE_WORK_CUE;
 const EXPERIENCE_NEGATIVE_CUE = /\b(?:sin experiencia|no tengo experiencia|ninguna experiencia|nunca he trabajado)\b/;
 const EXPERIENCE_JOB_SEARCH_CUE = /\b(?:para\s+(?:un\s+)?trabajo|busco\s+(?:un\s+)?trabajo|buscando\s+(?:un\s+)?trabajo|quiero\s+(?:un\s+)?trabajo|deseo\s+(?:un\s+)?trabajo)\b/;
 const EXPERIENCE_DURATION_CUE = /\b(?:mas\s+de\s+)?(?:\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:es)?|anos?|semanas?)\b/;
