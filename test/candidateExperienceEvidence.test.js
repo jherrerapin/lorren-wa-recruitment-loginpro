@@ -53,6 +53,36 @@ test('acepta respuesta corta cuando experiencia está pendiente', () => {
   assert.equal(result.fields.experienceInfo, 'Sí');
 });
 
+test('acepta respuesta corta de experiencia cuando hay varios pendientes pero esa fue la pregunta activa', () => {
+  const result = sanitizeExperience({
+    value: 'No',
+    text: 'no',
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['barrio', 'experiencia (si o no)'],
+      lastBotQuestion: '¿Tienes experiencia para este cargo?'
+    },
+    turnType: 'CONFIRMATION'
+  });
+
+  assert.equal(result.fields.experienceInfo, 'No');
+});
+
+test('rechaza respuesta corta para experiencia cuando la pregunta activa pide otro campo', () => {
+  const result = sanitizeExperience({
+    value: 'No',
+    text: 'no',
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['barrio', 'experiencia (si o no)'],
+      lastBotQuestion: '¿En qué barrio vives?'
+    },
+    turnType: 'CONFIRMATION'
+  });
+
+  assert.equal(result.fields.experienceInfo, undefined);
+});
+
 test('rechaza Sí de interés general sin evidencia de experiencia', () => {
   const result = sanitizeExperience({
     value: 'Sí',

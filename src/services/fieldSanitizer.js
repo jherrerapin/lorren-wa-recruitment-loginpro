@@ -129,6 +129,19 @@ function lastQuestionAskedForField(field, context = {}) {
   return fieldPatterns[field]?.test(question) || false;
 }
 
+function shortAnswerHasFieldContext(field, context = {}) {
+  if (readLastBotQuestion(context).trim()) {
+    return lastQuestionAskedForField(field, context);
+  }
+
+  const pending = [...new Set(
+    readPendingFields(context)
+      .map(normalizeText)
+      .filter(Boolean)
+  )];
+  return pending.length === 1 && fieldWasPending(field, context);
+}
+
 function currentStepCollectsCandidateData(context = {}) {
   const step = readCurrentStep(context);
   return /COLLECT|CONFIRM|GREETING_SENT|ASK_DATA|DATA|REGISTRO/.test(step);
@@ -188,7 +201,12 @@ function sanitizeExperienceInfo(value, evidence, text, context = {}, turnType = 
 
   if (isPositive && explicitNo) return { ok: false, reason: 'experience_info_contradicts_negative_evidence' };
   if (isNegative && explicitYes) return { ok: false, reason: 'experience_info_contradicts_positive_evidence' };
-  if (shortAnswer && fieldContext) return { ok: true, value: isPositive ? 'Sí' : 'No' };
+  if (shortAnswer) {
+    if (!shortAnswerHasFieldContext('experienceInfo', context)) {
+      return { ok: false, reason: 'short_experience_answer_without_active_field_context' };
+    }
+    return { ok: true, value: isPositive ? 'Sí' : 'No' };
+  }
   if (isPositive && explicitYes) return { ok: true, value: 'Sí' };
   if (isNegative && explicitNo) return { ok: true, value: 'No' };
 
