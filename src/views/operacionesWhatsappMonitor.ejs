@@ -114,7 +114,7 @@
       <h2>Inbound recientes que no coinciden con los teléfonos de los asignados</h2>
       <p>Si un auxiliar asegura que ya escribió pero sigue cerrado, revisa aquí. Si aparece su número, el problema es de coincidencia con el teléfono guardado en Personal, no de falta de respuesta.</p>
       <div class="unmatched-list" id="unmatchedList">
-        <% unmatchedInbound.forEach((item) => { %><div class="unmatched-item"><strong><%= item.phone %></strong> · <span data-date="<%= item.lastInboundAt %>"><%= item.lastInboundAt %></span></div><% }) %>
+        <% unmatchedInbound.forEach((item) => { %><div class="unmatched-item"><strong><%= item.workerName ? `${item.workerName} · ${item.phone}` : item.phone %></strong> · <span data-date="<%= item.lastInboundAt %>"><%= item.lastInboundAt %></span></div><% }) %>
       </div>
     </section>
   </main>
@@ -232,7 +232,10 @@
     function renderUnmatched(items) {
       const list = Array.isArray(items) ? items : [];
       unmatchedPanel.hidden = list.length === 0;
-      unmatchedList.innerHTML = list.map((item) => `<div class="unmatched-item"><strong>${escapeHtml(item.phone || '—')}</strong> · ${escapeHtml(formatBogota(item.lastInboundAt))}</div>`).join('');
+      unmatchedList.innerHTML = list.map((item) => {
+        const identity = item.workerName ? `${escapeHtml(item.workerName)} · ${escapeHtml(item.phone || '—')}` : escapeHtml(item.phone || '—');
+        return `<div class="unmatched-item"><strong>${identity}</strong> · ${escapeHtml(formatBogota(item.lastInboundAt))}</div>`;
+      }).join('');
     }
     function render(data) {
       renderItems(data.items);

@@ -96,6 +96,24 @@ function possibleInboundMatch(phone, unmatchedInbound = []) {
   return matches.length === 1 ? matches[0] : null;
 }
 
+async function loadWorkerNamesByPhone(prismaClient) {
+  const result = new Map();
+  if (!prismaClient?.dispatchWorker?.findMany) return result;
+  const workers = await prismaClient.dispatchWorker.findMany({
+    where: { phone: { not: null } },
+    select: { fullName: true, phone: true }
+  });
+  for (const worker of workers) {
+    const phone = normalizePhone(worker?.phone);
+    const name = text(worker?.fullName);
+    if (!phone || !name) continue;
+    const names = result.get(phone) || new Set();
+    names.add(name);
+    result.set(phone, names);
+  }
+  return new Map([...result.entries()].map(([phone, names]) => [phone, [...names].sort((a, b) => a.localeCompare(b, 'es'))]));
+}
+
 function auditAction(direction) {
   return direction === 'INBOUND' ? 'DISPATCH_WHATSAPP_INBOUND' : 'DISPATCH_WHATSAPP_OUTBOUND';
 }
@@ -416,12 +434,21 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
     bucket.push(link);
     linksByAssignment.set(link.assignmentId, bucket);
   }
-  const unmatchedInbound = recentInboundRows
+  const unmatchedInboundBase = recentInboundRows
     .map((row) => ({
       phone: normalizePhone(row?.phone),
       lastInboundAt: validDate(row?.lastInboundAt)?.toISOString() || null
     }))
     .filter((row) => row.phone && row.lastInboundAt && !assignedPhones.has(row.phone));
+  const workerNamesByPhone = unmatchedInboundBase.length ? await loadWorkerNamesByPhone(prismaClient) : new Map();
+  const unmatchedInbound = unmatchedInboundBase.map((row) => {
+    const workerNames = workerNamesByPhone.get(row.phone) || [];
+    return {
+      ...row,
+      workerName: workerNames.length ? workerNames.join(' / ') : null,
+      workerNames
+    };
+  });
 
   const items = assignments.map((assignment) => {
     const worker = assignment.worker || {};

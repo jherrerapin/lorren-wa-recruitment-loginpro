@@ -60,6 +60,13 @@ function prismaFixture() {
       assert.equal(query.where.serviceRequest.source.not, 'DEV_TEST');
       return assignments;
     } },
+    dispatchWorker: { findMany: async (query) => {
+      assert.deepEqual(query.where, { phone: { not: null } });
+      assert.deepEqual(query.select, { fullName: true, phone: true });
+      return [
+        { fullName: 'Auxiliar relacionado', phone: '300 999 9999' }
+      ];
+    } },
     dispatchWhatsappContactWindow: {
       findMany: async (query) => {
         assert.equal(query.where.scope, 'operational');
@@ -135,6 +142,8 @@ test('monitor vivo reconcilia ventana, expone inbound sin coincidencia y adjunta
   assert.equal(monitor.summary.missingWindow, 1);
   assert.equal(monitor.summary.unmatchedInbound, 1);
   assert.equal(monitor.unmatchedInbound[0].phone, '573009999999');
+  assert.equal(monitor.unmatchedInbound[0].workerName, 'Auxiliar relacionado');
+  assert.deepEqual(monitor.unmatchedInbound[0].workerNames, ['Auxiliar relacionado']);
 
   const auxiliarA = monitor.items.find((item) => item.workerName === 'Auxiliar A');
   assert.equal(auxiliarA.isOpen, true);
@@ -224,6 +233,8 @@ test('monitor detecta posible desajuste entre teléfono guardado e inbound real 
   assert.equal(monitor.items[0].isOpen, false);
   assert.equal(monitor.items[0].phoneIssue, 'CO_LENGTH_MISMATCH');
   assert.equal(monitor.items[0].possibleInboundPhone, '573001112233');
+  assert.equal(monitor.unmatchedInbound[0].workerName, null);
+  assert.deepEqual(monitor.unmatchedInbound[0].workerNames, []);
   assert.equal(monitor.summary.phoneReview, 1);
 });
 
@@ -271,6 +282,8 @@ test('UI conserva separación del bot, refresh vivo, conversación por auxiliar 
   assert.match(monitorView, /no se mezclan mensajes del bot de Reclutamiento/);
   assert.match(monitorView, /window\.setInterval\(refreshMonitor, 5000\)/);
   assert.match(monitorView, /Inbound recientes que no coinciden/);
+  assert.match(monitorView, /item\.workerName \? `\$\{item\.workerName\} · \$\{item\.phone\}` : item\.phone/);
+  assert.match(monitorView, /const identity = item\.workerName/);
   assert.match(monitorView, /Probar envío/);
   assert.match(monitorView, /Meta será quien acepte o rechace/);
   assert.match(assignmentRoute, /assignment-wa-window-check/);
