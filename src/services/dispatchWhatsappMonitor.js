@@ -140,7 +140,7 @@ function noveltyEvent(incident) {
   });
 }
 
-function reminderText(reminder, link) {
+function reminderText(_reminder, link) {
   const worker = link?.assignment?.worker;
   if (!worker) return 'Recordatorio de vencimiento de la ventana de 24 horas.';
   return `⏰ La ventana de 24 horas con ${text(worker.fullName) || 'el auxiliar'} (${normalizePhone(worker.phone) || 'sin número'}) vence en aproximadamente 25 minutos. Si necesitas enviarle información sin plantilla, hazlo antes del vencimiento.`;
@@ -197,7 +197,7 @@ export function normalizeDispatchWhatsappMonitorFilters(query = {}) {
 export async function loadDispatchWhatsappMonitorHistory({ prismaClient, query = {} } = {}) {
   if (!prismaClient) throw new Error('prismaClient es requerido');
   const filters = normalizeDispatchWhatsappMonitorFilters(query);
-  const [links, incidents, reminders] = await Promise.all([
+  const [allLinks, incidents, reminders] = await Promise.all([
     prismaClient.dispatchWhatsappConfirmation.findMany({
       include: {
         assignment: {
@@ -214,9 +214,13 @@ export async function loadDispatchWhatsappMonitorHistory({ prismaClient, query =
       include: { worker: true, assignment: { include: { worker: true } } },
       orderBy: { createdAt: 'desc' }
     }),
-    prismaClient.dispatchWhatsappWindowReminder.findMany({ orderBy: { createdAt: 'desc' } })
+    prismaClient.dispatchWhatsappWindowReminder.findMany({
+      where: { scope: 'operational' },
+      orderBy: { createdAt: 'desc' }
+    })
   ]);
 
+  const links = allLinks.filter((link) => link.assignment?.serviceRequest?.source !== 'DEV_TEST');
   const appUserIds = [...new Set(reminders.map((item) => item.appUserId).filter(Boolean))];
   const users = appUserIds.length
     ? await prismaClient.appUser.findMany({
