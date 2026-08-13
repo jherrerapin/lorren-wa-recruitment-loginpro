@@ -9,6 +9,7 @@
   const returnLabel = typeof whatsappReturnLabel === 'string' && whatsappReturnLabel ? whatsappReturnLabel : 'Volver a Operaciones';
   const assignmentsHref = typeof whatsappAssignmentsHref === 'string' && whatsappAssignmentsHref ? whatsappAssignmentsHref : '/admin/operaciones/asignaciones';
   const assignmentsLabel = typeof whatsappAssignmentsLabel === 'string' && whatsappAssignmentsLabel ? whatsappAssignmentsLabel : 'Asignaciones';
+  const monitorHref = typeof whatsappMonitorHref === 'string' && whatsappMonitorHref ? whatsappMonitorHref : `${basePath}/monitor`;
   const missing = Array.isArray(missingConfiguration) ? missingConfiguration : [];
 %>
 <!DOCTYPE html>
@@ -56,6 +57,7 @@
       <div class="actions">
         <a class="btn" href="<%= returnHref %>"><%= returnLabel %></a>
         <a class="btn" href="<%= assignmentsHref %>"><%= assignmentsLabel %></a>
+        <a class="btn" href="<%= monitorHref %>">Monitor de mensajes</a>
         <button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button>
       </div>
     </section>
