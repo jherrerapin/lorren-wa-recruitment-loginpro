@@ -130,6 +130,33 @@ function semanticGateAcceptsExperienceConfirmation(context = {}) {
   return probe.fields.experienceInfo === 'Sí';
 }
 
+function buildContextualExperienceSummaryCandidate(input = '', context = {}) {
+  const raw = String(input || '').replace(/\s+/g, ' ').trim();
+  if (!raw) return { fields: {}, evidence: {} };
+
+  const evidence = {
+    experienceSummary: {
+      snippet: raw.slice(0, 120),
+      confidence: 0.95,
+      source: 'contextual_answer'
+    }
+  };
+  const probe = sanitizeCandidateFieldsForConversation({
+    fields: { experienceSummary: raw },
+    evidence,
+    text: input,
+    context,
+    turnType: null
+  });
+  const experienceSummary = probe.fields.experienceSummary;
+  if (!hasValue(experienceSummary)) return { fields: {}, evidence: {} };
+
+  return {
+    fields: { experienceSummary },
+    evidence
+  };
+}
+
 function buildContextualExperienceCandidate(input = '', context = {}) {
   if (!semanticGateAcceptsExperienceConfirmation(context)) return { fields: {}, evidence: {} };
 
@@ -147,7 +174,7 @@ function buildContextualExperienceCandidate(input = '', context = {}) {
   }
 
   const affirmative = normalized.match(/^(?:si|sii|sip)(?:\s+(\d+)\s+(personas?|anos?|meses?|semanas?))?$/);
-  if (!affirmative) return { fields: {}, evidence: {} };
+  if (!affirmative) return buildContextualExperienceSummaryCandidate(input, context);
 
   const fields = { experienceInfo: 'Sí' };
   const evidence = {
