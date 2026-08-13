@@ -3,6 +3,7 @@ import {
   getDispatchWhatsappStatusView,
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappCloudService.js';
+import { loadDispatchWhatsappMonitorHistory } from '../services/dispatchWhatsappMonitor.js';
 
 const OPERATIONAL_API_ERROR = 'La integración oficial de WhatsApp de despacho no está disponible en este momento. Revisa su configuración o contacta al responsable técnico.';
 const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
@@ -74,7 +75,7 @@ function responseStatusCode(error) {
   return 500;
 }
 
-export function dispatchWhatsappNotificationsRouter(_prisma) {
+export function dispatchWhatsappNotificationsRouter(prisma) {
   const router = express.Router();
   router.use(requireOps);
 
@@ -92,12 +93,36 @@ export function dispatchWhatsappNotificationsRouter(_prisma) {
       whatsappReturnLabel: 'Volver a Operaciones',
       whatsappAssignmentsHref: '/admin/operaciones/asignaciones',
       whatsappAssignmentsLabel: 'Asignaciones',
+      whatsappMonitorHref: '/admin/operaciones/whatsapp/monitor',
       ...status
     });
   });
 
   router.get('/estado', async (req, res) => {
     res.json({ ok: true, ...await getStatusForViewer(req) });
+  });
+
+  router.get('/monitor', async (req, res, next) => {
+    try {
+      const history = await loadDispatchWhatsappMonitorHistory({ prismaClient: prisma, query: req.query });
+      return res.render('operacionesWhatsappMonitor', {
+        pageTitle: 'Monitor WhatsApp de despacho',
+        role: role(req),
+        history,
+        monitorDataEndpoint: '/admin/operaciones/whatsapp/monitor/datos'
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/monitor/datos', async (req, res, next) => {
+    try {
+      const history = await loadDispatchWhatsappMonitorHistory({ prismaClient: prisma, query: req.query });
+      return res.json({ ok: true, ...history });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.post('/enviar', async (req, res) => {
