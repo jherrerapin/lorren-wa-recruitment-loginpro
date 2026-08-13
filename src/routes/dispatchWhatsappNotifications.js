@@ -8,7 +8,10 @@ import {
   loadDispatchWhatsappWindowStatusForAssignments
 } from '../services/dispatchWhatsappMonitor.js';
 import {
+  DISPATCH_WINDOW_CHECK_BUTTON,
+  DISPATCH_WINDOW_CHECK_MESSAGE,
   dispatchWhatsappProviderErrorMessage,
+  sendCloudWindowCheckTemplate,
   sendDispatchWhatsappTextMessage
 } from '../services/dispatchWhatsappCloudClient.js';
 
@@ -175,12 +178,14 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         getDispatchWhatsappStatusView({ scope: 'operational' })
       ]);
       return res.render('operacionesWhatsappMonitor', {
-        pageTitle: 'Asignados de mañana · WhatsApp Despacho · DEV',
+        pageTitle: 'Ventanas 24 h de asignados de mañana · WhatsApp Despacho · DEV',
         role: role(req),
         monitor,
-        assignmentTemplateName: status.assignmentTemplateName || null,
+        windowCheckTemplateName: status.windowCheckTemplateName || null,
+        windowCheckMessage: DISPATCH_WINDOW_CHECK_MESSAGE,
+        windowCheckButton: DISPATCH_WINDOW_CHECK_BUTTON,
         monitorDataEndpoint: '/admin/operaciones/whatsapp/monitor/datos',
-        bulkSendEndpoint: '/admin/operaciones/whatsapp/monitor/enviar-confirmaciones-manana',
+        bulkSendEndpoint: '/admin/operaciones/whatsapp/monitor/enviar-verificacion-ventana',
         manualSendEndpoint: '/admin/operaciones/whatsapp/monitor/mensaje'
       });
     } catch (error) {
@@ -197,40 +202,32 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
     }
   });
 
-  router.post('/monitor/enviar-confirmaciones-manana', requireDevMonitor, async (req, res, next) => {
+  router.post('/monitor/enviar-verificacion-ventana', requireDevMonitor, async (_req, res, next) => {
     try {
       const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma });
-      const pending = monitor.items.filter((item) => item.canSendConfirmation);
+      const missing = monitor.items.filter((item) => item.canSendWindowCheck);
       const results = [];
-      const actorUsername = normalizeString(req.session?.username || req.username);
 
-      for (const item of pending) {
+      for (const item of missing) {
         try {
-          const result = await sendDispatchWhatsappMessage({
-            phone: item.phone,
-            context: {
-              assignmentId: item.assignmentId,
-              serviceRequestId: item.serviceRequestId,
-              workerId: item.workerId,
-              recipientName: item.workerName,
-              messageType: ASSIGNMENT_MESSAGE_TYPE
-            },
+          const result = await sendCloudWindowCheckTemplate({
             scope: 'operational',
-            actorUsername
+            assignmentId: item.assignmentId,
+            phone: item.phone
           });
           results.push({
             assignmentId: item.assignmentId,
             workerName: item.workerName,
             ok: true,
-            deliveryMode: result.deliveryMode,
-            templateName: result.templateName || null
+            providerMessageId: result.providerMessageId,
+            templateName: result.templateName
           });
         } catch (error) {
           results.push({
             assignmentId: item.assignmentId,
             workerName: item.workerName,
             ok: false,
-            message: error?.message || 'No fue posible enviar la confirmación.'
+            message: error?.message || 'No fue posible enviar la verificación de ventana.'
           });
         }
       }
@@ -243,7 +240,8 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         attempted: results.length,
         sent,
         failed,
-        skippedConfirmed: monitor.summary.confirmed,
+        alreadyOpen: monitor.summary.open,
+        withoutPhone: monitor.summary.withoutPhone,
         results
       });
     } catch (error) {
@@ -264,7 +262,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       if (!item.isOpen) {
         return res.status(409).json({
           ok: false,
-          message: 'La ventana de 24 horas está cerrada. No se puede enviar texto libre hasta que el auxiliar responda o exista una plantilla aprobada para ese mensaje.'
+          message: 'La ventana de 24 horas está cerrada. Primero el auxiliar debe responder la verificación del canal.'
         });
       }
       const providerMessageId = await sendDispatchWhatsappTextMessage({

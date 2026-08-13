@@ -2,14 +2,16 @@
   const data = monitor || { items: [], summary: {}, dateKey: '', generatedAt: null };
   const items = Array.isArray(data.items) ? data.items : [];
   const summary = data.summary || {};
-  const configuredTemplate = typeof assignmentTemplateName === 'string' && assignmentTemplateName ? assignmentTemplateName : null;
+  const configuredTemplate = typeof windowCheckTemplateName === 'string' && windowCheckTemplateName ? windowCheckTemplateName : null;
+  const checkMessage = typeof windowCheckMessage === 'string' && windowCheckMessage ? windowCheckMessage : '';
+  const checkButton = typeof windowCheckButton === 'string' && windowCheckButton ? windowCheckButton : 'CONFIRMAR CANAL';
 %>
 <!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Asignados de mañana · WhatsApp Despacho · DEV — LoginPro</title>
+  <title>Ventanas 24 h · WhatsApp Despacho · DEV — LoginPro</title>
   <link rel="icon" type="image/svg+xml" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
@@ -17,15 +19,15 @@
     .summary{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-bottom:12px}
     .metric{background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px;box-shadow:var(--shadow-sm)}
     .metric span{display:block;color:var(--muted);font-size:11px;font-weight:850;text-transform:uppercase}.metric strong{display:block;color:var(--navy);font-size:24px;margin-top:3px}
-    .template-panel{display:grid;grid-template-columns:minmax(320px,1fr) minmax(260px,.7fr);gap:10px;margin-bottom:12px}
+    .template-panel{display:grid;grid-template-columns:minmax(320px,1fr) minmax(280px,.75fr);gap:10px;margin-bottom:12px}
     .template-card,.note{background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow-sm);font-size:12px;line-height:1.45}
     .template-card h2{margin:0 0 7px;color:var(--navy);font-size:14px}.template-preview{white-space:pre-line;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;color:#334155}.template-buttons{display:flex;gap:6px;margin-top:8px}.template-buttons span{border-radius:8px;padding:5px 8px;background:#eef2ff;color:#3730a3;font-size:10px;font-weight:900}.note{background:#eff6ff;border-color:#bfdbfe;color:#1e40af;box-shadow:none}.note code{font-size:10px}
     .bulk-result{margin-bottom:12px;border-radius:12px;padding:10px 12px;font-size:11px;font-weight:800;display:none}.bulk-result.show{display:block}.bulk-result.ok{background:#dcfce7;color:#166534}.bulk-result.warn{background:#fef3c7;color:#92400e}
     .table-wrap{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:auto;box-shadow:var(--shadow-sm)}
-    table{width:100%;border-collapse:collapse;min-width:1180px}th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle;text-align:left;font-size:11px}th{position:sticky;top:0;background:#f8fafc;color:var(--muted);font-size:10px;text-transform:uppercase;z-index:1}
-    .pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:900;white-space:nowrap}.open{background:#dcfce7;color:#166534}.closed{background:#fee2e2;color:#991b1b}.confirmed{background:#dcfce7;color:#166534}.pending{background:#fef3c7;color:#92400e}.provider{background:#eef2ff;color:#4338ca}
+    table{width:100%;border-collapse:collapse;min-width:1160px}th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle;text-align:left;font-size:11px}th{position:sticky;top:0;background:#f8fafc;color:var(--muted);font-size:10px;text-transform:uppercase;z-index:1}
+    .pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:900;white-space:nowrap}.open{background:#dcfce7;color:#166534}.closed{background:#fee2e2;color:#991b1b}.confirmed{background:#dcfce7;color:#166534}.pending{background:#fef3c7;color:#92400e}
     .window-check{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:11px;font-weight:900;margin-right:5px;vertical-align:middle}.window-off{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#e2e8f0;color:#64748b;font-size:10px;font-weight:900;margin-right:5px;vertical-align:middle}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px}.muted{color:var(--muted)}.live{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:11px;font-weight:900}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px}.muted{color:var(--muted)}.live{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:11px;font-weight:900}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}.evidence{font-size:9px;color:var(--muted);margin-top:2px}
     .row-action{padding:5px 8px;font-size:10px;min-height:0}.row-action[disabled]{opacity:.45;cursor:not-allowed}
     .message-dialog{border:0;border-radius:16px;padding:0;width:min(620px,calc(100vw - 24px));box-shadow:0 24px 70px rgba(15,23,42,.3)}.message-dialog::backdrop{background:rgba(15,23,42,.45)}.message-dialog form{padding:18px;display:grid;gap:12px}.message-dialog h3{margin:0;color:var(--navy)}.message-dialog textarea{width:100%;min-height:125px;border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;resize:vertical}.dialog-actions{display:flex;justify-content:flex-end;gap:8px}
     @media(max-width:900px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}}
@@ -47,38 +49,32 @@
     <section class="hero">
       <div>
         <div class="eyebrow">DEV · Línea oficial de WhatsApp Despacho</div>
-        <h1>Asignados de mañana y ventana de 24 horas</h1>
-        <p>Lista todos los auxiliares con asignación activa para mañana y permite comprobar quién ya puede recibir mensajes libres desde la línea de Despacho.</p>
+        <h1>Ventanas de 24 horas · asignados de mañana</h1>
+        <p>Los que siguen con ventana cerrada aparecen primero. El estado se vuelve a consultar automáticamente cada 5 segundos.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/asignaciones?fecha=<%= encodeURIComponent(data.dateKey || '') %>">Ver asignaciones de mañana</a>
-        <button class="btn btn-primary" type="button" id="sendBulkConfirmations" <%= summary.pendingConfirmation ? '' : 'disabled' %>>Enviar confirmación a pendientes</button>
-        <span class="live" id="liveState"><span class="dot"></span>Actualización automática</span>
+        <button class="btn btn-primary" type="button" id="sendBulkWindowCheck" <%= summary.missingWindow ? '' : 'disabled' %>>Enviar verificación a faltantes</button>
+        <span class="live" id="liveState"><span class="dot"></span>En vivo · 5 s</span>
       </div>
     </section>
 
     <section class="summary">
       <article class="metric"><span>Asignados mañana</span><strong id="metricTotal"><%= summary.total || 0 %></strong></article>
-      <article class="metric"><span>Ventana abierta</span><strong id="metricOpen"><%= summary.open || 0 %></strong></article>
-      <article class="metric"><span>Ventana cerrada</span><strong id="metricClosed"><%= summary.closed || 0 %></strong></article>
-      <article class="metric"><span>Pendientes confirmación</span><strong id="metricPending"><%= summary.pendingConfirmation || 0 %></strong></article>
+      <article class="metric"><span>Ya abrieron ventana</span><strong id="metricOpen"><%= summary.open || 0 %></strong></article>
+      <article class="metric"><span>Faltan por abrir</span><strong id="metricMissing"><%= summary.missingWindow || 0 %></strong></article>
+      <article class="metric"><span>Sin teléfono</span><strong id="metricNoPhone"><%= summary.withoutPhone || 0 %></strong></article>
     </section>
 
     <section class="template-panel">
       <article class="template-card">
-        <h2>Mensaje estándar de confirmación</h2>
-        <div class="template-preview">Hola *{nombre}*,
-
-Mañana: *{fecha}*
-Llegar a: *{operación} - {dirección}*
-Hora: *{hora} por favor.*
-
-*Confirmado?*</div>
-        <div class="template-buttons"><span>CONFIRMADO</span><span>REPORTAR NOVEDAD</span></div>
+        <h2>Mensaje para abrir/verificar la ventana</h2>
+        <div class="template-preview"><%= checkMessage %></div>
+        <div class="template-buttons"><span><%= checkButton %></span></div>
       </article>
       <article class="note">
-        <strong>Regla de envío:</strong> con ventana abierta se envía el mensaje interactivo normal. Con ventana cerrada Meta exige una plantilla aprobada; Lórren intentará usar <code><%= configuredTemplate || 'DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME no configurada' %></code>. Que exista el nombre configurado no significa por sí solo que Meta ya la haya aprobado.
-        <div style="margin-top:8px">Fecha que se está preparando: <strong id="dateKey"><%= data.dateKey || '—' %></strong> · Última lectura: <strong id="generatedAt"><%= data.generatedAt || '—' %></strong></div>
+        <strong>No confirma la asignación.</strong> Este mensaje solo busca que el auxiliar responda desde WhatsApp. Esa respuesta es la que abre o renueva la ventana de atención de 24 horas. La plantilla configurada es <code><%= configuredTemplate || 'DISPATCH_META_WINDOW_CHECK_TEMPLATE_NAME pendiente' %></code>.
+        <div style="margin-top:8px">Fecha objetivo: <strong id="dateKey"><%= data.dateKey || '—' %></strong> · Última lectura: <strong id="generatedAt"><%= data.generatedAt || '—' %></strong></div>
       </article>
     </section>
 
@@ -87,7 +83,7 @@ Hora: *{hora} por favor.*
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Auxiliar</th><th>Teléfono</th><th>Operación</th><th>Asignación</th><th>Ventana 24 h</th><th>Vence</th><th>Última confirmación</th><th>Acción DEV</th></tr>
+          <tr><th>Auxiliar</th><th>Teléfono</th><th>Operación</th><th>Asignación</th><th>Ventana 24 h</th><th>Último mensaje recibido</th><th>Vence</th><th>Acción DEV</th></tr>
         </thead>
         <tbody id="monitorRows">
           <% if (!items.length) { %><tr><td colspan="8" class="muted">No hay auxiliares con asignación activa para mañana.</td></tr><% } %>
@@ -98,8 +94,8 @@ Hora: *{hora} por favor.*
               <td><%= item.operationName || '—' %><% if (item.startTime) { %><div class="muted"><%= item.startTime %></div><% } %></td>
               <td><span class="pill <%= item.confirmed ? 'confirmed' : 'pending' %>"><%= item.assignmentStatus %></span></td>
               <td><% if (item.isOpen) { %><span class="window-check">✓</span><span class="pill open">ABIERTA</span><% } else { %><span class="window-off">–</span><span class="pill closed">CERRADA</span><% } %></td>
+              <td><span data-date="<%= item.lastInboundAt || '' %>"><%= item.lastInboundAt || 'Sin inbound registrado' %></span><% if (item.evidenceSource) { %><div class="evidence"><%= item.evidenceSource === 'CONFIRMATION_EVIDENCE' ? 'evidencia de confirmación' : 'registro de inbound' %></div><% } %></td>
               <td data-date="<%= item.expiresAt || '' %>"><%= item.expiresAt || '—' %></td>
-              <td data-date="<%= item.lastConfirmationSentAt || '' %>"><%= item.lastConfirmationSentAt || 'Aún no enviada' %></td>
               <td><button class="btn row-action manual-message-button" type="button" data-assignment-id="<%= item.assignmentId %>" data-worker-name="<%= item.workerName %>" <%= item.isOpen ? '' : 'disabled title="La ventana está cerrada"' %>>Enviar mensaje</button></td>
             </tr>
           <% }) %>
@@ -113,8 +109,8 @@ Hora: *{hora} por favor.*
       <div><div class="eyebrow">DEV · Mensaje libre</div><h3 id="manualMessageTitle">Enviar mensaje</h3></div>
       <input type="hidden" id="manualAssignmentId" />
       <textarea id="manualMessageText" maxlength="1200" placeholder="Escribe el mensaje para el auxiliar..." required></textarea>
-      <div class="muted">Solo se enviará si la ventana de 24 horas sigue abierta al momento de pulsar Enviar.</div>
-      <div class="dialog-actions"><button class="btn" type="button" id="cancelManualMessage">Cancelar</button><button class="btn btn-primary" type="submit" id="submitManualMessage">Enviar</button></div>
+      <div class="muted">Se valida otra vez la ventana en el servidor al pulsar Enviar.</div>
+      <div class="dialog-actions"><button class="btn" type="button" id="cancelManualMessage">Cancelar</button><button class="btn btn-primary" type="submit">Enviar</button></div>
     </form>
   </dialog>
 
@@ -124,12 +120,13 @@ Hora: *{hora} por favor.*
     const manualEndpoint = <%- JSON.stringify(manualSendEndpoint) %>;
     const rows = document.getElementById('monitorRows');
     const liveState = document.getElementById('liveState');
-    const bulkButton = document.getElementById('sendBulkConfirmations');
+    const bulkButton = document.getElementById('sendBulkWindowCheck');
     const bulkResult = document.getElementById('bulkResult');
     const manualDialog = document.getElementById('manualMessageDialog');
     const manualForm = document.getElementById('manualMessageForm');
     const manualAssignmentId = document.getElementById('manualAssignmentId');
     const manualMessageText = document.getElementById('manualMessageText');
+    let refreshBusy = false;
 
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
@@ -139,6 +136,11 @@ Hora: *{hora} por favor.*
       const date = new Date(value);
       if (Number.isNaN(date.getTime())) return value;
       return new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).format(date);
+    }
+    function evidenceLabel(source) {
+      if (source === 'CONFIRMATION_EVIDENCE') return '<div class="evidence">evidencia de confirmación</div>';
+      if (source === 'CONTACT_WINDOW') return '<div class="evidence">registro de inbound</div>';
+      return '';
     }
     function renderItems(items) {
       if (!Array.isArray(items) || !items.length) {
@@ -151,57 +153,37 @@ Hora: *{hora} por favor.*
         <td>${escapeHtml(item.operationName || '—')}${item.startTime ? `<div class="muted">${escapeHtml(item.startTime)}</div>` : ''}</td>
         <td><span class="pill ${item.confirmed ? 'confirmed' : 'pending'}">${escapeHtml(item.assignmentStatus || '—')}</span></td>
         <td>${item.isOpen ? '<span class="window-check">✓</span><span class="pill open">ABIERTA</span>' : '<span class="window-off">–</span><span class="pill closed">CERRADA</span>'}</td>
-        <td>${escapeHtml(item.expiresAt ? formatBogota(item.expiresAt) : '—')}</td>
-        <td>${escapeHtml(item.lastConfirmationSentAt ? formatBogota(item.lastConfirmationSentAt) : 'Aún no enviada')}</td>
+        <td>${item.lastInboundAt ? escapeHtml(formatBogota(item.lastInboundAt)) : 'Sin inbound registrado'}${evidenceLabel(item.evidenceSource)}</td>
+        <td>${item.expiresAt ? escapeHtml(formatBogota(item.expiresAt)) : '—'}</td>
         <td><button class="btn row-action manual-message-button" type="button" data-assignment-id="${escapeHtml(item.assignmentId)}" data-worker-name="${escapeHtml(item.workerName || 'Auxiliar')}" ${item.isOpen ? '' : 'disabled title="La ventana está cerrada"'}>Enviar mensaje</button></td>
       </tr>`).join('');
       bindManualButtons();
     }
     function render(data) {
       renderItems(data.items);
-      const summary = data.summary || {};
-      document.getElementById('metricTotal').textContent = summary.total || 0;
-      document.getElementById('metricOpen').textContent = summary.open || 0;
-      document.getElementById('metricClosed').textContent = summary.closed || 0;
-      document.getElementById('metricPending').textContent = summary.pendingConfirmation || 0;
+      const current = data.summary || {};
+      document.getElementById('metricTotal').textContent = current.total || 0;
+      document.getElementById('metricOpen').textContent = current.open || 0;
+      document.getElementById('metricMissing').textContent = current.missingWindow || 0;
+      document.getElementById('metricNoPhone').textContent = current.withoutPhone || 0;
       document.getElementById('dateKey').textContent = data.dateKey || '—';
       document.getElementById('generatedAt').textContent = data.generatedAt ? formatBogota(data.generatedAt) : '—';
-      bulkButton.disabled = !(summary.pendingConfirmation > 0);
+      bulkButton.disabled = !(current.missingWindow > 0);
     }
     async function refreshMonitor() {
+      if (refreshBusy) return;
+      refreshBusy = true;
       try {
         const response = await fetch(dataEndpoint,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         render(await response.json());
         liveState.style.color = '';
-        liveState.title = `Actualizado ${formatBogota(new Date().toISOString())}`;
-      } catch (error) {
+        liveState.textContent = `● En vivo · ${new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',hour:'numeric',minute:'2-digit',second:'2-digit'}).format(new Date())}`;
+      } catch (_error) {
         liveState.style.color = '#b91c1c';
-        liveState.title = 'No fue posible actualizar el monitor';
-        console.error('No fue posible actualizar el monitor DEV de WhatsApp de Despacho.', error);
-      }
-    }
-    function showBulkResult(message, ok) {
-      bulkResult.textContent = message;
-      bulkResult.className = `bulk-result show ${ok ? 'ok' : 'warn'}`;
-    }
-    async function sendBulk() {
-      if (!bulkButton || bulkButton.disabled) return;
-      const original = bulkButton.textContent;
-      bulkButton.disabled = true;
-      bulkButton.textContent = 'Enviando...';
-      try {
-        const response = await fetch(bulkEndpoint,{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:'{}'});
-        const data = await response.json();
-        const failures = Array.isArray(data.results) ? data.results.filter((item) => !item.ok) : [];
-        const detail = failures.length ? ` Fallaron ${failures.length}: ${failures.slice(0,4).map((item) => `${item.workerName}: ${item.message}`).join(' · ')}` : '';
-        showBulkResult(`Enviados ${data.sent || 0} de ${data.attempted || 0}.${detail}`, Boolean(response.ok && data.failed === 0));
-        await refreshMonitor();
-      } catch (error) {
-        showBulkResult(error.message || 'No fue posible ejecutar el envío masivo.', false);
+        liveState.textContent = '● Sin actualizar';
       } finally {
-        bulkButton.textContent = original;
-        await refreshMonitor();
+        refreshBusy = false;
       }
     }
     function bindManualButtons() {
@@ -212,29 +194,39 @@ Hora: *{hora} por favor.*
           document.getElementById('manualMessageTitle').textContent = `Enviar mensaje a ${button.dataset.workerName || 'auxiliar'}`;
           manualMessageText.value = '';
           manualDialog.showModal();
-          manualMessageText.focus();
         };
       });
     }
+    async function sendBulk() {
+      if (bulkButton.disabled) return;
+      bulkButton.disabled = true;
+      bulkResult.className = 'bulk-result show warn';
+      bulkResult.textContent = 'Enviando verificación solo a quienes siguen con ventana cerrada...';
+      try {
+        const response = await fetch(bulkEndpoint,{method:'POST',credentials:'same-origin',headers:{Accept:'application/json'}});
+        const result = await response.json();
+        bulkResult.className = `bulk-result show ${result.failed ? 'warn' : 'ok'}`;
+        bulkResult.textContent = `Intentados: ${result.attempted || 0} · enviados: ${result.sent || 0} · fallidos: ${result.failed || 0} · ya abiertos omitidos: ${result.alreadyOpen || 0}.`;
+      } catch (_error) {
+        bulkResult.className = 'bulk-result show warn';
+        bulkResult.textContent = 'No fue posible ejecutar el envío de verificación.';
+      }
+      await refreshMonitor();
+    }
     async function sendManual(event) {
       event.preventDefault();
-      const submit = document.getElementById('submitManualMessage');
-      submit.disabled = true;
-      try {
-        const response = await fetch(manualEndpoint,{
-          method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},
-          body:JSON.stringify({assignmentId:manualAssignmentId.value,message:manualMessageText.value})
-        });
-        const data = await response.json();
-        if (!response.ok || !data.ok) throw new Error(data.message || 'No fue posible enviar el mensaje.');
-        manualDialog.close();
-        showBulkResult(`Mensaje enviado a ${data.workerName || 'auxiliar'}.`, true);
-      } catch (error) {
-        showBulkResult(error.message || 'No fue posible enviar el mensaje.', false);
-      } finally {
-        submit.disabled = false;
+      const assignmentId = manualAssignmentId.value;
+      const message = manualMessageText.value.trim();
+      if (!assignmentId || !message) return;
+      const response = await fetch(manualEndpoint,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({assignmentId,message})});
+      const result = await response.json();
+      if (!response.ok) {
+        window.alert(result.message || 'No fue posible enviar el mensaje.');
         await refreshMonitor();
+        return;
       }
+      manualDialog.close();
+      await refreshMonitor();
     }
 
     bulkButton?.addEventListener('click', sendBulk);
