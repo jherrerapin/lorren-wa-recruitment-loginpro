@@ -199,7 +199,7 @@ export async function enrichAttendanceBoardWithWorkday(prisma, board) {
       return {
         ...row,
         serviceRequestId: assignment?.serviceRequestId || null,
-        arrivalMarkId: arrivalMark?.id || row.markId || null,
+        arrivalMarkId: arrivalMark?.id || null,
         departureMarkId: departureMark?.id || null,
         breakStartMarkId: breakStartMark?.id || null,
         breakEndMarkId: breakEndMark?.id || null,
@@ -327,7 +327,7 @@ function correctionEarlyArrivalRecognition(session, marks) {
   if (inferredEarlyArrivalRecognition(session, marks)) return true;
   const latestReview = Array.isArray(session?.reviews) ? session.reviews[0] : null;
   return Boolean(
-    ['WORKDAY_DELETE_MARK', 'WORKDAY_ADD_MARK'].includes(latestReview?.action)
+    ['WORKDAY_DELETE_MARK', 'WORKDAY_ADD_MARK', 'WORKDAY_EDIT_MARK'].includes(latestReview?.action)
     && latestReview?.metadata?.recognizeEarlyArrival === true
   );
 }
@@ -560,6 +560,86 @@ async function deleteAttendanceWorkdayMark(prisma, input = {}) {
   });
 }
 
+async function editAttendanceWorkdayMark(prisma, input = {}) {
+  const sessionId = requireString(input.sessionId, 'attendance_review_session_id', { maxLength: 120 });
+  const markId = requireString(input.markId, 'attendance_review_mark_id', { maxLength: 120 });
+  const markType = correctionMarkType(input.markType);
+  const reportedAt = correctionDateTime(input.reportedAt);
+  const reason = requireString(input.reason, 'attendance_review_reason', { minLength: 5, maxLength: 500 });
+  const actorUsername = requireString(input.actorUsername, 'attendance_review_actor', { maxLength: 120 });
+  const actorRole = normalizeString(input.actorRole)?.slice(0, 60) || null;
+  const now = input.now instanceof Date ? input.now : new Date();
+  if (Number.isNaN(now.getTime())) throw new Error('attendance_review_now_invalid');
+  if (typeof prisma.$transaction !== 'function') throw new Error('attendance_workday_transaction_required');
+
+  return prisma.$transaction(async (tx) => {
+    if (!tx?.dispatchAttendanceMark || typeof tx.dispatchAttendanceMark.update !== 'function') {
+      throw new Error('attendance_workday_mark_writer_required');
+    }
+    const session = await tx.dispatchAttendanceSession.findUnique({
+      where: { id: sessionId },
+      include: {
+        marks: { orderBy: { serverReceivedAt: 'asc' } },
+        reviews: { orderBy: { createdAt: 'desc' } },
+        assignment: { include: { worker: true, serviceRequest: true } }
+      }
+    });
+    if (!session) throw new Error('attendance_review_session_not_found');
+    const previousMarks = Array.isArray(session.marks) ? [...session.marks] : [];
+    const target = previousMarks.find((mark) => mark.id === markId && mark.markType === markType);
+    if (!target) throw new Error('attendance_review_mark_not_found');
+    const recognizeEarlyArrival = correctionEarlyArrivalRecognition(session, previousMarks);
+    const editedSnapshot = {
+      ...target,
+      clientCapturedAt: reportedAt,
+      decision: 'MANUAL_VALIDATED'
+    };
+    const nextMarks = previousMarks.map((mark) => mark.id === target.id ? editedSnapshot : mark);
+    validateAttendanceTimelineAgainstAssignment(session.assignment?.serviceRequest, {
+      arrivalAt: markMoment(latestMark(nextMarks, 'ARRIVAL')),
+      breakStartAt: markMoment(latestMark(nextMarks, 'BREAK_START')),
+      breakEndAt: markMoment(latestMark(nextMarks, 'BREAK_END')),
+      departureAt: markMoment(latestMark(nextMarks, 'DEPARTURE'))
+    });
+    const pendingCorrections = pendingCorrectionMarkTypes(session.reviews);
+    const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival, pendingCorrections);
+
+    const edited = await tx.dispatchAttendanceMark.update({
+      where: { id: target.id },
+      data: {
+        clientCapturedAt: reportedAt,
+        decision: 'MANUAL_VALIDATED'
+      }
+    });
+    const persistedMarks = previousMarks.map((mark) => mark.id === target.id ? edited : mark);
+    const updated = await tx.dispatchAttendanceSession.update({ where: { id: session.id }, data: next });
+    await tx.dispatchAttendanceReview.create({
+      data: {
+        attendanceSessionId: session.id,
+        action: 'WORKDAY_EDIT_MARK',
+        previousAttendanceStatus: session.attendanceStatus,
+        newAttendanceStatus: next.attendanceStatus,
+        previousValidationStatus: session.validationStatus,
+        newValidationStatus: next.validationStatus,
+        reason,
+        notes: null,
+        actorUsername,
+        actorRole,
+        metadata: correctionMetadata(session, previousMarks, persistedMarks, next, now, {
+          markId: target.id,
+          markType,
+          previousCapturedAt: markMoment(target)?.toISOString() || null,
+          newCapturedAt: reportedAt.toISOString(),
+          previousDecision: target.decision || null,
+          newDecision: edited.decision || 'MANUAL_VALIDATED',
+          recognizeEarlyArrival
+        })
+      }
+    });
+    return updated;
+  });
+}
+
 async function addAttendanceWorkdayMark(prisma, input = {}) {
   const sessionId = requireString(input.sessionId, 'attendance_review_session_id', { maxLength: 120 });
   const markType = correctionMarkType(input.markType);
@@ -695,6 +775,9 @@ export async function reviewAttendanceWorkdaySession(prisma, input = {}) {
     return deleteAttendanceWorkdayMark(prisma, { ...input, sessionId });
   }
   if (action === 'ADD_MARK') {
+    if (normalizeString(input.markId)) {
+      return editAttendanceWorkdayMark(prisma, { ...input, sessionId });
+    }
     return addAttendanceWorkdayMark(prisma, { ...input, sessionId });
   }
 

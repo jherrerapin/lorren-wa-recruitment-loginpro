@@ -80,6 +80,61 @@
     return form;
   }
 
+  function editMarkDetails(mark, markId, reviewAction) {
+    const details = document.createElement('details');
+    details.className = 'review-panel';
+    details.dataset.attendanceEditMark = mark.markType;
+
+    const summary = document.createElement('summary');
+    summary.textContent = `Editar ${mark.label}`;
+    details.appendChild(summary);
+
+    const form = correctionForm('ADD_MARK', mark.markType, reviewAction);
+    form.className = 'review-form';
+    form.appendChild(hiddenInput('markId', markId));
+
+    const hint = document.createElement('p');
+    hint.className = 'review-hint';
+    hint.textContent = `Cambia la fecha y hora de ${mark.label}. La edición conservará las demás marcaciones y quedará auditada.`;
+    form.appendChild(hint);
+
+    const timeField = document.createElement('label');
+    timeField.className = 'field';
+    const timeLabel = document.createElement('span');
+    timeLabel.textContent = 'Nueva fecha y hora';
+    const timeInput = document.createElement('input');
+    timeInput.type = 'datetime-local';
+    timeInput.name = 'reportedAt';
+    timeInput.required = true;
+    timeField.appendChild(timeLabel);
+    timeField.appendChild(timeInput);
+    form.appendChild(timeField);
+
+    const reasonField = document.createElement('label');
+    reasonField.className = 'field';
+    const reasonLabel = document.createElement('span');
+    reasonLabel.textContent = 'Justificación de la edición';
+    const reasonInput = document.createElement('textarea');
+    reasonInput.name = 'reason';
+    reasonInput.required = true;
+    reasonInput.minLength = 5;
+    reasonInput.maxLength = 500;
+    reasonInput.rows = 3;
+    reasonInput.placeholder = 'Explica por qué debe corregirse esta marcación.';
+    reasonField.appendChild(reasonLabel);
+    reasonField.appendChild(reasonInput);
+    form.appendChild(reasonField);
+
+    const button = document.createElement('button');
+    button.className = 'btn btn-primary';
+    button.type = 'submit';
+    button.textContent = `Guardar edición de ${mark.label}`;
+    form.appendChild(button);
+
+    details.appendChild(form);
+    return details;
+  }
+
   function addMarkForm(mark, reviewAction) {
     const form = correctionForm('ADD_MARK', mark.markType, reviewAction);
     form.className = 'review-form';
@@ -180,13 +235,15 @@
 
         const explanation = document.createElement('p');
         explanation.className = 'review-hint';
-        explanation.textContent = 'Elimina únicamente la marcación que necesites corregir. Solo aparecen las horas que están registradas.';
+        explanation.textContent = 'Puedes editar una hora existente con justificación o eliminarla para reponerla después. Solo aparecen marcaciones realmente registradas.';
         section.appendChild(explanation);
 
         const actions = document.createElement('div');
         actions.className = 'risk-row';
         existingMarks.forEach((mark) => actions.appendChild(deleteMarkForm(mark, mark.markId, reviewAction)));
         section.appendChild(actions);
+
+        existingMarks.forEach((mark) => section.appendChild(editMarkDetails(mark, mark.markId, reviewAction)));
         reviewContent.prepend(section);
 
         reviewContent.appendChild(clearAllDetails(reviewAction));
