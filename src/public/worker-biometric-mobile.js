@@ -24,8 +24,8 @@
   const RUNTIME_PREPARE_TIMEOUT_MS = 30_000;
   const RUNTIME_STALLED_LOAD_MS = 75_000;
   const RUNTIME_MAX_IDLE_MS = 12 * 60 * 60 * 1000;
-  const ENROLLMENT_TARGET_SAMPLES = 3;
-  const ENROLLMENT_MIN_SAMPLES = 2;
+  const ENROLLMENT_TARGET_SAMPLES = 1;
+  const ENROLLMENT_MIN_SAMPLES = 1;
   const VERIFICATION_STAGE_SAMPLES = 2;
   const REQUIRED_ACTION_FRAMES = 3;
   const BACKENDS = Object.freeze(IS_ANDROID ? ['cpu'] : ['webgl', 'wasm', 'cpu']);
@@ -559,7 +559,7 @@
       onStatus,
       deadline,
       ENROLLMENT_TARGET_SAMPLES,
-      'biometric_enrollment_timeout',
+      'biometric_capture_timeout',
       ENROLLMENT_MIN_SAMPLES
     );
     const photoBlob = await capturePhoto(video);
