@@ -7,6 +7,7 @@ import {
   buildAdminSessionCookieClearOptions,
   createAdminLogoutHandler,
   createAdminSessionMiddleware,
+  ensureEnvironmentDispatchProfile,
   resolveAdminSessionConfig
 } from '../src/services/adminSession.js';
 
@@ -52,6 +53,104 @@ test('producción usa secreto y cookie configurados sin alterar el contrato', ()
   assert.equal(config.sessionOptions.secret, 'configured-secret');
   assert.equal(config.sessionOptions.resave, false);
   assert.equal(config.sessionOptions.saveUninitialized, false);
+});
+
+test('una sesión env de despacho sin AppUser crea un perfil persistente para alertas personales', async () => {
+  const created = [];
+  const sessionData = {
+    userId: null,
+    userSource: 'env',
+    userRole: 'admin',
+    username: 'operaciones-despacho-principal',
+    canAccessDispatch: false,
+    canAccessAttendance: false,
+    canAccessStatistics: false,
+    canAccessMetaAds: false,
+    canAccessCvAnalysis: false
+  };
+  const prismaClient = {
+    appUser: {
+      findUnique: async () => null,
+      create: async ({ data }) => {
+        created.push(data);
+        return { id: 'app-user-1', ...data };
+      }
+    }
+  };
+  const bcryptModule = {
+    hash: async (value, rounds) => {
+      assert.equal(value, '61626364');
+      assert.equal(rounds, 10);
+      return 'random-hash';
+    }
+  };
+
+  const profile = await ensureEnvironmentDispatchProfile(sessionData, {
+    prismaClient,
+    bcryptModule,
+    randomBytesFn: () => Buffer.from('abcd', 'utf8')
+  });
+
+  assert.equal(profile.id, 'app-user-1');
+  assert.equal(sessionData.userId, 'app-user-1');
+  assert.equal(created.length, 1);
+  assert.equal(created[0].username, 'operaciones-despacho-principal');
+  assert.equal(created[0].passwordHash, 'random-hash');
+  assert.equal(created[0].role, 'ADMIN');
+  assert.equal(created[0].canAccessDispatch, true);
+  assert.equal(created[0].isActive, true);
+});
+
+test('el puente reutiliza un AppUser existente y no crea duplicados', async () => {
+  let createCalls = 0;
+  const sessionData = {
+    userId: null,
+    userSource: 'env',
+    userRole: 'dev',
+    username: 'dev-env',
+    canAccessDispatch: true
+  };
+  const existing = { id: 'existing-user', username: 'dev-env', isActive: true };
+  const prismaClient = {
+    appUser: {
+      findUnique: async () => existing,
+      create: async () => {
+        createCalls += 1;
+        return null;
+      }
+    }
+  };
+
+  const profile = await ensureEnvironmentDispatchProfile(sessionData, { prismaClient });
+
+  assert.equal(profile, existing);
+  assert.equal(sessionData.userId, 'existing-user');
+  assert.equal(createCalls, 0);
+});
+
+test('una sesión que no proviene de env no se autoaprovisiona', async () => {
+  let queries = 0;
+  const sessionData = {
+    userId: null,
+    userSource: 'db',
+    userRole: 'admin',
+    username: 'usuario-db',
+    canAccessDispatch: true
+  };
+  const prismaClient = {
+    appUser: {
+      findUnique: async () => {
+        queries += 1;
+        return null;
+      }
+    }
+  };
+
+  const profile = await ensureEnvironmentDispatchProfile(sessionData, { prismaClient });
+
+  assert.equal(profile, null);
+  assert.equal(sessionData.userId, null);
+  assert.equal(queries, 0);
 });
 
 test('el factory inyecta store, registra errores y devuelve el middleware', () => {
@@ -116,6 +215,48 @@ test('el factory inyecta store, registra errores y devuelve el middleware', () =
   const storeError = new Error('store failed');
   result.store.listeners.get('error')(storeError);
   assert.deepEqual(calls.errors[0], ['[SESSION_STORE_ERROR]', storeError]);
+});
+
+test('el middleware completa userId del perfil env antes de continuar con las rutas', async () => {
+  const calls = [];
+  class FakeStore {
+    on() {}
+  }
+  function fakeSessionModule() {
+    return function fakeSessionMiddleware(req, _res, next) {
+      req.session = {
+        userId: null,
+        userSource: 'env',
+        userRole: 'admin',
+        username: 'operaciones-despacho-alertas',
+        canAccessDispatch: false
+      };
+      next();
+    };
+  }
+  const prismaClient = {
+    appUser: {
+      findUnique: async () => ({ id: 'profile-9', username: 'operaciones-despacho-alertas', isActive: true })
+    }
+  };
+  const result = createAdminSessionMiddleware({
+    env: { NODE_ENV: 'development', DATABASE_URL: 'postgresql://localhost/test' },
+    logger: { warn: () => {}, error: () => {} },
+    sessionModule: fakeSessionModule,
+    connectPgSimpleModule: () => FakeStore,
+    prismaClient
+  });
+  const req = {};
+
+  await new Promise((resolve, reject) => {
+    result.middleware(req, {}, (error) => {
+      if (error) return reject(error);
+      calls.push(req.session.userId);
+      return resolve();
+    });
+  });
+
+  assert.deepEqual(calls, ['profile-9']);
 });
 
 test('el cierre de sesión elimina la cookie configurada y redirige al login', () => {
