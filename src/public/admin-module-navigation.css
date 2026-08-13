@@ -10,6 +10,8 @@
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
+  position: relative;
+  z-index: 1300;
 }
 
 .admin-module-navbar .admin-module-brand img {
@@ -21,6 +23,8 @@
   width: auto !important;
   margin: 0 !important;
   flex: 0 0 auto;
+  position: relative;
+  z-index: 1300;
 }
 
 .admin-module-navbar .btn-logout {
@@ -64,6 +68,8 @@
   line-height: 1.15;
   white-space: nowrap;
   flex: 0 0 auto;
+  position: relative;
+  z-index: 1300;
 }
 
 .admin-module-navbar a.admin-module-standalone-link:hover,
@@ -82,7 +88,12 @@
 
 .admin-module-menu {
   position: relative;
+  z-index: 1300;
   flex: 0 0 auto;
+}
+
+.admin-module-menu[open] {
+  z-index: 1200;
 }
 
 .admin-module-menu > summary {
@@ -91,6 +102,14 @@
 
 .admin-module-menu > summary::-webkit-details-marker {
   display: none;
+}
+
+.admin-module-menu[open] > .admin-module-menu-trigger::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  cursor: default;
 }
 
 .admin-module-menu-trigger {
@@ -108,6 +127,11 @@
   white-space: nowrap;
   cursor: pointer;
   user-select: none;
+}
+
+.admin-module-menu-trigger > span {
+  position: relative;
+  z-index: 1;
 }
 
 .admin-module-menu-trigger:hover,
@@ -214,7 +238,7 @@
   }
 
   .admin-module-menu-panel {
-    position: static;
+    position: relative;
     min-width: 0;
     width: 100%;
     margin-top: 6px;

@@ -68,6 +68,16 @@ test('entorno de pruebas no depende de permiso de Despacho para seguir visible',
   assert.doesNotMatch(navbar, /href="\/admin\/operaciones">Panel operativo<\/a>/);
 });
 
+test('un menu abierto crea una capa de clic externo sin tapar panel ni controles del header', async () => {
+  const css = await readFile(new URL('../src/public/admin-module-navigation.css', import.meta.url), 'utf8');
+
+  assert.match(css, /\.admin-module-menu\[open\] > \.admin-module-menu-trigger::before[\s\S]*position:\s*fixed[\s\S]*inset:\s*0[\s\S]*z-index:\s*0/);
+  assert.match(css, /\.admin-module-menu \{[\s\S]*z-index:\s*1300/);
+  assert.match(css, /\.admin-module-menu\[open\] \{[\s\S]*z-index:\s*1200/);
+  assert.match(css, /\.admin-module-menu-panel \{[\s\S]*z-index:\s*1200/);
+  assert.match(css, /admin-module-standalone-link[\s\S]*z-index:\s*1300/);
+});
+
 test('dropdown responsive y header sticky de escritorio quedan declarados', async () => {
   const html = injectAdminModuleNavigation(baseHtml, req('/admin'));
   const [css, desktop] = await Promise.all([
@@ -77,7 +87,7 @@ test('dropdown responsive y header sticky de escritorio quedan declarados', asyn
   assert.match(html, /admin-module-navigation-desktop\.css" media="\(min-width: 901px\)"/);
   assert.match(css, /\.admin-module-menu-panel[\s\S]*position:\s*absolute/);
   assert.match(css, /admin-module-standalone-link/);
-  assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.admin-module-menu-panel[\s\S]*position:\s*static/);
+  assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.admin-module-menu-panel[\s\S]*position:\s*relative/);
   assert.match(desktop, /position:\s*sticky/);
   assert.match(desktop, /top:\s*0/);
 });
