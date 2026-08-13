@@ -126,11 +126,11 @@ test('Human se invalida al suspender la página y puede cambiar de backend', asy
   assert.match(mobile, /document\.wasDiscarded/);
 });
 
-test('la verificación usa una etapa frontal corta con dos muestras', async () => {
+test('la verificación usa una etapa frontal corta con una muestra', async () => {
   const mobile = await read('src/public/worker-biometric-mobile.js');
 
   assert.match(mobile, /const BASELINE_TIMEOUT_MS = 14_000/);
-  assert.match(mobile, /const VERIFICATION_STAGE_SAMPLES = 2/);
+  assert.match(mobile, /const VERIFICATION_STAGE_SAMPLES = 1/);
   const start = mobile.indexOf('async function captureVerification');
   const end = mobile.indexOf('function stopStream', start);
   const verification = mobile.slice(start, end);
