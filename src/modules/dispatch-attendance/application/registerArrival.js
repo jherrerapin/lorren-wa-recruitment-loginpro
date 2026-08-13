@@ -22,6 +22,7 @@ const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
 const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
 const MAX_OFFLINE_CAPTURE_AGE_MS = 72 * 60 * 60 * 1000;
 const MAX_CLIENT_CLOCK_FUTURE_SKEW_MS = 5 * 60 * 1000;
+const OPERATIONAL_DAY_MS = 24 * 60 * 60 * 1000;
 
 function requireInputObject(input, label) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`${label}_invalid`);
@@ -93,13 +94,8 @@ function finiteDatabaseNumber(value) {
   return Number.isFinite(number) ? number : null;
 }
 
-function dateKeyInBogota(value) {
-  const date = requiredTimestamp(value, 'service_date');
-  const isLegacyUtcDateOnly = date.getUTCHours() === 0
-    && date.getUTCMinutes() === 0
-    && date.getUTCSeconds() === 0
-    && date.getUTCMilliseconds() === 0;
-  if (isLegacyUtcDateOnly) return date.toISOString().slice(0, 10);
+function instantDateKeyInBogota(value, label) {
+  const date = requiredTimestamp(value, label);
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: BOGOTA_TIME_ZONE,
     year: 'numeric',
@@ -108,6 +104,16 @@ function dateKeyInBogota(value) {
   }).formatToParts(date);
   const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${lookup.year}-${lookup.month}-${lookup.day}`;
+}
+
+function dateKeyInBogota(value) {
+  const date = requiredTimestamp(value, 'service_date');
+  const isLegacyUtcDateOnly = date.getUTCHours() === 0
+    && date.getUTCMinutes() === 0
+    && date.getUTCSeconds() === 0
+    && date.getUTCMilliseconds() === 0;
+  if (isLegacyUtcDateOnly) return date.toISOString().slice(0, 10);
+  return instantDateKeyInBogota(date, 'service_date');
 }
 
 function parseOperationalTime(value, label) {
@@ -143,14 +149,23 @@ export function buildDispatchAttendanceExpectedWindow(serviceRequest) {
     serviceRequest.endTime,
     'service_end_time'
   );
-  if (expectedEndAt <= expectedStartAt) expectedEndAt = new Date(expectedEndAt.getTime() + 24 * 60 * 60 * 1000);
+  if (expectedEndAt <= expectedStartAt) expectedEndAt = new Date(expectedEndAt.getTime() + OPERATIONAL_DAY_MS);
   return { expectedStartAt, expectedEndAt };
 }
 
 export function getDispatchArrivalWindowState(input = {}) {
-  requiredTimestamp(input.now, 'attendance_window_now');
-  requiredTimestamp(input.expectedStartAt, 'attendance_expected_start');
-  return { open: true, opensAt: null, closesAt: null, expired: false };
+  const now = requiredTimestamp(input.now, 'attendance_window_now');
+  const expectedStartAt = requiredTimestamp(input.expectedStartAt, 'attendance_expected_start');
+  const serviceDateKey = instantDateKeyInBogota(expectedStartAt, 'attendance_expected_start');
+  const opensAt = new Date(`${serviceDateKey}T00:00:00-05:00`);
+  const closesAt = new Date(opensAt.getTime() + OPERATIONAL_DAY_MS);
+  const open = now >= opensAt && now < closesAt;
+  return {
+    open,
+    opensAt,
+    closesAt,
+    expired: now >= closesAt
+  };
 }
 
 function minutesLateAt(now, expectedStartAt) {
@@ -264,6 +279,10 @@ async function registerInsideTransaction(client, input) {
   const expectedWindow = existingSession
     ? { expectedStartAt: existingSession.expectedStartAt, expectedEndAt: existingSession.expectedEndAt }
     : buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
+  const arrivalWindow = getDispatchArrivalWindowState({
+    now: input.reportedAt,
+    expectedStartAt: expectedWindow.expectedStartAt
+  });
   const deviceSignals = await resolveDeviceSignals(client, {
     workerId: assignment.workerId,
     installationIdHash: input.installationIdHash,
@@ -274,7 +293,7 @@ async function registerInsideTransaction(client, input) {
     assignmentActive,
     attendanceEnabled,
     duplicateMark,
-    arrivalWindowOpen: true,
+    arrivalWindowOpen: arrivalWindow.open,
     hasConfiguredGeofence: geofence.hasConfiguredGeofence,
     withinGeofence: geofence.withinGeofence,
     accuracyMeters: input.accuracyMeters,

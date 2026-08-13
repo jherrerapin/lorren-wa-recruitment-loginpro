@@ -249,7 +249,7 @@
               </div>
               <div class="action-grid">
                 <% if (!assignment.arrivalReported && !assignment.departureReported) { %>
-                  <button type="button" class="mark-button" data-assignment-id="<%= assignment.id %>" data-mark-type="ARRIVAL" <%= assignment.canRegisterArrival ? '' : 'disabled' %>>Registrar llegada</button>
+                  <button type="button" class="mark-button" data-assignment-id="<%= assignment.id %>" data-mark-type="ARRIVAL" <%= assignment.canRegisterArrival ? '' : 'disabled' %>><%= assignment.actionLabel %></button>
                 <% } else if (!assignment.departureReported) { %>
                   <% if (assignment.breakActionType) { %>
                     <button type="button" class="mark-button break" data-assignment-id="<%= assignment.id %>" data-mark-type="<%= assignment.breakActionType %>"><%= assignment.breakActionType === 'BREAK_START' ? 'Iniciar almuerzo' : 'Finalizar almuerzo' %></button>
