@@ -65,6 +65,7 @@ import { buildCandidateDataCollectionMessage, evaluateCandidateEligibility, getC
 import { evaluateSchedulingGuard } from '../services/schedulingGuard.js';
 import { handleSupervisorInbound, isSupervisorPhone, notifySupervisorAttachment, notifySupervisorManualReview } from '../services/adminSupervisor.js';
 import {
+  loadConversationInterpretationContext,
   markConversationMessagesResponded,
   mergeConversationMessagePayload,
   persistInboundConversationMessage,
@@ -1648,11 +1649,15 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     });
   }
 
-  const aiResult = await tryOpenAIParse(cleanText);
+  const conversationContext = await loadConversationInterpretationContext(prisma, {
+    candidateId: candidate.id
+  });
   const sanitizerContext = {
     currentStep: candidate.currentStep,
-    pendingFields: getMissingFieldLabels(candidate, currentVacancy)
+    pendingFields: getMissingFieldLabels(candidate, currentVacancy),
+    ...conversationContext
   };
+  const aiResult = await tryOpenAIParse(cleanText, sanitizerContext);
   const localParsedData = parseNaturalData(cleanText);
   const aiFields = aiResult.parsedFields || {};
   const enginePreviewEligible = shouldUseEngineFieldPreview(
@@ -2415,7 +2420,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_reschedule', nextSlot, currentVacancy));
     }
 
-    if (interviewIntent === 'confirm_attendance') {
+  if (interviewIntent === 'confirm_attendance') {
       const transition = await applyActiveInterviewResponse(prisma, candidate, activeBooking, cleanText, 'confirm_attendance');
       if (!transition) return;
 

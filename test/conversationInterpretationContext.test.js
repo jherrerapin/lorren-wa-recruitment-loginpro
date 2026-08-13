@@ -24,7 +24,7 @@ test('carga solo historial previo y conserva la última salida como pregunta act
     {
       direction: MessageDirection.OUTBOUND,
       body: '¿Tienes experiencia en logística?',
-      rawPayload: { source: 'bot_flow' },
+      rawPayload: { source: 'bot_flow', actor: 'BOT' },
       respondedAt: null,
       createdAt: new Date('2026-08-12T15:01:00.000Z')
     },
@@ -58,6 +58,7 @@ test('carga solo historial previo y conserva la última salida como pregunta act
   assert.deepEqual(calls[0].select, {
     direction: true,
     body: true,
+    rawPayload: true,
     createdAt: true
   });
 
@@ -68,11 +69,44 @@ test('carga solo historial previo y conserva la última salida como pregunta act
   ]);
 });
 
+test('una salida manual no reemplaza la última pregunta automática', async () => {
+  const { prisma } = createPrismaMock([
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: 'El equipo revisará tu caso y te escribe por este medio.',
+      rawPayload: {
+        source: 'admin_outbound',
+        sourceCategory: 'MANUAL_AUTHORIZED',
+        actor: 'RECRUITER',
+        manualIntervention: true
+      },
+      createdAt: new Date('2026-08-12T15:02:00.000Z')
+    },
+    {
+      direction: MessageDirection.OUTBOUND,
+      body: '¿Tienes experiencia en logística?',
+      rawPayload: { source: 'bot_flow', actor: 'BOT' },
+      createdAt: new Date('2026-08-12T15:01:00.000Z')
+    }
+  ]);
+
+  const context = await loadConversationInterpretationContext(prisma, {
+    candidateId: 'candidate-context-manual'
+  });
+
+  assert.equal(context.lastBotQuestion, '¿Tienes experiencia en logística?');
+  assert.deepEqual(context.recentConversation, [
+    { direction: MessageDirection.OUTBOUND, body: '¿Tienes experiencia en logística?' },
+    { direction: MessageDirection.OUTBOUND, body: 'El equipo revisará tu caso y te escribe por este medio.' }
+  ]);
+});
+
 test('no inventa pregunta activa cuando el historial previo no contiene salida textual', async () => {
   const { prisma } = createPrismaMock([
     {
       direction: MessageDirection.INBOUND,
       body: 'Dato anterior',
+      rawPayload: { source: 'whatsapp' },
       respondedAt: new Date('2026-08-12T15:00:30.000Z'),
       createdAt: new Date('2026-08-12T15:00:00.000Z')
     }

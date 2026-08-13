@@ -1,4 +1,5 @@
 import { MessageDirection } from '@prisma/client';
+import { isHumanOutboundMessage } from './manualSourcePolicy.js';
 
 const OUTBOUND_DELIVERY_STATES = new Set(['SENDING', 'SENT', 'FAILED', 'UNKNOWN']);
 
@@ -229,6 +230,7 @@ export async function loadConversationInterpretationContext(prisma, input = {}) 
     select: {
       direction: true,
       body: true,
+      rawPayload: true,
       createdAt: true
     }
   });
@@ -236,6 +238,7 @@ export async function loadConversationInterpretationContext(prisma, input = {}) 
   const latestOutbound = rows.find((row) => (
     row?.direction === MessageDirection.OUTBOUND
     && String(row?.body ?? '').trim()
+    && !isHumanOutboundMessage(row)
   )) || null;
 
   const recentConversation = [...rows]
