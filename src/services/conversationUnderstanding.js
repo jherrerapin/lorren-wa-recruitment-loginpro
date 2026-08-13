@@ -246,10 +246,18 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
   };
 }
 
-function detectCorrectionIntent(text = '', aiResult = {}) {
+function detectCorrectionIntent(aiResult = {}, fallbackIntent = null) {
   const extraction = aiResult?.extraction || {};
   if (Array.isArray(extraction.conflicts) && extraction.conflicts.length) return true;
-  return ['provide_correction', 'confirm_correction'].includes(String(aiResult?.intent || '').toLowerCase());
+
+  const correctionIntents = new Set([
+    'provide_correction',
+    'confirm_correction',
+    'confirmation_no_or_correction'
+  ]);
+  return [aiResult?.intent, extraction?.replyIntent, fallbackIntent]
+    .map((intent) => String(intent || '').toLowerCase())
+    .some((intent) => correctionIntents.has(intent));
 }
 
 function findTransportContradiction(candidateFields = {}) {
@@ -273,9 +281,13 @@ export async function conversationUnderstanding(text, options = {}) {
   const aiRoleHint = typeof aiFields.roleHint === 'string' ? aiFields.roleHint.trim() || null : null;
   const extractionWasUseful = aiResult?.status === 'ok' && (Object.keys(aiCandidateFields).length > 0 || aiCity || aiRoleHint || aiResult.intent);
   const runtime = options.runtime && typeof options.runtime === 'object' ? options.runtime : null;
+  const correctionIntent = detectCorrectionIntent(aiResult, runtime?.fallbackIntent);
+  const semanticContext = correctionIntent
+    ? { ...(options.context || {}), correctionIntent: true }
+    : (options.context || {});
 
   if (runtime) {
-    const turnInterpretation = buildRuntimeTurnInterpretation(input, aiResult, runtime, options.context || {});
+    const turnInterpretation = buildRuntimeTurnInterpretation(input, aiResult, runtime, semanticContext);
     understanding.turnInterpretation = turnInterpretation;
     understanding.candidateFields = turnInterpretation.fields;
     understanding.rejectedFields = turnInterpretation.rejectedFields;
@@ -289,7 +301,7 @@ export async function conversationUnderstanding(text, options = {}) {
       fields: rawAiCandidateFields,
       evidence: aiEvidence,
       text: input,
-      context: options.context || {},
+      context: semanticContext,
       turnType: aiResult?.extraction?.turnType || null
     });
     understanding.candidateFields = normalizeAiFields(sanitized.fields);
@@ -306,7 +318,7 @@ export async function conversationUnderstanding(text, options = {}) {
       fields: localCandidateFields,
       evidence: localEvidence,
       text: input,
-      context: options.context || {},
+      context: semanticContext,
       turnType: null
     });
     understanding.candidateFields = sanitized.fields;
@@ -332,21 +344,26 @@ export async function conversationUnderstanding(text, options = {}) {
     };
   }
 
-  if (detectCorrectionIntent(input, aiResult)) {
+  if (correctionIntent) {
     understanding.intent = 'provide_correction';
-    understanding.corrections.push({ source: aiResult?.status === 'ok' ? 'ai_extraction' : 'text', reason: 'correction_or_conflict_detected' });
+    understanding.corrections.push({
+      source: aiResult?.status === 'ok' ? 'ai_or_context' : 'deterministic_context',
+      reason: 'correction_or_conflict_detected'
+    });
   }
 
   const contradiction = findTransportContradiction(understanding.candidateFields);
   if (contradiction) understanding.contradictions.push(contradiction);
 
   if (typeof options.aiParser === 'function') {
-    const secondaryAiResult = await options.aiParser(input, options.context || {});
+    const secondaryAiResult = await options.aiParser(input, semanticContext);
     if (secondaryAiResult?.intent) understanding.intent = secondaryAiResult.intent;
   }
 
   if (understanding.turnInterpretation) {
-    understanding.turnInterpretation.intent = aiResult?.intent || understanding.intent || runtime?.fallbackIntent || 'unknown';
+    understanding.turnInterpretation.intent = correctionIntent
+      ? 'provide_correction'
+      : (aiResult?.intent || understanding.intent || runtime?.fallbackIntent || 'unknown');
     understanding.turnInterpretation.cityHint = aiFields.city || understanding.cityDetection?.value || null;
     understanding.turnInterpretation.roleHint = aiFields.roleHint || understanding.vacancyDetection?.value || null;
   }
