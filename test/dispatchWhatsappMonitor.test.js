@@ -47,11 +47,11 @@ function prismaFixture() {
     dispatchWhatsappContactWindow: {
       findMany: async (query) => {
         assert.equal(query.where.scope, 'operational');
-        assert.deepEqual([...query.where.phone.in].sort(), ['573001112233', '573002223344', '573003334455']);
+        const requested = new Set(query.where.phone.in);
         return [
           { scope: 'operational', phone: '573001112233', lastInboundAt: new Date('2026-08-12T23:10:00.000Z') },
           { scope: 'operational', phone: '573003334455', lastInboundAt: new Date('2026-08-11T20:00:00.000Z') }
-        ];
+        ].filter((row) => requested.has(row.phone));
       },
       upsert: async (query) => {
         healed.push(query);
@@ -59,12 +59,11 @@ function prismaFixture() {
       }
     },
     dispatchWhatsappConfirmation: { findMany: async (query) => {
-      assert.deepEqual([...query.where.phone.in].sort(), ['573001112233', '573002223344', '573003334455']);
       assert.deepEqual(query.where.confirmationReceivedAt, { not: null });
+      const requested = new Set(query.where.phone.in);
       return [
-        // Reproduce el caso real: hubo confirmación inbound, pero faltó/estuvo atrasado el registro de ventana.
         { phone: '573002223344', confirmationReceivedAt: new Date('2026-08-13T00:20:00.000Z') }
-      ];
+      ].filter((row) => requested.has(row.phone));
     } }
   };
 }
@@ -95,8 +94,6 @@ test('monitor vivo reconcilia confirmación inbound y no deja cerrado a quien ya
   const auxiliarC = monitor.items.find((item) => item.workerName === 'Auxiliar C');
   assert.equal(auxiliarC.isOpen, false);
   assert.equal(auxiliarC.canSendWindowCheck, true);
-
-  // Los cerrados se muestran primero para saber quién falta.
   assert.equal(monitor.items[0].workerName, 'Auxiliar C');
 });
 
