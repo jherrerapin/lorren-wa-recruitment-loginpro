@@ -76,7 +76,6 @@ test('abre la llegada solo durante la fecha operativa en Bogotá', () => {
   const startOfDay = getDispatchArrivalWindowState({ now: new Date('2026-07-22T05:00:00.000Z'), expectedStartAt });
   const endOfDay = getDispatchArrivalWindowState({ now: new Date('2026-07-23T04:59:59.999Z'), expectedStartAt });
   const nextDay = getDispatchArrivalWindowState({ now: new Date('2026-07-23T05:00:00.000Z'), expectedStartAt });
-
   assert.equal(beforeDay.open, false);
   assert.equal(beforeDay.expired, false);
   assert.equal(beforeDay.opensAt.toISOString(), '2026-07-22T05:00:00.000Z');
@@ -103,6 +102,17 @@ test('registra una llegada varias horas antes si ya es el mismo día operativo',
 test('rechaza en backend una llegada del día anterior', async () => {
   const prisma = successfulPrisma(assignmentFixture());
   const result = await registerDispatchArrival(prisma, input({ now: new Date('2026-07-22T04:59:59.999Z') }));
+  assert.equal(result.recorded, false);
+  assert.deepEqual(result.validation.riskFlags, ['ARRIVAL_WINDOW_NOT_OPEN']);
+});
+
+test('rechaza captura offline anterior a la fecha operativa', async () => {
+  const prisma = successfulPrisma(assignmentFixture());
+  const result = await registerDispatchArrival(prisma, input({
+    captureMode: 'OFFLINE_WEB',
+    clientCapturedAt: new Date('2026-07-22T04:50:00.000Z'),
+    now: new Date('2026-07-22T05:10:00.000Z')
+  }));
   assert.equal(result.recorded, false);
   assert.deepEqual(result.validation.riskFlags, ['ARRIVAL_WINDOW_NOT_OPEN']);
 });
