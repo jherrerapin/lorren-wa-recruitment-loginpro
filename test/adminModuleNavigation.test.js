@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   ADMIN_MODULE_PATHS,
   buildAdminModuleCards,
@@ -101,6 +102,16 @@ test('los recuadros grandes se muestran solo en las entradas principales de cada
   assert.match(buildAdminModuleCards(request('/admin/operaciones', access), baseHtml), /data-module-card="operations"/);
   assert.match(buildAdminModuleCards(request(ADMIN_MODULE_PATHS.payroll, access), baseHtml), /data-module-card="payroll"/);
   assert.equal(buildAdminModuleCards(request('/admin/operaciones/clientes', access), baseHtml), '');
+});
+
+test('la navegación fija se aplica solo fuera de móvil', async () => {
+  const html = injectAdminModuleNavigation(baseHtml, request('/admin'));
+  const desktopCss = await readFile(new URL('../src/public/admin-module-navigation-desktop.css', import.meta.url), 'utf8');
+
+  assert.match(html, /href="\/public\/admin-module-navigation-desktop\.css" media="\(min-width: 901px\)"/);
+  assert.match(desktopCss, /position:\s*sticky/);
+  assert.match(desktopCss, /top:\s*0/);
+  assert.match(desktopCss, /z-index:\s*1000/);
 });
 
 test('la inyección es idempotente y no altera endpoints API ni HTML sin navbar', () => {
