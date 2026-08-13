@@ -39,10 +39,11 @@ test('la detección facial usa fallback móvil y precalienta los modelos', () =>
 });
 
 
-test('vivacidad, anti-spoof y descriptor deben coincidir en cada muestra', () => {
+test('vivacidad, anti-spoof y descriptor deben coincidir en la muestra aceptada', () => {
   assert.match(mobile, /scores\.realScore < MIN_REAL_SCORE/);
   assert.match(mobile, /scores\.liveScore < MIN_LIVE_SCORE/);
-  assert.match(mobile, /descriptor:\s*normalizeDescriptor\(detected\.face\.embedding\)/);
+  assert.match(mobile, /descriptor = normalizeDescriptor\(detected\.face\.embedding\)/);
+  assert.match(mobile, /samples\.push\(\{\s*descriptor,/);
   assert.match(mobile, /realScore:\s*scores\.realScore/);
   assert.match(mobile, /liveScore:\s*scores\.liveScore/);
   assert.match(mobile, /ArrayBuffer\.isView\(value\)/);
@@ -52,26 +53,32 @@ test('vivacidad, anti-spoof y descriptor deben coincidir en cada muestra', () =>
 });
 
 
-test('un score aislado bajo se descarta y una muestra frontal válida basta', () => {
+test('una sola muestra exige cinco segundos continuos de rostro válido antes de capturar', () => {
   const start = mobile.indexOf('async function collectStableFront');
   const end = mobile.indexOf('\n  async function captureEnrollment', start);
   assert.ok(start >= 0 && end > start);
   const source = mobile.slice(start, end);
 
-  assert.match(source, /if \(!detected \|\| !frontFacing\(detected\.face\)\) \{\s*consecutiveFront = 0/);
+  assert.match(mobile, /const MIN_STABLE_FACE_DURATION_MS = 5_000/);
+  assert.match(source, /let stableStartedAt = null/);
+  assert.match(source, /function resetStableWindow\(\) \{\s*stableStartedAt = null/);
+  assert.match(source, /if \(!detected \|\| !frontFacing\(detected\.face\)\) \{\s*resetStableWindow\(\)/);
 
   const realScoreBranch = source.match(/if \(scores\.realScore < MIN_REAL_SCORE\) \{([\s\S]*?)\n      \}/)?.[1] || '';
   const liveScoreBranch = source.match(/if \(scores\.liveScore < MIN_LIVE_SCORE\) \{([\s\S]*?)\n      \}/)?.[1] || '';
-  assert.ok(realScoreBranch);
-  assert.ok(liveScoreBranch);
-  assert.doesNotMatch(realScoreBranch, /consecutiveFront\s*=\s*0/);
-  assert.doesNotMatch(liveScoreBranch, /consecutiveFront\s*=\s*0/);
+  const descriptorFailure = source.match(/catch \{([\s\S]*?)No se pudieron leer los rasgos/)?.[1] || '';
+  assert.match(realScoreBranch, /resetStableWindow\(\)/);
+  assert.match(liveScoreBranch, /resetStableWindow\(\)/);
+  assert.match(descriptorFailure, /resetStableWindow\(\)/);
 
-  assert.match(mobile, /const REQUIRED_STABLE_FRONT_FRAMES = 1/);
-  assert.match(source, /if \(consecutiveFront < REQUIRED_STABLE_FRONT_FRAMES\)/);
-  assert.match(source, /samples\.push\(\{/);
-  assert.match(source, /realScore:\s*scores\.realScore/);
-  assert.match(source, /liveScore:\s*scores\.liveScore/);
+  const timerPosition = source.indexOf('if (stableStartedAt === null) stableStartedAt = Date.now();');
+  const thresholdPosition = source.indexOf('stableElapsedMs < MIN_STABLE_FACE_DURATION_MS');
+  const capturePosition = source.indexOf('samples.push({');
+  assert.ok(timerPosition >= 0);
+  assert.ok(thresholdPosition > timerPosition);
+  assert.ok(capturePosition > thresholdPosition, 'la muestra solo se guarda después de superar la ventana estable');
+  assert.match(source, /secondsRemaining = Math\.max\(1, Math\.ceil/);
+  assert.match(source, /Mantén el rostro de frente y quieto/);
 });
 
 
