@@ -30,6 +30,16 @@ function disabledAiResult() {
   };
 }
 
+function emptyRuntime() {
+  return {
+    localParsedData: {},
+    engineFields: {},
+    engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+    fallbackIntent: 'continue_application',
+    enrichFields: (fields) => fields
+  };
+}
+
 test('sí responde experiencia cuando la última pregunta del bot pide experiencia', () => {
   const result = sanitize(
     'sí',
@@ -110,13 +120,7 @@ test('el pipeline recupera sí/no contextual aun con IA deshabilitada', async ()
     const result = await conversationUnderstanding(text, {
       context: EXPERIENCE_CONTEXT,
       aiResult: disabledAiResult(),
-      runtime: {
-        localParsedData: {},
-        engineFields: {},
-        engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-        fallbackIntent: 'continue_application',
-        enrichFields: (fields) => fields
-      }
+      runtime: emptyRuntime()
     });
 
     assert.equal(result.candidateFields.experienceInfo, expected, text);
@@ -127,13 +131,7 @@ test('el pipeline recupera afirmación y duración contextual con IA deshabilita
   const result = await conversationUnderstanding('sí, 2 años', {
     context: EXPERIENCE_CONTEXT,
     aiResult: disabledAiResult(),
-    runtime: {
-      localParsedData: {},
-      engineFields: {},
-      engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-      fallbackIntent: 'continue_application',
-      enrichFields: (fields) => fields
-    }
+    runtime: emptyRuntime()
   });
 
   assert.equal(result.candidateFields.experienceInfo, 'Sí');
@@ -147,15 +145,25 @@ test('el pipeline recupera sí. 60 personas como experiencia contextual sin fabr
       lastBotQuestion: '¿Tienes experiencia coordinando personal?'
     },
     aiResult: disabledAiResult(),
-    runtime: {
-      localParsedData: {},
-      engineFields: {},
-      engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-      fallbackIntent: 'continue_application',
-      enrichFields: (fields) => fields
-    }
+    runtime: emptyRuntime()
   });
 
   assert.equal(result.candidateFields.experienceInfo, 'Sí');
   assert.equal(result.candidateFields.age, undefined);
+});
+
+test('el pipeline no usa pendingFields para robar una respuesta dirigida a otro campo', async () => {
+  for (const text of ['sí', 'no', 'sí, 2 años', 'sí. 60 personas']) {
+    const result = await conversationUnderstanding(text, {
+      context: {
+        ...EXPERIENCE_CONTEXT,
+        lastBotQuestion: '¿En qué barrio vives?'
+      },
+      aiResult: disabledAiResult(),
+      runtime: emptyRuntime()
+    });
+
+    assert.equal(result.candidateFields.experienceInfo, undefined, text);
+    assert.equal(result.candidateFields.experienceTime, undefined, text);
+  }
 });
