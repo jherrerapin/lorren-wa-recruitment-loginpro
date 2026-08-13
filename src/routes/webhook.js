@@ -2420,7 +2420,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       return reply(prisma, candidate.id, from, body, cleanText, buildInterviewReplyPayload(body, 'interview_reschedule', nextSlot, currentVacancy));
     }
 
-    if (interviewIntent === 'confirm_attendance') {
+  if (interviewIntent === 'confirm_attendance') {
       const transition = await applyActiveInterviewResponse(prisma, candidate, activeBooking, cleanText, 'confirm_attendance');
       if (!transition) return;
 
@@ -2594,7 +2594,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       });
       const correctionReply = buildUpdatedConfirmationReply(updated, correctedRequiredFields, currentVacancy);
       const body = askedVacancyQuestion
-        ? buildQuestionFollowUpReply(currentVacancy, cleanText, correctionReply, updated)
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, correctionReply)
         : correctionReply;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
