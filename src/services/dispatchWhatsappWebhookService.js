@@ -12,11 +12,11 @@ import {
   resolveDispatchWhatsappScopeByPhoneNumberId,
   setDispatchWhatsappRuntimeState
 } from './dispatchWhatsappCloudConfig.js';
-import { claimDispatchAssignmentConfirmation, claimDispatchAssignmentDecline } from './dispatchWhatsappAssignmentService.js';
+import { claimDispatchAssignmentConfirmation, claimDispatchAssignmentNovelty } from './dispatchWhatsappAssignmentService.js';
 import { dispatchWhatsappProviderErrorMessage, sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
 import {
   recordDispatchWhatsappInboundWindow,
-  sendDispatchDeclineAdminAlert
+  sendDispatchNoveltyAdminAlert
 } from './dispatchWhatsappAdminAlerts.js';
 
 function normalizeConfirmationText(value) {
@@ -54,18 +54,22 @@ function inboundPayload(message = {}) {
 }
 
 function assignmentActionFromInboundPayload(message = {}) {
-  const match = inboundPayload(message).trim().match(/^dispatch_(confirm|decline):([A-Za-z0-9_-]+)$/);
+  const match = inboundPayload(message).trim().match(/^dispatch_(confirm|novelty|decline):([A-Za-z0-9_-]+)$/);
   if (!match) return null;
-  return { action: match[1] === 'decline' ? 'DECLINE' : 'CONFIRM', assignmentId: match[2] };
+  return {
+    action: match[1] === 'confirm' ? 'CONFIRM' : 'NOVELTY',
+    assignmentId: match[2]
+  };
 }
 
 function assignmentIdFromInboundPayload(message = {}) {
   return assignmentActionFromInboundPayload(message)?.assignmentId || null;
 }
 
-function isAutomaticDeclineReply(value) {
+function isAutomaticNoveltyReply(value) {
   const text = normalizeConfirmationText(value);
-  return ['no puedo', 'no puedo asistir'].includes(text);
+  return ['reportar novedad', 'novedad', 'tengo una novedad', 'reporto novedad'].includes(text)
+    || /\breport(?:ar|o)\b.*\bnovedad\b/.test(text);
 }
 
 function inboundReceivedAt(message = {}) {
@@ -106,34 +110,37 @@ export async function processDispatchWhatsappInboundMessage({
   const buttonAction = assignmentActionFromInboundPayload(message);
   const inbound = inboundText(message);
   const inferredAction = buttonAction?.action
-    || (isAutomaticDeclineReply(inbound) ? 'DECLINE' : isAutomaticConfirmationReply(inbound) ? 'CONFIRM' : null);
+    || (isAutomaticNoveltyReply(inbound) ? 'NOVELTY' : isAutomaticConfirmationReply(inbound) ? 'CONFIRM' : null);
   if (!inferredAction) return { handled: false, reason: 'not_assignment_response' };
   const target = await findConfirmationTarget({ scope, message, prismaClient });
   if (!target) return { handled: false, reason: 'no_pending_assignment' };
   const confirmationMessageId = String(message.id || '').trim();
   if (!confirmationMessageId) return { handled: false, reason: 'missing_message_id' };
 
-  if (inferredAction === 'DECLINE') {
-    const decline = await claimDispatchAssignmentDecline({
+  if (inferredAction === 'NOVELTY') {
+    const novelty = await claimDispatchAssignmentNovelty({
       scope,
       assignment: target.assignment,
       responseMessageId: confirmationMessageId,
       responseReceivedAt: inboundReceivedAt(message),
       prismaClient
     });
-    if (decline.assignmentDeclined && scope === 'operational') {
-      await recalculateDispatchServiceRequestStatus(prismaClient, target.assignment.serviceRequestId);
-    }
     let adminAlertSent = false;
-    if (decline.assignmentDeclined) {
-      const adminAlert = await sendDispatchDeclineAdminAlert({
+    if (novelty.noveltyReported) {
+      const adminAlert = await sendDispatchNoveltyAdminAlert({
         scope, link: target.link, assignment: target.assignment, prismaClient, axiosClient
       }).catch((error) => ({ sent: false, error }));
       adminAlertSent = Boolean(adminAlert?.sent);
     }
     setDispatchWhatsappRuntimeState(scope, { lastInboundAt: new Date().toISOString(), lastError: null });
-    console.info(`[dispatch-wa-cloud] Respuesta NO PUEDO procesada. scope=${scope} assignment=${target.assignment.id} changed=${decline.assignmentDeclined ? 'yes' : 'no'} adminAlert=${adminAlertSent ? 'sent' : 'not-sent'}.`);
-    return { handled: decline.assignmentDeclined || decline.duplicate, duplicate: decline.duplicate, assignmentDeclined: decline.assignmentDeclined, adminAlertSent, replySent: false };
+    console.info(`[dispatch-wa-cloud] Novedad de auxiliar procesada. scope=${scope} assignment=${target.assignment.id} reported=${novelty.noveltyReported ? 'yes' : 'no'} adminAlert=${adminAlertSent ? 'sent' : 'not-sent'}.`);
+    return {
+      handled: novelty.noveltyReported || novelty.duplicate,
+      duplicate: novelty.duplicate,
+      noveltyReported: novelty.noveltyReported,
+      adminAlertSent,
+      replySent: false
+    };
   }
 
   const claim = await claimDispatchAssignmentConfirmation({
