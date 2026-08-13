@@ -108,13 +108,20 @@ const FIELD_LABELS = {
 const USE_CONVERSATION_ENGINE = process.env.USE_CONVERSATION_ENGINE === 'true';
 const FORWARD_MEDIA_TO = process.env.FORWARD_MEDIA_TO;
 
+// ---------------------------------------------------------------------------
+// Rate limiting en memoria por número de teléfono.
+// ---------------------------------------------------------------------------
 const MAX_MESSAGES_PER_WINDOW = parseInt(process.env.RATE_LIMIT_MAX || '15', 10);
-const RATE_WINDOW_MS           = parseInt(process.env.RATE_LIMIT_WINDOW_MS || String(10 * 60 * 1000), 10);
-const CLEANUP_INTERVAL_MS      = 30 * 60 * 1000;
+const RATE_WINDOW_MS           = parseInt(process.env.RATE_LIMIT_WINDOW_MS || String(10 * 60 * 1000), 10); // 10 min
+const CLEANUP_INTERVAL_MS      = 30 * 60 * 1000; // 30 min
 
 /** @type {Map<string, number[]>} */
 const phoneTimestamps = new Map();
 
+/**
+ * Devuelve true si el número está dentro del límite permitido y registra
+ * el timestamp del intento. Devuelve false si lo supera (rate limited).
+ */
 function checkRateLimit(phone) {
   const now = Date.now();
   const windowStart = now - RATE_WINDOW_MS;
@@ -128,6 +135,7 @@ function checkRateLimit(phone) {
   return true;
 }
 
+// Limpieza periódica para no acumular entradas viejas en memoria.
 const rateLimitCleanupTimer = setInterval(() => {
   const windowStart = Date.now() - RATE_WINDOW_MS;
   for (const [phone, timestamps] of phoneTimestamps.entries()) {
@@ -215,7 +223,7 @@ function formatFieldListForVacancy(fields = [], vacancy = null) {
 }
 function formatYearsLabel(age) {
   if (!age) return 'Pendiente';
-  return `${age} años`;
+  return `${age} a\u00f1os`;
 }
 function isMedicalRestrictionsClarificationRequest(text = '') {
   const n = normalizeComparableText(text);
@@ -1176,6 +1184,7 @@ async function hasRecentResumePhotoReply(prisma, candidateId, minutes = 15) {
     || (message?.rawPayload?.replyIntent === 'request_cv_pdf_word' && /registrar tu hoja de vida|pdf o word\/docx/i.test(message?.body || '')));
 }
 
+
 export async function recordIntentionalSilence(prisma, candidate = {}, inboundText = '', details = {}) {
   const payload = {
     source: 'bot_silence_trace',
@@ -1466,6 +1475,7 @@ async function prepareCandidateForInboundAutomation(prisma, candidate = {}) {
 
   return transition.candidate || candidate;
 }
+
 
 function outboundRequestsResolvedVacancy(reply = '', candidate = {}, vacancy = null) {
   if (!candidate?.vacancyId && !vacancy?.id) return false;
@@ -1929,6 +1939,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
   }
 
+
   const vacancyFirstGateDecision = await resolveVacancyFirstGate({
     prisma,
     candidate,
@@ -2191,6 +2202,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     return reply(prisma, candidate.id, from, SALUDO_INICIAL, cleanText, { body: SALUDO_INICIAL, source: 'bot_vacancy_prompt' });
   }
+
 
   if (
     !currentVacancy
@@ -2539,19 +2551,19 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
     if (!updatedCandidate.vacancyId && !isFutureProfileCaptureCandidate(updatedCandidate)) {
       await prisma.candidate.update({ where: { id: candidate.id }, data: { currentStep: ConversationStep.GREETING_SENT } });
-      const activeVacancies = await findActiveVacancies(prisma);
-      const cityVacancies = vacancyHints.city
-        ? activeVacancies.filter((vacancy) => (
-          normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(vacancyHints.city)
-        ))
-        : [];
-      const body = buildVacancyAssociationPrompt({
-        dataCaptured: true,
-        hasCv: hasHv(updatedCandidate),
-        city: vacancyHints.city,
-        cityVacancyOptions: cityVacancies
-      });
-      return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
+        const activeVacancies = await findActiveVacancies(prisma);
+        const cityVacancies = vacancyHints.city
+          ? activeVacancies.filter((vacancy) => (
+            normalizeComparableText(vacancy.operation?.city?.name || vacancy.city || '') === normalizeComparableText(vacancyHints.city)
+          ))
+          : [];
+        const body = buildVacancyAssociationPrompt({
+          dataCaptured: true,
+          hasCv: hasHv(updatedCandidate),
+          city: vacancyHints.city,
+          cityVacancyOptions: cityVacancies
+        });
+        return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_vacancy_prompt' });
     }
 
     if (resolveStepAfterDataCompletion({ hasCv: hasHv(updatedCandidate) }) === ConversationStep.DONE) {
@@ -2582,7 +2594,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       });
       const correctionReply = buildUpdatedConfirmationReply(updated, correctedRequiredFields, currentVacancy);
       const body = askedVacancyQuestion
-        ? buildQuestionFollowUpReply(currentVacancy, cleanText, correctionReply)
+        ? buildQuestionFollowUpReply(currentVacancy, cleanText, correctionReply, updated)
         : correctionReply;
       return reply(prisma, candidate.id, from, body, cleanText, { body, source: 'bot_flow' });
     }
