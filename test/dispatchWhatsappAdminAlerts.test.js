@@ -35,6 +35,7 @@ test('cada usuario configura sus alertas dentro de Despacho y no desde administr
   assert.match(dashboard, /name="dispatchAlertPhone"/);
   assert.match(dashboard, /name="dispatchWindowExpiryReminderEnabled"/);
   assert.match(dashboard, /Guardar cambios/);
+  assert.match(dashboard, /Las novedades reportadas por los auxiliares se notifican aunque este check esté apagado/);
   assert.match(dashboardRoute, /router\.post\('\/alertas-whatsapp'/);
   assert.match(dashboardRoute, /findCurrentDispatchAppUser/);
   assert.match(dashboardRoute, /prisma\.appUser\.update/);
@@ -47,8 +48,17 @@ test('mensaje normal de asignación conserva literalmente el cuerpo canónico y 
   assert.equal(payload.interactive.type, 'button');
   assert.equal(payload.interactive.body.text,
     'Hola *Ana Pérez*,\n\nMañana: *12/08/2026*\nLlegar a: *Punto Norte  - Calle 1 # 2-3*\nHora : *8:00 AM por favor.*\n\n\n*Confirmado?*');
-  assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.title), ['CONFIRMADO', 'NO PUEDO']);
-  assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.id), ['dispatch_confirm:assignment-1', 'dispatch_decline:assignment-1']);
+  assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.title), ['CONFIRMADO', 'REPORTAR NOVEDAD']);
+  assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.id), ['dispatch_confirm:assignment-1', 'dispatch_novelty:assignment-1']);
+});
+
+test('alerta de novedad incluye auxiliar, teléfono e instrucción de contacto', async () => {
+  const { buildDispatchNoveltyAdminAlertText } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
+  const text = buildDispatchNoveltyAdminAlertText(assignmentFixture());
+  assert.match(text, /Ana Pérez/);
+  assert.match(text, /573001234567/);
+  assert.match(text, /Punto Norte/);
+  assert.match(text, /Comunícate con el auxiliar/);
 });
 
 test('envío prioriza ventana de 24h y deja plantilla solo como fallback', () => {
@@ -63,14 +73,16 @@ test('envío prioriza ventana de 24h y deja plantilla solo como fallback', () =>
   assert.match(config, /assignmentTemplate = false/);
 });
 
-test('cada inbound reinicia la ventana, NO PUEDO alerta al dueño y Gracias permanece', () => {
+test('cada inbound reinicia la ventana, Reportar novedad alerta al dueño y Gracias permanece para confirmación', () => {
   const webhook = read('src/services/dispatchWhatsappWebhookService.js');
   const assignment = read('src/services/dispatchWhatsappAssignmentService.js');
   const config = read('src/services/dispatchWhatsappCloudConfig.js');
   assert.match(webhook, /recordDispatchWhatsappInboundWindow/);
   assert.ok(webhook.indexOf('recordDispatchWhatsappInboundWindow') < webhook.indexOf('const buttonAction'));
-  assert.match(webhook, /sendDispatchDeclineAdminAlert/);
+  assert.match(webhook, /sendDispatchNoveltyAdminAlert/);
+  assert.match(webhook, /claimDispatchAssignmentNovelty/);
   assert.match(assignment, /alertOwnerUsername:/);
+  assert.match(assignment, /type: 'WHATSAPP_NOVELTY'/);
   assert.match(config, /AUTOMATIC_CONFIRMATION_REPLY = 'Gracias\.'/);
   assert.match(webhook, /AUTOMATIC_CONFIRMATION_REPLY/);
 });
