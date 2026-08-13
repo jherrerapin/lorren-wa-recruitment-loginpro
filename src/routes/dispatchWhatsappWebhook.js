@@ -8,7 +8,10 @@ import {
   resolveDispatchWhatsappScopeByPhoneNumberId
 } from '../services/dispatchWhatsappCloudService.js';
 import { todayIsoDateCO } from '../services/dispatchDate.js';
-import { confirmedOperationalAssignments } from '../services/dispatchOperationalCoverage.js';
+import {
+  confirmedOperationalAssignments,
+  deriveDispatchRequestOperationalState
+} from '../services/dispatchOperationalCoverage.js';
 import {
   buildProgrammingCompletionSummary,
   buildProgrammingFilename,
@@ -23,6 +26,8 @@ import {
 import { recordDispatchWhatsappMessageAudit } from '../services/dispatchWhatsappMonitor.js';
 import { loadProgrammingWhatsappRecipients } from './dispatchProgrammingNotifications.js';
 import { logWhatsappWebhookDiagnostics } from '../services/whatsappWebhookDiagnostics.js';
+
+const PENDING_PROGRAMMING_STATUSES = new Set(['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION']);
 
 function parsePayload(rawBody) {
   if (!Buffer.isBuffer(rawBody) || !rawBody.length) return null;
@@ -49,7 +54,9 @@ function webhookMessageValues(payload = {}) {
   const values = [];
   for (const entry of Array.isArray(payload?.entry) ? payload.entry : []) {
     for (const change of Array.isArray(entry?.changes) ? entry.changes : []) {
-      if (change?.field === 'messages' && change?.value) values.push(change.value);
+      if (change?.field === 'messages' && change?.value && Array.isArray(change.value.messages) && change.value.messages.length) {
+        values.push(change.value);
+      }
     }
   }
   return values;
@@ -97,7 +104,9 @@ async function sendProgrammingSummary(prisma, contact) {
     (sum, request) => sum + confirmedOperationalAssignments(request).length,
     0
   );
-  const pendingRequests = Math.max(summary.totalRequests - summary.completedRequests, 0);
+  const pendingRequests = loaded.requests.filter((request) => (
+    PENDING_PROGRAMMING_STATUSES.has(deriveDispatchRequestOperationalState(request).status)
+  )).length;
   const text = [
     `📊 *Resumen operativo — ${formatDateLabel(loaded.selectedDate)}*`,
     `Solicitudes: ${summary.totalRequests}`,
@@ -158,13 +167,15 @@ async function sendProgrammingMenu(prisma, contact) {
 }
 
 async function processProgrammingContacts(prisma, payload, { allowGenericMenu = false } = {}) {
+  const messageValues = webhookMessageValues(payload);
+  if (!messageValues.length) return;
   const recipients = await loadProgrammingWhatsappRecipients(prisma);
   if (!recipients.length) return;
   const byPhone = new Map(recipients.map((recipient) => [recipient.phone, recipient]));
 
-  for (const value of webhookMessageValues(payload)) {
+  for (const value of messageValues) {
     if (resolveDispatchWhatsappScopeByPhoneNumberId(value?.metadata?.phone_number_id) !== 'operational') continue;
-    for (const message of Array.isArray(value.messages) ? value.messages : []) {
+    for (const message of value.messages) {
       const contact = byPhone.get(normalizeDispatchWhatsappPhone(message.from));
       if (!contact) continue;
       const action = programmingContactAction(message);
