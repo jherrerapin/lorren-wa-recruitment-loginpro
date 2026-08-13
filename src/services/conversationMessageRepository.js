@@ -64,6 +64,14 @@ function validateInboundReadContract(prisma) {
   );
 }
 
+function validateConversationContextReadContract(prisma) {
+  return Boolean(
+    prisma
+    && prisma.message
+    && typeof prisma.message.findMany === 'function'
+  );
+}
+
 function validateOutboundContract(prisma) {
   return Boolean(
     prisma
@@ -192,6 +200,55 @@ export async function findInboundConversationMessage(prisma, input = {}) {
   });
 
   return { found: Boolean(message), message };
+}
+
+export async function loadConversationInterpretationContext(prisma, input = {}) {
+  if (!validateConversationContextReadContract(prisma)) {
+    throw new Error('conversation_context_read_prisma_contract_invalid');
+  }
+
+  const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
+  const requestedLimit = input.limit === undefined ? 12 : Number(input.limit);
+  if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 24) {
+    throw new Error('conversation_context_limit_invalid');
+  }
+
+  const rows = await prisma.message.findMany({
+    where: {
+      candidateId,
+      OR: [
+        { direction: MessageDirection.OUTBOUND },
+        {
+          direction: MessageDirection.INBOUND,
+          respondedAt: { not: null }
+        }
+      ]
+    },
+    orderBy: { createdAt: 'desc' },
+    take: requestedLimit,
+    select: {
+      direction: true,
+      body: true,
+      createdAt: true
+    }
+  });
+
+  const latestOutbound = rows.find((row) => (
+    row?.direction === MessageDirection.OUTBOUND
+    && String(row?.body ?? '').trim()
+  )) || null;
+
+  const recentConversation = [...rows]
+    .reverse()
+    .map((row) => ({
+      direction: row.direction,
+      body: String(row.body ?? '')
+    }));
+
+  return {
+    lastBotQuestion: latestOutbound ? String(latestOutbound.body).trim() : null,
+    recentConversation
+  };
 }
 
 export async function persistOutboundConversationMessage(prisma, input = {}) {
