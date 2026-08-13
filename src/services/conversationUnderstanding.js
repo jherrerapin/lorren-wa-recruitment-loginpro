@@ -95,6 +95,77 @@ function hasFieldsFromOriginalUnderstanding(turnInterpretation = {}) {
   ));
 }
 
+function normalizeContextualConfirmationText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function semanticGateAcceptsExperienceConfirmation(context = {}) {
+  const lastBotQuestion = String(
+    context.lastBotQuestion
+    || context.conversationContext?.lastBotQuestion
+    || ''
+  ).trim();
+  if (!lastBotQuestion) return false;
+
+  const probe = sanitizeCandidateFieldsForConversation({
+    fields: { experienceInfo: 'Sí' },
+    evidence: {
+      experienceInfo: {
+        snippet: 'sí',
+        confidence: 1,
+        source: 'context_probe'
+      }
+    },
+    text: 'sí',
+    context,
+    turnType: 'CONFIRMATION'
+  });
+
+  return probe.fields.experienceInfo === 'Sí';
+}
+
+function buildContextualExperienceCandidate(input = '', context = {}) {
+  if (!semanticGateAcceptsExperienceConfirmation(context)) return { fields: {}, evidence: {} };
+
+  const normalized = normalizeContextualConfirmationText(input);
+  if (!normalized) return { fields: {}, evidence: {} };
+
+  const snippet = String(input || '').slice(0, 120);
+  if (/^(?:no|nop|negativo)$/.test(normalized)) {
+    return {
+      fields: { experienceInfo: 'No' },
+      evidence: {
+        experienceInfo: { snippet, confidence: 0.95, source: 'contextual_confirmation' }
+      }
+    };
+  }
+
+  const affirmative = normalized.match(/^(?:si|sii|sip)(?:\s+(\d+)\s+(personas?|anos?|meses?|semanas?))?$/);
+  if (!affirmative) return { fields: {}, evidence: {} };
+
+  const fields = { experienceInfo: 'Sí' };
+  const evidence = {
+    experienceInfo: { snippet, confidence: 0.95, source: 'contextual_confirmation' }
+  };
+  const amount = Number.parseInt(affirmative[1] || '', 10);
+  const unit = affirmative[2] || '';
+
+  if (Number.isInteger(amount) && amount > 0 && /^(?:anos?|meses?|semanas?)$/.test(unit)) {
+    if (/^anos?$/.test(unit)) fields.experienceTime = `${amount} ${amount === 1 ? 'año' : 'años'}`;
+    if (/^meses?$/.test(unit)) fields.experienceTime = `${amount} ${amount === 1 ? 'mes' : 'meses'}`;
+    if (/^semanas?$/.test(unit)) fields.experienceTime = `${amount} ${amount === 1 ? 'semana' : 'semanas'}`;
+    evidence.experienceTime = { snippet, confidence: 0.95, source: 'contextual_confirmation' };
+  }
+
+  return { fields, evidence };
+}
+
 function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context = {}) {
   const localParsedData = runtime.localParsedData || parseNaturalData(input);
   const aiFields = aiResult?.parsedFields || {};
@@ -102,6 +173,7 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
   const engineFields = runtime.engineFields && typeof runtime.engineFields === 'object'
     ? normalizeAiFields(runtime.engineFields)
     : {};
+  const contextualExperience = buildContextualExperienceCandidate(input, context);
   const sourceByField = {};
   const evidenceByField = {};
   const mergedData = {};
@@ -126,6 +198,13 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
     mergeFieldSource(sourceByField, field, 'engine');
     evidenceByField[field] = evidenceByField[field]
       || { snippet: input.slice(0, 120), confidence: 0.8, source: 'engine' };
+  }
+
+  for (const [field, value] of Object.entries(contextualExperience.fields)) {
+    if (hasValue(mergedData[field]) || !hasValue(value)) continue;
+    mergedData[field] = value;
+    mergeFieldSource(sourceByField, field, 'contextual');
+    evidenceByField[field] = contextualExperience.evidence[field];
   }
 
   let fields = normalizeCandidateFields(mergedData);
