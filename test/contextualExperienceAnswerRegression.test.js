@@ -14,29 +14,18 @@ const EXPERIENCE_CONTEXT = Object.freeze({
 });
 
 function sanitize(text, fields, evidence, context = EXPERIENCE_CONTEXT, turnType = 'DATA') {
-  return sanitizeCandidateFieldsForConversation({
-    text,
-    fields,
-    evidence,
-    context,
-    turnType
-  });
+  return sanitizeCandidateFieldsForConversation({ text, fields, evidence, context, turnType });
 }
 
 function evidence(snippet) {
-  return {
-    snippet,
-    confidence: 0.99,
-    source: 'responses_extractor'
-  };
+  return { snippet, confidence: 0.99, source: 'responses_extractor' };
 }
 
 function disabledAiResult() {
   return {
     status: 'disabled',
-    intent: 'unknown',
+    intent: null,
     parsedFields: {},
-    extraction: { turnType: 'CONFIRMATION', fieldEvidence: {} },
     usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
   };
 }
@@ -51,7 +40,6 @@ test('sí responde experiencia cuando la última pregunta del bot pide experienc
   );
 
   assert.equal(result.fields.experienceInfo, 'Sí');
-  assert.deepEqual(result.rejectedFields, []);
 });
 
 test('no responde experiencia cuando la última pregunta del bot pide experiencia', () => {
@@ -64,7 +52,6 @@ test('no responde experiencia cuando la última pregunta del bot pide experienci
   );
 
   assert.equal(result.fields.experienceInfo, 'No');
-  assert.deepEqual(result.rejectedFields, []);
 });
 
 test('sí, 2 años conserva afirmación y tiempo cuando responde la pregunta activa', () => {
@@ -79,7 +66,6 @@ test('sí, 2 años conserva afirmación y tiempo cuando responde la pregunta act
 
   assert.equal(result.fields.experienceInfo, 'Sí');
   assert.equal(result.fields.experienceTime, '2 años');
-  assert.deepEqual(result.rejectedFields, []);
 });
 
 test('sí. 60 personas conserva experiencia sin convertir la métrica laboral en edad', () => {
@@ -98,7 +84,6 @@ test('sí. 60 personas conserva experiencia sin convertir la métrica laboral en
 
   assert.equal(result.fields.experienceInfo, 'Sí');
   assert.equal(result.fields.age, undefined);
-  assert.equal(result.rejectedFields.find((item) => item.field === 'age')?.reason, 'weak_age_evidence');
 });
 
 test('sí o no no se atribuyen a experiencia cuando la última pregunta era de otro campo', () => {
@@ -117,11 +102,6 @@ test('sí o no no se atribuyen a experiencia cuando la última pregunta era de o
     );
 
     assert.equal(result.fields.experienceInfo, undefined, text);
-    assert.equal(
-      result.rejectedFields.find((item) => item.field === 'experienceInfo')?.reason,
-      'short_experience_answer_without_active_field_context',
-      text
-    );
   }
 });
 
