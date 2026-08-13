@@ -82,6 +82,53 @@ test('lista asignaciones activas y permite llegada sin ventana temporal', async 
   });
 });
 
+test('la fecha no habilita la llegada si el punto tiene asistencia deshabilitada', async () => {
+  const disabledToday = assignmentFixture({
+    id: 'disabled-today',
+    serviceRequest: {
+      serviceDate: new Date('2026-07-22T00:00:00.000Z'),
+      operationPoint: {
+        name: 'Punto sin asistencia',
+        cityName: 'Bogotá',
+        address: 'Dirección de prueba',
+        attendanceEnabled: false,
+        attendancePhotoPolicy: 'RISK_ONLY'
+      }
+    }
+  });
+  const enabledTomorrow = assignmentFixture({
+    id: 'enabled-tomorrow',
+    serviceRequest: {
+      serviceDate: new Date('2026-07-23T00:00:00.000Z'),
+      operationPoint: {
+        name: 'Punto con asistencia',
+        cityName: 'Bogotá',
+        address: 'Otra dirección de prueba',
+        attendanceEnabled: true,
+        attendancePhotoPolicy: 'RISK_ONLY'
+      }
+    }
+  });
+  const prisma = prismaWithAssignments({ async findMany() { return [disabledToday, enabledTomorrow]; } });
+  const assignments = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: NOW });
+  const today = assignments.find((assignment) => assignment.id === 'disabled-today');
+  const tomorrow = assignments.find((assignment) => assignment.id === 'enabled-tomorrow');
+
+  assert.equal(today.canRegisterArrival, false);
+  assert.equal(today.actionLabel, 'Marcación no habilitada');
+  assert.equal(tomorrow.canRegisterArrival, true);
+  assert.equal(tomorrow.actionLabel, 'Registrar llegada');
+});
+
+test('la vista usa la etiqueta calculada por la autoridad de asignaciones para la llegada', async () => {
+  const view = await readFile(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
+  const arrivalBranch = view.match(/<% if \(!assignment\.arrivalReported && !assignment\.departureReported\) \{ %>[\s\S]*?<% \} else if \(!assignment\.departureReported\) \{ %>/)?.[0] || '';
+
+  assert.match(arrivalBranch, /assignment\.canRegisterArrival \? '' : 'disabled'/);
+  assert.match(arrivalBranch, /<%= assignment\.actionLabel %>/);
+  assert.doesNotMatch(arrivalBranch, />Registrar llegada<\/button>/);
+});
+
 test('conserva la fecha operativa de registros históricos y modernos sin desplazarlos al día anterior', async () => {
   const prisma = prismaWithAssignments({
     async findMany() {
