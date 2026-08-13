@@ -7,6 +7,7 @@ const WHATSAPP_ICON_SVG = '<svg class="official-whatsapp-icon" viewBox="0 0 448 
 const FINAL_ASSIGNMENT_CARD_SELECTOR = '.assignment-page .assigned-card.assignment-final-card';
 const ASSIGNMENT_UI_STYLE = `<style id="dispatch-assignment-source-ui-fix">
 .assignment-page .icon-whatsapp.whatsapp-link{font-size:0!important;line-height:1!important;padding:0!important;width:32px!important;height:32px!important;min-width:32px!important;min-height:32px!important;display:inline-flex!important;align-items:center!important;justify-content:center!important;border-radius:999px!important;overflow:hidden!important;background:#25D366!important;border-color:#25D366!important;color:#fff!important}.assignment-page .official-whatsapp-icon{width:19px!important;height:19px!important;display:block!important;flex:0 0 19px!important;color:#fff!important}
+.assignment-page .assignment-wa-window-check{display:inline-flex!important;align-items:center!important;justify-content:center!important;flex:0 0 15px!important;width:15px!important;height:15px!important;border-radius:50%!important;background:#16a34a!important;color:#fff!important;font-size:9px!important;font-weight:950!important;line-height:1!important;margin-left:3px!important;box-shadow:0 0 0 1px rgba(22,163,74,.12)!important}.assignment-page .assignment-wa-window-check[hidden]{display:none!important}
 ${FINAL_ASSIGNMENT_CARD_SELECTOR}{display:grid!important;grid-template-columns:minmax(0,1fr) 30px!important;align-items:center!important;gap:6px!important;padding:6px 8px!important;min-height:0!important}
 ${FINAL_ASSIGNMENT_CARD_SELECTOR} .assigned-main{grid-column:1!important;grid-row:1!important;min-width:0!important}
 ${FINAL_ASSIGNMENT_CARD_SELECTOR} .assigned-actions{grid-column:2!important;grid-row:1!important;display:flex!important;justify-content:center!important;align-items:center!important;gap:0!important;margin:0!important;width:30px!important;align-self:center!important}
@@ -19,6 +20,7 @@ ${FINAL_ASSIGNMENT_CARD_SELECTOR} .icon-remove-btn{width:28px!important;height:2
 </style>`;
 const ASSIGNMENT_FINAL_CARD_SCRIPT = `<script id="dispatch-confirmed-assignment-ui-fix">
 (function(){
+  var windowRefreshBusy = false;
   function isConfirmedAssignmentCard(card){
     var statusLine = card && card.querySelector ? card.querySelector('.assignment-status-line') : null;
     return /Estado:\s*Confirmado/i.test(String(statusLine && statusLine.textContent || ''));
@@ -28,11 +30,56 @@ const ASSIGNMENT_FINAL_CARD_SCRIPT = `<script id="dispatch-confirmed-assignment-
     card.classList.add('assignment-final-card');
     card.querySelectorAll('.whatsapp-link,.dispatch-wa-button,form[data-async-assignment-action="confirmar"],form[data-async-assignment-action="no-confirmado"]').forEach(function(el){ el.remove(); });
   }
+  function ensureWindowIndicator(card){
+    if (!card || !card.querySelector) return null;
+    var indicator = card.querySelector('.assignment-wa-window-check');
+    if (indicator) return indicator;
+    var heading = card.querySelector('.worker-heading');
+    if (!heading) return null;
+    indicator = document.createElement('span');
+    indicator.className = 'assignment-wa-window-check';
+    indicator.textContent = '✓';
+    indicator.hidden = true;
+    indicator.setAttribute('aria-label','Ventana de WhatsApp de 24 horas abierta');
+    heading.appendChild(indicator);
+    return indicator;
+  }
+  async function refreshAssignmentWindows(){
+    if (windowRefreshBusy) return;
+    var cards = Array.from(document.querySelectorAll('.assignment-page .assigned-card[data-assignment-id]'));
+    var ids = cards.map(function(card){ return String(card.dataset.assignmentId || '').trim(); }).filter(Boolean);
+    cards.forEach(ensureWindowIndicator);
+    if (!ids.length) return;
+    windowRefreshBusy = true;
+    try{
+      var response = await fetch('/admin/operaciones/whatsapp/ventanas-asignaciones?assignmentIds=' + encodeURIComponent(ids.join(',')), { cache:'no-store', credentials:'same-origin', headers:{ Accept:'application/json' } });
+      if (!response.ok) return;
+      var data = await response.json();
+      var byId = new Map((Array.isArray(data.windows) ? data.windows : []).map(function(item){ return [item.assignmentId, item]; }));
+      cards.forEach(function(card){
+        var indicator = ensureWindowIndicator(card);
+        if (!indicator) return;
+        var state = byId.get(card.dataset.assignmentId);
+        var open = Boolean(state && state.isOpen);
+        indicator.hidden = !open;
+        indicator.title = open ? 'Ventana WhatsApp 24 h abierta' : '';
+      });
+    }catch(_error){
+    }finally{
+      windowRefreshBusy = false;
+    }
+  }
   window.__compactConfirmedAssignments = function(root){
     (root || document).querySelectorAll('.assigned-card').forEach(compactConfirmedCard);
   };
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ window.__compactConfirmedAssignments(document); });
-  else window.__compactConfirmedAssignments(document);
+  window.__refreshAssignmentWhatsappWindows = refreshAssignmentWindows;
+  function init(){
+    window.__compactConfirmedAssignments(document);
+    refreshAssignmentWindows();
+    window.setInterval(refreshAssignmentWindows, 10000);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
 </script>`;
 
@@ -133,7 +180,7 @@ function normalizeAssignmentBoardHtml(html) {
   output = output.replace("qs('#sendAllWhatsapp')", "qs('#sendAllAssignmentWhatsapp')");
   output = output.replace(/(<button[^>]*class="[^"]*icon-whatsapp[^"]*"[^>]*>)(?:\s*WA\s*)<\/button>/g, `$1${WHATSAPP_ICON_SVG}</button>`);
   output = compactFinalizedAssignmentCards(output);
-  output = output.replace('bindBoard();restoreBoardPosition();', 'bindBoard();window.__compactConfirmedAssignments?.(document);restoreBoardPosition();');
+  output = output.replace('bindBoard();restoreBoardPosition();', 'bindBoard();window.__compactConfirmedAssignments?.(document);window.__refreshAssignmentWhatsappWindows?.();restoreBoardPosition();');
   if (!output.includes('dispatch-assignment-source-ui-fix')) output = output.replace('</head>', `${ASSIGNMENT_UI_STYLE}\n</head>`);
   if (!output.includes('dispatch-confirmed-assignment-ui-fix')) output = output.replace('</body>', `${ASSIGNMENT_FINAL_CARD_SCRIPT}\n</body>`);
   return output;
