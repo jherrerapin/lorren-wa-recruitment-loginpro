@@ -27,7 +27,9 @@ function read(path) { return fs.readFileSync(path, 'utf8'); }
 function assignmentFixture() {
   return {
     id: 'assignment-test',
-    worker: { fullName: 'Auxiliar Prueba' },
+    serviceRequestId: 'request-test',
+    workerId: 'worker-test',
+    worker: { id: 'worker-test', fullName: 'Auxiliar Prueba', phone: '3001234567' },
     serviceRequest: {
       clientName: 'CLIENTE_QUE_NO_DEBE_VIAJAR',
       operationPointName: 'Operación Prueba',
@@ -99,6 +101,52 @@ test('Cloud API usa únicamente las cinco variables del mensaje canónico y dos 
     { index: '0', payload: 'dispatch_confirm:assignment-test' },
     { index: '1', payload: 'dispatch_novelty:assignment-test' }
   ]);
+});
+
+test('reportar novedad registra evidencia e incidente sin cambiar el estado de la asignación', async () => {
+  const { claimDispatchAssignmentNovelty } = await import('../src/services/dispatchWhatsappAssignmentService.js');
+  const incidents = [];
+  let assignmentMutations = 0;
+  const tx = {
+    dispatchWhatsappConfirmation: {
+      findFirst: async () => null,
+      updateMany: async ({ data }) => {
+        assert.equal(data.status, 'NOVELTY_REPORTED');
+        assert.equal(data.confirmationMessageId, 'wamid-novelty-1');
+        return { count: 1 };
+      }
+    },
+    dispatchAssignment: {
+      updateMany: async () => {
+        assignmentMutations += 1;
+        return { count: 1 };
+      }
+    },
+    dispatchIncident: {
+      create: async ({ data }) => {
+        incidents.push(data);
+        return { id: 'incident-1', ...data };
+      }
+    }
+  };
+  const prismaClient = { $transaction: async (callback) => callback(tx) };
+
+  const result = await claimDispatchAssignmentNovelty({
+    scope: 'operational',
+    assignment: assignmentFixture(),
+    responseMessageId: 'wamid-novelty-1',
+    responseReceivedAt: new Date('2026-08-12T23:00:00.000Z'),
+    prismaClient
+  });
+
+  assert.deepEqual(result, { noveltyReported: true, duplicate: false });
+  assert.equal(assignmentMutations, 0);
+  assert.equal(incidents.length, 1);
+  assert.equal(incidents[0].serviceRequestId, 'request-test');
+  assert.equal(incidents[0].assignmentId, 'assignment-test');
+  assert.equal(incidents[0].workerId, 'worker-test');
+  assert.equal(incidents[0].type, 'WHATSAPP_NOVELTY');
+  assert.equal(incidents[0].status, 'OPEN');
 });
 
 test('el webhook convierte Reportar novedad en alerta sin rechazar la asignación', () => {
