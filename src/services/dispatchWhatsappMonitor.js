@@ -2,15 +2,27 @@ import { buildDispatchServiceDateWhere, dispatchServiceDateKey, todayIsoDateCO }
 import { DISPATCH_WHATSAPP_WINDOW_MS } from './dispatchWhatsappAdminAlerts.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
+const UNMATCHED_INBOUND_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function phoneDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
 function normalizePhone(value) {
-  const digits = String(value || '').replace(/\D/g, '');
+  const digits = phoneDigits(value);
   if (!digits) return '';
   return digits.length === 10 ? `57${digits}` : digits;
+}
+
+function phoneIssue(value) {
+  const digits = phoneDigits(value);
+  if (!digits) return 'MISSING';
+  if (digits.startsWith('57') && digits.length !== 12) return 'CO_LENGTH_MISMATCH';
+  return null;
 }
 
 function addIsoDays(dateKey, days) {
@@ -66,6 +78,14 @@ async function healContactWindowFromEvidence({ prismaClient, phone, currentLastI
     create: { scope: 'operational', phone, lastInboundAt: evidenceLastInboundAt },
     update: { lastInboundAt: evidenceLastInboundAt }
   }).catch(() => {});
+}
+
+function possibleInboundMatch(phone, unmatchedInbound = []) {
+  const digits = normalizePhone(phone);
+  if (digits.length < 7) return null;
+  const suffix = digits.slice(-7);
+  const matches = unmatchedInbound.filter((item) => normalizePhone(item.phone).endsWith(suffix));
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function tomorrowIsoDateCO(now = new Date()) {
@@ -129,7 +149,8 @@ export async function loadDispatchWhatsappWindowStatusForAssignments({
       return [assignment.id, {
         assignmentId: assignment.id,
         phone,
-        ...(snapshotsByPhone.get(phone) || windowSnapshot(null, now))
+        ...windowSnapshot(null, now),
+        ...(snapshotsByPhone.get(phone) || {})
       }];
     }));
 }
@@ -154,21 +175,41 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
   ));
 
   const windowsByAssignment = await loadDispatchWhatsappWindowStatusForAssignments({ prismaClient, assignments, now });
+  const assignedPhones = new Set(assignments.map((assignment) => normalizePhone(assignment?.worker?.phone)).filter(Boolean));
+  const recentInboundRows = await prismaClient.dispatchWhatsappContactWindow.findMany({
+    where: {
+      scope: 'operational',
+      lastInboundAt: { gte: new Date(now.getTime() - UNMATCHED_INBOUND_LOOKBACK_MS) }
+    },
+    orderBy: { lastInboundAt: 'desc' },
+    take: 200
+  });
+  const unmatchedInbound = recentInboundRows
+    .map((row) => ({
+      phone: normalizePhone(row?.phone),
+      lastInboundAt: validDate(row?.lastInboundAt)?.toISOString() || null
+    }))
+    .filter((row) => row.phone && row.lastInboundAt && !assignedPhones.has(row.phone));
 
   const items = assignments.map((assignment) => {
     const worker = assignment.worker || {};
     const request = assignment.serviceRequest || {};
     const phone = normalizePhone(worker.phone);
     const window = windowsByAssignment[assignment.id] || windowSnapshot(null, now);
+    const possibleMatch = !window.isOpen ? possibleInboundMatch(phone, unmatchedInbound) : null;
     return {
       assignmentId: assignment.id,
       serviceRequestId: assignment.serviceRequestId,
       workerId: assignment.workerId,
       workerName: text(worker.fullName) || 'Auxiliar',
       phone,
+      phoneIssue: phoneIssue(worker.phone),
+      possibleInboundPhone: possibleMatch?.phone || null,
+      possibleInboundAt: possibleMatch?.lastInboundAt || null,
       assignmentStatus: assignment.status,
       confirmed: assignment.status === 'CONFIRMED',
       canSendWindowCheck: Boolean(phone && !window.isOpen),
+      canAttemptManualMessage: Boolean(phone),
       canSendManualMessage: Boolean(phone && window.isOpen),
       operationName: text(request.operationPointName || request.serviceName) || 'Operación',
       clientName: text(request.clientName) || null,
@@ -179,6 +220,9 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
     };
   }).sort((a, b) => {
     if (a.isOpen !== b.isOpen) return a.isOpen ? 1 : -1;
+    if (Boolean(a.phoneIssue || a.possibleInboundAt) !== Boolean(b.phoneIssue || b.possibleInboundAt)) {
+      return a.phoneIssue || a.possibleInboundAt ? -1 : 1;
+    }
     return a.workerName.localeCompare(b.workerName, 'es');
   });
 
@@ -186,14 +230,17 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
     dateKey,
     generatedAt: now.toISOString(),
     items,
+    unmatchedInbound,
     summary: {
       total: items.length,
       open: items.filter((item) => item.isOpen).length,
       closed: items.filter((item) => !item.isOpen).length,
       missingWindow: items.filter((item) => item.canSendWindowCheck).length,
-      withoutPhone: items.filter((item) => !item.phone).length
+      withoutPhone: items.filter((item) => !item.phone).length,
+      phoneReview: items.filter((item) => item.phoneIssue || item.possibleInboundAt).length,
+      unmatchedInbound: unmatchedInbound.length
     },
     scope: 'operational',
-    note: 'Estado vivo: se recalcula en cada consulta con el último inbound operativo y, como respaldo de integridad, con la evidencia persistida de confirmaciones recibidas. Ventana = último inbound + 24 horas.'
+    note: 'Estado vivo: se recalcula en cada consulta con el último inbound operativo y, como respaldo, con confirmaciones persistidas. También expone inbound recientes que no coinciden con ningún teléfono de los asignados para detectar números mal registrados en lugar de marcarlos silenciosamente como cerrados.'
   };
 }
