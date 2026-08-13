@@ -7,6 +7,9 @@ import {
   setDispatchWhatsappRuntimeState
 } from './dispatchWhatsappCloudConfig.js';
 
+export const DISPATCH_WINDOW_CHECK_MESSAGE = 'Hola. Este es el canal oficial de Despacho de LoginPro. Para poder enviarte novedades de tu programación por este WhatsApp, confirma la recepción tocando el botón.';
+export const DISPATCH_WINDOW_CHECK_BUTTON = 'CONFIRMAR CANAL';
+
 function hourLabel(value) {
   const match = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
   if (!match) return String(value || '').trim();
@@ -94,6 +97,29 @@ export function buildDispatchAssignmentTemplatePayload({ config, assignment, pho
   };
 }
 
+export function buildDispatchWindowCheckTemplatePayload({ config, assignmentId, phone }) {
+  const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
+  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para verificar la ventana de WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  const safeAssignmentId = String(assignmentId || '').trim();
+  if (!safeAssignmentId) throw buildDispatchWhatsappError('No se pudo identificar la asignación para verificar la ventana.', 400, 'dispatch_window_check_assignment_missing');
+  return {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: normalizedPhone,
+    type: 'template',
+    template: {
+      name: config.windowCheckTemplateName,
+      language: { code: config.templateLanguage },
+      components: [
+        {
+          type: 'button', sub_type: 'quick_reply', index: '0',
+          parameters: [{ type: 'payload', payload: `dispatch_window_check:${safeAssignmentId}` }]
+        }
+      ]
+    }
+  };
+}
+
 export function buildDispatchProgrammingTemplatePayload({ config, phone, mediaId, filename, templateValues = {} }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
   if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
@@ -160,6 +186,31 @@ export async function sendCloudAssignmentTemplate({ scope = 'operational', assig
     throw buildDispatchWhatsappError('Meta aceptó la solicitud sin devolver un identificador de mensaje.', 502, 'dispatch_whatsapp_provider_message_missing');
   }
   return { config, providerMessageId };
+}
+
+export async function sendCloudWindowCheckTemplate({ scope = 'operational', assignmentId, phone, axiosClient = axios }) {
+  const config = ensureDispatchWhatsappConfigured(scope, { windowCheckTemplate: true });
+  try {
+    const response = await postGraph(config, buildDispatchWindowCheckTemplatePayload({ config, assignmentId, phone }), axiosClient);
+    const providerMessageId = providerMessageIdFromResponse(response);
+    if (!providerMessageId) {
+      throw buildDispatchWhatsappError('Meta aceptó la verificación sin devolver un identificador de mensaje.', 502, 'dispatch_whatsapp_provider_message_missing');
+    }
+    const now = new Date().toISOString();
+    setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
+    return {
+      config,
+      providerMessageId,
+      phone: normalizeDispatchWhatsappPhone(phone),
+      templateName: config.windowCheckTemplateName,
+      provider: 'META_CLOUD_API'
+    };
+  } catch (error) {
+    const message = error?.code?.startsWith?.('dispatch_') ? error.message : dispatchWhatsappProviderErrorMessage(error);
+    setDispatchWhatsappRuntimeState(scope, { lastError: message });
+    if (error?.statusCode) throw error;
+    throw buildDispatchWhatsappError(message, 502, 'dispatch_whatsapp_provider_error');
+  }
 }
 
 export async function sendCloudAssignmentInteractive({ scope = 'operational', assignment, phone, axiosClient = axios }) {
