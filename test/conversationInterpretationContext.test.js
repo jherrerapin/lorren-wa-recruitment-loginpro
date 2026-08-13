@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { MessageDirection } from '@prisma/client';
 import { loadConversationInterpretationContext } from '../src/services/conversationMessageRepository.js';
 
@@ -96,4 +97,19 @@ test('rechaza contexto sin candidato antes de consultar persistencia', async () 
   );
 
   assert.equal(calls.length, 0);
+});
+
+test('el runtime comparte el mismo contexto previo entre extractor y sanitizador', async () => {
+  const source = await readFile(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
+
+  assert.match(source, /loadConversationInterpretationContext/);
+  assert.match(
+    source,
+    /const conversationContext\s*=\s*await loadConversationInterpretationContext\(prisma,\s*\{\s*candidateId:\s*candidate\.id\s*\}\);/
+  );
+  assert.match(
+    source,
+    /const sanitizerContext\s*=\s*\{[\s\S]*?currentStep:\s*candidate\.currentStep,[\s\S]*?pendingFields:\s*getMissingFieldLabels\(candidate,\s*currentVacancy\),[\s\S]*?\.\.\.conversationContext[\s\S]*?\};/
+  );
+  assert.match(source, /tryOpenAIParse\(cleanText,\s*sanitizerContext\)/);
 });
