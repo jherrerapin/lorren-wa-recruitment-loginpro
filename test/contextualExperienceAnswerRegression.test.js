@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
+import { conversationUnderstanding } from '../src/services/conversationUnderstanding.js';
 
 const EXPERIENCE_CONTEXT = Object.freeze({
   currentStep: 'COLLECTING_DATA',
@@ -27,6 +28,16 @@ function evidence(snippet) {
     snippet,
     confidence: 0.99,
     source: 'responses_extractor'
+  };
+}
+
+function disabledAiResult() {
+  return {
+    status: 'disabled',
+    intent: 'unknown',
+    parsedFields: {},
+    extraction: { turnType: 'CONFIRMATION', fieldEvidence: {} },
+    usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
   };
 }
 
@@ -112,4 +123,59 @@ test('sí o no no se atribuyen a experiencia cuando la última pregunta era de o
       text
     );
   }
+});
+
+test('el pipeline recupera sí/no contextual aun con IA deshabilitada', async () => {
+  for (const [text, expected] of [['sí', 'Sí'], ['no', 'No']]) {
+    const result = await conversationUnderstanding(text, {
+      context: EXPERIENCE_CONTEXT,
+      aiResult: disabledAiResult(),
+      runtime: {
+        localParsedData: {},
+        engineFields: {},
+        engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+        fallbackIntent: 'continue_application',
+        enrichFields: (fields) => fields
+      }
+    });
+
+    assert.equal(result.candidateFields.experienceInfo, expected, text);
+  }
+});
+
+test('el pipeline recupera afirmación y duración contextual con IA deshabilitada', async () => {
+  const result = await conversationUnderstanding('sí, 2 años', {
+    context: EXPERIENCE_CONTEXT,
+    aiResult: disabledAiResult(),
+    runtime: {
+      localParsedData: {},
+      engineFields: {},
+      engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      fallbackIntent: 'continue_application',
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.candidateFields.experienceInfo, 'Sí');
+  assert.equal(result.candidateFields.experienceTime, '2 años');
+});
+
+test('el pipeline recupera sí. 60 personas como experiencia contextual sin fabricar edad', async () => {
+  const result = await conversationUnderstanding('sí. 60 personas', {
+    context: {
+      ...EXPERIENCE_CONTEXT,
+      lastBotQuestion: '¿Tienes experiencia coordinando personal?'
+    },
+    aiResult: disabledAiResult(),
+    runtime: {
+      localParsedData: {},
+      engineFields: {},
+      engineUsage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      fallbackIntent: 'continue_application',
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.candidateFields.experienceInfo, 'Sí');
+  assert.equal(result.candidateFields.age, undefined);
 });
