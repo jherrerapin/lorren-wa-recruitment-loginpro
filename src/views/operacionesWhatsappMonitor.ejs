@@ -40,9 +40,9 @@
   <main class="page monitor-page">
     <section class="hero">
       <div>
-        <div class="eyebrow">DEV · WhatsApp oficial de Despacho</div>
+        <div class="eyebrow">DEV · Nueva línea oficial de WhatsApp Despacho</div>
         <h1>Ventanas de 24 horas de hoy</h1>
-        <p>Solo actividad de la línea operativa de Despacho registrada hoy. Este monitor es independiente del Monitor del bot de Reclutamiento.</p>
+        <p>Solo muestra la actividad operativa registrada hoy en la línea de Despacho. No mezcla conversaciones ni datos del Monitor del bot de Reclutamiento.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/monitor">Ir al Monitor bot</a>
@@ -59,7 +59,7 @@
     </section>
 
     <section class="note">
-      <strong>Qué significa “ventana abierta”:</strong> el auxiliar envió un mensaje o pulsó una respuesta hacia esta línea de Despacho. Desde su último mensaje entrante se cuentan 24 horas. El monitor usa directamente <code>DispatchWhatsappContactWindow</code>, que es la misma autoridad que usa Lórren para decidir si puede enviar mensajes interactivos sin plantilla.
+      <strong>Cómo se determina:</strong> cuando un auxiliar envía cualquier mensaje o pulsa una respuesta hacia la línea de Despacho, Lórren actualiza <code>DispatchWhatsappContactWindow.lastInboundAt</code>. Desde ese último mensaje se cuentan 24 horas. Esta es la misma fuente que usa el backend para decidir si la ventana está abierta y puede enviar mensajes interactivos sin plantilla.
       <div>Fecha operativa: <strong id="dateKey"><%= data.dateKey || '—' %></strong> · Última lectura: <strong id="generatedAt"><%= data.generatedAt || '—' %></strong></div>
     </section>
 
