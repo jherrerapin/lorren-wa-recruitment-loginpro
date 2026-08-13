@@ -19,6 +19,7 @@ const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const PENDING_REQUEST_STATUSES = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
 const OPEN_INCIDENT_STATUSES = ['OPEN', 'IN_PROGRESS'];
 const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
+const RANGE_TOKEN_PATTERN = /^(\d{4}-\d{2}-\d{2})\s+a\s+(\d{4}-\d{2}-\d{2})$/;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -77,9 +78,12 @@ function requireOps(req, res, next) {
 }
 
 function selectedDateRangeFromQuery(query = {}) {
-  const legacyDate = normalizeDispatchDateParam(query.fecha || query.date);
-  let from = normalizeDispatchDateParam(query.fechaDesde || query.from || legacyDate, legacyDate);
-  let to = normalizeDispatchDateParam(query.fechaHasta || query.to || legacyDate, legacyDate);
+  const legacyRaw = normalizeString(query.fecha || query.date);
+  const legacyRange = legacyRaw?.match(RANGE_TOKEN_PATTERN);
+  const legacyFrom = legacyRange ? normalizeDispatchDateParam(legacyRange[1]) : normalizeDispatchDateParam(legacyRaw);
+  const legacyTo = legacyRange ? normalizeDispatchDateParam(legacyRange[2], legacyFrom) : legacyFrom;
+  let from = normalizeDispatchDateParam(query.fechaDesde || query.from || legacyFrom, legacyFrom);
+  let to = normalizeDispatchDateParam(query.fechaHasta || query.to || legacyTo, legacyTo);
   if (from > to) [from, to] = [to, from];
   return { from, to };
 }
@@ -353,7 +357,7 @@ function renderSummary(res, req, range, type, requests) {
     role: req.session?.userRole || req.userRole,
     pageTitle: meta.title,
     subtitle: `${meta.description} Rango: ${dateRangeLabel(range)}.`,
-    selectedDate: range.to,
+    selectedDate: dateRangeLabel(range),
     selectedDateFrom: range.from,
     selectedDateTo: range.to,
     type,
