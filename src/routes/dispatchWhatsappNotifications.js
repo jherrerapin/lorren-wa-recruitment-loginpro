@@ -3,7 +3,7 @@ import {
   getDispatchWhatsappStatusView,
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappCloudService.js';
-import { loadDispatchWhatsappMonitorHistory } from '../services/dispatchWhatsappMonitor.js';
+import { loadDispatchWhatsappTodayWindowMonitor } from '../services/dispatchWhatsappMonitor.js';
 
 const OPERATIONAL_API_ERROR = 'La integración oficial de WhatsApp de despacho no está disponible en este momento. Revisa su configuración o contacta al responsable técnico.';
 const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
@@ -115,11 +115,11 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
 
   router.get('/monitor', requireDevMonitor, async (req, res, next) => {
     try {
-      const history = await loadDispatchWhatsappMonitorHistory({ prismaClient: prisma, query: req.query });
+      const monitor = await loadDispatchWhatsappTodayWindowMonitor({ prismaClient: prisma });
       return res.render('operacionesWhatsappMonitor', {
-        pageTitle: 'Monitor WhatsApp de Despacho · DEV',
+        pageTitle: 'Ventanas 24 h · WhatsApp Despacho · DEV',
         role: role(req),
-        history,
+        monitor,
         monitorDataEndpoint: '/admin/operaciones/whatsapp/monitor/datos'
       });
     } catch (error) {
@@ -127,10 +127,10 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
     }
   });
 
-  router.get('/monitor/datos', requireDevMonitor, async (req, res, next) => {
+  router.get('/monitor/datos', requireDevMonitor, async (_req, res, next) => {
     try {
-      const history = await loadDispatchWhatsappMonitorHistory({ prismaClient: prisma, query: req.query });
-      return res.json({ ok: true, ...history });
+      const monitor = await loadDispatchWhatsappTodayWindowMonitor({ prismaClient: prisma });
+      return res.json({ ok: true, ...monitor });
     } catch (error) {
       return next(error);
     }
