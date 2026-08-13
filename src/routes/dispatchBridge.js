@@ -8,6 +8,11 @@ import { dispatchDevPayrollTestRouter } from './dispatchDevPayrollTest.js';
 import { resolveAttendanceFeatureAccess } from '../services/attendanceFeatureAccess.js';
 import { resolvePayrollFeatureAccess } from '../services/payrollFeatureAccess.js';
 import { geocodeAttendanceAddress } from '../services/attendanceGeocoding.js';
+import {
+  DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
+  deleteDispatchServiceRequestWithPolicy,
+  resolveDispatchServiceRequestPolicy
+} from '../services/dispatchServiceRequestPolicy.js';
 
 export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-27-workday-r1';
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
@@ -281,6 +286,39 @@ function attendanceGeocodingErrorStatus(error) {
   return 503;
 }
 
+async function loadDispatchRequestForEdit(requestKey) {
+  const normalizedKey = normalizeString(requestKey);
+  if (!normalizedKey) return null;
+  return prisma.dispatchServiceRequest.findFirst({
+    where: {
+      OR: [
+        { id: normalizedKey },
+        { serviceName: { contains: `Grupo ${normalizedKey}` } }
+      ]
+    },
+    include: { service: true, ...DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE },
+    orderBy: [{ serviceDate: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
+  });
+}
+
+async function loadDispatchRequestFormClients() {
+  return prisma.dispatchClient.findMany({
+    where: { isActive: true },
+    include: {
+      operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } },
+      services: { where: { isActive: true }, orderBy: { name: 'asc' } }
+    },
+    orderBy: { name: 'asc' }
+  });
+}
+
+function assignmentRedirect(serviceRequestId, message = null) {
+  const params = new URLSearchParams();
+  if (serviceRequestId) params.set('serviceRequestId', serviceRequestId);
+  if (message) params.set('message', message);
+  return `/admin/operaciones/asignaciones?${params.toString()}`;
+}
+
 export function dispatchBridgeRouter() {
   const router = express.Router();
 
@@ -411,6 +449,37 @@ export function dispatchBridgeRouter() {
       }
     }
   );
+
+  // La ruta activa del tablero puede recibir tanto un id de fila como una clave de grupo.
+  // Se resuelve antes del router legado para evitar una pantalla 404 en solicitudes válidas.
+  router.get('/asignaciones/solicitudes/:id/editar', requireOps, async (req, res) => {
+    const [serviceRequest, clients] = await Promise.all([
+      loadDispatchRequestForEdit(req.params.id),
+      loadDispatchRequestFormClients()
+    ]);
+    if (!serviceRequest) {
+      return res.redirect(assignmentRedirect(null, 'La solicitud ya no existe o no pudo resolverse. Actualiza el tablero e intenta nuevamente.'));
+    }
+    const policy = resolveDispatchServiceRequestPolicy(serviceRequest);
+    if (!policy.canEdit) return res.redirect(assignmentRedirect(serviceRequest.id, policy.editBlockedReason));
+    return res.render('operacionesSolicitudEditar', {
+      serviceRequest,
+      clients,
+      role: req.session?.userRole || req.userRole
+    });
+  });
+
+  // Limpieza operativa exclusiva de DEV: conserva toda la cascada y limpieza de evidencias
+  // de la autoridad existente, pero omite únicamente el bloqueo temporal de borrado.
+  router.post('/dev/solicitudes/:id/eliminar', requireDev, async (req, res) => {
+    const result = await deleteDispatchServiceRequestWithPolicy(prisma, req.params.id, {
+      allowLockedDelete: true
+    });
+    if (result.status === 'NOT_FOUND') {
+      return res.redirect(assignmentRedirect(null, 'La solicitud ya no existe.'));
+    }
+    return res.redirect(assignmentRedirect(null, 'Solicitud eliminada por DEV.'));
+  });
 
   router.use(dispatchBridgeCoreRouter());
   return router;

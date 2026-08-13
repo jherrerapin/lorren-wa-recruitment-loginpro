@@ -111,9 +111,34 @@ test('la eliminación directa de cliente real vencido se bloquea en la transacci
   assert.equal(deleted, false);
 });
 
+test('el bypass explícito de DEV puede eliminar una solicitud real vencida sin relajar la política normal', async () => {
+  let deleted = false;
+  const tx = {
+    dispatchServiceRequest: {
+      findUnique: async () => requestAt({ isTestClient: false }),
+      delete: async () => { deleted = true; }
+    },
+    dispatchAttendanceSession: { findMany: async () => [] },
+    dispatchAttendanceReview: { deleteMany: async () => null },
+    dispatchAttendanceMark: { deleteMany: async () => null }
+  };
+  const prisma = { $transaction: async (callback) => callback(tx) };
+
+  const result = await deleteDispatchServiceRequestWithPolicy(prisma, 'request-1', {
+    now: new Date('2027-01-01T00:00:00-05:00'),
+    allowLockedDelete: true,
+    deleteEvidence: async () => null
+  });
+
+  assert.equal(result.status, 'DELETED');
+  assert.equal(result.deleteBypassApplied, true);
+  assert.equal(deleted, true);
+});
+
 test('contratos del repositorio conectan la marca y la autoridad server-side', () => {
   const schema = fs.readFileSync('prisma/schema.prisma', 'utf8');
   const migration = fs.readFileSync('prisma/migrations/20260725060000_add_dispatch_test_client/migration.sql', 'utf8');
+  const bridge = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
   const bridgeCore = fs.readFileSync('src/routes/dispatchBridgeCore.js', 'utf8');
   const opsExtras = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
   const publicClient = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
@@ -122,6 +147,7 @@ test('contratos del repositorio conectan la marca y la autoridad server-side', (
   const summaryView = fs.readFileSync('src/views/operacionesSolicitudesResumen.ejs', 'utf8');
   const legacyAssignmentView = fs.readFileSync('src/views/operacionesAsignaciones.ejs', 'utf8');
   const assignmentView = fs.readFileSync('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8');
+  const whatsappStatusView = fs.readFileSync('src/views/operacionesWhatsappEstado.ejs', 'utf8');
   const browserPolicy = fs.readFileSync('src/public/expired-service-request-modal.js', 'utf8');
 
   assert.match(schema, /isTestClient\s+Boolean\s+@default\(false\)/);
@@ -139,6 +165,13 @@ test('contratos del repositorio conectan la marca y la autoridad server-side', (
   assert.match(summaryView, /policy\.canEdit/);
   assert.match(legacyAssignmentView, /include\('operacionesAsignacionesConfirmacion'/);
   assert.match(assignmentView, /\/admin\/operaciones\/asignaciones/);
+  assert.match(assignmentView, /role === 'dev'[\s\S]*\/admin\/operaciones\/dev\/solicitudes\//);
+  assert.match(bridge, /router\.post\('\/dev\/solicitudes\/:id\/eliminar', requireDev/);
+  assert.match(bridge, /allowLockedDelete:\s*true/);
+  assert.match(bridge, /loadDispatchRequestForEdit/);
+  assert.match(bridge, /serviceName:\s*\{ contains:\s*`Grupo \$\{normalizedKey\}` \}/);
+  assert.doesNotMatch(whatsappStatusView, /Configura tus horas personales\. Lórren siempre las interpreta con la hora oficial de Bogotá/);
+  assert.doesNotMatch(whatsappStatusView, /Bogotá · America\/Bogota/);
   assert.doesNotMatch(browserPolicy, /TWO_HOURS_MS/);
   assert.match(browserPolicy, /editLockAt/);
 });
