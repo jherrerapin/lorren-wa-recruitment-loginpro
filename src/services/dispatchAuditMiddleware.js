@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.js';
+import { injectAdminModuleNavigation } from './adminNavigation.js';
 
-const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
-const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
 const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 const DEV_TEST_ASSIGNMENT_STATUSES = new Set(['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED']);
@@ -277,26 +276,6 @@ function isHtmlResponse(body, res) {
   return contentType.includes('text/html') || body.trimStart().startsWith('<!DOCTYPE html') || body.trimStart().startsWith('<html');
 }
 
-function injectFeatureNavigation(html, req) {
-  const path = String(req.originalUrl || '').split('?')[0];
-  if (!path.startsWith('/admin')) return html;
-  let output = html;
-  const payrollAllowed = req.canAccessPayroll === true || req.session?.canAccessPayroll === true;
-  const testAllowed = req.canAccessTestWorkspace === true || req.session?.canAccessTestWorkspace === true;
-  const links = [];
-  if (payrollAllowed && !path.startsWith('/admin/operaciones/asistencia/nomina/api/') && !output.includes(`href="${PAYROLL_PATH}"`)) {
-    links.push(`<a href="${PAYROLL_PATH}">Nómina</a>`);
-  }
-  if (testAllowed && !path.startsWith('/admin/operaciones/pruebas/api/') && !output.includes(`href="${TEST_WORKSPACE_PATH}"`)) {
-    links.push(`<a href="${TEST_WORKSPACE_PATH}">Entorno de pruebas</a>`);
-  }
-  if (!links.length) return output;
-  if (output.includes('<span class="spacer"></span>')) {
-    return output.replace('<span class="spacer"></span>', `${links.join('\n    ')}\n    <span class="spacer"></span>`);
-  }
-  return output.replace(/<\/nav>/i, `  ${links.join('\n  ')}\n  </nav>`);
-}
-
 function injectPayrollUsersScript(html, req) {
   const path = String(req.originalUrl || '').split('?')[0];
   const role = req.session?.userRole || req.userRole;
@@ -304,11 +283,11 @@ function injectPayrollUsersScript(html, req) {
   return html.replace(/<\/body>/i, `  <script src="${PAYROLL_USERS_SCRIPT}"></script>\n</body>`);
 }
 
-function installPayrollHtmlBridge(req, res) {
+function installAdminHtmlBridge(req, res) {
   const originalSend = res.send.bind(res);
   res.send = (body) => {
     if (!isHtmlResponse(body, res)) return originalSend(body);
-    const withNavigation = injectFeatureNavigation(body, req);
+    const withNavigation = injectAdminModuleNavigation(body, req);
     return originalSend(injectPayrollUsersScript(withNavigation, req));
   };
 }
@@ -348,7 +327,7 @@ export function dispatchAuditMiddleware(prisma) {
       req.canAccessTestWorkspace = isDev;
     }
 
-    installPayrollHtmlBridge(req, res);
+    installAdminHtmlBridge(req, res);
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
     const startedAt = Date.now();
     res.on('finish', () => {
