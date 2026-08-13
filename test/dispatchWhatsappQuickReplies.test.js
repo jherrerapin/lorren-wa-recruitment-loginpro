@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { buildDispatchAssignmentTemplatePayload } from '../src/services/dispatchWhatsappCloudClient.js';
+import {
+  buildDispatchAssignmentInteractivePayload,
+  buildDispatchAssignmentTemplatePayload
+} from '../src/services/dispatchWhatsappCloudClient.js';
 
 const CANONICAL_MESSAGE = [
   'Hola *{{nombre}}*,',
@@ -21,7 +24,23 @@ const OBSOLETE_FRAGMENTS = [
 ];
 function read(path) { return fs.readFileSync(path, 'utf8'); }
 
-test('el dashboard conserva el mensaje canónico real y muestra dos respuestas rápidas', () => {
+function assignmentFixture() {
+  return {
+    id: 'assignment-test',
+    worker: { fullName: 'Auxiliar Prueba' },
+    serviceRequest: {
+      clientName: 'CLIENTE_QUE_NO_DEBE_VIAJAR',
+      operationPointName: 'Operación Prueba',
+      address: 'Dirección Prueba',
+      cityName: 'CIUDAD_QUE_NO_DEBE_VIAJAR',
+      serviceName: 'SERVICIO_QUE_NO_DEBE_VIAJAR',
+      serviceDate: '2026-08-12',
+      startTime: '07:30'
+    }
+  };
+}
+
+test('el dashboard conserva el mensaje canónico y elimina la previsualización estática de respuestas', () => {
   const view = read('src/views/operacionesAsignacionesConfirmacion.ejs');
   const legacyView = read('src/views/operacionesAsignaciones.ejs');
   const canonicalSource = read('src/public/assignment-template-sync.js');
@@ -36,28 +55,31 @@ test('el dashboard conserva el mensaje canónico real y muestra dos respuestas r
     assert.equal(view.includes(obsolete), false);
     assert.equal(legacyView.includes(obsolete), false);
   }
-  assert.match(view, />CONFIRMADO<\/span>/);
-  assert.match(view, />NO PUEDO<\/span>/);
+  assert.match(canonicalSource, /function removeAssignmentReplyPreview/);
+  assert.match(canonicalSource, /querySelectorAll\?\.\('\.dispatch-reply-preview'\)/);
   assert.match(view, /Enviar WhatsApp a todos/);
+});
+
+test('mensaje interactivo usa CONFIRMADO y REPORTAR NOVEDAD', () => {
+  const payload = buildDispatchAssignmentInteractivePayload({
+    assignment: assignmentFixture(),
+    phone: '3001234567'
+  });
+  assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.title), [
+    'CONFIRMADO',
+    'REPORTAR NOVEDAD'
+  ]);
+  assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.id), [
+    'dispatch_confirm:assignment-test',
+    'dispatch_novelty:assignment-test'
+  ]);
 });
 
 test('Cloud API usa únicamente las cinco variables del mensaje canónico y dos Quick Replies', () => {
   const payload = buildDispatchAssignmentTemplatePayload({
     config: { assignmentTemplateName: 'dispatch_assignment_confirmation', templateLanguage: 'es' },
     phone: '3001234567',
-    assignment: {
-      id: 'assignment-test',
-      worker: { fullName: 'Auxiliar Prueba' },
-      serviceRequest: {
-        clientName: 'CLIENTE_QUE_NO_DEBE_VIAJAR',
-        operationPointName: 'Operación Prueba',
-        address: 'Dirección Prueba',
-        cityName: 'CIUDAD_QUE_NO_DEBE_VIAJAR',
-        serviceName: 'SERVICIO_QUE_NO_DEBE_VIAJAR',
-        serviceDate: '2026-08-12',
-        startTime: '07:30'
-      }
-    }
+    assignment: assignmentFixture()
   });
 
   const body = payload.template.components.find((component) => component.type === 'body');
@@ -71,17 +93,19 @@ test('Cloud API usa únicamente las cinco variables del mensaje canónico y dos 
   ]);
   assert.deepEqual(buttons.map((button) => ({ index: button.index, payload: button.parameters[0].payload })), [
     { index: '0', payload: 'dispatch_confirm:assignment-test' },
-    { index: '1', payload: 'dispatch_decline:assignment-test' }
+    { index: '1', payload: 'dispatch_novelty:assignment-test' }
   ]);
 });
 
-test('el webhook convierte NO PUEDO en rechazo operativo sin depender de texto escrito', () => {
+test('el webhook convierte Reportar novedad en alerta sin rechazar la asignación', () => {
   const webhook = read('src/services/dispatchWhatsappWebhookService.js');
   const assignment = read('src/services/dispatchWhatsappAssignmentService.js');
   const config = read('src/services/dispatchWhatsappCloudConfig.js');
-  assert.match(webhook, /dispatch_\(confirm\|decline\)/);
-  assert.match(webhook, /claimDispatchAssignmentDecline/);
-  assert.match(assignment, /status: definition\.declinedAssignmentStatus/);
-  assert.match(config, /declinedAssignmentStatus: 'NO_CONFIRMO'/);
-  assert.match(config, /TERMINAL_LINK_STATUSES[\s\S]*'DECLINED'/);
+  assert.match(webhook, /dispatch_\(confirm\|novelty\|decline\)/);
+  assert.match(webhook, /claimDispatchAssignmentNovelty/);
+  assert.match(webhook, /sendDispatchNoveltyAdminAlert/);
+  assert.match(assignment, /status: 'NOVELTY_REPORTED'/);
+  assert.match(assignment, /type: 'WHATSAPP_NOVELTY'/);
+  assert.match(config, /INBOUND_LINK_STATUSES[\s\S]*'NOVELTY_REPORTED'/);
+  assert.match(config, /ACTIVE_LINK_STATUSES[\s\S]*'NOVELTY_REPORTED'/);
 });
