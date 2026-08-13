@@ -52,7 +52,7 @@ test('vivacidad, anti-spoof y descriptor deben coincidir en cada muestra', () =>
 });
 
 
-test('un score aislado bajo descarta el fotograma sin borrar la estabilidad frontal', () => {
+test('un score aislado bajo se descarta y una muestra frontal válida basta', () => {
   const start = mobile.indexOf('async function collectStableFront');
   const end = mobile.indexOf('\n  async function captureEnrollment', start);
   assert.ok(start >= 0 && end > start);
@@ -67,17 +67,18 @@ test('un score aislado bajo descarta el fotograma sin borrar la estabilidad fron
   assert.doesNotMatch(realScoreBranch, /consecutiveFront\s*=\s*0/);
   assert.doesNotMatch(liveScoreBranch, /consecutiveFront\s*=\s*0/);
 
-  assert.match(source, /if \(consecutiveFront < 2\)/);
+  assert.match(mobile, /const REQUIRED_STABLE_FRONT_FRAMES = 1/);
+  assert.match(source, /if \(consecutiveFront < REQUIRED_STABLE_FRONT_FRAMES\)/);
   assert.match(source, /samples\.push\(\{/);
   assert.match(source, /realScore:\s*scores\.realScore/);
   assert.match(source, /liveScore:\s*scores\.liveScore/);
 });
 
 
-test('cada verificación conserva desafío activo y siete muestras desde video vivo', () => {
+test('la verificación móvil conserva cámara viva y una sola muestra frontal', () => {
   assert.match(mobile, /challenge\.action === 'TURN_SIDE'/);
   assert.match(mobile, /geometry\.faceRatio >= closerTarget/);
-  assert.match(mobile, /const VERIFICATION_STAGE_SAMPLES = 2/);
+  assert.match(mobile, /const VERIFICATION_STAGE_SAMPLES = 1/);
   assert.match(mobile, /const REQUIRED_ACTION_FRAMES = 3/);
   assert.match(mobile, /actionDescriptors:\s*action\.descriptors/);
   assert.match(mobile, /actionLiveScores:\s*action\.liveScores/);
