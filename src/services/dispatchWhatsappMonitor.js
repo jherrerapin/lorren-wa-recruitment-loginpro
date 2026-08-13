@@ -1,8 +1,12 @@
 import { buildDispatchServiceDateWhere, dispatchServiceDateKey, todayIsoDateCO } from './dispatchDate.js';
 import { DISPATCH_WHATSAPP_WINDOW_MS } from './dispatchWhatsappAdminAlerts.js';
+import { buildDispatchAssignmentMessageBody } from './dispatchWhatsappCloudClient.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const UNMATCHED_INBOUND_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const DISPATCH_WHATSAPP_MESSAGE_ENTITY = 'DISPATCH_WHATSAPP_MESSAGE';
+const MESSAGE_HISTORY_LIMIT = 20;
+const MESSAGE_BODY_LIMIT = 4000;
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -34,6 +38,10 @@ function addIsoDays(dateKey, days) {
 function validDate(value) {
   const date = value ? new Date(value) : null;
   return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function isoDate(value) {
+  return validDate(value)?.toISOString() || null;
 }
 
 function latestDate(...values) {
@@ -86,6 +94,203 @@ function possibleInboundMatch(phone, unmatchedInbound = []) {
   const suffix = digits.slice(-7);
   const matches = unmatchedInbound.filter((item) => normalizePhone(item.phone).endsWith(suffix));
   return matches.length === 1 ? matches[0] : null;
+}
+
+function auditAction(direction) {
+  return direction === 'INBOUND' ? 'DISPATCH_WHATSAPP_INBOUND' : 'DISPATCH_WHATSAPP_OUTBOUND';
+}
+
+export async function recordDispatchWhatsappMessageAudit({
+  prismaClient,
+  scope = 'operational',
+  direction,
+  phone,
+  body = '',
+  messageType = 'TEXT',
+  messageId = null,
+  providerMessageId = null,
+  dedupeKey = null,
+  source = null,
+  occurredAt = new Date()
+} = {}) {
+  if (scope !== 'operational' || !prismaClient?.devAuditEvent?.create) return { recorded: false, reason: 'unsupported' };
+  const normalizedPhone = normalizePhone(phone);
+  const normalizedDirection = String(direction || '').trim().toUpperCase();
+  const externalId = text(messageId) || text(providerMessageId) || text(dedupeKey);
+  const eventDate = validDate(occurredAt) || new Date();
+  if (!normalizedPhone || !['INBOUND', 'OUTBOUND'].includes(normalizedDirection) || !externalId) {
+    return { recorded: false, reason: 'invalid' };
+  }
+
+  const entityId = `dispatch-wa:${normalizedDirection.toLowerCase()}:${externalId}`;
+  try {
+    if (prismaClient.devAuditEvent.findFirst) {
+      const duplicate = await prismaClient.devAuditEvent.findFirst({
+        where: { entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY, entityId },
+        select: { id: true }
+      });
+      if (duplicate) return { recorded: false, duplicate: true };
+    }
+    const cleanBody = String(body || '').trim().slice(0, MESSAGE_BODY_LIMIT);
+    await prismaClient.devAuditEvent.create({
+      data: {
+        entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
+        entityId,
+        entityLabel: normalizedPhone,
+        action: auditAction(normalizedDirection),
+        actorSource: source || 'whatsapp-dispatch',
+        metadata: {
+          scope: 'operational',
+          direction: normalizedDirection,
+          phone: normalizedPhone,
+          body: cleanBody || null,
+          messageType: String(messageType || 'UNKNOWN').toUpperCase(),
+          messageId: text(messageId),
+          providerMessageId: text(providerMessageId),
+          source: source || null,
+          occurredAt: eventDate.toISOString()
+        },
+        createdAt: eventDate
+      }
+    });
+    return { recorded: true };
+  } catch (_error) {
+    console.warn('[dispatch-wa-audit] No fue posible persistir la auditoría de un mensaje de Despacho.');
+    return { recorded: false, reason: 'storage_error' };
+  }
+}
+
+function auditMessageFromRow(row) {
+  const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+  const direction = String(metadata.direction || (row.action?.endsWith('INBOUND') ? 'INBOUND' : 'OUTBOUND')).toUpperCase();
+  return {
+    id: row.entityId || row.id,
+    direction,
+    body: text(metadata.body) || '(mensaje sin texto)',
+    messageType: text(metadata.messageType) || 'UNKNOWN',
+    at: isoDate(metadata.occurredAt || row.createdAt),
+    source: text(metadata.source) || 'AUDIT',
+    messageId: text(metadata.messageId) || null,
+    providerMessageId: text(metadata.providerMessageId) || null,
+    persisted: true,
+    reconstructed: false
+  };
+}
+
+async function loadPersistedMessagesByPhone(prismaClient, phones = []) {
+  const uniquePhones = [...new Set(phones.map(normalizePhone).filter(Boolean))];
+  const result = new Map(uniquePhones.map((phone) => [phone, []]));
+  if (!uniquePhones.length || !prismaClient?.devAuditEvent?.findMany) return result;
+  const rows = await prismaClient.devAuditEvent.findMany({
+    where: {
+      entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
+      entityLabel: { in: uniquePhones },
+      action: { in: ['DISPATCH_WHATSAPP_INBOUND', 'DISPATCH_WHATSAPP_OUTBOUND'] }
+    },
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(1000, Math.max(100, uniquePhones.length * MESSAGE_HISTORY_LIMIT * 2))
+  });
+  for (const row of rows) {
+    const phone = normalizePhone(row.entityLabel);
+    if (!result.has(phone)) continue;
+    const bucket = result.get(phone);
+    if (bucket.length < MESSAGE_HISTORY_LIMIT) bucket.push(auditMessageFromRow(row));
+  }
+  return result;
+}
+
+function legacyDirectionLabel(status) {
+  return status === 'NOVELTY_REPORTED' ? 'REPORTAR NOVEDAD' : 'CONFIRMADO';
+}
+
+function sameEvidenceId(message, id) {
+  return Boolean(id && (message.messageId === id || message.providerMessageId === id));
+}
+
+function hasInboundNear(messages, value, toleranceMs = 5000) {
+  const target = validDate(value);
+  if (!target) return false;
+  return messages.some((message) => {
+    if (message.direction !== 'INBOUND') return false;
+    const at = validDate(message.at);
+    return at && Math.abs(at.getTime() - target.getTime()) <= toleranceMs;
+  });
+}
+
+function legacyMessagesForAssignment({ assignment, links = [], window = {}, persistedMessages = [] }) {
+  const messages = [...persistedMessages];
+  for (const link of links) {
+    if (link.providerMessageId && !messages.some((message) => sameEvidenceId(message, link.providerMessageId))) {
+      messages.push({
+        id: `legacy-out:${link.id}`,
+        direction: 'OUTBOUND',
+        body: `${buildDispatchAssignmentMessageBody(assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
+        messageType: 'INTERACTIVE',
+        at: isoDate(link.createdAt),
+        source: 'RECONSTRUIDO_ASIGNACION',
+        messageId: null,
+        providerMessageId: link.providerMessageId,
+        persisted: false,
+        reconstructed: true
+      });
+    }
+    if (link.confirmationMessageId && link.confirmationReceivedAt
+      && !messages.some((message) => sameEvidenceId(message, link.confirmationMessageId))) {
+      messages.push({
+        id: `legacy-in:${link.id}`,
+        direction: 'INBOUND',
+        body: legacyDirectionLabel(link.status),
+        messageType: 'INTERACTIVE',
+        at: isoDate(link.confirmationReceivedAt),
+        source: 'RECONSTRUIDO_RESPUESTA',
+        messageId: link.confirmationMessageId,
+        providerMessageId: null,
+        persisted: false,
+        reconstructed: true
+      });
+    }
+    const hasAuditedThanks = messages.some((message) => (
+      message.direction === 'OUTBOUND'
+      && message.body === 'Gracias.'
+      && validDate(message.at)
+      && validDate(link.confirmationReceivedAt)
+      && validDate(message.at).getTime() >= validDate(link.confirmationReceivedAt).getTime()
+    ));
+    if (link.status === 'CONFIRMED' && link.confirmationReceivedAt && !hasAuditedThanks) {
+      messages.push({
+        id: `legacy-thanks:${link.id}`,
+        direction: 'OUTBOUND',
+        body: 'Gracias.',
+        messageType: 'TEXT',
+        at: isoDate(link.updatedAt || link.confirmationReceivedAt),
+        source: 'RECONSTRUIDO_AUTO_REPLY',
+        messageId: null,
+        providerMessageId: null,
+        persisted: false,
+        reconstructed: true
+      });
+    }
+  }
+
+  if (window.lastInboundAt && !hasInboundNear(messages, window.lastInboundAt)) {
+    messages.push({
+      id: `legacy-window:${assignment.id}:${window.lastInboundAt}`,
+      direction: 'INBOUND',
+      body: 'Mensaje recibido. El contenido exacto no se almacenaba todavía en el monitor de Despacho.',
+      messageType: 'UNKNOWN',
+      at: window.lastInboundAt,
+      source: 'EVIDENCIA_VENTANA',
+      messageId: null,
+      providerMessageId: null,
+      persisted: false,
+      reconstructed: true
+    });
+  }
+
+  return messages
+    .filter((message) => message.at)
+    .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
+    .slice(-MESSAGE_HISTORY_LIMIT);
 }
 
 export function tomorrowIsoDateCO(now = new Date()) {
@@ -176,14 +381,41 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
 
   const windowsByAssignment = await loadDispatchWhatsappWindowStatusForAssignments({ prismaClient, assignments, now });
   const assignedPhones = new Set(assignments.map((assignment) => normalizePhone(assignment?.worker?.phone)).filter(Boolean));
-  const recentInboundRows = await prismaClient.dispatchWhatsappContactWindow.findMany({
-    where: {
-      scope: 'operational',
-      lastInboundAt: { gte: new Date(now.getTime() - UNMATCHED_INBOUND_LOOKBACK_MS) }
-    },
-    orderBy: { lastInboundAt: 'desc' },
-    take: 200
-  });
+  const assignmentIds = assignments.map((assignment) => assignment.id);
+  const [recentInboundRows, confirmationLinks, persistedByPhone] = await Promise.all([
+    prismaClient.dispatchWhatsappContactWindow.findMany({
+      where: {
+        scope: 'operational',
+        lastInboundAt: { gte: new Date(now.getTime() - UNMATCHED_INBOUND_LOOKBACK_MS) }
+      },
+      orderBy: { lastInboundAt: 'desc' },
+      take: 200
+    }),
+    assignmentIds.length
+      ? prismaClient.dispatchWhatsappConfirmation.findMany({
+          where: { assignmentId: { in: assignmentIds } },
+          select: {
+            id: true,
+            assignmentId: true,
+            phone: true,
+            providerMessageId: true,
+            confirmationMessageId: true,
+            confirmationReceivedAt: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true
+          },
+          orderBy: { createdAt: 'asc' }
+        })
+      : [],
+    loadPersistedMessagesByPhone(prismaClient, [...assignedPhones])
+  ]);
+  const linksByAssignment = new Map();
+  for (const link of confirmationLinks) {
+    const bucket = linksByAssignment.get(link.assignmentId) || [];
+    bucket.push(link);
+    linksByAssignment.set(link.assignmentId, bucket);
+  }
   const unmatchedInbound = recentInboundRows
     .map((row) => ({
       phone: normalizePhone(row?.phone),
@@ -197,6 +429,12 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
     const phone = normalizePhone(worker.phone);
     const window = windowsByAssignment[assignment.id] || windowSnapshot(null, now);
     const possibleMatch = !window.isOpen ? possibleInboundMatch(phone, unmatchedInbound) : null;
+    const messageHistory = legacyMessagesForAssignment({
+      assignment,
+      links: linksByAssignment.get(assignment.id) || [],
+      window,
+      persistedMessages: persistedByPhone.get(phone) || []
+    });
     return {
       assignmentId: assignment.id,
       serviceRequestId: assignment.serviceRequestId,
@@ -216,6 +454,8 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
       address: text(request.address) || null,
       startTime: text(request.startTime) || null,
       serviceDate: dateKey,
+      messageHistory,
+      messageCount: messageHistory.length,
       ...window
     };
   }).sort((a, b) => {
@@ -241,6 +481,6 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
       unmatchedInbound: unmatchedInbound.length
     },
     scope: 'operational',
-    note: 'Estado vivo: se recalcula en cada consulta con el último inbound operativo y, como respaldo, con confirmaciones persistidas. También expone inbound recientes que no coinciden con ningún teléfono de los asignados para detectar números mal registrados en lugar de marcarlos silenciosamente como cerrados.'
+    note: 'Estado vivo: se recalcula en cada consulta con el último inbound operativo y, como respaldo, con confirmaciones persistidas. El historial de conversación del monitor de Despacho usa auditoría propia y nunca lee la tabla Message del bot de Reclutamiento.'
   };
 }

@@ -25,15 +25,16 @@
     .template-card h2{margin:0 0 7px;color:var(--navy);font-size:14px}.template-preview{white-space:pre-line;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;color:#334155}.template-buttons{display:flex;gap:6px;margin-top:8px}.template-buttons span{border-radius:8px;padding:5px 8px;background:#eef2ff;color:#3730a3;font-size:10px;font-weight:900}.note{background:#eff6ff;border-color:#bfdbfe;color:#1e40af;box-shadow:none}.note code{font-size:10px}
     .bulk-result{margin-bottom:12px;border-radius:12px;padding:10px 12px;font-size:11px;font-weight:800;display:none}.bulk-result.show{display:block}.bulk-result.ok{background:#dcfce7;color:#166534}.bulk-result.warn{background:#fef3c7;color:#92400e}
     .table-wrap{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:auto;box-shadow:var(--shadow-sm)}
-    table{width:100%;border-collapse:collapse;min-width:1160px}th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle;text-align:left;font-size:11px}th{position:sticky;top:0;background:#f8fafc;color:var(--muted);font-size:10px;text-transform:uppercase;z-index:1}
+    table{width:100%;border-collapse:collapse;min-width:1320px}th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle;text-align:left;font-size:11px}th{position:sticky;top:0;background:#f8fafc;color:var(--muted);font-size:10px;text-transform:uppercase;z-index:1}
     .pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:900;white-space:nowrap}.open{background:#dcfce7;color:#166534}.closed{background:#fee2e2;color:#991b1b}.review{background:#fef3c7;color:#92400e}.confirmed{background:#dcfce7;color:#166534}.pending{background:#fef3c7;color:#92400e}
     .window-check{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:11px;font-weight:900;margin-right:5px;vertical-align:middle}.window-off{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#e2e8f0;color:#64748b;font-size:10px;font-weight:900;margin-right:5px;vertical-align:middle}.window-review{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#f59e0b;color:#fff;font-size:10px;font-weight:900;margin-right:5px;vertical-align:middle}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px}.muted{color:var(--muted)}.live{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:11px;font-weight:900}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}.evidence{font-size:9px;color:var(--muted);margin-top:2px}.phone-warning{font-size:9px;color:#92400e;font-weight:800;margin-top:2px}
-    .row-action{padding:5px 8px;font-size:10px;min-height:0}.row-action[disabled]{opacity:.45;cursor:not-allowed}
+    .row-action{padding:5px 8px;font-size:10px;min-height:0}.row-action[disabled]{opacity:.45;cursor:not-allowed}.chat-toggle{white-space:nowrap}
+    .chat-row[hidden]{display:none}.chat-row td{padding:0 12px 12px;background:#f8fafc}.chat-panel{border:1px solid #dbe4ee;border-radius:12px;background:#fff;padding:10px;max-height:360px;overflow:auto}.chat-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px;color:#475569;font-size:10px}.chat-feed{display:flex;flex-direction:column;gap:7px}.chat-message{max-width:min(760px,88%);border-radius:11px;padding:8px 10px;border:1px solid #e2e8f0}.chat-in{align-self:flex-start;background:#eff6ff;border-color:#bfdbfe}.chat-out{align-self:flex-end;background:#ecfdf5;border-color:#bbf7d0}.chat-meta{display:flex;gap:8px;align-items:center;font-size:9px;color:#64748b;margin-bottom:3px}.chat-meta strong{color:#334155}.chat-body{white-space:pre-wrap;word-break:break-word;color:#1f2937;font-size:11px;line-height:1.4}.chat-reconstructed{display:inline-flex;border-radius:999px;background:#fef3c7;color:#92400e;padding:1px 6px;font-size:8px;font-weight:900}.chat-empty{font-size:10px;color:#64748b;padding:4px}.chat-note{font-size:9px;color:#64748b;margin-top:8px}
     .unmatched-panel{margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;padding:12px 14px}.unmatched-panel h2{font-size:13px;margin:0 0 4px;color:#9a3412}.unmatched-panel p{font-size:11px;color:#9a3412;margin:0 0 8px}.unmatched-list{display:flex;flex-wrap:wrap;gap:7px}.unmatched-item{background:#fff;border:1px solid #fed7aa;border-radius:9px;padding:6px 8px;font-size:10px;color:#7c2d12}
     .message-dialog{border:0;border-radius:16px;padding:0;width:min(620px,calc(100vw - 24px));box-shadow:0 24px 70px rgba(15,23,42,.3)}.message-dialog::backdrop{background:rgba(15,23,42,.45)}.message-dialog form{padding:18px;display:grid;gap:12px}.message-dialog h3{margin:0;color:var(--navy)}.message-dialog textarea{width:100%;min-height:125px;border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;resize:vertical}.dialog-actions{display:flex;justify-content:flex-end;gap:8px}
     @media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr)}}
-    @media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}}
+    @media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}.chat-message{max-width:96%}}
   </style>
 </head>
 <body>
@@ -53,7 +54,7 @@
       <div>
         <div class="eyebrow">DEV · Línea oficial de WhatsApp Despacho</div>
         <h1>Ventanas de 24 horas · asignados de mañana</h1>
-        <p>Los que siguen con ventana cerrada o tienen un teléfono que requiere revisión aparecen primero. El estado se consulta nuevamente cada 5 segundos.</p>
+        <p>Los que siguen con ventana cerrada o tienen un teléfono que requiere revisión aparecen primero. El estado y la conversación propia de Despacho se consultan nuevamente cada 5 segundos; no se mezclan mensajes del bot de Reclutamiento.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/asignaciones?fecha=<%= encodeURIComponent(data.dateKey || '') %>">Ver asignaciones de mañana</a>
@@ -87,10 +88,10 @@
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Auxiliar</th><th>Teléfono</th><th>Operación</th><th>Asignación</th><th>Ventana 24 h</th><th>Último mensaje recibido</th><th>Vence</th><th>Acción DEV</th></tr>
+          <tr><th>Auxiliar</th><th>Teléfono</th><th>Operación</th><th>Asignación</th><th>Ventana 24 h</th><th>Último mensaje recibido</th><th>Vence</th><th>Mensajes</th><th>Acción DEV</th></tr>
         </thead>
         <tbody id="monitorRows">
-          <% if (!items.length) { %><tr><td colspan="8" class="muted">No hay auxiliares con asignación activa para mañana.</td></tr><% } %>
+          <% if (!items.length) { %><tr><td colspan="9" class="muted">No hay auxiliares con asignación activa para mañana.</td></tr><% } %>
           <% items.forEach((item) => { %>
             <tr data-assignment-id="<%= item.assignmentId %>">
               <td><strong><%= item.workerName %></strong></td>
@@ -100,8 +101,10 @@
               <td><% if (item.isOpen) { %><span class="window-check">✓</span><span class="pill open">ABIERTA</span><% } else if (item.phoneIssue || item.possibleInboundAt) { %><span class="window-review">!</span><span class="pill review">REVISAR NÚMERO</span><% } else { %><span class="window-off">–</span><span class="pill closed">CERRADA</span><% } %></td>
               <td><span data-date="<%= item.lastInboundAt || '' %>"><%= item.lastInboundAt || 'Sin inbound exacto registrado' %></span><% if (item.evidenceSource) { %><div class="evidence"><%= item.evidenceSource === 'CONFIRMATION_EVIDENCE' ? 'evidencia de confirmación' : 'registro de inbound' %></div><% } %><% if (item.possibleInboundAt) { %><div class="phone-warning">Posible inbound <span data-date="<%= item.possibleInboundAt %>"><%= item.possibleInboundAt %></span></div><% } %></td>
               <td data-date="<%= item.expiresAt || '' %>"><%= item.expiresAt || '—' %></td>
+              <td><button class="btn row-action chat-toggle" type="button" data-chat-toggle="<%= item.assignmentId %>">Ver mensajes (<%= item.messageCount || 0 %>)</button></td>
               <td><button class="btn row-action manual-message-button" type="button" data-assignment-id="<%= item.assignmentId %>" data-worker-name="<%= item.workerName %>" <%= item.phone ? '' : 'disabled title="No hay teléfono"' %>><%= item.isOpen ? 'Enviar mensaje' : 'Probar envío' %></button></td>
             </tr>
+            <tr class="chat-row" data-chat-row="<%= item.assignmentId %>" hidden><td colspan="9"><div class="chat-panel"><div class="chat-head"><strong>Conversación WhatsApp Despacho · <%= item.workerName %></strong><span>Últimos <%= item.messageCount || 0 %> registros disponibles</span></div><div class="chat-feed"><% if (!(item.messageHistory || []).length) { %><div class="chat-empty">Todavía no hay mensajes persistidos o reconstruibles para este auxiliar.</div><% } %><% (item.messageHistory || []).forEach((message) => { %><div class="chat-message <%= message.direction === 'INBOUND' ? 'chat-in' : 'chat-out' %>"><div class="chat-meta"><strong><%= message.direction === 'INBOUND' ? 'Auxiliar → Lórren' : 'Lórren → auxiliar' %></strong><span data-date="<%= message.at || '' %>"><%= message.at || '—' %></span><% if (message.reconstructed) { %><span class="chat-reconstructed">RECONSTRUIDO</span><% } %></div><div class="chat-body"><%= message.body || '(mensaje sin texto)' %></div></div><% }) %></div><div class="chat-note">Los mensajes nuevos se guardan en una auditoría exclusiva de WhatsApp Despacho. Los elementos RECONSTRUIDOS son evidencia anterior cuyo texto completo no siempre se persistía.</div></div></td></tr>
           <% }) %>
         </tbody>
       </table>
@@ -140,6 +143,7 @@
     const manualMessageText = document.getElementById('manualMessageText');
     const unmatchedPanel = document.getElementById('unmatchedPanel');
     const unmatchedList = document.getElementById('unmatchedList');
+    const openChats = new Set();
     let refreshBusy = false;
 
     function escapeHtml(value) {
@@ -167,9 +171,30 @@
       if (item.possibleInboundPhone) value += `<div class="phone-warning">Posible inbound: ${escapeHtml(item.possibleInboundPhone)}</div>`;
       return value;
     }
+    function chatMessagesHtml(item) {
+      const history = Array.isArray(item.messageHistory) ? item.messageHistory : [];
+      if (!history.length) return '<div class="chat-empty">Todavía no hay mensajes persistidos o reconstruibles para este auxiliar.</div>';
+      return history.map((message) => {
+        const inbound = message.direction === 'INBOUND';
+        const reconstruction = message.reconstructed ? '<span class="chat-reconstructed">RECONSTRUIDO</span>' : '';
+        return `<div class="chat-message ${inbound ? 'chat-in' : 'chat-out'}">
+          <div class="chat-meta"><strong>${inbound ? 'Auxiliar → Lórren' : 'Lórren → auxiliar'}</strong><span>${escapeHtml(formatBogota(message.at))}</span>${reconstruction}</div>
+          <div class="chat-body">${escapeHtml(message.body || '(mensaje sin texto)')}</div>
+        </div>`;
+      }).join('');
+    }
+    function chatRowHtml(item) {
+      const assignmentId = escapeHtml(item.assignmentId);
+      const hidden = openChats.has(item.assignmentId) ? '' : ' hidden';
+      return `<tr class="chat-row" data-chat-row="${assignmentId}"${hidden}><td colspan="9"><div class="chat-panel">
+        <div class="chat-head"><strong>Conversación WhatsApp Despacho · ${escapeHtml(item.workerName || 'Auxiliar')}</strong><span>Últimos ${Number(item.messageCount || 0)} registros disponibles</span></div>
+        <div class="chat-feed">${chatMessagesHtml(item)}</div>
+        <div class="chat-note">Los mensajes nuevos se guardan en una auditoría exclusiva de WhatsApp Despacho. Los elementos RECONSTRUIDOS son evidencia anterior cuyo texto completo no siempre se persistía.</div>
+      </div></td></tr>`;
+    }
     function renderItems(items) {
       if (!Array.isArray(items) || !items.length) {
-        rows.innerHTML = '<tr><td colspan="8" class="muted">No hay auxiliares con asignación activa para mañana.</td></tr>';
+        rows.innerHTML = '<tr><td colspan="9" class="muted">No hay auxiliares con asignación activa para mañana.</td></tr>';
         return;
       }
       rows.innerHTML = items.map((item) => `<tr data-assignment-id="${escapeHtml(item.assignmentId)}">
@@ -180,9 +205,29 @@
         <td>${windowHtml(item)}</td>
         <td>${item.lastInboundAt ? escapeHtml(formatBogota(item.lastInboundAt)) : 'Sin inbound exacto registrado'}${evidenceLabel(item.evidenceSource)}${item.possibleInboundAt ? `<div class="phone-warning">Posible inbound ${escapeHtml(formatBogota(item.possibleInboundAt))}</div>` : ''}</td>
         <td>${item.expiresAt ? escapeHtml(formatBogota(item.expiresAt)) : '—'}</td>
+        <td><button class="btn row-action chat-toggle" type="button" data-chat-toggle="${escapeHtml(item.assignmentId)}">${openChats.has(item.assignmentId) ? 'Ocultar' : 'Ver mensajes'} (${Number(item.messageCount || 0)})</button></td>
         <td><button class="btn row-action manual-message-button" type="button" data-assignment-id="${escapeHtml(item.assignmentId)}" data-worker-name="${escapeHtml(item.workerName || 'Auxiliar')}" ${item.phone ? '' : 'disabled title="No hay teléfono"'}>${item.isOpen ? 'Enviar mensaje' : 'Probar envío'}</button></td>
-      </tr>`).join('');
+      </tr>${chatRowHtml(item)}`).join('');
       bindManualButtons();
+      bindChatButtons();
+    }
+    function bindChatButtons() {
+      document.querySelectorAll('[data-chat-toggle]').forEach((button) => {
+        button.onclick = () => {
+          const assignmentId = button.dataset.chatToggle || '';
+          const chatRow = document.querySelector(`[data-chat-row="${CSS.escape(assignmentId)}"]`);
+          if (!chatRow) return;
+          if (openChats.has(assignmentId)) {
+            openChats.delete(assignmentId);
+            chatRow.hidden = true;
+            button.textContent = button.textContent.replace(/^Ocultar/, 'Ver mensajes');
+          } else {
+            openChats.add(assignmentId);
+            chatRow.hidden = false;
+            button.textContent = button.textContent.replace(/^Ver mensajes/, 'Ocultar');
+          }
+        };
+      });
     }
     function renderUnmatched(items) {
       const list = Array.isArray(items) ? items : [];
@@ -268,6 +313,7 @@
     document.querySelectorAll('[data-date]').forEach((cell) => { const value = cell.dataset.date; if (value) cell.textContent = formatBogota(value); });
     document.getElementById('generatedAt').textContent = <%- JSON.stringify(data.generatedAt || '') %> ? formatBogota(<%- JSON.stringify(data.generatedAt || '') %>) : '—';
     bindManualButtons();
+    bindChatButtons();
     window.setInterval(refreshMonitor, 5000);
   </script>
 </body>

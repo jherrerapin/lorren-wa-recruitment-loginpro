@@ -5,11 +5,13 @@ import {
 } from '../services/dispatchWhatsappCloudService.js';
 import {
   loadDispatchWhatsappTomorrowAssignmentMonitor,
-  loadDispatchWhatsappWindowStatusForAssignments
+  loadDispatchWhatsappWindowStatusForAssignments,
+  recordDispatchWhatsappMessageAudit
 } from '../services/dispatchWhatsappMonitor.js';
 import {
   DISPATCH_WINDOW_CHECK_BUTTON,
   DISPATCH_WINDOW_CHECK_MESSAGE,
+  buildDispatchAssignmentMessageBody,
   dispatchWhatsappProviderErrorMessage,
   sendCloudWindowCheckTemplate,
   sendDispatchWhatsappTextMessage
@@ -119,6 +121,29 @@ function manualMessageText(value) {
   return message.slice(0, MAX_MANUAL_MESSAGE_LENGTH);
 }
 
+async function auditAssignmentSend(prisma, context, result) {
+  const assignment = await prisma.dispatchAssignment.findFirst({
+    where: {
+      id: context.assignmentId,
+      serviceRequestId: context.serviceRequestId,
+      workerId: context.workerId
+    },
+    include: { worker: true, serviceRequest: { include: { operationPoint: true } } }
+  });
+  if (!assignment) return;
+  await recordDispatchWhatsappMessageAudit({
+    prismaClient: prisma,
+    scope: 'operational',
+    direction: 'OUTBOUND',
+    phone: result.phone,
+    body: `${buildDispatchAssignmentMessageBody(assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
+    messageType: result.deliveryMode === 'TEMPLATE' ? 'TEMPLATE' : 'INTERACTIVE',
+    providerMessageId: result.providerMessageId,
+    source: 'ASSIGNMENT_CONFIRMATION',
+    occurredAt: new Date()
+  });
+}
+
 export function dispatchWhatsappNotificationsRouter(prisma) {
   const router = express.Router();
   router.use(requireOps);
@@ -215,6 +240,17 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
             assignmentId: item.assignmentId,
             phone: item.phone
           });
+          await recordDispatchWhatsappMessageAudit({
+            prismaClient: prisma,
+            scope: 'operational',
+            direction: 'OUTBOUND',
+            phone: item.phone,
+            body: `${DISPATCH_WINDOW_CHECK_MESSAGE}\n\n[Botón: ${DISPATCH_WINDOW_CHECK_BUTTON}]`,
+            messageType: 'TEMPLATE',
+            providerMessageId: result.providerMessageId,
+            source: 'WINDOW_CHECK_TEMPLATE',
+            occurredAt: new Date()
+          });
           results.push({
             assignmentId: item.assignmentId,
             workerName: item.workerName,
@@ -266,6 +302,18 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         phone: item.phone,
         text: message
       });
+      await recordDispatchWhatsappMessageAudit({
+        prismaClient: prisma,
+        scope: 'operational',
+        direction: 'OUTBOUND',
+        phone: item.phone,
+        body: message,
+        messageType: 'TEXT',
+        providerMessageId,
+        dedupeKey: `dev-manual:${assignmentId}:${Date.now()}`,
+        source: 'DEV_MANUAL',
+        occurredAt: new Date()
+      });
       return res.json({
         ok: true,
         assignmentId,
@@ -290,6 +338,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         scope: 'operational',
         actorUsername: normalizeString(req.session?.username || req.username)
       });
+      await auditAssignmentSend(prisma, context, result);
       return res.json({
         ok: true,
         provider: result.provider,

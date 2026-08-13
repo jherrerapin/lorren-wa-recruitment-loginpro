@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import {
   loadDispatchWhatsappTomorrowAssignmentMonitor,
   loadDispatchWhatsappWindowStatusForAssignments,
+  recordDispatchWhatsappMessageAudit,
   tomorrowIsoDateCO
 } from '../src/services/dispatchWhatsappMonitor.js';
 import { canAccessDispatchWhatsappMonitor } from '../src/routes/dispatchWhatsappNotifications.js';
@@ -30,6 +31,21 @@ function assignmentFixture() {
       id: 'assignment-c', serviceRequestId: 'request-c', workerId: 'worker-c', status: 'CONFIRMED', createdAt: new Date('2026-08-12T20:20:00.000Z'),
       worker: { id: 'worker-c', fullName: 'Auxiliar C', phone: '3003334455' },
       serviceRequest: { id: 'request-c', source: 'MANUAL', operationPointName: 'Operación C', serviceDate: new Date('2026-08-13T00:00:00.000Z'), startTime: '09:00', address: 'Dirección C' }
+    }
+  ];
+}
+
+function confirmationLinks() {
+  return [
+    {
+      id: 'link-a', assignmentId: 'assignment-a', phone: '573001112233', providerMessageId: 'wamid-out-a',
+      confirmationMessageId: null, confirmationReceivedAt: null, status: 'SENT',
+      createdAt: new Date('2026-08-12T22:50:00.000Z'), updatedAt: new Date('2026-08-12T22:50:00.000Z')
+    },
+    {
+      id: 'link-b', assignmentId: 'assignment-b', phone: '573002223344', providerMessageId: 'wamid-out-b',
+      confirmationMessageId: 'wamid-in-b', confirmationReceivedAt: new Date('2026-08-13T00:20:00.000Z'), status: 'CONFIRMED',
+      createdAt: new Date('2026-08-12T23:00:00.000Z'), updatedAt: new Date('2026-08-13T00:20:05.000Z')
     }
   ];
 }
@@ -67,12 +83,42 @@ function prismaFixture() {
       }
     },
     dispatchWhatsappConfirmation: { findMany: async (query) => {
-      assert.deepEqual(query.where.confirmationReceivedAt, { not: null });
-      const requested = new Set(query.where.phone.in);
-      return [
-        { phone: '573002223344', confirmationReceivedAt: new Date('2026-08-13T00:20:00.000Z') }
-      ].filter((row) => requested.has(row.phone));
-    } }
+      if (query.where.confirmationReceivedAt) {
+        assert.deepEqual(query.where.confirmationReceivedAt, { not: null });
+        const requested = new Set(query.where.phone.in);
+        return [
+          { phone: '573002223344', confirmationReceivedAt: new Date('2026-08-13T00:20:00.000Z') }
+        ].filter((row) => requested.has(row.phone));
+      }
+      assert.deepEqual([...query.where.assignmentId.in].sort(), ['assignment-a', 'assignment-b', 'assignment-c']);
+      return confirmationLinks();
+    } },
+    devAuditEvent: {
+      findMany: async (query) => {
+        assert.equal(query.where.entityType, 'DISPATCH_WHATSAPP_MESSAGE');
+        assert.deepEqual([...query.where.entityLabel.in].sort(), ['573001112233', '573002223344', '573003334455']);
+        return [
+          {
+            id: 'audit-in-b', entityType: 'DISPATCH_WHATSAPP_MESSAGE', entityId: 'dispatch-wa:inbound:wamid-in-b',
+            entityLabel: '573002223344', action: 'DISPATCH_WHATSAPP_INBOUND', actorSource: 'WEBHOOK_INBOUND',
+            metadata: {
+              direction: 'INBOUND', body: 'Sí, recibido', messageType: 'TEXT', messageId: 'wamid-in-b',
+              providerMessageId: null, source: 'WEBHOOK_INBOUND', occurredAt: '2026-08-13T00:20:00.000Z'
+            },
+            createdAt: new Date('2026-08-13T00:20:00.000Z')
+          },
+          {
+            id: 'audit-out-b', entityType: 'DISPATCH_WHATSAPP_MESSAGE', entityId: 'dispatch-wa:outbound:manual-b',
+            entityLabel: '573002223344', action: 'DISPATCH_WHATSAPP_OUTBOUND', actorSource: 'DEV_MANUAL',
+            metadata: {
+              direction: 'OUTBOUND', body: 'Mensaje de prueba', messageType: 'TEXT', messageId: null,
+              providerMessageId: 'manual-b', source: 'DEV_MANUAL', occurredAt: '2026-08-13T00:22:00.000Z'
+            },
+            createdAt: new Date('2026-08-13T00:22:00.000Z')
+          }
+        ];
+      }
+    }
   };
 }
 
@@ -80,7 +126,7 @@ test('fecha objetivo del monitor DEV es mañana en America/Bogota', () => {
   assert.equal(tomorrowIsoDateCO(NOW), '2026-08-13');
 });
 
-test('monitor vivo reconcilia confirmación inbound y expone inbound sin coincidencia', async () => {
+test('monitor vivo reconcilia ventana, expone inbound sin coincidencia y adjunta conversación propia de Despacho', async () => {
   const prismaClient = prismaFixture();
   const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient, now: NOW });
   assert.equal(monitor.summary.total, 3);
@@ -93,6 +139,8 @@ test('monitor vivo reconcilia confirmación inbound y expone inbound sin coincid
   const auxiliarA = monitor.items.find((item) => item.workerName === 'Auxiliar A');
   assert.equal(auxiliarA.isOpen, true);
   assert.equal(auxiliarA.evidenceSource, 'CONTACT_WINDOW');
+  assert.ok(auxiliarA.messageHistory.some((message) => message.direction === 'OUTBOUND' && message.reconstructed));
+  assert.ok(auxiliarA.messageHistory.some((message) => message.direction === 'INBOUND' && /contenido exacto/.test(message.body)));
 
   const auxiliarB = monitor.items.find((item) => item.workerName === 'Auxiliar B');
   assert.equal(auxiliarB.isOpen, true);
@@ -100,12 +148,61 @@ test('monitor vivo reconcilia confirmación inbound y expone inbound sin coincid
   assert.equal(auxiliarB.evidenceSource, 'CONFIRMATION_EVIDENCE');
   assert.equal(prismaClient.healed.length, 1);
   assert.equal(prismaClient.healed[0].where.scope_phone.phone, '573002223344');
+  assert.ok(auxiliarB.messageHistory.some((message) => message.body === 'Sí, recibido' && message.persisted));
+  assert.ok(auxiliarB.messageHistory.some((message) => message.body === 'Mensaje de prueba' && message.direction === 'OUTBOUND'));
+  assert.equal(auxiliarB.messageHistory.filter((message) => message.messageId === 'wamid-in-b').length, 1);
 
   const auxiliarC = monitor.items.find((item) => item.workerName === 'Auxiliar C');
   assert.equal(auxiliarC.isOpen, false);
   assert.equal(auxiliarC.canSendWindowCheck, true);
   assert.equal(auxiliarC.canAttemptManualMessage, true);
   assert.equal(monitor.items[0].workerName, 'Auxiliar C');
+});
+
+test('auditoría de mensajes de Despacho es idempotente por id externo y no usa la tabla Message del bot', async () => {
+  const created = [];
+  let existing = null;
+  const prismaClient = {
+    devAuditEvent: {
+      findFirst: async () => existing,
+      create: async ({ data }) => {
+        created.push(data);
+        existing = { id: 'audit-1' };
+        return data;
+      }
+    }
+  };
+
+  const first = await recordDispatchWhatsappMessageAudit({
+    prismaClient,
+    scope: 'operational',
+    direction: 'INBOUND',
+    phone: '3000000001',
+    body: 'Mensaje ficticio',
+    messageType: 'TEXT',
+    messageId: 'wamid-fake-1',
+    source: 'WEBHOOK_INBOUND',
+    occurredAt: NOW
+  });
+  const duplicate = await recordDispatchWhatsappMessageAudit({
+    prismaClient,
+    scope: 'operational',
+    direction: 'INBOUND',
+    phone: '3000000001',
+    body: 'Mensaje ficticio',
+    messageType: 'TEXT',
+    messageId: 'wamid-fake-1',
+    source: 'WEBHOOK_INBOUND',
+    occurredAt: NOW
+  });
+
+  assert.equal(first.recorded, true);
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(created.length, 1);
+  assert.equal(created[0].entityType, 'DISPATCH_WHATSAPP_MESSAGE');
+  assert.equal(created[0].entityLabel, '573000000001');
+  assert.equal(created[0].metadata.body, 'Mensaje ficticio');
+  assert.equal('message' in prismaClient, false);
 });
 
 test('monitor detecta posible desajuste entre teléfono guardado e inbound real sin inventar ventana abierta', async () => {
@@ -160,22 +257,26 @@ test('monitor de WhatsApp Despacho sigue siendo exclusivamente DEV', () => {
   assert.equal(canAccessDispatchWhatsappMonitor({ session: { userRole: 'admin', username: 'operaciones-despacho' } }), false);
 });
 
-test('UI conserva monitor vivo, diagnóstico de teléfonos y permite intentar envío aunque figure cerrado', () => {
+test('UI conserva separación del bot, refresh vivo, conversación por auxiliar y prueba de envío', () => {
   const statusView = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const monitorView = fs.readFileSync(new URL('../src/views/operacionesWhatsappMonitor.ejs', import.meta.url), 'utf8');
   const assignmentRoute = fs.readFileSync(new URL('../src/routes/dispatchAssignmentConfirmations.js', import.meta.url), 'utf8');
   const whatsappRoute = fs.readFileSync(new URL('../src/routes/dispatchWhatsappNotifications.js', import.meta.url), 'utf8');
+  const webhookService = fs.readFileSync(new URL('../src/services/dispatchWhatsappWebhookService.js', import.meta.url), 'utf8');
 
   assert.match(monitorView, /href="\/admin\/monitor">Monitor bot/);
-  assert.match(monitorView, /Enviar verificación a faltantes/);
+  assert.match(monitorView, /WhatsApp Despacho · DEV/);
+  assert.match(monitorView, /Conversación WhatsApp Despacho/);
+  assert.match(monitorView, /data-chat-toggle/);
+  assert.match(monitorView, /no se mezclan mensajes del bot de Reclutamiento/);
   assert.match(monitorView, /window\.setInterval\(refreshMonitor, 5000\)/);
   assert.match(monitorView, /Inbound recientes que no coinciden/);
   assert.match(monitorView, /Probar envío/);
   assert.match(monitorView, /Meta será quien acepte o rechace/);
   assert.match(assignmentRoute, /assignment-wa-window-check/);
   assert.match(assignmentRoute, /ventanas-asignaciones/);
-  assert.match(whatsappRoute, /monitor\/enviar-verificacion-ventana/);
-  assert.match(whatsappRoute, /sendCloudWindowCheckTemplate/);
+  assert.match(whatsappRoute, /recordDispatchWhatsappMessageAudit/);
+  assert.match(webhookService, /recordDispatchWhatsappMessageAudit/);
   assert.doesNotMatch(whatsappRoute, /if \(!item\.isOpen\)/);
   assert.match(statusView, /Configuración activa · solo DEV/);
 });
