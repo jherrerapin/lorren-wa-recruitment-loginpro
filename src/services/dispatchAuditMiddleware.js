@@ -4,6 +4,7 @@ import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.
 import { injectAdminModuleNavigation } from './adminNavigation.js';
 
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
+const PROGRAMMING_CONTACTS_SCRIPT = '/public/dispatch-programming-contacts.js';
 const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 const DEV_TEST_ASSIGNMENT_STATUSES = new Set(['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED']);
 const GUARDED_PRISMA_CLIENTS = new WeakSet();
@@ -283,12 +284,30 @@ function injectPayrollUsersScript(html, req) {
   return html.replace(/<\/body>/i, `  <script src="${PAYROLL_USERS_SCRIPT}"></script>\n</body>`);
 }
 
+function normalizeProgrammingPresentation(html, req) {
+  const path = String(req.originalUrl || '').split('?')[0];
+  if (path !== '/admin/operaciones') return html;
+  return html
+    .replace('aria-label="Formatos para enviar a gerentes"', 'aria-label="Formatos para enviar reportes"')
+    .replace('<strong>Enviar a gerentes:</strong>', '<strong>Enviar reportes:</strong>')
+    .replace("showToast(formatLabel+' enviado a los gerentes.');", "showToast(formatLabel+' enviado a los destinatarios configurados.');");
+}
+
+function injectProgrammingContactsScript(html, req) {
+  const path = String(req.originalUrl || '').split('?')[0];
+  if (path !== '/admin/operaciones' || html.includes(PROGRAMMING_CONTACTS_SCRIPT)) return html;
+  const isDev = (req.session?.userRole || req.userRole) === 'dev';
+  return html.replace(/<\/body>/i, `  <script src="${PROGRAMMING_CONTACTS_SCRIPT}" data-dev="${isDev ? 'true' : 'false'}"></script>\n</body>`);
+}
+
 function installAdminHtmlBridge(req, res) {
   const originalSend = res.send.bind(res);
   res.send = (body) => {
     if (!isHtmlResponse(body, res)) return originalSend(body);
     const withNavigation = injectAdminModuleNavigation(body, req);
-    return originalSend(injectPayrollUsersScript(withNavigation, req));
+    const withPayrollUsers = injectPayrollUsersScript(withNavigation, req);
+    const withProgrammingCopy = normalizeProgrammingPresentation(withPayrollUsers, req);
+    return originalSend(injectProgrammingContactsScript(withProgrammingCopy, req));
   };
 }
 
