@@ -31,7 +31,8 @@ const SAMPLE_CONSISTENCY_THRESHOLD = 0.78;
 const IDENTITY_CONTINUITY_THRESHOLD = ATTENDANCE_IDENTITY_THRESHOLD;
 const ACTION_SAMPLE_CONSISTENCY_THRESHOLD = 0.65;
 const ACTION_IDENTITY_THRESHOLD = 0.65;
-const ENROLLMENT_SAMPLE_COUNT = 3;
+const ENROLLMENT_MIN_SAMPLE_COUNT = 2;
+const ENROLLMENT_TARGET_SAMPLE_COUNT = 3;
 const VERIFICATION_SAMPLE_COUNT = 4;
 const PASSIVE_VERIFICATION_SAMPLE_COUNT = 2;
 const ACTION_SAMPLE_COUNT = 3;
@@ -222,6 +223,14 @@ function validateStrictSamples(input, expectedLength, prefix) {
   };
 }
 
+function strictEnrollmentSampleCount(input) {
+  const sampleCount = Array.isArray(input.sampleDescriptors) ? input.sampleDescriptors.length : 0;
+  if (sampleCount < ENROLLMENT_MIN_SAMPLE_COUNT || sampleCount > ENROLLMENT_TARGET_SAMPLE_COUNT) {
+    throw new Error('attendance_biometric_enrollment_samples_invalid');
+  }
+  return sampleCount;
+}
+
 function encryptDescriptor(descriptor, env) {
   const iv = randomBytes(12);
   const key = deriveKey(biometricSecret(env), 'biometric-template-encryption');
@@ -248,7 +257,11 @@ function decryptDescriptor(envelope, env) {
 }
 
 function decryptEnrollmentReferences(value, env) {
-  if (!Array.isArray(value) || value.length !== ENROLLMENT_SAMPLE_COUNT) return [];
+  if (
+    !Array.isArray(value)
+    || value.length < ENROLLMENT_MIN_SAMPLE_COUNT
+    || value.length > ENROLLMENT_TARGET_SAMPLE_COUNT
+  ) return [];
   try {
     const descriptors = value.map((entry) => decryptDescriptor(entry, env));
     const length = descriptors[0]?.length || 0;
@@ -404,7 +417,8 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
     if (normalizeString(input.modelVersion, 100) !== WORKER_BIOMETRIC_MODEL_VERSION) {
       throw new Error('attendance_biometric_model_version_invalid');
     }
-    const samples = validateStrictSamples(input, ENROLLMENT_SAMPLE_COUNT, 'enrollment');
+    const strictSampleCount = strictEnrollmentSampleCount(input);
+    const samples = validateStrictSamples(input, strictSampleCount, 'enrollment');
     finiteNumber(input.captureDurationMs, 'attendance_biometric_enrollment_duration', {
       min: 500,
       max: MAX_CAPTURE_DURATION_MS
@@ -415,7 +429,7 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
     liveScore = samples.liveScore;
     minimumSampleSimilarityValue = samples.minimumSimilarity;
     captureHash = samples.captureHash;
-    sampleCount = ENROLLMENT_SAMPLE_COUNT;
+    sampleCount = strictSampleCount;
   } else {
     descriptor = normalizeWorkerBiometricDescriptor(input.descriptor);
     realScore = Number(input.realScore);
