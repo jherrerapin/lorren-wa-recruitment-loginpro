@@ -66,9 +66,11 @@ function descriptor(seed = 1) {
   return [seed, ...Array(127).fill(0)];
 }
 
-test('un registro facial sirve para llegada, almuerzos y salida', () => {
+test('registro y marcaciones usan una sola cara real en el modo temporal', () => {
   assert.match(mobile, /const ENROLLMENT_TARGET_SAMPLES = 1/);
   assert.match(mobile, /const ENROLLMENT_MIN_SAMPLES = 1/);
+  assert.match(mobile, /const VERIFICATION_STAGE_SAMPLES = 1/);
+  assert.match(mobile, /const REQUIRED_STABLE_FRONT_FRAMES = 1/);
   assert.match(mobile, /faces\.length !== 1/);
   assert.match(mobile, /scores\.realScore < MIN_REAL_SCORE/);
   assert.match(mobile, /scores\.liveScore < MIN_LIVE_SCORE/);
@@ -90,7 +92,7 @@ test('el backend acepta uno, dos o tres rostros válidos y conserva las referenc
       sampleDescriptors: samples,
       sampleRealScores: Array(sampleCount).fill(0.9),
       sampleLiveScores: Array(sampleCount).fill(0.9),
-      captureDurationMs: 1_000
+      captureDurationMs: 0
     }, { now: new Date('2026-08-12T15:00:00.000Z'), env: ENV });
 
     const enrollmentEvent = prisma.events.find((event) => event.action === 'BIOMETRIC_ENROLLED');
@@ -117,14 +119,14 @@ test('el backend rechaza cero o más de tres muestras de enrolamiento', async ()
         sampleDescriptors: samples,
         sampleRealScores: Array(sampleCount).fill(0.9),
         sampleLiveScores: Array(sampleCount).fill(0.9),
-        captureDurationMs: 1_000
+        captureDurationMs: 0
       }, { now: new Date('2026-08-12T15:00:00.000Z'), env: ENV }),
       /attendance_biometric_enrollment_samples_invalid/
     );
   }
 });
 
-test('Android evita WebGL y la marcación conserva dos muestras frontales', () => {
+test('Android evita WebGL y una sola muestra frontal completa la marcación', () => {
   assert.match(mobile, /const IS_ANDROID = \/Android\/i/);
   assert.match(mobile, /IS_ANDROID \? \['cpu'\] : \['webgl', 'wasm', 'cpu'\]/);
   assert.match(mobile, /mesh: \{ enabled: !IS_ANDROID/);
@@ -137,20 +139,23 @@ test('Android evita WebGL y la marcación conserva dos muestras frontales', () =
   assert.doesNotMatch(verification, /captureActiveChallenge/);
 });
 
-test('el servidor conserva anti-spoof, liveness y comparación de identidad', () => {
+test('el servidor conserva presencia real pero deja la similitud como telemetría', () => {
   assert.match(service, /ENROLLMENT_MIN_SAMPLE_COUNT = 1/);
   assert.match(service, /ENROLLMENT_TARGET_SAMPLE_COUNT = 3/);
+  assert.match(service, /PASSIVE_VERIFICATION_MIN_SAMPLE_COUNT = 1/);
   assert.match(service, /PASSIVE_VERIFICATION_SAMPLE_COUNT = 2/);
   assert.match(service, /validateStrictSamples\(input, verificationSampleCount/);
   assert.match(service, /REAL_THRESHOLD = 0\.55/);
   assert.match(service, /LIVE_THRESHOLD = 0\.55/);
   assert.match(service, /MATCH_THRESHOLD = 0\.82/);
   assert.match(service, /ATTENDANCE_IDENTITY_THRESHOLD = 0\.60/);
+  assert.match(service, /identityMatchEnforced:\s*false/);
+  assert.doesNotMatch(service, /addFlag\(flags, 'BIOMETRIC_FACE_MISMATCH'/);
   assert.match(service, /PASSIVE_CHALLENGE_KIND = 'MODEL_PASSIVE_LIVENESS_V2'/);
 });
 
-test('no encadena reinicios automáticos y fuerza actualización del portal', () => {
+test('no encadena reinicios automáticos y conserva la estrategia network-first vigente', () => {
   assert.match(flow, /MAX_AUTOMATIC_ATTEMPTS = 1/);
-  assert.match(loader, /20260812-worker-portal-biometric-v10/);
+  assert.match(loader, /20260811-worker-portal-biometric-v9/);
   assert.match(serviceWorker, /lorren-worker-portal-shell-v14/);
 });
