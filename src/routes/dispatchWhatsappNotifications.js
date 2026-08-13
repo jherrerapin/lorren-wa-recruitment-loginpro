@@ -259,18 +259,20 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma });
       const item = monitor.items.find((candidate) => candidate.assignmentId === assignmentId);
       if (!item) return res.status(404).json({ ok: false, message: 'La asignación ya no corresponde a mañana.' });
-      if (!item.isOpen) {
-        return res.status(409).json({
-          ok: false,
-          message: 'La ventana de 24 horas está cerrada. Primero el auxiliar debe responder la verificación del canal.'
-        });
-      }
+      if (!item.phone) return res.status(409).json({ ok: false, message: 'El auxiliar no tiene un teléfono disponible para intentar el envío.' });
+
       const providerMessageId = await sendDispatchWhatsappTextMessage({
         scope: 'operational',
         phone: item.phone,
         text: message
       });
-      return res.json({ ok: true, assignmentId, workerName: item.workerName, providerMessageId });
+      return res.json({
+        ok: true,
+        assignmentId,
+        workerName: item.workerName,
+        providerMessageId,
+        monitorStateWasOpen: Boolean(item.isOpen)
+      });
     } catch (error) {
       return res.status(502).json({
         ok: false,

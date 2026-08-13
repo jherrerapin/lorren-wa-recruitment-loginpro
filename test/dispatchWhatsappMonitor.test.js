@@ -47,11 +47,19 @@ function prismaFixture() {
     dispatchWhatsappContactWindow: {
       findMany: async (query) => {
         assert.equal(query.where.scope, 'operational');
-        const requested = new Set(query.where.phone.in);
+        if (query.where.phone?.in) {
+          const requested = new Set(query.where.phone.in);
+          return [
+            { scope: 'operational', phone: '573001112233', lastInboundAt: new Date('2026-08-12T23:10:00.000Z') },
+            { scope: 'operational', phone: '573003334455', lastInboundAt: new Date('2026-08-11T20:00:00.000Z') }
+          ].filter((row) => requested.has(row.phone));
+        }
+        assert.ok(query.where.lastInboundAt?.gte instanceof Date);
         return [
           { scope: 'operational', phone: '573001112233', lastInboundAt: new Date('2026-08-12T23:10:00.000Z') },
-          { scope: 'operational', phone: '573003334455', lastInboundAt: new Date('2026-08-11T20:00:00.000Z') }
-        ].filter((row) => requested.has(row.phone));
+          { scope: 'operational', phone: '573002223344', lastInboundAt: new Date('2026-08-13T00:20:00.000Z') },
+          { scope: 'operational', phone: '573009999999', lastInboundAt: new Date('2026-08-13T00:25:00.000Z') }
+        ];
       },
       upsert: async (query) => {
         healed.push(query);
@@ -72,13 +80,15 @@ test('fecha objetivo del monitor DEV es mañana en America/Bogota', () => {
   assert.equal(tomorrowIsoDateCO(NOW), '2026-08-13');
 });
 
-test('monitor vivo reconcilia confirmación inbound y no deja cerrado a quien ya respondió', async () => {
+test('monitor vivo reconcilia confirmación inbound y expone inbound sin coincidencia', async () => {
   const prismaClient = prismaFixture();
   const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient, now: NOW });
   assert.equal(monitor.summary.total, 3);
   assert.equal(monitor.summary.open, 2);
   assert.equal(monitor.summary.closed, 1);
   assert.equal(monitor.summary.missingWindow, 1);
+  assert.equal(monitor.summary.unmatchedInbound, 1);
+  assert.equal(monitor.unmatchedInbound[0].phone, '573009999999');
 
   const auxiliarA = monitor.items.find((item) => item.workerName === 'Auxiliar A');
   assert.equal(auxiliarA.isOpen, true);
@@ -94,7 +104,30 @@ test('monitor vivo reconcilia confirmación inbound y no deja cerrado a quien ya
   const auxiliarC = monitor.items.find((item) => item.workerName === 'Auxiliar C');
   assert.equal(auxiliarC.isOpen, false);
   assert.equal(auxiliarC.canSendWindowCheck, true);
+  assert.equal(auxiliarC.canAttemptManualMessage, true);
   assert.equal(monitor.items[0].workerName, 'Auxiliar C');
+});
+
+test('monitor detecta posible desajuste entre teléfono guardado e inbound real sin inventar ventana abierta', async () => {
+  const malformedAssignment = {
+    ...assignmentFixture()[0],
+    worker: { id: 'worker-a', fullName: 'Auxiliar A', phone: '57001112233' }
+  };
+  const prismaClient = {
+    dispatchAssignment: { findMany: async () => [malformedAssignment] },
+    dispatchWhatsappContactWindow: {
+      findMany: async (query) => query.where.phone?.in ? [] : [
+        { scope: 'operational', phone: '573001112233', lastInboundAt: new Date('2026-08-13T00:25:00.000Z') }
+      ],
+      upsert: async () => null
+    },
+    dispatchWhatsappConfirmation: { findMany: async () => [] }
+  };
+  const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient, now: NOW });
+  assert.equal(monitor.items[0].isOpen, false);
+  assert.equal(monitor.items[0].phoneIssue, 'CO_LENGTH_MISMATCH');
+  assert.equal(monitor.items[0].possibleInboundPhone, '573001112233');
+  assert.equal(monitor.summary.phoneReview, 1);
 });
 
 test('estado compacto de asignaciones usa la misma autoridad viva', async () => {
@@ -127,7 +160,7 @@ test('monitor de WhatsApp Despacho sigue siendo exclusivamente DEV', () => {
   assert.equal(canAccessDispatchWhatsappMonitor({ session: { userRole: 'admin', username: 'operaciones-despacho' } }), false);
 });
 
-test('UI conserva monitor separado, refresco vivo y check compacto en tarjetas', () => {
+test('UI conserva monitor vivo, diagnóstico de teléfonos y permite intentar envío aunque figure cerrado', () => {
   const statusView = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const monitorView = fs.readFileSync(new URL('../src/views/operacionesWhatsappMonitor.ejs', import.meta.url), 'utf8');
   const assignmentRoute = fs.readFileSync(new URL('../src/routes/dispatchAssignmentConfirmations.js', import.meta.url), 'utf8');
@@ -136,10 +169,13 @@ test('UI conserva monitor separado, refresco vivo y check compacto en tarjetas',
   assert.match(monitorView, /href="\/admin\/monitor">Monitor bot/);
   assert.match(monitorView, /Enviar verificación a faltantes/);
   assert.match(monitorView, /window\.setInterval\(refreshMonitor, 5000\)/);
-  assert.match(monitorView, /Último mensaje recibido/);
+  assert.match(monitorView, /Inbound recientes que no coinciden/);
+  assert.match(monitorView, /Probar envío/);
+  assert.match(monitorView, /Meta será quien acepte o rechace/);
   assert.match(assignmentRoute, /assignment-wa-window-check/);
   assert.match(assignmentRoute, /ventanas-asignaciones/);
   assert.match(whatsappRoute, /monitor\/enviar-verificacion-ventana/);
   assert.match(whatsappRoute, /sendCloudWindowCheckTemplate/);
+  assert.doesNotMatch(whatsappRoute, /if \(!item\.isOpen\)/);
   assert.match(statusView, /Configuración activa · solo DEV/);
 });
