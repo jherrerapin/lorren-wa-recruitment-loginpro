@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma.js';
 import { buildDispatchServiceDateWhere, dispatchServiceDateKey, todayIsoDateCO } from './dispatchDate.js';
+import { dispatchServiceRequestStartAt } from './dispatchServiceRequestPolicy.js';
 import {
   ACTIVE_LINK_STATUSES,
   normalizeDispatchWhatsappPhone
@@ -205,6 +206,20 @@ function bogotaDayStart(dateKey) {
   return new Date(`${dateKey}T00:00:00.000-05:00`);
 }
 
+function configurationPredatesCurrentDay(settings, currentDateKey) {
+  const configuredAt = new Date(settings?.configuredAt || Number.NaN);
+  if (Number.isNaN(configuredAt.getTime())) return false;
+  return configuredAt.getTime() < bogotaDayStart(currentDateKey).getTime();
+}
+
+function isRecoverableAssignment(assignment, targetDateKey, now) {
+  const createdAt = new Date(assignment?.createdAt || Number.NaN);
+  if (Number.isNaN(createdAt.getTime())) return false;
+  if (createdAt.getTime() >= bogotaDayStart(targetDateKey).getTime()) return false;
+  const startAt = dispatchServiceRequestStartAt(assignment?.serviceRequest || {});
+  return Boolean(startAt && now.getTime() < startAt.getTime());
+}
+
 async function latestAutomationConfigs(prismaClient) {
   if (!prismaClient?.devAuditEvent?.findMany) return [];
   const rows = await prismaClient.devAuditEvent.findMany({
@@ -216,7 +231,7 @@ async function latestAutomationConfigs(prismaClient) {
   for (const row of rows) {
     const userId = String(row?.entityId || '').trim();
     if (!userId || latestByUserId.has(userId)) continue;
-    latestByUserId.set(userId, automationMetadata(row));
+    latestByUserId.set(userId, { ...automationMetadata(row), configuredAt: row?.createdAt || null });
   }
   if (!latestByUserId.size) return [];
   const users = await prismaClient.appUser.findMany({
@@ -309,12 +324,17 @@ async function runAutomaticAssignmentSends({
   dateKey,
   targetDateKey,
   axiosClient,
-  sendAssignmentMessage
+  sendAssignmentMessage,
+  recoveryMode = false,
+  now = new Date()
 }) {
   const assignments = await assignmentsForUserAndDate(prismaClient, user, targetDateKey, ['ASSIGNED']);
-  const attempted = await attemptedAssignmentIdsToday(prismaClient, assignments.map((item) => item.id), dateKey);
-  const pending = assignments.filter((assignment) => !attempted.has(assignment.id));
-  if (!pending.length) return { eligible: assignments.length, attempted: 0, sent: 0, failed: 0 };
+  const eligibleAssignments = recoveryMode
+    ? assignments.filter((assignment) => isRecoverableAssignment(assignment, targetDateKey, now))
+    : assignments;
+  const attempted = await attemptedAssignmentIdsToday(prismaClient, eligibleAssignments.map((item) => item.id), dateKey);
+  const pending = eligibleAssignments.filter((assignment) => !attempted.has(assignment.id));
+  if (!pending.length) return { eligible: eligibleAssignments.length, attempted: 0, sent: 0, failed: 0 };
 
   const sender = sendAssignmentMessage || (await import('./dispatchWhatsappAssignmentService.js')).sendDispatchWhatsappMessage;
   let sent = 0;
@@ -346,7 +366,7 @@ async function runAutomaticAssignmentSends({
       console.warn(`[dispatch-wa-schedule] Falló envío automático. userId=${user.id} assignment=${assignment.id} code=${error?.code || 'unknown'}.`);
     }
   }
-  return { eligible: assignments.length, attempted: pending.length, sent, failed };
+  return { eligible: eligibleAssignments.length, attempted: pending.length, sent, failed };
 }
 
 async function runPendingConfirmationAlert({
@@ -355,7 +375,9 @@ async function runPendingConfirmationAlert({
   dateKey,
   targetDateKey,
   axiosClient,
-  sendAdminMessage
+  sendAdminMessage,
+  recoveryMode = false,
+  now = new Date()
 }) {
   const runKey = `${user.id}:${dateKey}:${PENDING_ALERT_ACTION}`;
   if (activeScheduleRuns.has(runKey)) return { skipped: true, reason: 'running' };
@@ -365,13 +387,16 @@ async function runPendingConfirmationAlert({
   activeScheduleRuns.add(runKey);
   try {
     const assignments = await assignmentsForUserAndDate(prismaClient, user, targetDateKey, PENDING_ASSIGNMENT_STATUSES);
-    const summary = { pendingCount: assignments.length, sent: false, failed: false };
-    if (assignments.length) {
+    const eligibleAssignments = recoveryMode
+      ? assignments.filter((assignment) => isRecoverableAssignment(assignment, targetDateKey, now))
+      : assignments;
+    const summary = { pendingCount: eligibleAssignments.length, sent: false, failed: false };
+    if (eligibleAssignments.length) {
       try {
         await sendAdminMessage({
           scope: 'operational',
           phone: user.dispatchAlertPhone,
-          text: buildDispatchPendingConfirmationAlertText(assignments, targetDateKey),
+          text: buildDispatchPendingConfirmationAlertText(eligibleAssignments, targetDateKey),
           axiosClient
         });
         summary.sent = true;
@@ -395,18 +420,47 @@ export async function runDispatchUserAutomationScheduler(prismaClient = prisma, 
 } = {}) {
   const clock = bogotaClock(now);
   const targetDateKey = addIsoDays(clock.dateKey, 1);
+  const recoveryScheduleDateKey = addIsoDays(clock.dateKey, -1);
+  const recoveryTargetDateKey = clock.dateKey;
   const configured = await latestAutomationConfigs(prismaClient);
   const result = {
     usersChecked: configured.length,
     targetDateKey,
+    recoveryTargetDateKey,
     assignmentAttempts: 0,
     assignmentSent: 0,
     assignmentFailed: 0,
     pendingAlertsSent: 0,
-    pendingAlertsFailed: 0
+    pendingAlertsFailed: 0,
+    recoveryAssignmentAttempts: 0,
+    recoveryAssignmentSent: 0,
+    recoveryAssignmentFailed: 0,
+    recoveryPendingAlertsSent: 0,
+    recoveryPendingAlertsFailed: 0
   };
 
   for (const { user, settings } of configured) {
+    const recoveryAllowed = configurationPredatesCurrentDay(settings, clock.dateKey);
+
+    if (settings.assignmentAutoSendTime && recoveryAllowed && clock.timeKey < settings.assignmentAutoSendTime) {
+      const recovery = await runAutomaticAssignmentSends({
+        prismaClient,
+        user,
+        dateKey: recoveryScheduleDateKey,
+        targetDateKey: recoveryTargetDateKey,
+        axiosClient,
+        sendAssignmentMessage,
+        recoveryMode: true,
+        now
+      });
+      result.assignmentAttempts += recovery.attempted;
+      result.assignmentSent += recovery.sent;
+      result.assignmentFailed += recovery.failed;
+      result.recoveryAssignmentAttempts += recovery.attempted;
+      result.recoveryAssignmentSent += recovery.sent;
+      result.recoveryAssignmentFailed += recovery.failed;
+    }
+
     if (settings.assignmentAutoSendTime && clock.timeKey >= settings.assignmentAutoSendTime) {
       const auto = await runAutomaticAssignmentSends({
         prismaClient,
@@ -414,11 +468,33 @@ export async function runDispatchUserAutomationScheduler(prismaClient = prisma, 
         dateKey: clock.dateKey,
         targetDateKey,
         axiosClient,
-        sendAssignmentMessage
+        sendAssignmentMessage,
+        now
       });
       result.assignmentAttempts += auto.attempted;
       result.assignmentSent += auto.sent;
       result.assignmentFailed += auto.failed;
+    }
+
+    if (settings.pendingConfirmationAlertTime && recoveryAllowed && clock.timeKey < settings.pendingConfirmationAlertTime) {
+      const recoveryAlert = await runPendingConfirmationAlert({
+        prismaClient,
+        user,
+        dateKey: recoveryScheduleDateKey,
+        targetDateKey: recoveryTargetDateKey,
+        axiosClient,
+        sendAdminMessage,
+        recoveryMode: true,
+        now
+      });
+      if (recoveryAlert?.sent) {
+        result.pendingAlertsSent += 1;
+        result.recoveryPendingAlertsSent += 1;
+      }
+      if (recoveryAlert?.failed) {
+        result.pendingAlertsFailed += 1;
+        result.recoveryPendingAlertsFailed += 1;
+      }
     }
 
     if (settings.pendingConfirmationAlertTime && clock.timeKey >= settings.pendingConfirmationAlertTime) {
@@ -428,7 +504,8 @@ export async function runDispatchUserAutomationScheduler(prismaClient = prisma, 
         dateKey: clock.dateKey,
         targetDateKey,
         axiosClient,
-        sendAdminMessage
+        sendAdminMessage,
+        now
       });
       if (alert?.sent) result.pendingAlertsSent += 1;
       if (alert?.failed) result.pendingAlertsFailed += 1;
