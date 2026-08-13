@@ -24,7 +24,8 @@
   const RUNTIME_PREPARE_TIMEOUT_MS = 30_000;
   const RUNTIME_STALLED_LOAD_MS = 75_000;
   const RUNTIME_MAX_IDLE_MS = 12 * 60 * 60 * 1000;
-  const ENROLLMENT_SAMPLES = 3;
+  const ENROLLMENT_TARGET_SAMPLES = 3;
+  const ENROLLMENT_MIN_SAMPLES = 2;
   const VERIFICATION_STAGE_SAMPLES = 2;
   const REQUIRED_ACTION_FRAMES = 3;
   const BACKENDS = Object.freeze(IS_ANDROID ? ['cpu'] : ['webgl', 'wasm', 'cpu']);
@@ -459,12 +460,33 @@
     return { face, quality };
   }
 
-  async function collectStableFront(human, video, onStatus, deadline, samplesRequired, timeoutError) {
+  async function collectStableFront(
+    human,
+    video,
+    onStatus,
+    deadline,
+    samplesRequired,
+    timeoutError,
+    minimumSamplesRequired = samplesRequired
+  ) {
     const samples = [];
     let consecutiveFront = 0;
     let latest = null;
     let activeDeadline = deadline;
     let sampleGraceGranted = false;
+
+    function selectionResult(sampleCount) {
+      const selected = samples.slice(-sampleCount);
+      return {
+        latest,
+        samples: selected,
+        descriptors: selected.map((sample) => sample.descriptor),
+        realScores: selected.map((sample) => sample.realScore),
+        liveScores: selected.map((sample) => sample.liveScore),
+        realScore: Math.min(...selected.map((sample) => sample.realScore)),
+        liveScore: Math.min(...selected.map((sample) => sample.liveScore))
+      };
+    }
 
     while (Date.now() < activeDeadline) {
       const detected = await detectOneFace(human, video, onStatus);
@@ -511,19 +533,15 @@
       }
 
       if (samples.length >= samplesRequired) {
-        const selected = samples.slice(-samplesRequired);
-        return {
-          latest,
-          samples: selected,
-          descriptors: selected.map((sample) => sample.descriptor),
-          realScores: selected.map((sample) => sample.realScore),
-          liveScores: selected.map((sample) => sample.liveScore),
-          realScore: Math.min(...selected.map((sample) => sample.realScore)),
-          liveScore: Math.min(...selected.map((sample) => sample.liveScore))
-        };
+        return selectionResult(samplesRequired);
       }
       onStatus?.(`Rostro válido · captura ${samples.length} de ${samplesRequired}. Mantén la posición.`);
       await sleep(160);
+    }
+
+    if (samples.length >= minimumSamplesRequired) {
+      onStatus?.(`Rostro válido · ${samples.length} capturas suficientes. Registrando rostro…`);
+      return selectionResult(samples.length);
     }
     throw new Error(timeoutError || 'biometric_capture_timeout');
   }
@@ -540,8 +558,9 @@
       video,
       onStatus,
       deadline,
-      ENROLLMENT_SAMPLES,
-      'biometric_enrollment_timeout'
+      ENROLLMENT_TARGET_SAMPLES,
+      'biometric_enrollment_timeout',
+      ENROLLMENT_MIN_SAMPLES
     );
     const photoBlob = await capturePhoto(video);
     return {
