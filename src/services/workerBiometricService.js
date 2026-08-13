@@ -34,12 +34,13 @@ const ACTION_IDENTITY_THRESHOLD = 0.65;
 const ENROLLMENT_MIN_SAMPLE_COUNT = 1;
 const ENROLLMENT_TARGET_SAMPLE_COUNT = 3;
 const VERIFICATION_SAMPLE_COUNT = 4;
+const PASSIVE_VERIFICATION_MIN_SAMPLE_COUNT = 1;
 const PASSIVE_VERIFICATION_SAMPLE_COUNT = 2;
 const ACTION_SAMPLE_COUNT = 3;
 const PASSIVE_CHALLENGE_KIND = 'MODEL_PASSIVE_LIVENESS_V2';
 const MIN_CHALLENGE_DURATION_MS = 200;
 const MAX_CHALLENGE_DURATION_MS = 12_000;
-const MIN_CAPTURE_DURATION_MS = 700;
+const MIN_CAPTURE_DURATION_MS = 0;
 const MAX_CAPTURE_DURATION_MS = 45_000;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const RATE_LIMIT_INITIAL_FAILURES = 5;
@@ -227,6 +228,14 @@ function strictEnrollmentSampleCount(input) {
   const sampleCount = Array.isArray(input.sampleDescriptors) ? input.sampleDescriptors.length : 0;
   if (sampleCount < ENROLLMENT_MIN_SAMPLE_COUNT || sampleCount > ENROLLMENT_TARGET_SAMPLE_COUNT) {
     throw new Error('attendance_biometric_enrollment_samples_invalid');
+  }
+  return sampleCount;
+}
+
+function strictPassiveVerificationSampleCount(input) {
+  const sampleCount = Array.isArray(input.sampleDescriptors) ? input.sampleDescriptors.length : 0;
+  if (sampleCount < PASSIVE_VERIFICATION_MIN_SAMPLE_COUNT || sampleCount > PASSIVE_VERIFICATION_SAMPLE_COUNT) {
+    throw new Error('attendance_biometric_verification_samples_invalid');
   }
   return sampleCount;
 }
@@ -420,7 +429,7 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
     const strictSampleCount = strictEnrollmentSampleCount(input);
     const samples = validateStrictSamples(input, strictSampleCount, 'enrollment');
     finiteNumber(input.captureDurationMs, 'attendance_biometric_enrollment_duration', {
-      min: 500,
+      min: MIN_CAPTURE_DURATION_MS,
       max: MAX_CAPTURE_DURATION_MS
     });
     descriptor = samples.descriptor;
@@ -595,7 +604,7 @@ function normalizeChallengeEvidence(value, expectedAction) {
       kind: value.kind,
       action: value.action,
       frames: finiteNumber(value.frames, 'attendance_biometric_passive_frames', {
-        min: PASSIVE_VERIFICATION_SAMPLE_COUNT,
+        min: PASSIVE_VERIFICATION_MIN_SAMPLE_COUNT,
         max: 10
       }),
       captureDurationMs: finiteNumber(value.captureDurationMs, 'attendance_biometric_capture_duration', {
@@ -849,7 +858,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
         throw new Error('attendance_biometric_model_version_invalid');
       }
       const verificationSampleCount = input.challengeEvidence?.kind === PASSIVE_CHALLENGE_KIND
-        ? PASSIVE_VERIFICATION_SAMPLE_COUNT
+        ? strictPassiveVerificationSampleCount(input)
         : VERIFICATION_SAMPLE_COUNT;
       const samples = validateStrictSamples(input, verificationSampleCount, 'verification');
       descriptor = samples.descriptor;
@@ -928,9 +937,8 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     } else if (sessionMatched) {
       referenceSource = 'SESSION';
       identityConfidence = 'PROBABLE';
-    }
-    if (!enrollmentMatched && !enrollmentProbable && !sessionMatched) {
-      addFlag(flags, 'BIOMETRIC_FACE_MISMATCH', 70, state);
+    } else {
+      identityConfidence = 'UNCONFIRMED';
     }
     if (await captureWasReplayed(prisma, captureHash, hash, idempotencyKey)) {
       addFlag(flags, 'BIOMETRIC_DESCRIPTOR_REPLAY', 80, state);
@@ -950,6 +958,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     sessionSimilarity,
     referenceSource,
     identityConfidence,
+    identityMatchEnforced: false,
     matchThreshold: MATCH_THRESHOLD,
     attendanceIdentityThreshold: ATTENDANCE_IDENTITY_THRESHOLD,
     sessionIdentityThreshold: IDENTITY_CONTINUITY_THRESHOLD,
