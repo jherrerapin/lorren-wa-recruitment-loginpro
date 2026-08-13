@@ -300,6 +300,19 @@ function hasGroundedExperienceSummaryContext(text = '', context = {}, turnType =
   return fieldWasPending('experienceSummary', context) && hasExperienceEvidence(text);
 }
 
+function correctionContextGroundsField(field, value, evidence, text, context = {}) {
+  const isCorrection = context.correctionIntent === true
+    || context.conversationContext?.correctionIntent === true;
+  if (!isCorrection) return false;
+
+  const normalizedText = normalizeText(text);
+  const normalizedValue = normalizeText(value);
+  if (!normalizedText || !normalizedValue || !normalizedText.includes(normalizedValue)) return false;
+
+  return evidenceIsUsable(field, evidence, { allowLocalParser: true })
+    || evidenceSnippetIsGrounded(field, evidence, text);
+}
+
 function hasNameEvidenceCue(text = '') {
   const normalized = normalizeText(text);
   return /\b(mi nombre es|nombre completo|me llamo|soy)\b/.test(normalized);
@@ -361,20 +374,21 @@ function sanitizeFullName(value, evidence, text, context, turnType) {
   const identityCue = hasNameEvidenceCue(text);
   const groupedIdentityEvidence = hasDocumentEvidence(text) || hasAgeEvidence(text);
   const usableEvidence = evidenceIsUsable('fullName', evidence, { allowLocalParser: true });
+  const groundedCorrection = correctionContextGroundsField('fullName', value, evidence, text, context);
 
   if (getEvidence('fullName', evidence).snippet && !evidenceSnippetIsGrounded('fullName', evidence, text)) {
     return { ok: false, reason: 'name_evidence_not_grounded_in_candidate_text' };
   }
 
-  if (turnLooksLikeOnlyConversation(turnType) && !fieldContext && !identityCue && !groupedIdentityEvidence) {
+  if (turnLooksLikeOnlyConversation(turnType) && !fieldContext && !identityCue && !groupedIdentityEvidence && !groundedCorrection) {
     return { ok: false, reason: 'conversational_turn_without_identity_evidence' };
   }
 
-  if (!usableEvidence && !fieldContext && !identityCue && !groupedIdentityEvidence) {
+  if (!usableEvidence && !fieldContext && !identityCue && !groupedIdentityEvidence && !groundedCorrection) {
     return { ok: false, reason: 'missing_name_evidence' };
   }
 
-  if (!fieldContext && !identityCue && !groupedIdentityEvidence && !currentStepCollectsCandidateData(context)) {
+  if (!fieldContext && !identityCue && !groupedIdentityEvidence && !currentStepCollectsCandidateData(context) && !groundedCorrection) {
     return { ok: false, reason: 'outside_data_collection_context' };
   }
 
@@ -387,20 +401,21 @@ function sanitizeResidence(field, value, evidence, text, context, turnType) {
   const fieldContext = fieldWasPending(field, context) || lastQuestionAskedForField(field, context);
   const residenceCue = hasResidenceEvidenceCue(text);
   const usableEvidence = evidenceIsUsable(field, evidence, { allowLocalParser: true });
+  const groundedCorrection = correctionContextGroundsField(field, value, evidence, text, context);
 
   if (getEvidence(field, evidence).snippet && !evidenceSnippetIsGrounded(field, evidence, text)) {
     return { ok: false, reason: 'residence_evidence_not_grounded_in_candidate_text' };
   }
 
-  if (turnLooksLikeOnlyConversation(turnType) && !fieldContext && !residenceCue) {
+  if (turnLooksLikeOnlyConversation(turnType) && !fieldContext && !residenceCue && !groundedCorrection) {
     return { ok: false, reason: 'conversational_turn_without_residence_evidence' };
   }
 
-  if (!usableEvidence && !fieldContext && !residenceCue) {
+  if (!usableEvidence && !fieldContext && !residenceCue && !groundedCorrection) {
     return { ok: false, reason: 'missing_residence_evidence' };
   }
 
-  if (!fieldContext && !residenceCue && !currentStepCollectsCandidateData(context)) {
+  if (!fieldContext && !residenceCue && !currentStepCollectsCandidateData(context) && !groundedCorrection) {
     return { ok: false, reason: 'outside_residence_collection_context' };
   }
 
