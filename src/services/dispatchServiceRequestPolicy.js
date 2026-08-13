@@ -77,6 +77,7 @@ async function discardEvidenceKeys(keys, deleteEvidence) {
 export async function deleteDispatchServiceRequestWithPolicy(prisma, serviceRequestId, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date();
   const deleteEvidence = typeof options.deleteEvidence === 'function' ? options.deleteEvidence : deleteObjectFromR2;
+  const allowLockedDelete = options.allowLockedDelete === true;
 
   const transactionResult = await prisma.$transaction(async (tx) => {
     const request = await tx.dispatchServiceRequest.findUnique({
@@ -86,7 +87,7 @@ export async function deleteDispatchServiceRequestWithPolicy(prisma, serviceRequ
     if (!request) return { status: 'NOT_FOUND', policy: null, evidenceKeys: [] };
 
     const policy = resolveDispatchServiceRequestPolicy(request, now);
-    if (!policy.canDelete) return { status: 'BLOCKED', policy, evidenceKeys: [] };
+    if (!policy.canDelete && !allowLockedDelete) return { status: 'BLOCKED', policy, evidenceKeys: [] };
 
     const attendanceSessions = await tx.dispatchAttendanceSession.findMany({
       where: { assignment: { serviceRequestId } },
@@ -105,7 +106,12 @@ export async function deleteDispatchServiceRequestWithPolicy(prisma, serviceRequ
     }
 
     await tx.dispatchServiceRequest.delete({ where: { id: request.id } });
-    return { status: 'DELETED', policy, evidenceKeys };
+    return {
+      status: 'DELETED',
+      policy,
+      evidenceKeys,
+      deleteBypassApplied: allowLockedDelete && !policy.canDelete
+    };
   });
 
   if (transactionResult.status === 'DELETED') {
