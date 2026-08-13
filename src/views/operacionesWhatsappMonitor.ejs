@@ -1,0 +1,162 @@
+<%
+  const h = history || { items: [], filters: {}, pagination: {}, summary: {}, limitations: [] };
+  const filters = h.filters || {};
+  const pagination = h.pagination || {};
+  const summary = h.summary || {};
+  const items = Array.isArray(h.items) ? h.items : [];
+  const limitations = Array.isArray(h.limitations) ? h.limitations : [];
+  const kinds = ['ASIGNACION','CONFIRMACION','NOVEDAD','RESPUESTA_AUTOMATICA','RESPUESTA_LEGACY','RECORDATORIO_24H'];
+  const escQuery = (value) => encodeURIComponent(value || '');
+%>
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monitor WhatsApp de despacho — LoginPro</title>
+  <link rel="icon" type="image/svg+xml" href="/public/favicon-loginpro.svg" />
+  <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .monitor-page{max-width:min(1800px,calc(100vw - 28px));width:100%}
+    .monitor-summary{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+    .metric{background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px;box-shadow:var(--shadow-sm)}
+    .metric span{display:block;color:var(--muted);font-size:11px;font-weight:850;text-transform:uppercase}.metric strong{display:block;color:var(--navy);font-size:22px;margin-top:3px}
+    .monitor-note{background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:14px;padding:12px 14px;margin-bottom:12px;font-size:12px;line-height:1.45}
+    .monitor-note ul{margin:6px 0 0;padding-left:18px}
+    .filters{display:grid;grid-template-columns:1.2fr .75fr .9fr .85fr .8fr auto;gap:8px;align-items:end;background:#fff;border:1px solid var(--border);border-radius:14px;padding:10px;margin-bottom:12px;box-shadow:var(--shadow-sm)}
+    .field{display:grid;gap:4px}.field label{font-size:10px;color:var(--muted);font-weight:900;text-transform:uppercase}.field input,.field select{width:100%;border:1px solid var(--border);border-radius:9px;padding:8px 9px;background:#fff;color:var(--navy)}
+    .table-wrap{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:auto;box-shadow:var(--shadow-sm)}
+    table{width:100%;border-collapse:collapse;min-width:1120px}th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:top;text-align:left;font-size:11px}th{position:sticky;top:0;background:#f8fafc;color:var(--muted);font-size:10px;text-transform:uppercase;z-index:1}.message{white-space:pre-wrap;line-height:1.4;max-width:500px;color:var(--navy)}
+    .pill{display:inline-flex;border-radius:999px;padding:3px 7px;font-size:9px;font-weight:900;white-space:nowrap}.in{background:#dbeafe;color:#1d4ed8}.out{background:#dcfce7;color:#166534}.reconstructed{background:#fef3c7;color:#92400e}.persisted{background:#e2e8f0;color:#334155}.status{background:#f1f5f9;color:#475569}.kind{background:#ecfeff;color:#0e7490}
+    .muted{color:var(--muted)}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px;word-break:break-all}
+    .pager{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;flex-wrap:wrap}.pager .actions{display:flex;gap:7px}.live{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:11px;font-weight:900}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+    @media(max-width:1000px){.monitor-summary{grid-template-columns:repeat(2,1fr)}.filters{grid-template-columns:1fr 1fr}.filters .btn{width:100%}}
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
+    <a href="/admin">Panel</a><a href="/admin/vacancies">Vacantes</a><a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %><span class="spacer"></span>
+    <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
+  </nav>
+
+  <main class="page monitor-page">
+    <section class="hero">
+      <div><div class="eyebrow">WhatsApp oficial · Despacho</div><h1>Monitor de mensajes</h1><p>Histórico recuperable de la línea de Despacho desde el registro más antiguo disponible en Lórren.</p></div>
+      <div class="actions"><a class="btn" href="/admin/operaciones/whatsapp">Estado WhatsApp</a><a class="btn" href="/admin/operaciones/asignaciones">Asignaciones</a><span class="live" id="liveState"><span class="dot"></span>Actualización automática</span></div>
+    </section>
+
+    <section class="monitor-summary">
+      <article class="metric"><span>Total histórico filtrado</span><strong id="metricTotal"><%= summary.total || 0 %></strong></article>
+      <article class="metric"><span>Enviados</span><strong id="metricOutbound"><%= summary.outbound || 0 %></strong></article>
+      <article class="metric"><span>Recibidos</span><strong id="metricInbound"><%= summary.inbound || 0 %></strong></article>
+      <article class="metric"><span>Reconstruidos</span><strong id="metricReconstructed"><%= summary.reconstructed || 0 %></strong></article>
+    </section>
+
+    <section class="monitor-note">
+      <strong>Alcance histórico real:</strong> este monitor no empieza hoy; consulta toda la evidencia disponible en la base. Sin embargo, Meta no expone un historial retroactivo completo para recuperar mensajes que Lórren nunca persistió.
+      <ul><% limitations.forEach((item) => { %><li><%= item %></li><% }) %></ul>
+      <div>Registro más antiguo disponible: <strong id="oldestAvailable"><%= summary.oldestAvailableAt || 'Sin registros' %></strong></div>
+    </section>
+
+    <form class="filters" method="get" action="/admin/operaciones/whatsapp/monitor" id="monitorFilters">
+      <div class="field"><label>Buscar</label><input name="q" value="<%= filters.q || '' %>" placeholder="Nombre, número, mensaje, wamid..." /></div>
+      <div class="field"><label>Dirección</label><select name="direction"><option value="">Todas</option><option value="OUTBOUND" <%= filters.direction==='OUTBOUND'?'selected':'' %>>Enviados</option><option value="INBOUND" <%= filters.direction==='INBOUND'?'selected':'' %>>Recibidos</option></select></div>
+      <div class="field"><label>Tipo</label><select name="kind"><option value="">Todos</option><% kinds.forEach((kind)=>{ %><option value="<%= kind %>" <%= filters.kind===kind?'selected':'' %>><%= kind.replaceAll('_',' ') %></option><% }) %></select></div>
+      <div class="field"><label>Estado</label><input name="status" value="<%= filters.status || '' %>" placeholder="READ, CONFIRMED..." /></div>
+      <div class="field"><label>Teléfono</label><input name="phone" value="<%= filters.phone || '' %>" inputmode="numeric" placeholder="57..." /></div>
+      <button class="btn btn-primary" type="submit">Aplicar</button>
+    </form>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Fecha / hora</th><th>Dirección</th><th>Contacto</th><th>Tipo</th><th>Mensaje</th><th>Estado</th><th>Evidencia</th><th>ID Meta</th></tr></thead>
+        <tbody id="monitorRows">
+          <% if (!items.length) { %><tr><td colspan="8" class="muted">No hay mensajes recuperables con estos filtros.</td></tr><% } %>
+          <% items.forEach((item)=>{ %>
+            <tr data-event-id="<%= item.id %>">
+              <td data-date="<%= item.occurredAt || '' %>"><%= item.occurredAt || '—' %></td>
+              <td><span class="pill <%= item.direction==='OUTBOUND'?'out':'in' %>"><%= item.direction==='OUTBOUND'?'ENVIADO':'RECIBIDO' %></span></td>
+              <td><strong><%= item.contactName || '—' %></strong><div class="mono"><%= item.phone || '—' %></div></td>
+              <td><span class="pill kind"><%= item.kind.replaceAll('_',' ') %></span></td>
+              <td class="message"><%= item.content %></td>
+              <td><span class="pill status"><%= item.status %></span></td>
+              <td><span class="pill <%= item.evidence==='RECONSTRUIDO'?'reconstructed':'persisted' %>"><%= item.evidence %></span></td>
+              <td class="mono"><%= item.messageId || '—' %></td>
+            </tr>
+          <% }) %>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pager">
+      <div class="muted">Página <strong id="pageNumber"><%= pagination.page || 1 %></strong> de <strong id="totalPages"><%= pagination.totalPages || 1 %></strong> · <%= pagination.pageSize || 100 %> registros por página</div>
+      <div class="actions">
+        <% if ((pagination.page || 1) > 1) { %><a class="btn" href="?q=<%= escQuery(filters.q) %>&direction=<%= escQuery(filters.direction) %>&kind=<%= escQuery(filters.kind) %>&status=<%= escQuery(filters.status) %>&phone=<%= escQuery(filters.phone) %>&page=<%= (pagination.page || 1)-1 %>&pageSize=<%= pagination.pageSize || 100 %>">Anterior</a><% } %>
+        <% if ((pagination.page || 1) < (pagination.totalPages || 1)) { %><a class="btn" href="?q=<%= escQuery(filters.q) %>&direction=<%= escQuery(filters.direction) %>&kind=<%= escQuery(filters.kind) %>&status=<%= escQuery(filters.status) %>&phone=<%= escQuery(filters.phone) %>&page=<%= (pagination.page || 1)+1 %>&pageSize=<%= pagination.pageSize || 100 %>">Siguiente</a><% } %>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const dataEndpoint = <%- JSON.stringify(monitorDataEndpoint) %>;
+    const rows = document.getElementById('monitorRows');
+    const liveState = document.getElementById('liveState');
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+    }
+    function formatBogota(value) {
+      if (!value) return '—';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return value;
+      return new Intl.DateTimeFormat('es-CO', {timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).format(date);
+    }
+    function renderItems(items) {
+      if (!Array.isArray(items) || !items.length) {
+        rows.innerHTML = '<tr><td colspan="8" class="muted">No hay mensajes recuperables con estos filtros.</td></tr>';
+        return;
+      }
+      rows.innerHTML = items.map((item) => `<tr data-event-id="${escapeHtml(item.id)}">
+        <td>${escapeHtml(formatBogota(item.occurredAt))}</td>
+        <td><span class="pill ${item.direction === 'OUTBOUND' ? 'out' : 'in'}">${item.direction === 'OUTBOUND' ? 'ENVIADO' : 'RECIBIDO'}</span></td>
+        <td><strong>${escapeHtml(item.contactName || '—')}</strong><div class="mono">${escapeHtml(item.phone || '—')}</div></td>
+        <td><span class="pill kind">${escapeHtml(String(item.kind || '').replaceAll('_',' '))}</span></td>
+        <td class="message">${escapeHtml(item.content || '')}</td>
+        <td><span class="pill status">${escapeHtml(item.status || '—')}</span></td>
+        <td><span class="pill ${item.evidence === 'RECONSTRUIDO' ? 'reconstructed' : 'persisted'}">${escapeHtml(item.evidence || '—')}</span></td>
+        <td class="mono">${escapeHtml(item.messageId || '—')}</td>
+      </tr>`).join('');
+    }
+    function renderSummary(data) {
+      const summary = data.summary || {};
+      document.getElementById('metricTotal').textContent = summary.total || 0;
+      document.getElementById('metricOutbound').textContent = summary.outbound || 0;
+      document.getElementById('metricInbound').textContent = summary.inbound || 0;
+      document.getElementById('metricReconstructed').textContent = summary.reconstructed || 0;
+      document.getElementById('oldestAvailable').textContent = summary.oldestAvailableAt ? formatBogota(summary.oldestAvailableAt) : 'Sin registros';
+      document.getElementById('pageNumber').textContent = data.pagination?.page || 1;
+      document.getElementById('totalPages').textContent = data.pagination?.totalPages || 1;
+    }
+    async function refreshMonitor() {
+      const query = new URLSearchParams(window.location.search);
+      try {
+        const response = await fetch(`${dataEndpoint}?${query.toString()}`, {cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        renderItems(data.items);
+        renderSummary(data);
+        liveState.style.color = '';
+        liveState.title = `Actualizado ${formatBogota(new Date().toISOString())}`;
+      } catch (error) {
+        liveState.style.color = '#b91c1c';
+        liveState.title = 'No fue posible actualizar el monitor';
+        console.error('No fue posible actualizar el monitor de WhatsApp de Despacho.', error);
+      }
+    }
+    document.querySelectorAll('[data-date]').forEach((cell) => { cell.textContent = formatBogota(cell.dataset.date); });
+    window.setInterval(refreshMonitor, 8000);
+  </script>
+</body>
+</html>
