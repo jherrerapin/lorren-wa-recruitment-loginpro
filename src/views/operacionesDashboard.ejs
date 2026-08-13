@@ -11,7 +11,7 @@
     .dashboard-toolbar h2 { color: var(--navy); font-size: 16px; margin-bottom: 4px; }
     .dashboard-toolbar p { color: var(--muted); font-size: 13px; }
     .date-filter { display: flex; align-items: end; gap: 10px; flex-wrap: wrap; }
-    .date-filter .field { min-width: 190px; }
+    .date-filter .field { min-width: 175px; }
     .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
     .summary-card { display: block; background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow-sm); border-top: 4px solid var(--teal); color: inherit; text-decoration: none; transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease; }
     .summary-card:hover, .summary-card:focus { transform: translateY(-2px); box-shadow: var(--shadow); border-color: var(--teal); outline: none; }
@@ -55,6 +55,11 @@
     .programming-options input { width: 17px; height: 17px; accent-color: var(--teal); cursor: pointer; }
     .programming-options label { cursor: pointer; font-size: 13px; font-weight: 800; }
     .programming-options small { display: block; color: #475569; font-size: 11px; font-weight: 500; margin-top: 2px; }
+    .programming-formats { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 11px 12px; border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 12px; color: #166534; }
+    .programming-formats > strong { font-size: 13px; }
+    .programming-formats label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 800; }
+    .programming-formats input { width: 17px; height: 17px; accent-color: var(--teal); cursor: pointer; }
+    .programming-formats small { flex: 1 1 100%; color: #475569; font-size: 11px; }
     .programming-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .programming-actions .btn[disabled] { opacity: .55; cursor: not-allowed; }
     .programming-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -81,10 +86,11 @@
   </style>
 </head>
 <body>
-  <% const totalRequests = Number(metrics?.totalRequests ?? 0); %>
-  <% const completedRequests = Number(metrics?.completedRequests ?? 0); %>
+  <% const totalRequests = Number(programmingMetrics?.totalRequests ?? 0); %>
+  <% const completedRequests = Number(programmingMetrics?.completedRequests ?? 0); %>
   <% const programmingComplete = totalRequests > 0 && completedRequests >= totalRequests; %>
-  <% const summaryUrl = (type) => `/admin/operaciones/resumen?fecha=${encodeURIComponent(selectedDate)}&type=${encodeURIComponent(type)}`; %>
+  <% const selectedRangeLabel = selectedDateFrom === selectedDateTo ? selectedDateFrom : `${selectedDateFrom} a ${selectedDateTo}`; %>
+  <% const summaryUrl = (type) => `/admin/operaciones/resumen?fechaDesde=${encodeURIComponent(selectedDateFrom)}&fechaHasta=${encodeURIComponent(selectedDateTo)}&type=${encodeURIComponent(type)}`; %>
   <nav class="navbar">
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
@@ -143,7 +149,8 @@
       <% if (typeof alertSettingsError !== 'undefined' && alertSettingsError) { %><div class="dispatch-settings-alert error"><%= alertSettingsError %></div><% } %>
       <% if (typeof dispatchAlertSettings !== 'undefined' && dispatchAlertSettings?.available) { %>
         <form class="dispatch-alert-settings-form" method="post" action="/admin/operaciones/alertas-whatsapp">
-          <input type="hidden" name="fecha" value="<%= selectedDate %>" />
+          <input type="hidden" name="fechaDesde" value="<%= selectedDateFrom %>" />
+          <input type="hidden" name="fechaHasta" value="<%= selectedDateTo %>" />
           <div class="field">
             <label for="dispatchAlertPhone">WhatsApp para mis alertas de despacho</label>
             <input id="dispatchAlertPhone" name="dispatchAlertPhone" type="tel" inputmode="numeric" value="<%= dispatchAlertSettings.phone || '' %>" placeholder="3001234567" />
@@ -159,17 +166,21 @@
       <% } %>
     </section>
 
-    <section class="dashboard-toolbar" aria-label="Filtro de fecha del panel operativo">
+    <section class="dashboard-toolbar" aria-label="Filtro de rango del panel operativo">
       <div>
         <h2>Indicadores por fecha de servicio</h2>
-        <p>Selecciona el día operativo que quieres revisar. También puedes descargar la programación de ese día en Excel, separada por cliente.</p>
+        <p>Selecciona un rango de fechas operativas. Los indicadores, el detalle y el Excel se calculan sobre todo el rango.</p>
       </div>
       <form class="date-filter" method="get" action="/admin/operaciones">
         <div class="field">
-          <label for="fecha">Fecha operativa</label>
-          <input id="fecha" name="fecha" type="date" value="<%= selectedDate %>" />
+          <label for="fechaDesde">Desde</label>
+          <input id="fechaDesde" name="fechaDesde" type="date" value="<%= selectedDateFrom %>" />
         </div>
-        <button class="btn btn-primary" type="submit">Aplicar fecha</button>
+        <div class="field">
+          <label for="fechaHasta">Hasta</label>
+          <input id="fechaHasta" name="fechaHasta" type="date" value="<%= selectedDateTo %>" />
+        </div>
+        <button class="btn btn-primary" type="submit">Aplicar rango</button>
         <button class="btn btn-excel" type="submit" formaction="/admin/operaciones/resumen/exportar">Descargar Excel</button>
         <a class="btn" href="/admin/operaciones">Hoy</a>
       </form>
@@ -178,8 +189,8 @@
     <section class="programming-card <%= programmingComplete ? 'complete' : '' %>" aria-label="Programación del día">
       <div class="programming-head">
         <div>
-          <h2>Programación del día</h2>
-          <p>Genera la programación operativa en PDF con clientes, horarios, auxiliares y el estado actual de cada solicitud incluida.</p>
+          <h2>Programación del día — <%= selectedDate %></h2>
+          <p>Genera la programación del día final del rango en PDF o Excel, con clientes, horarios, auxiliares y el estado actual de cada solicitud incluida.</p>
         </div>
         <span class="programming-pill <%= programmingComplete ? 'complete' : '' %>"><%= programmingComplete ? 'Programación completa' : `Faltan ${Math.max(totalRequests - completedRequests, 0)} solicitud(es)` %></span>
       </div>
@@ -198,21 +209,28 @@
         <input id="includePendingProgramming" type="checkbox" />
         <label for="includePendingProgramming">Incluir solicitudes pendientes o por confirmar<small>Marcado: incluye asignación pendiente, parcial y pendientes de confirmación. Sin marcar: envía únicamente solicitudes completas.</small></label>
       </div>
+      <div class="programming-formats" aria-label="Formatos para enviar a gerentes">
+        <strong>Enviar a gerentes:</strong>
+        <label for="sendProgramPdf"><input id="sendProgramPdf" type="checkbox" value="pdf" checked /> PDF</label>
+        <label for="sendProgramExcel"><input id="sendProgramExcel" type="checkbox" value="excel" /> Excel</label>
+        <small>Puedes marcar PDF, Excel o ambos. Los formatos seleccionados usan exactamente el mismo alcance de solicitudes.</small>
+      </div>
       <div class="programming-actions">
         <a class="btn" id="programPdfLink" href="/admin/operaciones/programacion.pdf?fecha=<%= selectedDate %>&includePending=false">Descargar PDF</a>
+        <a class="btn btn-excel" id="programExcelLink" href="/admin/operaciones/programacion.xlsx?fecha=<%= selectedDate %>&includePending=false">Descargar Excel</a>
         <a class="btn" id="programEmailLink" href="#" target="_blank" rel="noopener">Abrir correo</a>
-        <button class="btn btn-primary" type="button" id="sendProgramWhatsapp">Enviar PDF por WhatsApp</button>
+        <button class="btn btn-primary" type="button" id="sendProgramWhatsapp">Enviar</button>
       </div>
       <div class="programming-note">
-        <strong>Estado del día:</strong> <%= completedRequests %>/<%= totalRequests %> solicitudes completas. El envío está siempre disponible. Sin marcar la opción se envían solo las completas; al marcarla también se muestran las pendientes y lo que falta por confirmar.
+        <strong>Estado del día <%= selectedDate %>:</strong> <%= completedRequests %>/<%= totalRequests %> solicitudes completas. El envío está siempre disponible. Sin marcar pendientes se incluyen solo las completas; al marcar esa opción también se incluyen pendientes y parciales.
       </div>
     </section>
 
-    <section class="summary-grid" aria-label="Resumen operativo">
-      <a class="summary-card" href="<%= summaryUrl('total') %>"><div class="label">Solicitudes del día</div><div class="value"><%= metrics?.totalRequests ?? 0 %></div><div class="hint">Servicios programados para la fecha seleccionada</div><div class="open-hint">Ver solicitudes</div></a>
-      <a class="summary-card amber" href="<%= summaryUrl('pending') %>"><div class="label">Pendientes</div><div class="value"><%= metrics?.pendingRequests ?? 0 %></div><div class="hint">Solicitudes de esa fecha que requieren asignación</div><div class="open-hint">Ver pendientes</div></a>
-      <a class="summary-card green" href="<%= summaryUrl('complete') %>"><div class="label">Asignación completa</div><div class="value"><%= metrics?.completedRequests ?? 0 %></div><div class="hint">Servicios de esa fecha con cobertura confirmada</div><div class="open-hint">Ver completas</div></a>
-      <a class="summary-card blue" href="<%= summaryUrl('incidents') %>"><div class="label">Novedades abiertas</div><div class="value"><%= metrics?.openIncidents ?? 0 %></div><div class="hint">Casos operativos abiertos para esa fecha</div><div class="open-hint">Ver solicitudes con novedad</div></a>
+    <section class="summary-grid" aria-label="Resumen operativo del rango <%= selectedRangeLabel %>">
+      <a class="summary-card" href="<%= summaryUrl('total') %>"><div class="label"><%= selectedDateFrom === selectedDateTo ? 'Solicitudes del día' : 'Solicitudes del rango' %></div><div class="value"><%= metrics?.totalRequests ?? 0 %></div><div class="hint">Servicios programados entre <%= selectedRangeLabel %></div><div class="open-hint">Ver solicitudes</div></a>
+      <a class="summary-card amber" href="<%= summaryUrl('pending') %>"><div class="label">Pendientes</div><div class="value"><%= metrics?.pendingRequests ?? 0 %></div><div class="hint">Solicitudes del rango que requieren asignación o confirmación</div><div class="open-hint">Ver pendientes</div></a>
+      <a class="summary-card green" href="<%= summaryUrl('complete') %>"><div class="label">Asignación completa</div><div class="value"><%= metrics?.completedRequests ?? 0 %></div><div class="hint">Servicios del rango con cobertura confirmada</div><div class="open-hint">Ver completas</div></a>
+      <a class="summary-card blue" href="<%= summaryUrl('incidents') %>"><div class="label">Novedades abiertas</div><div class="value"><%= metrics?.openIncidents ?? 0 %></div><div class="hint">Casos operativos abiertos dentro del rango</div><div class="open-hint">Ver solicitudes con novedad</div></a>
     </section>
   </main>
   <div class="async-toast" id="asyncToast" role="status" aria-live="polite"></div>
@@ -223,7 +241,10 @@
     const customManagerWrap = document.getElementById('customProgramManagerWrap');
     const customManagerInput = document.getElementById('customProgramManager');
     const includePendingCheckbox = document.getElementById('includePendingProgramming');
+    const sendPdfCheckbox = document.getElementById('sendProgramPdf');
+    const sendExcelCheckbox = document.getElementById('sendProgramExcel');
     const pdfLink = document.getElementById('programPdfLink');
+    const excelLink = document.getElementById('programExcelLink');
     const emailLink = document.getElementById('programEmailLink');
     const whatsappButton = document.getElementById('sendProgramWhatsapp');
     const toast = document.getElementById('asyncToast');
@@ -235,10 +256,11 @@
     function showToast(message){if(!toast)return;toast.textContent=message;toast.classList.add('show');window.clearTimeout(showToast._t);showToast._t=window.setTimeout(()=>toast.classList.remove('show'),3000);}
     function currentManager(){return managerSelect?.value || 'Julián Herrera';}
     function includePendingRequests(){return Boolean(includePendingCheckbox?.checked);}
+    function selectedFormats(){const formats=[];if(sendPdfCheckbox?.checked)formats.push('pdf');if(sendExcelCheckbox?.checked)formats.push('excel');return formats;}
     function loadManagers(){try{return JSON.parse(localStorage.getItem(MANAGERS_KEY)||'[]');}catch(_error){return[];}}
     function saveManager(name){const clean=String(name||'').trim();if(!clean)return;const managers=[...new Set(['Julián Herrera',...loadManagers(),clean])];localStorage.setItem(MANAGERS_KEY,JSON.stringify(managers.filter((item)=>item!=='Julián Herrera')));renderManagers(clean);}
     function renderManagers(selected='Julián Herrera'){if(!managerSelect)return;const managers=[...new Set(['Julián Herrera',...loadManagers()])];managerSelect.innerHTML=managers.map((name)=>`<option value="${name.replace(/"/g,'&quot;')}">${name}</option>`).join('');managerSelect.value=managers.includes(selected)?selected:'Julián Herrera';refreshProgrammingLinks();}
-    function refreshProgrammingLinks(){const manager=currentManager();const includePending=includePendingRequests();const params=new URLSearchParams({fecha:selectedDate,managedBy:manager,includePending:String(includePending)});if(pdfLink)pdfLink.href='/admin/operaciones/programacion.pdf?'+params.toString();if(emailLink){const scope=includePending?'incluyendo solicitudes pendientes o por confirmar':'con las solicitudes completas';const subject='Programación operativa - '+selectedDate;const body=['Hola,','','Adjunto programación operativa para la fecha '+selectedDate+', '+scope+'.','','Gestionado por: '+manager].join('\n');emailLink.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);}}
+    function refreshProgrammingLinks(){const manager=currentManager();const includePending=includePendingRequests();const params=new URLSearchParams({fecha:selectedDate,managedBy:manager,includePending:String(includePending)});if(pdfLink)pdfLink.href='/admin/operaciones/programacion.pdf?'+params.toString();if(excelLink)excelLink.href='/admin/operaciones/programacion.xlsx?'+params.toString();if(emailLink){const scope=includePending?'incluyendo solicitudes pendientes o por confirmar':'con las solicitudes completas';const subject='Programación operativa - '+selectedDate;const body=['Hola,','','Adjunto programación operativa para la fecha '+selectedDate+', '+scope+'.','','Gestionado por: '+manager].join('\n');emailLink.href='mailto:?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);}}
     function setDispatchSessionState(state, hint){
       if(!dispatchSessionAction||!dispatchSessionButton||!dispatchSessionHint)return;
       dispatchSessionAction.classList.remove('session-online','session-offline','session-checking');
@@ -269,7 +291,7 @@
     customManagerInput?.addEventListener('blur',()=>{if(customManagerInput.value.trim()){saveManager(customManagerInput.value);customManagerInput.value='';}customManagerWrap.hidden=true;});
     managerSelect?.addEventListener('change',refreshProgrammingLinks);
     includePendingCheckbox?.addEventListener('change',refreshProgrammingLinks);
-    whatsappButton?.addEventListener('click',async()=>{const includePending=includePendingRequests();whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando PDF...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager(),includePending})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name}: ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar el PDF.');}showToast(includePending?'PDF enviado con solicitudes completas y pendientes.':'PDF enviado con las solicitudes completas.');}catch(error){showToast(error.message||'No fue posible enviar el PDF.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
+    whatsappButton?.addEventListener('click',async()=>{const includePending=includePendingRequests();const formats=selectedFormats();if(!formats.length){showToast('Selecciona PDF, Excel o ambos para enviar.');return;}whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager(),includePending,formats})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name} (${item.format||'archivo'}): ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar la programación.');}const formatLabel=formats.length===2?'PDF y Excel':formats[0]==='excel'?'Excel':'PDF';showToast(formatLabel+' enviado a los gerentes.');}catch(error){showToast(error.message||'No fue posible enviar la programación.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
     renderManagers();
     refreshDispatchSessionState();
     window.setInterval(refreshDispatchSessionState,30000);
