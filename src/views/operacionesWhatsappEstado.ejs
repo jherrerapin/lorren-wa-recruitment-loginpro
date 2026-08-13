@@ -9,8 +9,9 @@
   const returnLabel = typeof whatsappReturnLabel === 'string' && whatsappReturnLabel ? whatsappReturnLabel : 'Volver a Operaciones';
   const assignmentsHref = typeof whatsappAssignmentsHref === 'string' && whatsappAssignmentsHref ? whatsappAssignmentsHref : '/admin/operaciones/asignaciones';
   const assignmentsLabel = typeof whatsappAssignmentsLabel === 'string' && whatsappAssignmentsLabel ? whatsappAssignmentsLabel : 'Asignaciones';
-  const monitorHref = role === 'dev' && typeof whatsappMonitorHref === 'string' && whatsappMonitorHref ? whatsappMonitorHref : null;
-  const missing = Array.isArray(missingConfiguration) ? missingConfiguration : [];
+  const isDevView = role === 'dev';
+  const monitorHref = isDevView && typeof whatsappMonitorHref === 'string' && whatsappMonitorHref ? whatsappMonitorHref : null;
+  const missing = isDevView && typeof missingConfiguration !== 'undefined' && Array.isArray(missingConfiguration) ? missingConfiguration : [];
 %>
 <!DOCTYPE html>
 <html lang="es">
@@ -21,169 +22,90 @@
   <link rel="icon" type="image/svg+xml" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
-    .cloud-grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(320px,1fr);gap:16px;align-items:start}
-    .cloud-card{background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:20px;display:grid;gap:13px}
-    .cloud-card.ready{border-color:var(--green);background:var(--green-soft)}
-    .status-pill{display:inline-flex;width:fit-content;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:900;background:#fee2e2;color:#991b1b}
-    .status-pill.ready{background:#dcfce7;color:#166534}
-    .meta-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}
-    .meta-row{display:grid;grid-template-columns:minmax(140px,.7fr) minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid #edf2f7}
-    .meta-row:last-child{border-bottom:0}.meta-key{color:var(--muted);font-size:12px;font-weight:850}.meta-value{color:var(--navy);font-size:12px;font-weight:800;overflow-wrap:anywhere}
-    .alert{border:1px solid #fecaca;background:#fff5f5;color:#991b1b;border-radius:14px;padding:12px 14px;font-weight:800}
-    .info{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:14px;padding:12px 14px;font-weight:800;line-height:1.45}
-    .technical{border:1px dashed #cbd5e1;background:#f8fafc;color:#334155;border-radius:14px;padding:12px 14px;font-size:12px;line-height:1.45;word-break:break-word}
-    .missing-list{margin:0;padding-left:18px;color:#991b1b;font-size:12px;font-weight:800}
+    .cloud-grid{display:grid;grid-template-columns:minmax(300px,1fr) minmax(320px,1fr);gap:16px;align-items:start}.cloud-grid.single{grid-template-columns:minmax(300px,760px)}
+    .cloud-card{background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:20px;display:grid;gap:13px}.cloud-card.ready{border-color:var(--green);background:var(--green-soft)}
+    .status-pill{display:inline-flex;width:fit-content;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:900;background:#fee2e2;color:#991b1b}.status-pill.ready{background:#dcfce7;color:#166534}
+    .meta-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.meta-row{display:grid;grid-template-columns:minmax(140px,.7fr) minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid #edf2f7}.meta-row:last-child{border-bottom:0}.meta-key{color:var(--muted);font-size:12px;font-weight:850}.meta-value{color:var(--navy);font-size:12px;font-weight:800;overflow-wrap:anywhere}
+    .alert{border:1px solid #fecaca;background:#fff5f5;color:#991b1b;border-radius:14px;padding:12px 14px;font-weight:800}.info{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:14px;padding:12px 14px;font-weight:800;line-height:1.45}.technical{border:1px dashed #cbd5e1;background:#f8fafc;color:#334155;border-radius:14px;padding:12px 14px;font-size:12px;line-height:1.45;word-break:break-word}.missing-list{margin:0;padding-left:18px;color:#991b1b;font-size:12px;font-weight:800}
     @media(max-width:900px){.cloud-grid{grid-template-columns:1fr}.meta-row{grid-template-columns:1fr;gap:3px}}
   </style>
 </head>
 <body>
   <nav class="navbar">
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
-    <a href="/admin">Panel</a>
-    <a href="/admin/vacancies">Vacantes</a>
-    <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
-    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor bot</a><% } %>
-    <span class="spacer"></span>
+    <a href="/admin">Panel</a><a href="/admin/vacancies">Vacantes</a><a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
+    <% if (isDevView) { %><a href="/admin/monitor">Monitor bot</a><% } %><span class="spacer"></span>
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
 
   <main class="page">
     <section class="hero">
-      <div>
-        <div class="eyebrow"><%= screenEyebrow %></div>
-        <h1><%= screenTitle %></h1>
-        <p><%= screenDescription %></p>
-      </div>
+      <div><div class="eyebrow"><%= screenEyebrow %></div><h1><%= screenTitle %></h1><p><%= screenDescription %></p></div>
       <div class="actions">
-        <a class="btn" href="<%= returnHref %>"><%= returnLabel %></a>
-        <a class="btn" href="<%= assignmentsHref %>"><%= assignmentsLabel %></a>
-        <% if (monitorHref) { %><a class="btn" href="<%= monitorHref %>">Ventanas 24 h · DEV</a><% } %>
+        <a class="btn" href="<%= returnHref %>"><%= returnLabel %></a><a class="btn" href="<%= assignmentsHref %>"><%= assignmentsLabel %></a>
+        <% if (monitorHref) { %><a class="btn" href="<%= monitorHref %>">Asignados mañana · DEV</a><% } %>
         <button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button>
       </div>
     </section>
 
     <% if (typeof message === 'string' && message) { %><div class="section-note"><%= message %></div><% } %>
 
-    <section class="cloud-grid">
+    <section class="cloud-grid <%= isDevView ? '' : 'single' %>">
       <article class="cloud-card <%= ready ? 'ready' : '' %>" id="statusCard">
-        <span class="status-pill <%= ready ? 'ready' : '' %>" id="statusPill"><%= ready ? 'Configurado' : 'Configuración incompleta' %></span>
-        <h2 id="statusTitle"><%= ready ? 'WhatsApp Business Platform listo' : 'Faltan datos de configuración' %></h2>
-        <p>Despacho se comunica directamente con la API oficial de Meta. Esta integración no utiliza WhatsApp Web, códigos QR, Chromium ni dispositivos vinculados.</p>
+        <span class="status-pill <%= ready ? 'ready' : '' %>" id="statusPill"><%= ready ? (isDevView ? 'Configurado' : 'Disponible') : (isDevView ? 'Configuración incompleta' : 'No disponible') %></span>
+        <h2 id="statusTitle"><%= ready ? (isDevView ? 'WhatsApp Business Platform listo' : 'Canal de WhatsApp disponible') : (isDevView ? 'Faltan datos de configuración' : 'Canal de WhatsApp no disponible') %></h2>
+        <% if (isDevView) { %>
+          <p>Despacho se comunica directamente con la API oficial de Meta. Esta integración no utiliza WhatsApp Web, códigos QR, Chromium ni dispositivos vinculados.</p>
+        <% } else { %>
+          <p>Desde Asignaciones puedes continuar usando las acciones de WhatsApp habilitadas para tu perfil. La configuración técnica del canal está reservada para DEV.</p>
+        <% } %>
         <div class="alert" id="errorBox" <%= lastError ? '' : 'hidden' %>><%= lastError || '' %></div>
-        <div class="alert" id="missingBox" <%= missing.length ? '' : 'hidden' %>>
-          <strong>Variables pendientes:</strong>
-          <ul class="missing-list" id="missingList">
-            <% missing.forEach((item) => { %><li><%= item %></li><% }) %>
-          </ul>
-        </div>
-        <% if (role === 'dev') { %>
-          <details class="technical" id="technicalDetails" <%= technicalLastError ? '' : 'hidden' %>>
-            <summary>Detalle técnico para dev</summary>
-            <div id="technicalError"><%= technicalLastError || '' %></div>
-          </details>
+        <% if (isDevView) { %>
+          <div class="alert" id="missingBox" <%= missing.length ? '' : 'hidden' %>><strong>Variables pendientes:</strong><ul class="missing-list" id="missingList"><% missing.forEach((item) => { %><li><%= item %></li><% }) %></ul></div>
+          <details class="technical" id="technicalDetails" <%= typeof technicalLastError !== 'undefined' && technicalLastError ? '' : 'hidden' %>><summary>Detalle técnico para dev</summary><div id="technicalError"><%= typeof technicalLastError !== 'undefined' ? (technicalLastError || '') : '' %></div></details>
         <% } %>
       </article>
 
-      <article class="cloud-card">
-        <h2>Configuración activa</h2>
-        <ul class="meta-list">
-          <li class="meta-row"><span class="meta-key">Proveedor</span><span class="meta-value" id="provider"><%= provider || 'META_CLOUD_API' %></span></li>
-          <li class="meta-row"><span class="meta-key">Graph API</span><span class="meta-value" id="graphVersion"><%= graphVersion || '—' %></span></li>
-          <li class="meta-row"><span class="meta-key">Phone Number ID</span><span class="meta-value" id="phoneNumberId"><%= phoneNumberIdMasked || '—' %></span></li>
-          <li class="meta-row"><span class="meta-key">Plantilla de asignación</span><span class="meta-value" id="assignmentTemplate"><%= assignmentTemplateName || '—' %></span></li>
-          <% if (typeof programmingTemplateName !== 'undefined' && programmingTemplateName) { %>
-            <li class="meta-row"><span class="meta-key">Plantilla de programación</span><span class="meta-value" id="programmingTemplate"><%= programmingTemplateName %></span></li>
-          <% } %>
-          <li class="meta-row"><span class="meta-key">Idioma</span><span class="meta-value" id="templateLanguage"><%= templateLanguage || '—' %></span></li>
-          <li class="meta-row"><span class="meta-key">Webhook</span><span class="meta-value" id="webhookPath"><%= webhookPath || '/webhook/dispatch' %></span></li>
-          <li class="meta-row"><span class="meta-key">Último envío</span><span class="meta-value" id="lastOutbound"><%= lastOutboundAt || 'Sin registro desde este proceso' %></span></li>
-          <li class="meta-row"><span class="meta-key">Última confirmación recibida</span><span class="meta-value" id="lastInbound"><%= lastInboundAt || 'Sin registro desde este proceso' %></span></li>
-          <li class="meta-row"><span class="meta-key">Último estado Meta</span><span class="meta-value" id="lastProvider"><%= lastProviderStatus || '—' %></span></li>
-        </ul>
-        <div class="info">La aprobación y el contenido de las plantillas se administran en WhatsApp Manager. Los secretos no se muestran ni se guardan en esta vista.</div>
-      </article>
+      <% if (isDevView) { %>
+        <article class="cloud-card">
+          <h2>Configuración activa · solo DEV</h2>
+          <ul class="meta-list">
+            <li class="meta-row"><span class="meta-key">Proveedor</span><span class="meta-value" id="provider"><%= provider || 'META_CLOUD_API' %></span></li>
+            <li class="meta-row"><span class="meta-key">Graph API</span><span class="meta-value" id="graphVersion"><%= graphVersion || '—' %></span></li>
+            <li class="meta-row"><span class="meta-key">Phone Number ID</span><span class="meta-value" id="phoneNumberId"><%= phoneNumberIdMasked || '—' %></span></li>
+            <li class="meta-row"><span class="meta-key">Plantilla de asignación</span><span class="meta-value" id="assignmentTemplate"><%= assignmentTemplateName || '—' %></span></li>
+            <% if (typeof programmingTemplateName !== 'undefined' && programmingTemplateName) { %><li class="meta-row"><span class="meta-key">Plantilla de programación</span><span class="meta-value" id="programmingTemplate"><%= programmingTemplateName %></span></li><% } %>
+            <li class="meta-row"><span class="meta-key">Idioma</span><span class="meta-value" id="templateLanguage"><%= templateLanguage || '—' %></span></li>
+            <li class="meta-row"><span class="meta-key">Webhook</span><span class="meta-value" id="webhookPath"><%= webhookPath || '/webhook/dispatch' %></span></li>
+            <li class="meta-row"><span class="meta-key">Último envío</span><span class="meta-value" id="lastOutbound"><%= lastOutboundAt || 'Sin registro desde este proceso' %></span></li>
+            <li class="meta-row"><span class="meta-key">Última confirmación recibida</span><span class="meta-value" id="lastInbound"><%= lastInboundAt || 'Sin registro desde este proceso' %></span></li>
+            <li class="meta-row"><span class="meta-key">Último estado Meta</span><span class="meta-value" id="lastProvider"><%= lastProviderStatus || '—' %></span></li>
+          </ul>
+          <div class="info">La aprobación y el contenido de las plantillas se administran en WhatsApp Manager. Los secretos no se muestran ni se guardan en esta vista.</div>
+        </article>
+      <% } %>
     </section>
   </main>
 
   <script>
-    const isDev = <%= role === 'dev' ? 'true' : 'false' %>;
+    const isDev = <%= isDevView ? 'true' : 'false' %>;
     const statusEndpoint = <%- JSON.stringify(`${basePath}/estado`) %>;
-    const statusCard = document.getElementById('statusCard');
-    const statusPill = document.getElementById('statusPill');
-    const statusTitle = document.getElementById('statusTitle');
-    const errorBox = document.getElementById('errorBox');
-    const missingBox = document.getElementById('missingBox');
-    const missingList = document.getElementById('missingList');
-    const technicalDetails = document.getElementById('technicalDetails');
-    const technicalError = document.getElementById('technicalError');
-
-    function formatBogota(value) {
-      if (!value) return 'Sin registro desde este proceso';
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return value;
-      return new Intl.DateTimeFormat('es-CO', {
-        timeZone: 'America/Bogota',
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
-      }).format(date);
+    const statusCard = document.getElementById('statusCard'); const statusPill = document.getElementById('statusPill'); const statusTitle = document.getElementById('statusTitle'); const errorBox = document.getElementById('errorBox');
+    const missingBox = document.getElementById('missingBox'); const missingList = document.getElementById('missingList'); const technicalDetails = document.getElementById('technicalDetails'); const technicalError = document.getElementById('technicalError');
+    function formatBogota(value){if(!value)return 'Sin registro desde este proceso';const date=new Date(value);if(Number.isNaN(date.getTime()))return value;return new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).format(date);}
+    function text(id,value){const element=document.getElementById(id);if(element)element.textContent=value??'—';}
+    function renderStatus(data){
+      const ready=Boolean(data.ready);statusCard?.classList.toggle('ready',ready);
+      if(statusPill){statusPill.classList.toggle('ready',ready);statusPill.textContent=ready?(isDev?'Configurado':'Disponible'):(isDev?'Configuración incompleta':'No disponible');}
+      if(statusTitle)statusTitle.textContent=ready?(isDev?'WhatsApp Business Platform listo':'Canal de WhatsApp disponible'):(isDev?'Faltan datos de configuración':'Canal de WhatsApp no disponible');
+      const error=data.lastError||(isDev?data.technicalLastError:null);if(errorBox){errorBox.hidden=!error;errorBox.textContent=error||'';}
+      if(!isDev)return;
+      const missing=Array.isArray(data.missingConfiguration)?data.missingConfiguration:[];if(missingBox)missingBox.hidden=missing.length===0;if(missingList)missingList.innerHTML=missing.map((item)=>`<li>${String(item).replace(/[<>&"]/g,'')}</li>`).join('');
+      if(technicalDetails)technicalDetails.hidden=!data.technicalLastError;if(technicalError)technicalError.textContent=data.technicalLastError||'';
+      text('provider',data.provider||'META_CLOUD_API');text('graphVersion',data.graphVersion||'—');text('phoneNumberId',data.phoneNumberIdMasked||'—');text('assignmentTemplate',data.assignmentTemplateName||'—');text('programmingTemplate',data.programmingTemplateName||'—');text('templateLanguage',data.templateLanguage||'—');text('webhookPath',data.webhookPath||'/webhook/dispatch');text('lastOutbound',formatBogota(data.lastOutboundAt));text('lastInbound',formatBogota(data.lastInboundAt));text('lastProvider',data.lastProviderStatus||'—');
     }
-
-    function text(id, value) {
-      const element = document.getElementById(id);
-      if (element) element.textContent = value ?? '—';
-    }
-
-    function renderStatus(data) {
-      const ready = Boolean(data.ready);
-      statusCard?.classList.toggle('ready', ready);
-      if (statusPill) {
-        statusPill.classList.toggle('ready', ready);
-        statusPill.textContent = ready ? 'Configurado' : 'Configuración incompleta';
-      }
-      if (statusTitle) statusTitle.textContent = ready ? 'WhatsApp Business Platform listo' : 'Faltan datos de configuración';
-
-      const error = data.lastError || (isDev ? data.technicalLastError : null);
-      if (errorBox) {
-        errorBox.hidden = !error;
-        errorBox.textContent = error || '';
-      }
-
-      const missing = Array.isArray(data.missingConfiguration) ? data.missingConfiguration : [];
-      if (missingBox) missingBox.hidden = missing.length === 0;
-      if (missingList) missingList.innerHTML = missing.map((item) => `<li>${String(item).replace(/[<>&"]/g, '')}</li>`).join('');
-
-      if (technicalDetails) technicalDetails.hidden = !isDev || !data.technicalLastError;
-      if (technicalError) technicalError.textContent = data.technicalLastError || '';
-
-      text('provider', data.provider || 'META_CLOUD_API');
-      text('graphVersion', data.graphVersion || '—');
-      text('phoneNumberId', data.phoneNumberIdMasked || '—');
-      text('assignmentTemplate', data.assignmentTemplateName || '—');
-      text('programmingTemplate', data.programmingTemplateName || '—');
-      text('templateLanguage', data.templateLanguage || '—');
-      text('webhookPath', data.webhookPath || '/webhook/dispatch');
-      text('lastOutbound', formatBogota(data.lastOutboundAt));
-      text('lastInbound', formatBogota(data.lastInboundAt));
-      text('lastProvider', data.lastProviderStatus || '—');
-    }
-
-    async function refreshStatus() {
-      try {
-        const response = await fetch(statusEndpoint, {
-          cache: 'no-store',
-          credentials: 'same-origin',
-          headers: { Accept: 'application/json' }
-        });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        renderStatus(await response.json());
-      } catch (error) {
-        console.error('No fue posible consultar el estado de WhatsApp oficial.', error);
-      }
-    }
-
-    document.getElementById('refreshStatus')?.addEventListener('click', refreshStatus);
-    refreshStatus();
-    window.setInterval(refreshStatus, 15000);
+    async function refreshStatus(){try{const response=await fetch(statusEndpoint,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);renderStatus(await response.json());}catch(error){console.error('No fue posible consultar el estado de WhatsApp de despacho.',error);}}
+    document.getElementById('refreshStatus')?.addEventListener('click',refreshStatus);refreshStatus();window.setInterval(refreshStatus,15000);
   </script>
 </body>
 </html>
