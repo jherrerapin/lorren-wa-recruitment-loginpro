@@ -18,6 +18,7 @@ import {
   recordDispatchWhatsappInboundWindow,
   sendDispatchNoveltyAdminAlert
 } from './dispatchWhatsappAdminAlerts.js';
+import { recordDispatchWhatsappMessageAudit } from './dispatchWhatsappMonitor.js';
 
 function normalizeConfirmationText(value) {
   return String(value || '')
@@ -77,6 +78,13 @@ function inboundReceivedAt(message = {}) {
   return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp * 1000) : new Date();
 }
 
+function inboundAuditBody(message = {}) {
+  const visibleText = inboundText(message);
+  if (visibleText) return visibleText;
+  const type = String(message.type || 'mensaje').trim().toUpperCase();
+  return `[${type || 'MENSAJE'}]`;
+}
+
 async function findConfirmationTarget({ scope, message, prismaClient }) {
   const definition = dispatchWhatsappScopeDefinition(scope);
   const phone = normalizeDispatchWhatsappPhone(message.from);
@@ -106,7 +114,20 @@ async function findConfirmationTarget({ scope, message, prismaClient }) {
 export async function processDispatchWhatsappInboundMessage({
   scope = 'operational', message = {}, prismaClient = prisma, axiosClient = axios
 } = {}) {
+  const receivedAt = inboundReceivedAt(message);
   await recordDispatchWhatsappInboundWindow({ scope, message, prismaClient });
+  await recordDispatchWhatsappMessageAudit({
+    prismaClient,
+    scope,
+    direction: 'INBOUND',
+    phone: message.from,
+    body: inboundAuditBody(message),
+    messageType: message.type || 'UNKNOWN',
+    messageId: message.id,
+    source: 'WEBHOOK_INBOUND',
+    occurredAt: receivedAt
+  });
+
   const buttonAction = assignmentActionFromInboundPayload(message);
   const inbound = inboundText(message);
   const inferredAction = buttonAction?.action
@@ -122,7 +143,7 @@ export async function processDispatchWhatsappInboundMessage({
       scope,
       assignment: target.assignment,
       responseMessageId: confirmationMessageId,
-      responseReceivedAt: inboundReceivedAt(message),
+      responseReceivedAt: receivedAt,
       prismaClient
     });
     let adminAlertSent = false;
@@ -147,7 +168,7 @@ export async function processDispatchWhatsappInboundMessage({
     scope,
     assignment: target.assignment,
     confirmationMessageId,
-    confirmationReceivedAt: inboundReceivedAt(message),
+    confirmationReceivedAt: receivedAt,
     prismaClient
   });
   if (!claim.shouldReply) {
@@ -165,8 +186,25 @@ export async function processDispatchWhatsappInboundMessage({
 
   let replySent = false;
   try {
-    await sendDispatchWhatsappTextMessage({ scope, phone: target.phone, text: AUTOMATIC_CONFIRMATION_REPLY, axiosClient });
+    const replyProviderMessageId = await sendDispatchWhatsappTextMessage({
+      scope,
+      phone: target.phone,
+      text: AUTOMATIC_CONFIRMATION_REPLY,
+      axiosClient
+    });
     replySent = true;
+    await recordDispatchWhatsappMessageAudit({
+      prismaClient,
+      scope,
+      direction: 'OUTBOUND',
+      phone: target.phone,
+      body: AUTOMATIC_CONFIRMATION_REPLY,
+      messageType: 'TEXT',
+      providerMessageId: replyProviderMessageId,
+      dedupeKey: `auto-reply:${confirmationMessageId}`,
+      source: 'AUTO_CONFIRMATION_REPLY',
+      occurredAt: new Date()
+    });
     await prismaClient.dispatchWhatsappConfirmation.updateMany({
       where: { assignmentId: target.assignment.id, confirmationMessageId, status: 'CONFIRMED_REPLY_PENDING' },
       data: { status: 'CONFIRMED' }
