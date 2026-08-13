@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { baseOperations, baseVacancies } from './fixtures/conversationCases.js';
 import { runConversationCase } from './helpers/conversationHarness.js';
+import { inferContextualSemanticIntent } from '../src/services/contextualResponseGate.js';
 
 process.env.NODE_ENV = 'test';
 process.env.OPENAI_API_KEY = 'test-openai-key';
@@ -68,6 +69,18 @@ function normalize(value = '') {
     .replace(/\s+/g, ' ')
     .trim();
 }
+
+test('semántica ubicación: una pregunta genérica de ubicación no inventa una entrevista', () => {
+  const semanticIntent = inferContextualSemanticIntent({
+    text: 'En donde estan ubicados',
+    resolvedIntent: 'faq',
+    isQuestion: true,
+    hasCvAttachment: false,
+    hasDataIntent: false
+  });
+
+  assert.equal(semanticIntent, 'ASK_VACANCY_INFORMATION');
+});
 
 test('replay ubicación: responde la pregunta antes de retomar la recolección', async () => {
   const result = await runConversationCase(buildLocationQuestionCase(), {
