@@ -5,7 +5,8 @@ import {
 } from '../services/dispatchWhatsappCloudService.js';
 import {
   loadDispatchWhatsappTomorrowAssignmentMonitor,
-  loadDispatchWhatsappWindowStatusForAssignments
+  loadDispatchWhatsappWindowStatusForAssignments,
+  recordDispatchWhatsappMessageAudit
 } from '../services/dispatchWhatsappMonitor.js';
 import {
   DISPATCH_WINDOW_CHECK_BUTTON,
@@ -215,6 +216,17 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
             assignmentId: item.assignmentId,
             phone: item.phone
           });
+          await recordDispatchWhatsappMessageAudit({
+            prismaClient: prisma,
+            scope: 'operational',
+            direction: 'OUTBOUND',
+            phone: item.phone,
+            body: `${DISPATCH_WINDOW_CHECK_MESSAGE}\n\n[Botón: ${DISPATCH_WINDOW_CHECK_BUTTON}]`,
+            messageType: 'TEMPLATE',
+            providerMessageId: result.providerMessageId,
+            source: 'WINDOW_CHECK_TEMPLATE',
+            occurredAt: new Date()
+          });
           results.push({
             assignmentId: item.assignmentId,
             workerName: item.workerName,
@@ -265,6 +277,18 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         scope: 'operational',
         phone: item.phone,
         text: message
+      });
+      await recordDispatchWhatsappMessageAudit({
+        prismaClient: prisma,
+        scope: 'operational',
+        direction: 'OUTBOUND',
+        phone: item.phone,
+        body: message,
+        messageType: 'TEXT',
+        providerMessageId,
+        dedupeKey: `dev-manual:${assignmentId}:${Date.now()}`,
+        source: 'DEV_MANUAL',
+        occurredAt: new Date()
       });
       return res.json({
         ok: true,
