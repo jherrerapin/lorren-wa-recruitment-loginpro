@@ -4,6 +4,7 @@ const ATTENDANCE_PATH = '/admin/operaciones/asistencia';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
+const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
 
 function requestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0] || '/';
@@ -145,9 +146,16 @@ export function buildAdminModuleCards(req = {}, originalNav = '') {
 }
 
 function ensureNavigationStylesheet(html) {
-  if (html.includes(NAVIGATION_STYLESHEET)) return html;
-  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `  <link rel="stylesheet" href="${NAVIGATION_STYLESHEET}" />\n</head>`);
-  return html;
+  if (!/<\/head>/i.test(html)) return html;
+  const stylesheets = [];
+  if (!html.includes(NAVIGATION_STYLESHEET)) {
+    stylesheets.push(`<link rel="stylesheet" href="${NAVIGATION_STYLESHEET}" />`);
+  }
+  if (!html.includes(DESKTOP_NAVIGATION_STYLESHEET)) {
+    stylesheets.push(`<link rel="stylesheet" href="${DESKTOP_NAVIGATION_STYLESHEET}" media="(min-width: 901px)" />`);
+  }
+  if (!stylesheets.length) return html;
+  return html.replace(/<\/head>/i, `  ${stylesheets.join('\n  ')}\n</head>`);
 }
 
 export function injectAdminModuleNavigation(html, req = {}) {
