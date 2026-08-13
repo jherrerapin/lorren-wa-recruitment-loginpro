@@ -19,8 +19,20 @@ function addIsoDays(dateKey, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function windowSnapshot(row, now) {
-  const lastInboundAt = row?.lastInboundAt ? new Date(row.lastInboundAt) : null;
+function validDate(value) {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function latestDate(...values) {
+  return values
+    .map(validDate)
+    .filter(Boolean)
+    .sort((a, b) => b.getTime() - a.getTime())[0] || null;
+}
+
+function windowSnapshot(lastInboundValue, now, evidenceSource = null) {
+  const lastInboundAt = validDate(lastInboundValue);
   const expiresAt = lastInboundAt ? new Date(lastInboundAt.getTime() + DISPATCH_WHATSAPP_WINDOW_MS) : null;
   const isOpen = Boolean(expiresAt && now.getTime() < expiresAt.getTime());
   return {
@@ -28,8 +40,32 @@ function windowSnapshot(row, now) {
     windowStatus: isOpen ? 'ABIERTA' : 'CERRADA',
     lastInboundAt: lastInboundAt ? lastInboundAt.toISOString() : null,
     expiresAt: expiresAt ? expiresAt.toISOString() : null,
-    remainingMs: isOpen ? Math.max(0, expiresAt.getTime() - now.getTime()) : 0
+    remainingMs: isOpen ? Math.max(0, expiresAt.getTime() - now.getTime()) : 0,
+    evidenceSource
   };
+}
+
+function latestConfirmationEvidenceByPhone(rows = []) {
+  const result = new Map();
+  for (const row of rows) {
+    const phone = normalizePhone(row?.phone);
+    const receivedAt = validDate(row?.confirmationReceivedAt);
+    if (!phone || !receivedAt) continue;
+    const previous = result.get(phone);
+    if (!previous || receivedAt.getTime() > previous.getTime()) result.set(phone, receivedAt);
+  }
+  return result;
+}
+
+async function healContactWindowFromEvidence({ prismaClient, phone, currentLastInboundAt, evidenceLastInboundAt }) {
+  if (!phone || !evidenceLastInboundAt) return;
+  const current = validDate(currentLastInboundAt);
+  if (current && current.getTime() >= evidenceLastInboundAt.getTime()) return;
+  await prismaClient.dispatchWhatsappContactWindow.upsert({
+    where: { scope_phone: { scope: 'operational', phone } },
+    create: { scope: 'operational', phone, lastInboundAt: evidenceLastInboundAt },
+    update: { lastInboundAt: evidenceLastInboundAt }
+  }).catch(() => {});
 }
 
 export function tomorrowIsoDateCO(now = new Date()) {
@@ -47,12 +83,44 @@ export async function loadDispatchWhatsappWindowStatusForAssignments({
     .map((assignment) => normalizePhone(assignment?.worker?.phone))
     .filter(Boolean))];
 
-  const windows = phones.length
-    ? await prismaClient.dispatchWhatsappContactWindow.findMany({
-        where: { scope: 'operational', phone: { in: phones } }
-      })
-    : [];
+  const [windows, confirmations] = phones.length
+    ? await Promise.all([
+        prismaClient.dispatchWhatsappContactWindow.findMany({
+          where: { scope: 'operational', phone: { in: phones } }
+        }),
+        prismaClient.dispatchWhatsappConfirmation.findMany({
+          where: { phone: { in: phones }, confirmationReceivedAt: { not: null } },
+          select: { phone: true, confirmationReceivedAt: true },
+          orderBy: { confirmationReceivedAt: 'desc' }
+        })
+      ])
+    : [[], []];
+
   const windowsByPhone = new Map(windows.map((row) => [normalizePhone(row.phone), row]));
+  const confirmationEvidenceByPhone = latestConfirmationEvidenceByPhone(confirmations);
+  const snapshotsByPhone = new Map();
+
+  for (const phone of phones) {
+    const windowRow = windowsByPhone.get(phone);
+    const contactInbound = validDate(windowRow?.lastInboundAt);
+    const confirmationInbound = confirmationEvidenceByPhone.get(phone) || null;
+    const effectiveInbound = latestDate(contactInbound, confirmationInbound);
+    const source = effectiveInbound
+      ? (confirmationInbound && (!contactInbound || confirmationInbound.getTime() > contactInbound.getTime())
+          ? 'CONFIRMATION_EVIDENCE'
+          : 'CONTACT_WINDOW')
+      : null;
+
+    if (source === 'CONFIRMATION_EVIDENCE') {
+      await healContactWindowFromEvidence({
+        prismaClient,
+        phone,
+        currentLastInboundAt: contactInbound,
+        evidenceLastInboundAt: confirmationInbound
+      });
+    }
+    snapshotsByPhone.set(phone, windowSnapshot(effectiveInbound, now, source));
+  }
 
   return Object.fromEntries(normalizedAssignments
     .filter((assignment) => assignment?.id)
@@ -61,7 +129,7 @@ export async function loadDispatchWhatsappWindowStatusForAssignments({
       return [assignment.id, {
         assignmentId: assignment.id,
         phone,
-        ...windowSnapshot(windowsByPhone.get(phone), now)
+        ...(snapshotsByPhone.get(phone) || windowSnapshot(null, now))
       }];
     }));
 }
@@ -126,6 +194,6 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
       withoutPhone: items.filter((item) => !item.phone).length
     },
     scope: 'operational',
-    note: 'Lista únicamente auxiliares con asignación activa para mañana. Quienes aparecen primero con ventana CERRADA son los que todavía deben responder para abrirla. El estado se recalcula con el último inbound operativo + 24 horas.'
+    note: 'Estado vivo: se recalcula en cada consulta con el último inbound operativo y, como respaldo de integridad, con la evidencia persistida de confirmaciones recibidas. Ventana = último inbound + 24 horas.'
   };
 }
