@@ -15,7 +15,7 @@ test('la caché vigente usa los módulos actuales y no depende de archivos retir
   assert.match(serviceWorker, /cache\.addAll\(STATIC_ASSETS\)/);
   assert.match(serviceWorker, /name !== CACHE_NAME/);
   assert.match(serviceWorker, /Abre el portal una vez con conexión/);
-  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260811-worker-portal-biometric-v9'/);
+  assert.match(loader, /BIOMETRIC_ASSET_RELEASE\s*=\s*'20260812-worker-portal-biometric-v10'/);
   assert.match(loader, /worker-biometric-mobile\.js\?v=\$\{BIOMETRIC_ASSET_RELEASE\}/);
   assert.match(loader, /worker-portal-biometric-flow\.js\?v=\$\{BIOMETRIC_ASSET_RELEASE\}/);
   assert.doesNotMatch(loader, /worker-biometric-accessibility\.js|worker-portal-hardening\.js|worker-portal-offline-v2\.js/);
