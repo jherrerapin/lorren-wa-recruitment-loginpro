@@ -910,6 +910,8 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     if (!Number.isFinite(liveScore) || liveScore < LIVE_THRESHOLD) addFlag(flags, 'BIOMETRIC_LIVENESS_LOW', 45, state);
   }
 
+  const identityMatchEnforced = !strictEvidence || sampleCount > PASSIVE_VERIFICATION_MIN_SAMPLE_COUNT;
+
   if (descriptor && enrollment.descriptor) {
     baseSimilarity = humanFaceSimilarity(enrollment.descriptor, descriptor);
     if (strictEvidence && verificationDescriptors.length && enrollment.enrollmentReferences?.length) {
@@ -937,8 +939,11 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     } else if (sessionMatched) {
       referenceSource = 'SESSION';
       identityConfidence = 'PROBABLE';
-    } else {
+    } else if (!identityMatchEnforced) {
       identityConfidence = 'UNCONFIRMED';
+    }
+    if (!enrollmentMatched && !enrollmentProbable && !sessionMatched && identityMatchEnforced) {
+      addFlag(flags, 'BIOMETRIC_FACE_MISMATCH', 70, state);
     }
     if (await captureWasReplayed(prisma, captureHash, hash, idempotencyKey)) {
       addFlag(flags, 'BIOMETRIC_DESCRIPTOR_REPLAY', 80, state);
@@ -958,7 +963,7 @@ export async function assessWorkerBiometric(prisma, input = {}, options = {}) {
     sessionSimilarity,
     referenceSource,
     identityConfidence,
-    identityMatchEnforced: false,
+    identityMatchEnforced,
     matchThreshold: MATCH_THRESHOLD,
     attendanceIdentityThreshold: ATTENDANCE_IDENTITY_THRESHOLD,
     sessionIdentityThreshold: IDENTITY_CONTINUITY_THRESHOLD,
