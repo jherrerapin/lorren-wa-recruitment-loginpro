@@ -9,7 +9,7 @@
   const returnLabel = typeof whatsappReturnLabel === 'string' && whatsappReturnLabel ? whatsappReturnLabel : 'Volver a Operaciones';
   const assignmentsHref = typeof whatsappAssignmentsHref === 'string' && whatsappAssignmentsHref ? whatsappAssignmentsHref : '/admin/operaciones/asignaciones';
   const assignmentsLabel = typeof whatsappAssignmentsLabel === 'string' && whatsappAssignmentsLabel ? whatsappAssignmentsLabel : 'Asignaciones';
-  const monitorHref = typeof whatsappMonitorHref === 'string' && whatsappMonitorHref ? whatsappMonitorHref : `${basePath}/monitor`;
+  const monitorHref = role === 'dev' && typeof whatsappMonitorHref === 'string' && whatsappMonitorHref ? whatsappMonitorHref : null;
   const missing = Array.isArray(missingConfiguration) ? missingConfiguration : [];
 %>
 <!DOCTYPE html>
@@ -42,7 +42,7 @@
     <a href="/admin">Panel</a>
     <a href="/admin/vacancies">Vacantes</a>
     <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
-    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
+    <% if (role === 'dev') { %><a href="/admin/monitor">Monitor bot</a><% } %>
     <span class="spacer"></span>
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
@@ -57,7 +57,7 @@
       <div class="actions">
         <a class="btn" href="<%= returnHref %>"><%= returnLabel %></a>
         <a class="btn" href="<%= assignmentsHref %>"><%= assignmentsLabel %></a>
-        <a class="btn" href="<%= monitorHref %>">Monitor de mensajes</a>
+        <% if (monitorHref) { %><a class="btn" href="<%= monitorHref %>">Ventanas 24 h · DEV</a><% } %>
         <button class="btn btn-primary" type="button" id="refreshStatus">Actualizar estado</button>
       </div>
     </section>
