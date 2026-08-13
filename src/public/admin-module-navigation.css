@@ -17,6 +17,32 @@
   width: auto;
 }
 
+.admin-module-navbar > form {
+  width: auto !important;
+  margin: 0 !important;
+  flex: 0 0 auto;
+}
+
+.admin-module-navbar .btn-logout {
+  min-height: 36px;
+  padding: 7px 11px !important;
+  border: 1px solid rgba(255, 255, 255, .24) !important;
+  border-radius: 9px;
+  background: transparent;
+  color: #dbe5ec !important;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.admin-module-navbar .btn-logout:hover,
+.admin-module-navbar .btn-logout:focus-visible {
+  border-color: rgba(255, 255, 255, .5) !important;
+  color: #fff !important;
+  outline: none;
+}
+
 .admin-module-nav-links {
   display: flex;
   align-items: stretch;
@@ -62,7 +88,7 @@
   border-radius: 8px;
   background: rgba(255, 255, 255, .14);
   color: #fff;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 900;
 }
 
@@ -189,7 +215,7 @@
   border-radius: 13px;
   background: #1e2d3d;
   color: #fff;
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 900;
 }
 

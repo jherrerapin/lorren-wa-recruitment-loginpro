@@ -74,9 +74,9 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
   const active = activeModule(path);
   const access = moduleAccess(req, originalNav);
   const modules = [
-    moduleLink({ key: 'recruitment', href: RECRUITMENT_PATH, label: 'Reclutamiento', icon: 'R', active }),
-    moduleLink({ key: 'operations', href: OPERATIONS_PATH, label: 'Operaciones / Despacho', icon: 'O', active, allowed: access.dispatch }),
-    moduleLink({ key: 'payroll', href: PAYROLL_PATH, label: 'Nómina', icon: 'N', active, allowed: access.payroll })
+    moduleLink({ key: 'recruitment', href: RECRUITMENT_PATH, label: 'Reclutamiento', icon: '👥', active }),
+    moduleLink({ key: 'operations', href: OPERATIONS_PATH, label: 'Operaciones / Despacho', icon: '🚚', active, allowed: access.dispatch }),
+    moduleLink({ key: 'payroll', href: PAYROLL_PATH, label: 'Nómina', icon: '🧾', active, allowed: access.payroll })
   ].filter(Boolean).join('\n    ');
   const utilities = utilityLinks(access);
   const tools = utilities.length
@@ -133,9 +133,9 @@ export function buildAdminModuleCards(req = {}, originalNav = '') {
   const active = activeModule(path);
   const access = moduleAccess(req, originalNav);
   const cards = [
-    moduleCard({ key: 'recruitment', href: RECRUITMENT_PATH, label: 'Reclutamiento', icon: 'R', description: 'Lórren, candidatos, vacantes y seguimiento de selección.', active, access }),
-    moduleCard({ key: 'operations', href: OPERATIONS_PATH, label: 'Operaciones / Despacho', icon: 'O', description: 'Despacho, personal operativo, WhatsApp y asistencia.', active, access, allowed: access.dispatch }),
-    moduleCard({ key: 'payroll', href: PAYROLL_PATH, label: 'Nómina', icon: 'N', description: 'Tiempo trabajado, novedades, conceptos y exportaciones.', active, access, allowed: access.payroll })
+    moduleCard({ key: 'recruitment', href: RECRUITMENT_PATH, label: 'Reclutamiento', icon: '👥', description: 'Lórren, candidatos, vacantes y seguimiento de selección.', active, access }),
+    moduleCard({ key: 'operations', href: OPERATIONS_PATH, label: 'Operaciones / Despacho', icon: '🚚', description: 'Despacho, personal operativo, WhatsApp y asistencia.', active, access, allowed: access.dispatch }),
+    moduleCard({ key: 'payroll', href: PAYROLL_PATH, label: 'Nómina', icon: '🧾', description: 'Tiempo trabajado, novedades, conceptos y exportaciones.', active, access, allowed: access.payroll })
   ].filter(Boolean).join('\n    ');
 
   return `<section class="admin-module-switcher" data-module-cards="true" aria-label="Acceso a módulos">
