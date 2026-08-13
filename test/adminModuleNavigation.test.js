@@ -13,25 +13,34 @@ function nav(html) {
   return html.match(/<nav\b[\s\S]*?<\/nav>/i)?.[0] || '';
 }
 
-test('DEV recibe menus desplegables por modulo sin recuadros fijos', () => {
+function moduleMenu(html, key) {
+  return html.match(new RegExp(`<details[^>]*data-module-menu="${key}"[\\s\\S]*?<\\/details>`))?.[0] || '';
+}
+
+test('los modulos comparten un grupo exclusivo y Usuarios queda independiente', () => {
   const html = injectAdminModuleNavigation(baseHtml, req('/admin', {}, 'dev'));
   const navbar = nav(html);
+
+  assert.equal((navbar.match(/name="admin-primary-navigation"/g) || []).length, 3);
   assert.match(navbar, /data-module-menu="recruitment"/);
   assert.match(navbar, /data-module-menu="operations"/);
   assert.match(navbar, /data-module-menu="payroll"/);
+  assert.match(navbar, /class="admin-module-standalone-link" href="\/admin\/users">Usuarios<\/a>/);
+  assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /href="\/admin\/users"/);
   assert.match(navbar, /href="\/admin\/monitor"/);
   assert.match(navbar, /href="\/admin\/bot-knowledge"/);
   assert.match(navbar, /href="\/admin\/operaciones\/pruebas"/);
-  assert.doesNotMatch(navbar, />Herramientas</);
   assert.doesNotMatch(html, /data-module-cards=|admin-module-switcher|admin-module-card-grid/);
 });
 
 test('cada desplegable conserva sus opciones y permisos existentes', () => {
   const recruitment = nav(injectAdminModuleNavigation(baseHtml, req('/admin', { canAccessStatistics: true })));
-  assert.match(recruitment, /href="\/admin">Panel de candidatos<\/a>/);
-  assert.match(recruitment, /href="\/admin\/vacancies">Vacantes<\/a>/);
-  assert.match(recruitment, /href="\/admin\/users">Usuarios<\/a>/);
-  assert.match(recruitment, /href="\/admin\/estadisticas">Estadísticas<\/a>/);
+  const recruitmentMenu = moduleMenu(recruitment, 'recruitment');
+  assert.match(recruitmentMenu, /href="\/admin">Panel de candidatos<\/a>/);
+  assert.match(recruitmentMenu, /href="\/admin\/vacancies">Vacantes<\/a>/);
+  assert.match(recruitmentMenu, /href="\/admin\/estadisticas">Estadísticas<\/a>/);
+  assert.doesNotMatch(recruitmentMenu, /Usuarios/);
+  assert.match(recruitment, /admin-module-standalone-link[^>]*href="\/admin\/users"/);
   assert.doesNotMatch(recruitment, /data-module-menu="operations"|data-module-menu="payroll"/);
 
   const operations = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones', { canAccessDispatch: true, canAccessAttendance: true })));
@@ -46,7 +55,13 @@ test('cada desplegable conserva sus opciones y permisos existentes', () => {
   assert.match(payroll, /href="\/admin\/operaciones\/pruebas">Entorno de pruebas<\/a>/);
 });
 
-test('entorno de pruebas DEV no depende de permiso de Despacho para seguir visible', () => {
+test('Usuarios se marca activo sin marcar Reclutamiento como modulo activo', () => {
+  const navbar = nav(injectAdminModuleNavigation(baseHtml, req('/admin/users')));
+  assert.match(navbar, /class="admin-module-standalone-link is-active" href="\/admin\/users">Usuarios<\/a>/);
+  assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /admin-module-menu is-active/);
+});
+
+test('entorno de pruebas no depende de permiso de Despacho para seguir visible', () => {
   const navbar = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/pruebas', { canAccessTestWorkspace: true })));
   assert.match(navbar, /data-module-menu="operations"/);
   assert.match(navbar, /href="\/admin\/operaciones\/pruebas">Entorno de pruebas<\/a>/);
@@ -61,6 +76,7 @@ test('dropdown responsive y header sticky de escritorio quedan declarados', asyn
   ]);
   assert.match(html, /admin-module-navigation-desktop\.css" media="\(min-width: 901px\)"/);
   assert.match(css, /\.admin-module-menu-panel[\s\S]*position:\s*absolute/);
+  assert.match(css, /admin-module-standalone-link/);
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*\.admin-module-menu-panel[\s\S]*position:\s*static/);
   assert.match(desktop, /position:\s*sticky/);
   assert.match(desktop, /top:\s*0/);

@@ -1,10 +1,12 @@
 const RECRUITMENT_PATH = '/admin';
+const USERS_PATH = '/admin/users';
 const OPERATIONS_PATH = '/admin/operaciones';
 const ATTENDANCE_PATH = '/admin/operaciones/asistencia';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
 const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
+const MODULE_MENU_GROUP = 'admin-primary-navigation';
 
 function requestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0] || '/';
@@ -19,6 +21,7 @@ function requestCapability(req = {}, key) {
 }
 
 function activeModule(path) {
+  if (path.startsWith(USERS_PATH)) return null;
   if (path.startsWith(PAYROLL_PATH)) return 'payroll';
   if (path.startsWith(OPERATIONS_PATH)) return 'operations';
   return 'recruitment';
@@ -38,7 +41,7 @@ function moduleAccess(req = {}, originalNav = '') {
     payroll: isDev || requestCapability(req, 'canAccessPayroll'),
     testWorkspace: isDev || requestCapability(req, 'canAccessTestWorkspace'),
     statistics: isDev || requestCapability(req, 'canAccessStatistics'),
-    users: isDev || originalNavHasLink(originalNav, '/admin/users')
+    users: isDev || originalNavHasLink(originalNav, USERS_PATH)
   };
 }
 
@@ -51,7 +54,6 @@ function recruitmentMenuItems(access) {
     menuLink(RECRUITMENT_PATH, 'Panel de candidatos'),
     menuLink('/admin/vacancies', 'Vacantes')
   ];
-  if (access.users) items.push(menuLink('/admin/users', 'Usuarios'));
   if (access.statistics) items.push(menuLink('/admin/estadisticas', 'Estadísticas'));
   if (access.isDev) {
     items.push(menuLink('/admin/monitor', 'Monitor bot'));
@@ -86,10 +88,17 @@ function moduleMenu({ key, label, icon, active, items = [], allowed = true }) {
   if (!allowed || !items.length) return '';
   const classes = ['admin-module-menu'];
   if (active === key) classes.push('is-active');
-  return `<details class="${classes.join(' ')}" data-module-menu="${key}">
+  return `<details class="${classes.join(' ')}" name="${MODULE_MENU_GROUP}" data-module-menu="${key}">
       <summary class="admin-module-menu-trigger"><span class="admin-module-nav-icon" aria-hidden="true">${icon}</span><span>${label}</span><span class="admin-module-menu-chevron" aria-hidden="true">▾</span></summary>
       <div class="admin-module-menu-panel" aria-label="Opciones de ${label}">${items.join('')}</div>
     </details>`;
+}
+
+function standaloneUsersLink(access, path) {
+  if (!access.users) return '';
+  const classes = ['admin-module-standalone-link'];
+  if (path.startsWith(USERS_PATH)) classes.push('is-active');
+  return `<a class="${classes.join(' ')}" href="${USERS_PATH}">Usuarios</a>`;
 }
 
 export function buildAdminModuleNavbar(req = {}, originalNav = '') {
@@ -108,10 +117,12 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
     }),
     moduleMenu({ key: 'payroll', label: 'Nómina', icon: '🧾', active, items: payrollMenuItems(access), allowed: access.payroll })
   ].filter(Boolean).join('\n    ');
+  const usersLink = standaloneUsersLink(access, path);
 
   return `<nav class="navbar admin-module-navbar" data-module-navigation="true" aria-label="Módulos principales">
     <a class="brand admin-module-brand" href="${RECRUITMENT_PATH}" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <div class="admin-module-nav-links">${modules}</div>
+    ${usersLink}
     <span class="spacer"></span>
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>`;
