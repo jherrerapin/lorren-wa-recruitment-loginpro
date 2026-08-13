@@ -16,6 +16,11 @@ import {
   sendCloudWindowCheckTemplate,
   sendDispatchWhatsappTextMessage
 } from '../services/dispatchWhatsappCloudClient.js';
+import {
+  loadDispatchWhatsappAutomationSettings,
+  normalizeDispatchAutomationTime,
+  saveDispatchWhatsappAutomationSettings
+} from '../services/dispatchWhatsappAdminAlerts.js';
 
 const OPERATIONAL_API_ERROR = 'La integración oficial de WhatsApp de despacho no está disponible en este momento. Revisa su configuración o contacta al responsable técnico.';
 const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
@@ -101,6 +106,35 @@ async function getStatusForViewer(req) {
   return viewerStatus(req, await getDispatchWhatsappStatusView({ scope: 'operational' }));
 }
 
+async function findCurrentDispatchAppUser(prisma, req) {
+  const userId = normalizeString(req.session?.userId || req.userId);
+  if (userId) {
+    const byId = await prisma.appUser.findUnique({ where: { id: userId } });
+    if (byId) return byId;
+  }
+  const username = normalizeString(req.session?.username || req.username);
+  if (!username) return null;
+  return prisma.appUser.findUnique({ where: { username } });
+}
+
+async function getAutomationSettingsForViewer(prisma, req) {
+  const user = await findCurrentDispatchAppUser(prisma, req);
+  if (!user) {
+    return {
+      available: false,
+      assignmentAutoSendTime: null,
+      pendingConfirmationAlertTime: null,
+      alertPhoneConfigured: false
+    };
+  }
+  const settings = await loadDispatchWhatsappAutomationSettings({ prismaClient: prisma, userId: user.id });
+  return {
+    available: true,
+    ...settings,
+    alertPhoneConfigured: Boolean(user.dispatchAlertPhone)
+  };
+}
+
 function responseStatusCode(error) {
   const statusCode = Number(error?.statusCode || 0);
   if (statusCode >= 400 && statusCode <= 599) return statusCode;
@@ -149,11 +183,17 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
   router.use(requireOps);
 
   router.get('/', async (req, res) => {
-    const status = await getStatusForViewer(req);
+    const [status, automationSettings] = await Promise.all([
+      getStatusForViewer(req),
+      getAutomationSettingsForViewer(prisma, req)
+    ]);
     res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de despacho',
       role: role(req),
       message: normalizeString(req.query?.message),
+      settingsMessage: normalizeString(req.query?.settingsMessage),
+      settingsError: normalizeString(req.query?.settingsError),
+      automationSettings,
       whatsappTitle: role(req) === 'dev' ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
       whatsappEyebrow: 'Operaciones / Despacho',
       whatsappDescription: role(req) === 'dev'
@@ -167,6 +207,42 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       whatsappMonitorHref: role(req) === 'dev' ? '/admin/operaciones/whatsapp/monitor' : null,
       ...status
     });
+  });
+
+  router.post('/programacion-automatica', express.urlencoded({ extended: false }), async (req, res) => {
+    const redirectWith = (key, message) => {
+      const params = new URLSearchParams({ [key]: message });
+      return res.redirect(`/admin/operaciones/whatsapp?${params.toString()}`);
+    };
+    try {
+      const user = await findCurrentDispatchAppUser(prisma, req);
+      if (!user) return redirectWith('settingsError', 'No fue posible asociar esta configuración a tu usuario.');
+
+      const rawAuto = String(req.body?.dispatchAssignmentAutoSendTime || '').trim();
+      const rawPending = String(req.body?.dispatchPendingConfirmationAlertTime || '').trim();
+      const assignmentAutoSendTime = normalizeDispatchAutomationTime(rawAuto);
+      const pendingConfirmationAlertTime = normalizeDispatchAutomationTime(rawPending);
+      if ((rawAuto && !assignmentAutoSendTime) || (rawPending && !pendingConfirmationAlertTime)) {
+        return redirectWith('settingsError', 'Indica horarios válidos en formato de 24 horas.');
+      }
+      if (pendingConfirmationAlertTime && !user.dispatchAlertPhone) {
+        return redirectWith('settingsError', 'Configura primero tu WhatsApp personal de alertas en el panel de Operaciones.');
+      }
+      if (assignmentAutoSendTime && pendingConfirmationAlertTime && pendingConfirmationAlertTime <= assignmentAutoSendTime) {
+        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora de envío de confirmaciones.');
+      }
+
+      await saveDispatchWhatsappAutomationSettings({
+        prismaClient: prisma,
+        userId: user.id,
+        assignmentAutoSendTime,
+        pendingConfirmationAlertTime
+      });
+      return redirectWith('settingsMessage', 'Horarios de Bogotá guardados correctamente.');
+    } catch (error) {
+      console.warn('[dispatch-wa-schedule-settings] No fue posible guardar la configuración.', error?.message || error);
+      return redirectWith('settingsError', 'No fue posible guardar los horarios. Intenta nuevamente.');
+    }
   });
 
   router.get('/estado', async (req, res) => {
