@@ -1,118 +1,85 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadDispatchWhatsappMonitorHistory } from '../src/services/dispatchWhatsappMonitor.js';
+import fs from 'node:fs';
+import { loadDispatchWhatsappTodayWindowMonitor } from '../src/services/dispatchWhatsappMonitor.js';
+import { canAccessDispatchWhatsappMonitor } from '../src/routes/dispatchWhatsappNotifications.js';
+
+const NOW = new Date('2026-08-13T00:30:00.000Z'); // 12/08/2026 19:30 en Bogotá.
 
 function prismaFixture() {
-  const operationalLink = {
-    id: 'link-old',
-    phone: '3001112233',
-    providerMessageId: 'wamid.out.old',
-    confirmationMessageId: 'wamid.in.confirm',
-    confirmationReceivedAt: new Date('2026-08-12T22:00:00.000Z'),
-    status: 'CONFIRMED',
-    createdAt: new Date('2026-07-01T15:00:00.000Z'),
-    assignment: {
-      id: 'assignment-old',
-      worker: { id: 'worker-old', fullName: 'Auxiliar Histórico', phone: '3001112233' },
-      serviceRequest: {
-        source: 'INTERNAL',
-        serviceDate: new Date('2026-08-13T00:00:00.000Z'),
-        operationPointName: 'Operación Norte',
-        serviceName: 'Cargue',
-        address: 'Dirección de prueba',
-        startTime: '07:30',
-        operationPoint: null
-      }
+  const links = [
+    {
+      id: 'link-a', phone: '3001112233', providerMessageId: 'wamid.a', confirmationMessageId: 'wamid.in.a',
+      confirmationReceivedAt: new Date('2026-08-12T23:10:00.000Z'), status: 'CONFIRMED',
+      createdAt: new Date('2026-08-12T22:50:00.000Z'), serviceRequestId: 'request-a',
+      assignment: { id: 'assignment-a', serviceRequestId: 'request-a', worker: { id: 'worker-a', fullName: 'Auxiliar A', phone: '3001112233' }, serviceRequest: { source: 'INTERNAL' } }
+    },
+    {
+      id: 'link-b', phone: '3002223344', providerMessageId: 'wamid.b', confirmationMessageId: null,
+      confirmationReceivedAt: null, status: 'READ', createdAt: new Date('2026-08-12T23:00:00.000Z'), serviceRequestId: 'request-b',
+      assignment: { id: 'assignment-b', serviceRequestId: 'request-b', worker: { id: 'worker-b', fullName: 'Auxiliar B', phone: '3002223344' }, serviceRequest: { source: 'INTERNAL' } }
+    },
+    {
+      id: 'link-dev', phone: '3009990000', providerMessageId: 'wamid.dev', status: 'SENT', createdAt: new Date('2026-08-12T23:05:00.000Z'),
+      assignment: { id: 'assignment-dev', worker: { id: 'worker-dev', fullName: 'Auxiliar DEV', phone: '3009990000' }, serviceRequest: { source: 'DEV_TEST' } }
     }
-  };
-  const devLink = {
-    ...operationalLink,
-    id: 'link-dev',
-    phone: '3009990000',
-    providerMessageId: 'wamid.dev',
-    confirmationMessageId: null,
-    confirmationReceivedAt: null,
-    status: 'SENT',
-    createdAt: new Date('2026-08-12T20:00:00.000Z'),
-    assignment: {
-      ...operationalLink.assignment,
-      id: 'assignment-dev',
-      worker: { id: 'worker-dev', fullName: 'Perfil Dev', phone: '3009990000' },
-      serviceRequest: { ...operationalLink.assignment.serviceRequest, source: 'DEV_TEST' }
-    }
-  };
-  const incident = {
-    id: 'incident-1',
-    type: 'WHATSAPP_NOVELTY',
-    status: 'OPEN',
-    createdAt: new Date('2026-08-12T22:05:00.000Z'),
-    worker: { id: 'worker-old', fullName: 'Auxiliar Histórico', phone: '3001112233' },
-    assignment: { worker: { id: 'worker-old', fullName: 'Auxiliar Histórico', phone: '3001112233' } }
-  };
-  const reminder = {
-    id: 'reminder-1',
-    scope: 'operational',
-    phone: '573001112233',
-    appUserId: 'user-1',
-    status: 'SENT',
-    sentAt: new Date('2026-08-12T22:10:00.000Z'),
-    createdAt: new Date('2026-08-12T22:09:00.000Z')
-  };
-
+  ];
+  const windows = [
+    { id: 'window-a', scope: 'operational', phone: '573001112233', lastInboundAt: new Date('2026-08-12T23:10:00.000Z') },
+    { id: 'window-c', scope: 'operational', phone: '573003334455', lastInboundAt: new Date('2026-08-12T23:20:00.000Z') }
+  ];
+  const workers = [
+    { id: 'worker-a', fullName: 'Auxiliar A', phone: '3001112233', createdAt: new Date('2026-07-01T00:00:00.000Z') },
+    { id: 'worker-b', fullName: 'Auxiliar B', phone: '3002223344', createdAt: new Date('2026-07-01T00:00:00.000Z') },
+    { id: 'worker-c', fullName: 'Auxiliar C', phone: '3003334455', createdAt: new Date('2026-07-01T00:00:00.000Z') },
+    { id: 'worker-dev', fullName: 'Auxiliar DEV', phone: '3009990000', createdAt: new Date('2026-07-01T00:00:00.000Z') }
+  ];
   return {
-    dispatchWhatsappConfirmation: {
-      findMany: async () => [devLink, operationalLink]
-    },
-    dispatchIncident: {
-      findMany: async (query) => {
-        assert.equal(query.where.type, 'WHATSAPP_NOVELTY');
-        return [incident];
-      }
-    },
-    dispatchWhatsappWindowReminder: {
-      findMany: async (query) => {
-        assert.equal(query.where.scope, 'operational');
-        return [reminder];
-      }
-    },
-    appUser: {
-      findMany: async () => [{ id: 'user-1', username: 'operaciones-despacho', dispatchAlertPhone: '3015557788' }]
-    }
+    dispatchWhatsappContactWindow: { findMany: async (query) => {
+      assert.equal(query.where.scope, 'operational');
+      assert.equal(query.where.lastInboundAt.gte.toISOString(), '2026-08-12T05:00:00.000Z');
+      assert.equal(query.where.lastInboundAt.lte.toISOString(), '2026-08-13T04:59:59.999Z');
+      return windows;
+    } },
+    dispatchWhatsappConfirmation: { findMany: async (query) => {
+      assert.equal(query.where.createdAt.gte.toISOString(), '2026-08-12T05:00:00.000Z');
+      assert.equal(query.where.createdAt.lte.toISOString(), '2026-08-13T04:59:59.999Z');
+      return links;
+    } },
+    dispatchWorker: { findMany: async () => workers }
   };
 }
 
-test('monitor recupera histórico anterior sin recortarlo a hoy y excluye DEV_TEST', async () => {
-  const history = await loadDispatchWhatsappMonitorHistory({ prismaClient: prismaFixture() });
-
-  assert.equal(history.summary.total, 5);
-  assert.equal(history.summary.outbound, 3);
-  assert.equal(history.summary.inbound, 2);
-  assert.equal(history.summary.reconstructed, 1);
-  assert.equal(history.summary.oldestAvailableAt, '2026-07-01T15:00:00.000Z');
-  assert.equal(history.items.some((item) => item.phone === '573009990000'), false);
-  assert.ok(history.items.some((item) => item.messageId === 'wamid.out.old' && item.kind === 'ASIGNACION'));
-  assert.ok(history.items.some((item) => item.messageId === 'wamid.in.confirm' && item.content === 'CONFIRMADO'));
-  assert.ok(history.items.some((item) => item.kind === 'RESPUESTA_AUTOMATICA' && item.content === 'Gracias.' && item.evidence === 'RECONSTRUIDO'));
-  assert.ok(history.items.some((item) => item.kind === 'NOVEDAD' && item.content === 'REPORTAR NOVEDAD'));
-  assert.ok(history.items.some((item) => item.kind === 'RECORDATORIO_24H' && item.phone === '573015557788'));
+test('monitor de Despacho muestra solo la actividad operativa de hoy y quién abrió ventana', async () => {
+  const monitor = await loadDispatchWhatsappTodayWindowMonitor({ prismaClient: prismaFixture(), now: NOW });
+  assert.equal(monitor.dateKey, '2026-08-12');
+  assert.equal(monitor.summary.total, 3);
+  assert.equal(monitor.summary.open, 2);
+  assert.equal(monitor.summary.notOpened, 1);
+  assert.equal(monitor.summary.assignmentsSentToday, 2);
+  assert.equal(monitor.items.some((item) => item.phone === '573009990000'), false);
+  const auxiliarA = monitor.items.find((item) => item.workerName === 'Auxiliar A');
+  assert.equal(auxiliarA.windowStatus, 'ABIERTA');
+  assert.equal(auxiliarA.lastInboundAt, '2026-08-12T23:10:00.000Z');
+  assert.equal(auxiliarA.expiresAt, '2026-08-13T23:10:00.000Z');
+  const auxiliarB = monitor.items.find((item) => item.workerName === 'Auxiliar B');
+  assert.equal(auxiliarB.windowStatus, 'NO_ABIERTA');
+  const auxiliarC = monitor.items.find((item) => item.workerName === 'Auxiliar C');
+  assert.equal(auxiliarC.windowStatus, 'ABIERTA');
+  assert.equal(auxiliarC.sentAt, null);
 });
 
-test('monitor filtra por dirección, teléfono y búsqueda sin perder paginación', async () => {
-  const history = await loadDispatchWhatsappMonitorHistory({
-    prismaClient: prismaFixture(),
-    query: { direction: 'inbound', phone: '3001112233', q: 'confirmado', pageSize: '1', page: '9' }
-  });
-
-  assert.equal(history.summary.total, 1);
-  assert.equal(history.summary.inbound, 1);
-  assert.equal(history.summary.outbound, 0);
-  assert.equal(history.pagination.page, 1);
-  assert.equal(history.pagination.pageSize, 1);
-  assert.equal(history.items[0].content, 'CONFIRMADO');
+test('monitor de ventanas 24 h es exclusivamente DEV aunque el usuario tenga acceso a Despacho', () => {
+  assert.equal(canAccessDispatchWhatsappMonitor({ session: { userRole: 'dev' } }), true);
+  assert.equal(canAccessDispatchWhatsappMonitor({ session: { userRole: 'admin', canAccessDispatch: true } }), false);
+  assert.equal(canAccessDispatchWhatsappMonitor({ session: { userRole: 'admin', username: 'operaciones-despacho' } }), false);
 });
 
-test('monitor declara la limitación retroactiva en lugar de inventar mensajes no persistidos', async () => {
-  const history = await loadDispatchWhatsappMonitorHistory({ prismaClient: prismaFixture() });
-  assert.ok(history.limitations.some((item) => item.includes('Meta Cloud API')));
-  assert.ok(history.limitations.some((item) => item.includes('evidencia persistida')));
+test('monitor del bot y monitor de ventanas de Despacho conservan rutas separadas', () => {
+  const statusView = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
+  const windowView = fs.readFileSync(new URL('../src/views/operacionesWhatsappMonitor.ejs', import.meta.url), 'utf8');
+  assert.match(statusView, /href="\/admin\/monitor">Monitor bot/);
+  assert.match(statusView, /Ventanas 24 h · DEV/);
+  assert.match(windowView, /href="\/admin\/monitor">Monitor bot/);
+  assert.match(windowView, /Ventanas 24 h Despacho/);
 });
