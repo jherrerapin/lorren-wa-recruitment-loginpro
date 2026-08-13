@@ -35,28 +35,36 @@ function latestByPhone(rows, phoneSelector, timeSelector) {
   return result;
 }
 
-function buildWindowItem({ phone, link, window, worker, now }) {
-  const assignment = link?.assignment || null;
-  const selectedWorker = assignment?.worker || worker || null;
-  const lastInboundAt = window?.lastInboundAt ? new Date(window.lastInboundAt) : null;
+function inboundAfterSend(window, link) {
+  if (!window?.lastInboundAt || !link?.createdAt) return null;
+  const inboundAt = new Date(window.lastInboundAt);
+  const sentAt = new Date(link.createdAt);
+  return inboundAt.getTime() >= sentAt.getTime() ? window : null;
+}
+
+function buildWindowItem({ phone, link, window, now }) {
+  const assignment = link.assignment || null;
+  const worker = assignment?.worker || null;
+  const effectiveWindow = inboundAfterSend(window, link);
+  const lastInboundAt = effectiveWindow?.lastInboundAt ? new Date(effectiveWindow.lastInboundAt) : null;
   const expiresAt = lastInboundAt ? new Date(lastInboundAt.getTime() + DISPATCH_WHATSAPP_WINDOW_MS) : null;
   const isOpen = Boolean(expiresAt && now.getTime() < expiresAt.getTime());
   return {
     phone,
-    workerId: selectedWorker?.id || null,
-    workerName: text(selectedWorker?.fullName) || null,
+    workerId: worker?.id || null,
+    workerName: text(worker?.fullName) || null,
     assignmentId: assignment?.id || null,
-    serviceRequestId: assignment?.serviceRequestId || link?.serviceRequestId || null,
-    sentAt: link?.createdAt ? new Date(link.createdAt).toISOString() : null,
-    outboundStatus: text(link?.status) || null,
-    providerMessageId: text(link?.providerMessageId) || null,
+    serviceRequestId: assignment?.serviceRequestId || link.serviceRequestId || null,
+    sentAt: new Date(link.createdAt).toISOString(),
+    outboundStatus: text(link.status) || null,
+    providerMessageId: text(link.providerMessageId) || null,
     lastInboundAt: lastInboundAt ? lastInboundAt.toISOString() : null,
     expiresAt: expiresAt ? expiresAt.toISOString() : null,
     isOpen,
     windowStatus: isOpen ? 'ABIERTA' : (lastInboundAt ? 'VENCIDA' : 'NO_ABIERTA'),
     remainingMs: isOpen ? Math.max(0, expiresAt.getTime() - now.getTime()) : 0,
-    responseEvidence: text(link?.confirmationMessageId) || null,
-    responseReceivedAt: link?.confirmationReceivedAt ? new Date(link.confirmationReceivedAt).toISOString() : null
+    responseEvidence: text(link.confirmationMessageId) || null,
+    responseReceivedAt: link.confirmationReceivedAt ? new Date(link.confirmationReceivedAt).toISOString() : null
   };
 }
 
@@ -65,7 +73,7 @@ export async function loadDispatchWhatsappTodayWindowMonitor({ prismaClient, now
   const dateKey = todayIsoDateCO(now);
   const { start, end } = bogotaDayRange(dateKey);
 
-  const [windows, confirmationLinks, workers] = await Promise.all([
+  const [windows, confirmationLinks] = await Promise.all([
     prismaClient.dispatchWhatsappContactWindow.findMany({
       where: {
         scope: 'operational',
@@ -84,9 +92,6 @@ export async function loadDispatchWhatsappTodayWindowMonitor({ prismaClient, now
         }
       },
       orderBy: { createdAt: 'desc' }
-    }),
-    prismaClient.dispatchWorker.findMany({
-      select: { id: true, fullName: true, phone: true, createdAt: true }
     })
   ]);
 
@@ -97,21 +102,13 @@ export async function loadDispatchWhatsappTodayWindowMonitor({ prismaClient, now
     (link) => link.createdAt
   );
   const windowsByPhone = latestByPhone(windows, (window) => window.phone, (window) => window.lastInboundAt);
-  const workersByPhone = latestByPhone(workers, (worker) => worker.phone, (worker) => worker.createdAt);
-  const phones = new Set([...linksByPhone.keys(), ...windowsByPhone.keys()]);
 
-  const items = [...phones]
-    .map((phone) => buildWindowItem({
-      phone,
-      link: linksByPhone.get(phone) || null,
-      window: windowsByPhone.get(phone) || null,
-      worker: workersByPhone.get(phone) || null,
-      now
-    }))
+  const items = [...linksByPhone.entries()]
+    .map(([phone, link]) => buildWindowItem({ phone, link, window: windowsByPhone.get(phone) || null, now }))
     .sort((a, b) => {
       if (a.isOpen !== b.isOpen) return a.isOpen ? -1 : 1;
-      const aTime = new Date(a.lastInboundAt || a.sentAt || 0).getTime();
-      const bTime = new Date(b.lastInboundAt || b.sentAt || 0).getTime();
+      const aTime = new Date(a.lastInboundAt || a.sentAt).getTime();
+      const bTime = new Date(b.lastInboundAt || b.sentAt).getTime();
       return bTime - aTime;
     });
 
@@ -124,10 +121,10 @@ export async function loadDispatchWhatsappTodayWindowMonitor({ prismaClient, now
       open: items.filter((item) => item.isOpen).length,
       notOpened: items.filter((item) => item.windowStatus === 'NO_ABIERTA').length,
       expired: items.filter((item) => item.windowStatus === 'VENCIDA').length,
-      inboundToday: windowsByPhone.size,
+      inboundAfterSend: items.filter((item) => item.lastInboundAt).length,
       assignmentsSentToday: linksByPhone.size
     },
     scope: 'operational',
-    note: 'Solo muestra actividad operativa de hoy. No mezcla el monitor del bot de Reclutamiento ni registros DEV_TEST.'
+    note: 'Solo toma auxiliares a quienes la línea operativa envió confirmación hoy. Una ventana cuenta como abierta únicamente si hubo un inbound posterior a ese envío; no mezcla el Monitor bot ni DEV_TEST.'
   };
 }
