@@ -1,6 +1,7 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
 import {
+  buildDispatchServiceDateSearchRange,
   buildDispatchServiceDateWhere,
   dispatchServiceDateKey,
   filterDispatchServiceRequestsByDate,
@@ -18,6 +19,7 @@ const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const PENDING_REQUEST_STATUSES = ['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION'];
 const OPEN_INCIDENT_STATUSES = ['OPEN', 'IN_PROGRESS'];
 const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
+const RANGE_TOKEN_PATTERN = /^(\d{4}-\d{2}-\d{2})\s+a\s+(\d{4}-\d{2}-\d{2})$/;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -75,8 +77,19 @@ function requireOps(req, res, next) {
   return next();
 }
 
-function selectedDateFromQuery(query = {}) {
-  return normalizeDispatchDateParam(query.fecha || query.date);
+function selectedDateRangeFromQuery(query = {}) {
+  const legacyRaw = normalizeString(query.fecha || query.date);
+  const legacyRange = legacyRaw?.match(RANGE_TOKEN_PATTERN);
+  const legacyFrom = legacyRange ? normalizeDispatchDateParam(legacyRange[1]) : normalizeDispatchDateParam(legacyRaw);
+  const legacyTo = legacyRange ? normalizeDispatchDateParam(legacyRange[2], legacyFrom) : legacyFrom;
+  let from = normalizeDispatchDateParam(query.fechaDesde || query.from || legacyFrom, legacyFrom);
+  let to = normalizeDispatchDateParam(query.fechaHasta || query.to || legacyTo, legacyTo);
+  if (from > to) [from, to] = [to, from];
+  return { from, to };
+}
+
+function dateRangeLabel(range) {
+  return range.from === range.to ? range.from : `${range.from} a ${range.to}`;
 }
 
 function activeAssignments(request) {
@@ -164,20 +177,20 @@ function normalizeSummaryType(value) {
 function summaryTypeMeta(type) {
   return ({
     total: {
-      title: 'Solicitudes del día',
-      description: 'Todas las solicitudes programadas para la fecha seleccionada.'
+      title: 'Solicitudes del rango',
+      description: 'Todas las solicitudes programadas para el rango seleccionado.'
     },
     pending: {
       title: 'Solicitudes pendientes',
-      description: 'Solicitudes que aún requieren asignación, cobertura parcial o confirmación.'
+      description: 'Solicitudes del rango que aún requieren asignación, cobertura parcial o confirmación.'
     },
     complete: {
       title: 'Solicitudes con asignación completa',
-      description: 'Solicitudes cuya cobertura ya está confirmada para la fecha seleccionada.'
+      description: 'Solicitudes del rango cuya cobertura ya está confirmada.'
     },
     incidents: {
       title: 'Solicitudes con novedades abiertas',
-      description: 'Solicitudes de la fecha seleccionada que tienen novedades abiertas o en proceso.'
+      description: 'Solicitudes del rango que tienen novedades abiertas o en proceso.'
     }
   }[type]);
 }
@@ -204,10 +217,22 @@ function excludeDevTestRequests(where = {}) {
   };
 }
 
-async function loadServiceRequestsForDate(prisma, selectedDate) {
-  const broadWhere = buildDispatchServiceDateWhere(selectedDate);
+function buildDateRangeWhere(range) {
+  const start = buildDispatchServiceDateSearchRange(range.from).start;
+  const end = buildDispatchServiceDateSearchRange(range.to).end;
+  return { serviceDate: { gte: start, lt: end } };
+}
+
+function filterRequestsByDateRange(requests = [], range) {
+  return requests.filter((request) => {
+    const key = dispatchServiceDateKey(request?.serviceDate);
+    return Boolean(key && key >= range.from && key <= range.to);
+  });
+}
+
+async function loadServiceRequestsForRange(prisma, range) {
   const requests = await prisma.dispatchServiceRequest.findMany({
-    where: excludeDevTestRequests(broadWhere),
+    where: excludeDevTestRequests(buildDateRangeWhere(range)),
     include: {
       service: true,
       ...DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
@@ -221,13 +246,17 @@ async function loadServiceRequestsForDate(prisma, selectedDate) {
         orderBy: { createdAt: 'desc' }
       }
     },
-    orderBy: [{ clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
+    orderBy: [{ serviceDate: 'asc' }, { clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
   });
 
-  return filterDispatchServiceRequestsByDate(requests, selectedDate).map((request) => ({
+  return filterRequestsByDateRange(requests, range).map((request) => ({
     ...request,
     status: deriveDispatchRequestOperationalState(request).status
   }));
+}
+
+async function loadServiceRequestsForDate(prisma, selectedDate) {
+  return loadServiceRequestsForRange(prisma, { from: selectedDate, to: selectedDate });
 }
 
 async function loadAttendanceAccessForDashboard(prisma, req) {
@@ -299,15 +328,19 @@ function styleStatusCell(cell, status) {
   cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
 }
 
-function renderHome(res, req, selectedDate, requests, attendanceAccess, dispatchAlertSettings) {
+function renderHome(res, req, range, requests, programmingRequests, attendanceAccess, dispatchAlertSettings) {
   const metrics = buildOperationsDashboardMetrics(requests);
+  const programmingMetrics = buildOperationsDashboardMetrics(programmingRequests);
   return res.render('operacionesDashboard', {
     role: req.session?.userRole || req.userRole,
     pageTitle: 'Operaciones / Despacho',
     subtitle: 'Gestión operativa de solicitudes, asignaciones, novedades y reemplazos.',
     activeSection: 'dashboard',
-    selectedDate,
+    selectedDate: range.to,
+    selectedDateFrom: range.from,
+    selectedDateTo: range.to,
     metrics,
+    programmingMetrics,
     dispatchAlertSettings,
     alertSettingsMessage: normalizeString(req.query.alertSettingsMessage),
     alertSettingsError: normalizeString(req.query.alertSettingsError),
@@ -316,15 +349,17 @@ function renderHome(res, req, selectedDate, requests, attendanceAccess, dispatch
   });
 }
 
-function renderSummary(res, req, selectedDate, type, requests) {
+function renderSummary(res, req, range, type, requests) {
   const metrics = buildOperationsDashboardMetrics(requests);
   const filteredRequests = filterRequestsBySummaryType(requests, type);
   const meta = summaryTypeMeta(type);
   return res.render('operacionesSolicitudesResumen', {
     role: req.session?.userRole || req.userRole,
     pageTitle: meta.title,
-    subtitle: meta.description,
-    selectedDate,
+    subtitle: `${meta.description} Rango: ${dateRangeLabel(range)}.`,
+    selectedDate: dateRangeLabel(range),
+    selectedDateFrom: range.from,
+    selectedDateTo: range.to,
     type,
     typeLabel: meta.title,
     metrics,
@@ -341,10 +376,12 @@ function renderSummary(res, req, selectedDate, type, requests) {
   });
 }
 
-async function exportRequestsToExcel(res, selectedDate, serviceRequests) {
+async function exportRequestsToExcel(res, range, serviceRequests) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Lórren Dispatch';
   workbook.created = new Date();
+  const rangeText = dateRangeLabel(range);
+  const subtitle = range.from === range.to ? `Fecha de servicio: ${rangeText}` : `Rango de servicio: ${rangeText}`;
 
   const summarySheet = workbook.addWorksheet('Resumen');
   const summaryColumns = [
@@ -359,7 +396,7 @@ async function exportRequestsToExcel(res, selectedDate, serviceRequests) {
     { header: 'Auxiliares asignados', key: 'workers', width: 48 }
   ];
   summarySheet.columns = summaryColumns;
-  applyTitle(summarySheet, 'Solicitudes de Operaciones', `Fecha de servicio: ${selectedDate}`, summaryColumns.length);
+  applyTitle(summarySheet, 'Solicitudes de Operaciones', subtitle, summaryColumns.length);
   const headerRow = summarySheet.addRow(summaryColumns.map((column) => column.header));
   styleHeader(headerRow);
 
@@ -386,7 +423,7 @@ async function exportRequestsToExcel(res, selectedDate, serviceRequests) {
   for (const [clientName, requests] of groupByClient(serviceRequests)) {
     const sheet = workbook.addWorksheet(cleanSheetName(clientName, 'Cliente'));
     sheet.columns = summaryColumns;
-    applyTitle(sheet, clientName, `Fecha de servicio: ${selectedDate}`, summaryColumns.length);
+    applyTitle(sheet, clientName, subtitle, summaryColumns.length);
     const clientHeader = sheet.addRow(summaryColumns.map((column) => column.header));
     styleHeader(clientHeader);
     requests.forEach((request, index) => {
@@ -410,7 +447,8 @@ async function exportRequestsToExcel(res, selectedDate, serviceRequests) {
   }
 
   const buffer = await workbook.xlsx.writeBuffer();
-  const fileName = `solicitudes-operaciones-${selectedDate}.xlsx`;
+  const fileRange = range.from === range.to ? range.from : `${range.from}-a-${range.to}`;
+  const fileName = `solicitudes-operaciones-${fileRange}.xlsx`;
   res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.set('Content-Disposition', `attachment; filename="${fileName}"`);
   return res.send(Buffer.from(buffer));
@@ -420,19 +458,24 @@ export function dispatchDashboardMetricsRouter(prisma) {
   const router = express.Router();
 
   router.get('/', requireOps, async (req, res) => {
-    const selectedDate = selectedDateFromQuery(req.query);
-    const [requests, attendanceAccess, dispatchAlertSettings] = await Promise.all([
-      loadServiceRequestsForDate(prisma, selectedDate),
+    const range = selectedDateRangeFromQuery(req.query);
+    const rangeRequestsPromise = loadServiceRequestsForRange(prisma, range);
+    const programmingRequestsPromise = range.from === range.to
+      ? rangeRequestsPromise
+      : loadServiceRequestsForDate(prisma, range.to);
+    const [requests, programmingRequests, attendanceAccess, dispatchAlertSettings] = await Promise.all([
+      rangeRequestsPromise,
+      programmingRequestsPromise,
       loadAttendanceAccessForDashboard(prisma, req),
       loadCurrentDispatchAlertSettings(prisma, req)
     ]);
-    return renderHome(res, req, selectedDate, requests, attendanceAccess, dispatchAlertSettings);
+    return renderHome(res, req, range, requests, programmingRequests, attendanceAccess, dispatchAlertSettings);
   });
 
   router.post('/alertas-whatsapp', requireOps, express.urlencoded({ extended: false }), async (req, res) => {
-    const selectedDate = selectedDateFromQuery({ fecha: req.body?.fecha });
+    const range = selectedDateRangeFromQuery(req.body || {});
     const redirectWith = (key, message) => {
-      const params = new URLSearchParams({ fecha: selectedDate, [key]: message });
+      const params = new URLSearchParams({ fechaDesde: range.from, fechaHasta: range.to, [key]: message });
       return res.redirect(`/admin/operaciones?${params.toString()}`);
     };
 
@@ -459,16 +502,16 @@ export function dispatchDashboardMetricsRouter(prisma) {
   });
 
   router.get('/resumen', requireOps, async (req, res) => {
-    const selectedDate = selectedDateFromQuery(req.query);
-    const requests = await loadServiceRequestsForDate(prisma, selectedDate);
-    return renderSummary(res, req, selectedDate, normalizeSummaryType(req.query.type), requests);
+    const range = selectedDateRangeFromQuery(req.query);
+    const requests = await loadServiceRequestsForRange(prisma, range);
+    return renderSummary(res, req, range, normalizeSummaryType(req.query.type), requests);
   });
 
   router.get('/resumen/exportar', requireOps, async (req, res) => {
-    const selectedDate = selectedDateFromQuery(req.query);
-    const requests = await loadServiceRequestsForDate(prisma, selectedDate);
+    const range = selectedDateRangeFromQuery(req.query);
+    const requests = await loadServiceRequestsForRange(prisma, range);
     const type = normalizeSummaryType(req.query.type);
-    return exportRequestsToExcel(res, selectedDate, filterRequestsBySummaryType(requests, type));
+    return exportRequestsToExcel(res, range, filterRequestsBySummaryType(requests, type));
   });
 
   router.get('/solicitudes/:serviceRequestId', requireOps, async (req, res) => {
