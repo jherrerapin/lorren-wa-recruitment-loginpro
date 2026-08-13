@@ -82,6 +82,8 @@ test('replay ubicación: responde la pregunta antes de retomar la recolección',
 
   const reply = normalize(replies.at(-1)?.body);
   assert.match(reply, /zona industrial de ibague/);
+  assert.doesNotMatch(reply, /tu entrevista/);
+  assert.doesNotMatch(reply, /direccion registrada para .*entrevista/);
   assert.doesNotMatch(reply, /gracias, ese dato quedo registrado/);
   assert.doesNotMatch(reply, /la vacante que tengo para ti/);
   assert.doesNotMatch(reply, /nombre completo, tipo de documento, numero de documento, edad/);
