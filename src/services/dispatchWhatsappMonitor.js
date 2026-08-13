@@ -1,4 +1,4 @@
-import { buildDispatchServiceDateWhere, todayIsoDateCO } from './dispatchDate.js';
+import { buildDispatchServiceDateWhere, dispatchServiceDateKey, todayIsoDateCO } from './dispatchDate.js';
 import { DISPATCH_WHATSAPP_WINDOW_MS } from './dispatchWhatsappAdminAlerts.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
@@ -83,7 +83,7 @@ export async function loadDispatchWhatsappWindowStatusForAssignments({
 export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient, now = new Date() } = {}) {
   if (!prismaClient) throw new Error('prismaClient es requerido');
   const dateKey = tomorrowIsoDateCO(now);
-  const assignments = await prismaClient.dispatchAssignment.findMany({
+  const assignmentsRaw = await prismaClient.dispatchAssignment.findMany({
     where: {
       status: { in: ACTIVE_ASSIGNMENT_STATUSES },
       serviceRequest: {
@@ -94,6 +94,10 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
     include: { worker: true, serviceRequest: true },
     orderBy: { createdAt: 'asc' }
   });
+  const assignments = assignmentsRaw.filter((assignment) => (
+    assignment?.serviceRequest?.source !== 'DEV_TEST'
+    && dispatchServiceDateKey(assignment?.serviceRequest?.serviceDate) === dateKey
+  ));
 
   const assignmentIds = assignments.map((assignment) => assignment.id);
   const links = assignmentIds.length
