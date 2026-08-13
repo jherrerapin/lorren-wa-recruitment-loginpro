@@ -52,6 +52,13 @@ function normalizeProgrammingContact(entry, { allowAnonymous = false } = {}) {
   return { name: name || 'Destinatario', phone };
 }
 
+function isCompleteProgrammingContact(entry) {
+  return Boolean(
+    normalizeString(entry?.name || entry?.nombre)
+    && normalizeDispatchWhatsappPhone(entry?.phone || entry?.telefono || entry?.number || entry?.numero)
+  );
+}
+
 export function normalizeProgrammingWhatsappRecipients(value, options = {}) {
   let entries = value;
   if (typeof value === 'string') {
@@ -304,8 +311,12 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
   });
 
   router.post('/programacion/destinatarios', requireDev, async (req, res) => {
+    const submittedRecipients = Array.isArray(req.body?.recipients) ? req.body.recipients : [];
+    if (submittedRecipients.some((recipient) => !isCompleteProgrammingContact(recipient))) {
+      return res.status(400).json({ ok: false, message: 'Cada destinatario debe tener nombre y teléfono válidos.' });
+    }
     const recipients = await saveProgrammingWhatsappRecipients(prisma, {
-      recipients: Array.isArray(req.body?.recipients) ? req.body.recipients : [],
+      recipients: submittedRecipients,
       actor: {
         userId: req.session?.userId || req.userId || null,
         username: req.session?.username || req.username || null,

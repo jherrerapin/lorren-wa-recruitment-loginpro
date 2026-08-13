@@ -70,7 +70,8 @@
     input.setAttribute(attribute, 'true');
     if (type === 'tel') input.inputMode = 'numeric';
     input.placeholder = type === 'tel' ? '3001234567' : 'Nombre';
-    wrap.append(label, input);
+    label.appendChild(input);
+    wrap.appendChild(label);
     return { wrap, input };
   }
 
