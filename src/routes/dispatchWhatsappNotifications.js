@@ -25,11 +25,22 @@ function allowed(req) {
     || Boolean(username?.startsWith('operaciones-despacho'));
 }
 
+export function canAccessDispatchWhatsappMonitor(req) {
+  return role(req) === 'dev';
+}
+
 function requireOps(req, res, next) {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   const userRole = role(req);
   if (!userRole) return res.status(401).json({ ok: false, message: 'Debes iniciar sesión.' });
   if (!allowed(req)) return res.status(403).json({ ok: false, message: 'Módulo no habilitado para este usuario.' });
+  return next();
+}
+
+function requireDevMonitor(req, res, next) {
+  if (!canAccessDispatchWhatsappMonitor(req)) {
+    return res.status(403).send('Monitor de WhatsApp de Despacho disponible solo para DEV.');
+  }
   return next();
 }
 
@@ -93,7 +104,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       whatsappReturnLabel: 'Volver a Operaciones',
       whatsappAssignmentsHref: '/admin/operaciones/asignaciones',
       whatsappAssignmentsLabel: 'Asignaciones',
-      whatsappMonitorHref: '/admin/operaciones/whatsapp/monitor',
+      whatsappMonitorHref: role(req) === 'dev' ? '/admin/operaciones/whatsapp/monitor' : null,
       ...status
     });
   });
@@ -102,11 +113,11 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
     res.json({ ok: true, ...await getStatusForViewer(req) });
   });
 
-  router.get('/monitor', async (req, res, next) => {
+  router.get('/monitor', requireDevMonitor, async (req, res, next) => {
     try {
       const history = await loadDispatchWhatsappMonitorHistory({ prismaClient: prisma, query: req.query });
       return res.render('operacionesWhatsappMonitor', {
-        pageTitle: 'Monitor WhatsApp de despacho',
+        pageTitle: 'Monitor WhatsApp de Despacho · DEV',
         role: role(req),
         history,
         monitorDataEndpoint: '/admin/operaciones/whatsapp/monitor/datos'
@@ -116,7 +127,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
     }
   });
 
-  router.get('/monitor/datos', async (req, res, next) => {
+  router.get('/monitor/datos', requireDevMonitor, async (req, res, next) => {
     try {
       const history = await loadDispatchWhatsappMonitorHistory({ prismaClient: prisma, query: req.query });
       return res.json({ ok: true, ...history });
