@@ -107,6 +107,10 @@
     forms.slice(1).forEach((form) => form.remove());
   }
 
+  function removeAssignmentReplyPreview(root = document) {
+    root.querySelectorAll?.('.dispatch-reply-preview').forEach((preview) => preview.remove());
+  }
+
   function addRequestCrudActions() {
     document.querySelectorAll('.request-card').forEach((card) => {
       const edit = card.querySelector('a[href*="/asignaciones/solicitudes/"][href$="/editar"]');
@@ -277,6 +281,7 @@
 
   function runLightCleanup(root = document) {
     removeDuplicatedDateFilters();
+    removeAssignmentReplyPreview(root);
     addRequestCrudActions();
     applyCanonicalAssignmentTemplate(root);
     applyConfirmationInstruction(root);
