@@ -26,6 +26,11 @@ function assignmentFixture() {
       id: 'assignment-c', serviceRequestId: 'request-c', workerId: 'worker-c', status: 'CONFIRMED', createdAt: new Date('2026-08-12T20:20:00.000Z'),
       worker: { id: 'worker-c', fullName: 'Auxiliar C', phone: '3003334455' },
       serviceRequest: { id: 'request-c', source: 'MANUAL', operationPointName: 'Operación C', serviceDate: new Date('2026-08-13T00:00:00.000Z'), startTime: '09:00', address: 'Dirección C' }
+    },
+    {
+      id: 'assignment-next-day', serviceRequestId: 'request-next-day', workerId: 'worker-next-day', status: 'ASSIGNED', createdAt: new Date('2026-08-12T20:30:00.000Z'),
+      worker: { id: 'worker-next-day', fullName: 'Auxiliar Otro Día', phone: '3004445566' },
+      serviceRequest: { id: 'request-next-day', source: 'MANUAL', operationPointName: 'Operación Otro Día', serviceDate: new Date('2026-08-14T00:00:00.000Z'), startTime: '10:00', address: 'Dirección D' }
     }
   ];
 }
@@ -64,10 +69,11 @@ test('fecha objetivo del monitor DEV es mañana en America/Bogota', () => {
   assert.equal(tomorrowIsoDateCO(NOW), '2026-08-13');
 });
 
-test('monitor DEV lista todos los asignados de mañana y calcula ventana actual desde último inbound', async () => {
+test('monitor DEV lista solo los asignados de mañana y calcula ventana actual desde último inbound', async () => {
   const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prismaFixture(), now: NOW });
   assert.equal(monitor.dateKey, '2026-08-13');
   assert.equal(monitor.summary.total, 3);
+  assert.equal(monitor.items.some((item) => item.workerName === 'Auxiliar Otro Día'), false);
   assert.equal(monitor.summary.open, 1);
   assert.equal(monitor.summary.closed, 2);
   assert.equal(monitor.summary.confirmed, 1);
