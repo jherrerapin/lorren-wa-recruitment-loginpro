@@ -93,6 +93,7 @@ export function getDispatchWhatsappCloudConfig(scope = 'operational') {
     verifyToken: envValue(envName(prefix, 'VERIFY_TOKEN')),
     appSecret: envValue(envName(prefix, 'APP_SECRET')),
     assignmentTemplateName: envValue(envName(prefix, 'ASSIGNMENT_TEMPLATE_NAME')),
+    windowCheckTemplateName: envValue(envName(prefix, 'WINDOW_CHECK_TEMPLATE_NAME')),
     programmingTemplateName: envValue(envName(prefix, 'PROGRAMMING_TEMPLATE_NAME')),
     templateLanguage: envValue(envName(prefix, 'TEMPLATE_LANGUAGE')),
     timeoutMs: positiveNumber(envValue(envName(prefix, 'TIMEOUT_MS')), DEFAULT_TIMEOUT_MS, 1000),
@@ -110,7 +111,11 @@ export function getDispatchWhatsappCloudConfig(scope = 'operational') {
   return { ...config, missing, configured: missing.length === 0 };
 }
 
-export function ensureDispatchWhatsappConfigured(scope = 'operational', { programming = false, assignmentTemplate = false } = {}) {
+export function ensureDispatchWhatsappConfigured(scope = 'operational', {
+  programming = false,
+  assignmentTemplate = false,
+  windowCheckTemplate = false
+} = {}) {
   const config = getDispatchWhatsappCloudConfig(scope);
   const definition = dispatchWhatsappScopeDefinition(scope);
   const required = [
@@ -121,8 +126,9 @@ export function ensureDispatchWhatsappConfigured(scope = 'operational', { progra
     ['APP_SECRET', config.appSecret]
   ];
   if (assignmentTemplate) required.push(['ASSIGNMENT_TEMPLATE_NAME', config.assignmentTemplateName]);
+  if (windowCheckTemplate) required.push(['WINDOW_CHECK_TEMPLATE_NAME', config.windowCheckTemplateName]);
   if (programming) required.push(['PROGRAMMING_TEMPLATE_NAME', config.programmingTemplateName]);
-  if (assignmentTemplate || programming) required.push(['TEMPLATE_LANGUAGE', config.templateLanguage]);
+  if (assignmentTemplate || windowCheckTemplate || programming) required.push(['TEMPLATE_LANGUAGE', config.templateLanguage]);
   const missing = required.filter(([, value]) => !value).map(([suffix]) => envName(definition.envPrefix, suffix));
   if (missing.length) {
     throw buildDispatchWhatsappError(
@@ -164,6 +170,7 @@ export function getDispatchWhatsappStatus(scope = 'operational') {
     graphVersion: config.graphVersion || null,
     phoneNumberIdMasked: maskedIdentifier(config.phoneNumberId),
     assignmentTemplateName: config.assignmentTemplateName || null,
+    windowCheckTemplateName: config.windowCheckTemplateName || null,
     programmingTemplateName: config.programmingTemplateName || null,
     templateLanguage: config.templateLanguage || null,
     webhookPath: config.webhookPath,
