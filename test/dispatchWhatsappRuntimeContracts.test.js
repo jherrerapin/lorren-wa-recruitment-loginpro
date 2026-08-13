@@ -77,7 +77,7 @@ test('la autoridad de despacho usa Cloud API y la plantilla se arma desde la asi
   const buttons = payload.template.components.filter((component) => component.type === 'button');
   assert.deepEqual(buttons.map((button) => ({ index: button.index, payload: button.parameters[0].payload })), [
     { index: '0', payload: 'dispatch_confirm:assignment-1' },
-    { index: '1', payload: 'dispatch_decline:assignment-1' }
+    { index: '1', payload: 'dispatch_novelty:assignment-1' }
   ]);
 });
 
@@ -136,12 +136,25 @@ test('rutas operativas ya no aceptan texto arbitrario del navegador como autorid
   assert.match(service, /serviceDate < todayIsoDateCO\(\)/);
 });
 
-test('confirmaciones entrantes mantienen variantes actuales y no aceptan una negativa', async () => {
+test('confirmaciones entrantes mantienen variantes actuales y no aceptan texto de ausencia', async () => {
   const { isAutomaticConfirmationReply } = await import('../src/services/dispatchWhatsappWebhookService.js');
   assert.equal(isAutomaticConfirmationReply('Confirmado'), true);
   assert.equal(isAutomaticConfirmationReply('Sí, confirmado'), true);
   assert.equal(isAutomaticConfirmationReply('recibido'), true);
-  assert.equal(isAutomaticConfirmationReply('No puedo asistir'), false);
+  assert.equal(isAutomaticConfirmationReply('No asistiré'), false);
+});
+
+test('Reportar novedad conserva la asignación pendiente y el enlace sigue aceptando confirmación posterior', () => {
+  const config = readSource('src/services/dispatchWhatsappCloudConfig.js');
+  const assignment = readSource('src/services/dispatchWhatsappAssignmentService.js');
+  const webhook = readSource('src/services/dispatchWhatsappWebhookService.js');
+  assert.match(config, /ACTIVE_LINK_STATUSES[\s\S]*'NOVELTY_REPORTED'/);
+  assert.match(config, /INBOUND_LINK_STATUSES[\s\S]*'NOVELTY_REPORTED'/);
+  assert.match(assignment, /claimDispatchAssignmentNovelty/);
+  assert.match(assignment, /status: 'NOVELTY_REPORTED'/);
+  assert.doesNotMatch(assignment, /El auxiliar indicó NO PUEDO/);
+  assert.match(webhook, /match\(\/\^dispatch_\(confirm\|novelty\|decline\)/);
+  assert.match(webhook, /match\[1\] === 'confirm' \? 'CONFIRM' : 'NOVELTY'/);
 });
 
 test('Gracias solo se envía después de evidencia inbound real', () => {
