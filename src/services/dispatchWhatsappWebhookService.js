@@ -186,12 +186,7 @@ export async function processDispatchWhatsappInboundMessage({
 
   let replySent = false;
   try {
-    const replyProviderMessageId = await sendDispatchWhatsappTextMessage({
-      scope,
-      phone: target.phone,
-      text: AUTOMATIC_CONFIRMATION_REPLY,
-      axiosClient
-    });
+    const replyProviderMessageId = await sendDispatchWhatsappTextMessage({ scope, phone: target.phone, text: AUTOMATIC_CONFIRMATION_REPLY, axiosClient });
     replySent = true;
     await recordDispatchWhatsappMessageAudit({
       prismaClient,
