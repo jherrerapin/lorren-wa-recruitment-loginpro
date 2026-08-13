@@ -1,6 +1,7 @@
 <%
-  const data = monitor || { items: [], summary: {}, dateKey: '', generatedAt: null };
+  const data = monitor || { items: [], summary: {}, dateKey: '', generatedAt: null, unmatchedInbound: [] };
   const items = Array.isArray(data.items) ? data.items : [];
+  const unmatchedInbound = Array.isArray(data.unmatchedInbound) ? data.unmatchedInbound : [];
   const summary = data.summary || {};
   const configuredTemplate = typeof windowCheckTemplateName === 'string' && windowCheckTemplateName ? windowCheckTemplateName : null;
   const checkMessage = typeof windowCheckMessage === 'string' && windowCheckMessage ? windowCheckMessage : '';
@@ -16,7 +17,7 @@
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
   <style>
     .monitor-page{max-width:min(1760px,calc(100vw - 28px));width:100%}
-    .summary{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:10px;margin-bottom:12px}
+    .summary{display:grid;grid-template-columns:repeat(5,minmax(135px,1fr));gap:10px;margin-bottom:12px}
     .metric{background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px;box-shadow:var(--shadow-sm)}
     .metric span{display:block;color:var(--muted);font-size:11px;font-weight:850;text-transform:uppercase}.metric strong{display:block;color:var(--navy);font-size:24px;margin-top:3px}
     .template-panel{display:grid;grid-template-columns:minmax(320px,1fr) minmax(280px,.75fr);gap:10px;margin-bottom:12px}
@@ -25,12 +26,14 @@
     .bulk-result{margin-bottom:12px;border-radius:12px;padding:10px 12px;font-size:11px;font-weight:800;display:none}.bulk-result.show{display:block}.bulk-result.ok{background:#dcfce7;color:#166534}.bulk-result.warn{background:#fef3c7;color:#92400e}
     .table-wrap{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:auto;box-shadow:var(--shadow-sm)}
     table{width:100%;border-collapse:collapse;min-width:1160px}th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle;text-align:left;font-size:11px}th{position:sticky;top:0;background:#f8fafc;color:var(--muted);font-size:10px;text-transform:uppercase;z-index:1}
-    .pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:900;white-space:nowrap}.open{background:#dcfce7;color:#166534}.closed{background:#fee2e2;color:#991b1b}.confirmed{background:#dcfce7;color:#166534}.pending{background:#fef3c7;color:#92400e}
-    .window-check{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:11px;font-weight:900;margin-right:5px;vertical-align:middle}.window-off{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#e2e8f0;color:#64748b;font-size:10px;font-weight:900;margin-right:5px;vertical-align:middle}
-    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px}.muted{color:var(--muted)}.live{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:11px;font-weight:900}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}.evidence{font-size:9px;color:var(--muted);margin-top:2px}
+    .pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:900;white-space:nowrap}.open{background:#dcfce7;color:#166534}.closed{background:#fee2e2;color:#991b1b}.review{background:#fef3c7;color:#92400e}.confirmed{background:#dcfce7;color:#166534}.pending{background:#fef3c7;color:#92400e}
+    .window-check{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:11px;font-weight:900;margin-right:5px;vertical-align:middle}.window-off{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#e2e8f0;color:#64748b;font-size:10px;font-weight:900;margin-right:5px;vertical-align:middle}.window-review{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#f59e0b;color:#fff;font-size:10px;font-weight:900;margin-right:5px;vertical-align:middle}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px}.muted{color:var(--muted)}.live{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:11px;font-weight:900}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}.evidence{font-size:9px;color:var(--muted);margin-top:2px}.phone-warning{font-size:9px;color:#92400e;font-weight:800;margin-top:2px}
     .row-action{padding:5px 8px;font-size:10px;min-height:0}.row-action[disabled]{opacity:.45;cursor:not-allowed}
+    .unmatched-panel{margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;padding:12px 14px}.unmatched-panel h2{font-size:13px;margin:0 0 4px;color:#9a3412}.unmatched-panel p{font-size:11px;color:#9a3412;margin:0 0 8px}.unmatched-list{display:flex;flex-wrap:wrap;gap:7px}.unmatched-item{background:#fff;border:1px solid #fed7aa;border-radius:9px;padding:6px 8px;font-size:10px;color:#7c2d12}
     .message-dialog{border:0;border-radius:16px;padding:0;width:min(620px,calc(100vw - 24px));box-shadow:0 24px 70px rgba(15,23,42,.3)}.message-dialog::backdrop{background:rgba(15,23,42,.45)}.message-dialog form{padding:18px;display:grid;gap:12px}.message-dialog h3{margin:0;color:var(--navy)}.message-dialog textarea{width:100%;min-height:125px;border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;resize:vertical}.dialog-actions{display:flex;justify-content:flex-end;gap:8px}
-    @media(max-width:900px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}}
+    @media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -50,7 +53,7 @@
       <div>
         <div class="eyebrow">DEV · Línea oficial de WhatsApp Despacho</div>
         <h1>Ventanas de 24 horas · asignados de mañana</h1>
-        <p>Los que siguen con ventana cerrada aparecen primero. El estado se vuelve a consultar automáticamente cada 5 segundos.</p>
+        <p>Los que siguen con ventana cerrada o tienen un teléfono que requiere revisión aparecen primero. El estado se consulta nuevamente cada 5 segundos.</p>
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones/asignaciones?fecha=<%= encodeURIComponent(data.dateKey || '') %>">Ver asignaciones de mañana</a>
@@ -63,7 +66,8 @@
       <article class="metric"><span>Asignados mañana</span><strong id="metricTotal"><%= summary.total || 0 %></strong></article>
       <article class="metric"><span>Ya abrieron ventana</span><strong id="metricOpen"><%= summary.open || 0 %></strong></article>
       <article class="metric"><span>Faltan por abrir</span><strong id="metricMissing"><%= summary.missingWindow || 0 %></strong></article>
-      <article class="metric"><span>Sin teléfono</span><strong id="metricNoPhone"><%= summary.withoutPhone || 0 %></strong></article>
+      <article class="metric"><span>Revisar teléfono</span><strong id="metricReview"><%= summary.phoneReview || 0 %></strong></article>
+      <article class="metric"><span>Inbound sin coincidir</span><strong id="metricUnmatched"><%= summary.unmatchedInbound || 0 %></strong></article>
     </section>
 
     <section class="template-panel">
@@ -90,18 +94,26 @@
           <% items.forEach((item) => { %>
             <tr data-assignment-id="<%= item.assignmentId %>">
               <td><strong><%= item.workerName %></strong></td>
-              <td class="mono"><%= item.phone || 'Sin teléfono' %></td>
+              <td class="mono"><%= item.phone || 'Sin teléfono' %><% if (item.phoneIssue) { %><div class="phone-warning">⚠ formato a revisar</div><% } %><% if (item.possibleInboundPhone) { %><div class="phone-warning">Posible inbound: <%= item.possibleInboundPhone %></div><% } %></td>
               <td><%= item.operationName || '—' %><% if (item.startTime) { %><div class="muted"><%= item.startTime %></div><% } %></td>
               <td><span class="pill <%= item.confirmed ? 'confirmed' : 'pending' %>"><%= item.assignmentStatus %></span></td>
-              <td><% if (item.isOpen) { %><span class="window-check">✓</span><span class="pill open">ABIERTA</span><% } else { %><span class="window-off">–</span><span class="pill closed">CERRADA</span><% } %></td>
-              <td><span data-date="<%= item.lastInboundAt || '' %>"><%= item.lastInboundAt || 'Sin inbound registrado' %></span><% if (item.evidenceSource) { %><div class="evidence"><%= item.evidenceSource === 'CONFIRMATION_EVIDENCE' ? 'evidencia de confirmación' : 'registro de inbound' %></div><% } %></td>
+              <td><% if (item.isOpen) { %><span class="window-check">✓</span><span class="pill open">ABIERTA</span><% } else if (item.phoneIssue || item.possibleInboundAt) { %><span class="window-review">!</span><span class="pill review">REVISAR NÚMERO</span><% } else { %><span class="window-off">–</span><span class="pill closed">CERRADA</span><% } %></td>
+              <td><span data-date="<%= item.lastInboundAt || '' %>"><%= item.lastInboundAt || 'Sin inbound exacto registrado' %></span><% if (item.evidenceSource) { %><div class="evidence"><%= item.evidenceSource === 'CONFIRMATION_EVIDENCE' ? 'evidencia de confirmación' : 'registro de inbound' %></div><% } %><% if (item.possibleInboundAt) { %><div class="phone-warning">Posible inbound <span data-date="<%= item.possibleInboundAt %>"><%= item.possibleInboundAt %></span></div><% } %></td>
               <td data-date="<%= item.expiresAt || '' %>"><%= item.expiresAt || '—' %></td>
-              <td><button class="btn row-action manual-message-button" type="button" data-assignment-id="<%= item.assignmentId %>" data-worker-name="<%= item.workerName %>" <%= item.isOpen ? '' : 'disabled title="La ventana está cerrada"' %>>Enviar mensaje</button></td>
+              <td><button class="btn row-action manual-message-button" type="button" data-assignment-id="<%= item.assignmentId %>" data-worker-name="<%= item.workerName %>" <%= item.phone ? '' : 'disabled title="No hay teléfono"' %>><%= item.isOpen ? 'Enviar mensaje' : 'Probar envío' %></button></td>
             </tr>
           <% }) %>
         </tbody>
       </table>
     </div>
+
+    <section class="unmatched-panel" id="unmatchedPanel" <%= unmatchedInbound.length ? '' : 'hidden' %>>
+      <h2>Inbound recientes que no coinciden con los teléfonos de los asignados</h2>
+      <p>Si un auxiliar asegura que ya escribió pero sigue cerrado, revisa aquí. Si aparece su número, el problema es de coincidencia con el teléfono guardado en Personal, no de falta de respuesta.</p>
+      <div class="unmatched-list" id="unmatchedList">
+        <% unmatchedInbound.forEach((item) => { %><div class="unmatched-item"><strong><%= item.phone %></strong> · <span data-date="<%= item.lastInboundAt %>"><%= item.lastInboundAt %></span></div><% }) %>
+      </div>
+    </section>
   </main>
 
   <dialog class="message-dialog" id="manualMessageDialog">
@@ -109,8 +121,8 @@
       <div><div class="eyebrow">DEV · Mensaje libre</div><h3 id="manualMessageTitle">Enviar mensaje</h3></div>
       <input type="hidden" id="manualAssignmentId" />
       <textarea id="manualMessageText" maxlength="1200" placeholder="Escribe el mensaje para el auxiliar..." required></textarea>
-      <div class="muted">Se valida otra vez la ventana en el servidor al pulsar Enviar.</div>
-      <div class="dialog-actions"><button class="btn" type="button" id="cancelManualMessage">Cancelar</button><button class="btn btn-primary" type="submit">Enviar</button></div>
+      <div class="muted">DEV intentará el envío aunque el monitor figure CERRADA. Meta será quien acepte o rechace el mensaje; un rechazo no modifica artificialmente el estado de la ventana.</div>
+      <div class="dialog-actions"><button class="btn" type="button" id="cancelManualMessage">Cancelar</button><button class="btn btn-primary" type="submit">Intentar envío</button></div>
     </form>
   </dialog>
 
@@ -126,6 +138,8 @@
     const manualForm = document.getElementById('manualMessageForm');
     const manualAssignmentId = document.getElementById('manualAssignmentId');
     const manualMessageText = document.getElementById('manualMessageText');
+    const unmatchedPanel = document.getElementById('unmatchedPanel');
+    const unmatchedList = document.getElementById('unmatchedList');
     let refreshBusy = false;
 
     function escapeHtml(value) {
@@ -142,6 +156,17 @@
       if (source === 'CONTACT_WINDOW') return '<div class="evidence">registro de inbound</div>';
       return '';
     }
+    function windowHtml(item) {
+      if (item.isOpen) return '<span class="window-check">✓</span><span class="pill open">ABIERTA</span>';
+      if (item.phoneIssue || item.possibleInboundAt) return '<span class="window-review">!</span><span class="pill review">REVISAR NÚMERO</span>';
+      return '<span class="window-off">–</span><span class="pill closed">CERRADA</span>';
+    }
+    function phoneHtml(item) {
+      let value = escapeHtml(item.phone || 'Sin teléfono');
+      if (item.phoneIssue) value += '<div class="phone-warning">⚠ formato a revisar</div>';
+      if (item.possibleInboundPhone) value += `<div class="phone-warning">Posible inbound: ${escapeHtml(item.possibleInboundPhone)}</div>`;
+      return value;
+    }
     function renderItems(items) {
       if (!Array.isArray(items) || !items.length) {
         rows.innerHTML = '<tr><td colspan="8" class="muted">No hay auxiliares con asignación activa para mañana.</td></tr>';
@@ -149,23 +174,30 @@
       }
       rows.innerHTML = items.map((item) => `<tr data-assignment-id="${escapeHtml(item.assignmentId)}">
         <td><strong>${escapeHtml(item.workerName || 'Auxiliar')}</strong></td>
-        <td class="mono">${escapeHtml(item.phone || 'Sin teléfono')}</td>
+        <td class="mono">${phoneHtml(item)}</td>
         <td>${escapeHtml(item.operationName || '—')}${item.startTime ? `<div class="muted">${escapeHtml(item.startTime)}</div>` : ''}</td>
         <td><span class="pill ${item.confirmed ? 'confirmed' : 'pending'}">${escapeHtml(item.assignmentStatus || '—')}</span></td>
-        <td>${item.isOpen ? '<span class="window-check">✓</span><span class="pill open">ABIERTA</span>' : '<span class="window-off">–</span><span class="pill closed">CERRADA</span>'}</td>
-        <td>${item.lastInboundAt ? escapeHtml(formatBogota(item.lastInboundAt)) : 'Sin inbound registrado'}${evidenceLabel(item.evidenceSource)}</td>
+        <td>${windowHtml(item)}</td>
+        <td>${item.lastInboundAt ? escapeHtml(formatBogota(item.lastInboundAt)) : 'Sin inbound exacto registrado'}${evidenceLabel(item.evidenceSource)}${item.possibleInboundAt ? `<div class="phone-warning">Posible inbound ${escapeHtml(formatBogota(item.possibleInboundAt))}</div>` : ''}</td>
         <td>${item.expiresAt ? escapeHtml(formatBogota(item.expiresAt)) : '—'}</td>
-        <td><button class="btn row-action manual-message-button" type="button" data-assignment-id="${escapeHtml(item.assignmentId)}" data-worker-name="${escapeHtml(item.workerName || 'Auxiliar')}" ${item.isOpen ? '' : 'disabled title="La ventana está cerrada"'}>Enviar mensaje</button></td>
+        <td><button class="btn row-action manual-message-button" type="button" data-assignment-id="${escapeHtml(item.assignmentId)}" data-worker-name="${escapeHtml(item.workerName || 'Auxiliar')}" ${item.phone ? '' : 'disabled title="No hay teléfono"'}>${item.isOpen ? 'Enviar mensaje' : 'Probar envío'}</button></td>
       </tr>`).join('');
       bindManualButtons();
     }
+    function renderUnmatched(items) {
+      const list = Array.isArray(items) ? items : [];
+      unmatchedPanel.hidden = list.length === 0;
+      unmatchedList.innerHTML = list.map((item) => `<div class="unmatched-item"><strong>${escapeHtml(item.phone || '—')}</strong> · ${escapeHtml(formatBogota(item.lastInboundAt))}</div>`).join('');
+    }
     function render(data) {
       renderItems(data.items);
+      renderUnmatched(data.unmatchedInbound);
       const current = data.summary || {};
       document.getElementById('metricTotal').textContent = current.total || 0;
       document.getElementById('metricOpen').textContent = current.open || 0;
       document.getElementById('metricMissing').textContent = current.missingWindow || 0;
-      document.getElementById('metricNoPhone').textContent = current.withoutPhone || 0;
+      document.getElementById('metricReview').textContent = current.phoneReview || 0;
+      document.getElementById('metricUnmatched').textContent = current.unmatchedInbound || 0;
       document.getElementById('dateKey').textContent = data.dateKey || '—';
       document.getElementById('generatedAt').textContent = data.generatedAt ? formatBogota(data.generatedAt) : '—';
       bulkButton.disabled = !(current.missingWindow > 0);
@@ -201,7 +233,7 @@
       if (bulkButton.disabled) return;
       bulkButton.disabled = true;
       bulkResult.className = 'bulk-result show warn';
-      bulkResult.textContent = 'Enviando verificación solo a quienes siguen con ventana cerrada...';
+      bulkResult.textContent = 'Enviando verificación a quienes todavía no tienen una ventana confirmada...';
       try {
         const response = await fetch(bulkEndpoint,{method:'POST',credentials:'same-origin',headers:{Accept:'application/json'}});
         const result = await response.json();
@@ -221,10 +253,11 @@
       const response = await fetch(manualEndpoint,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({assignmentId,message})});
       const result = await response.json();
       if (!response.ok) {
-        window.alert(result.message || 'No fue posible enviar el mensaje.');
+        window.alert(result.message || 'Meta no permitió enviar el mensaje.');
         await refreshMonitor();
         return;
       }
+      window.alert(result.monitorStateWasOpen ? 'Meta aceptó el envío con la ventana marcada como abierta.' : 'Meta aceptó el intento aunque el monitor la mostraba cerrada. Revisa el monitor y la coincidencia del número.');
       manualDialog.close();
       await refreshMonitor();
     }
