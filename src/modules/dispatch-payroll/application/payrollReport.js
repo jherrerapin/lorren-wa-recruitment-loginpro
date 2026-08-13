@@ -3,6 +3,7 @@ import {
   PAYROLL_COMPENSATION_STATUS,
   PAYROLL_CONCEPT_CODES,
   addDateKeyDays,
+  bogotaDateKey,
   bogotaDayStart,
   calculatePayrollConceptReport,
   colombianHolidayKeys,
@@ -38,6 +39,12 @@ const REST_DAY_DEDUCTION_REASONS = new Set([
   WORKER_REST_REASONS.SUSPENSION,
   WORKER_REST_REASONS.NO_REMUNERADA
 ]);
+const PAYROLL_MARK_TIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
+  timeZone: 'America/Bogota',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true
+});
 
 function normalizeString(value, maxLength = 200) {
   if (typeof value !== 'string') return null;
@@ -485,6 +492,72 @@ function sessionMatchesFilters(session, filters) {
   return true;
 }
 
+function dateValue(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function attendanceMarkMoment(mark) {
+  return dateValue(mark?.clientCapturedAt || mark?.serverReceivedAt);
+}
+
+function latestAttendanceMark(session, markType) {
+  return (Array.isArray(session?.marks) ? session.marks : [])
+    .filter((mark) => mark?.markType === markType)
+    .map((mark) => ({ mark, moment: attendanceMarkMoment(mark) }))
+    .filter((entry) => entry.moment)
+    .sort((left, right) => right.moment.getTime() - left.moment.getTime())[0]?.mark || null;
+}
+
+function payrollMarkTimeLabel(value, workdayKey) {
+  const date = dateValue(value);
+  if (!date) return 'No registrada';
+  const time = PAYROLL_MARK_TIME_FORMATTER.format(date);
+  const localDateKey = bogotaDateKey(date);
+  if (!workdayKey || !localDateKey || localDateKey === workdayKey) return time;
+  if (localDateKey === addDateKeyDays(workdayKey, 1)) return `${time} · día siguiente`;
+  return `${time} · ${localDateKey}`;
+}
+
+function sessionPayrollMarking(session) {
+  const workerId = session?.assignment?.workerId || session?.assignment?.worker?.id || null;
+  const arrivalAt = dateValue(session?.arrivalReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'ARRIVAL'));
+  const departureAt = dateValue(session?.departureReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'DEPARTURE'));
+  const breakStartAt = attendanceMarkMoment(latestAttendanceMark(session, 'BREAK_START'));
+  const breakEndAt = attendanceMarkMoment(latestAttendanceMark(session, 'BREAK_END'));
+  const workdayKey = bogotaDateKey(arrivalAt);
+  if (!workerId || !workdayKey) return null;
+  const request = session?.assignment?.serviceRequest || {};
+  const point = request.operationPoint || {};
+  return {
+    sessionId: session?.id || null,
+    workerId,
+    workdayKey,
+    clientName: point.client?.name || request.clientName || 'Cliente sin nombre',
+    operationName: point.name || request.operationPointName || 'Operación sin nombre',
+    arrivalLabel: payrollMarkTimeLabel(arrivalAt, workdayKey),
+    breakStartLabel: payrollMarkTimeLabel(breakStartAt, workdayKey),
+    breakEndLabel: payrollMarkTimeLabel(breakEndAt, workdayKey),
+    departureLabel: payrollMarkTimeLabel(departureAt, workdayKey),
+    sortAt: arrivalAt?.getTime?.() || 0
+  };
+}
+
+function payrollMarkingsByWorkerDate(sessions) {
+  const map = new Map();
+  for (const session of Array.isArray(sessions) ? sessions : []) {
+    const marking = sessionPayrollMarking(session);
+    if (!marking) continue;
+    const key = `${marking.workerId}|${marking.workdayKey}`;
+    const current = map.get(key) || [];
+    current.push(marking);
+    current.sort((left, right) => left.sortAt - right.sortAt);
+    map.set(key, current);
+  }
+  return map;
+}
+
 function emptyPayrollConceptValues() {
   return Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, 0]));
 }
@@ -517,6 +590,7 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions) 
   const workerById = new Map(workers.map((worker) => [worker.id, worker]));
   const sessionWorkerIds = new Set(filteredSessions.map((session) => session.assignment?.workerId).filter(Boolean));
   const rowByWorker = new Map(report.rows.map((row) => [row.workerId, row]));
+  const markingsByWorkerDate = payrollMarkingsByWorkerDate(filteredSessions);
   const search = filters.search.toLowerCase();
   const visibleRests = rests.filter((rest) => {
     const worker = workerById.get(rest.workerId);
@@ -546,6 +620,7 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions) 
     row.netWorkedDays = row.workedDays - row.deductedDays;
     row.daily = row.daily.map((day) => ({
       ...day,
+      markings: markingsByWorkerDate.get(`${row.workerId}|${day.dateKey}`) || [],
       compensationManagedByRestAssignment: Boolean(day.isRestDay && isSundayDateKey(day.compensationDateKey))
     }));
   }
@@ -652,8 +727,8 @@ export function buildPayrollExportRows(report) {
       HorasOrdinarias: row.ordinaryHours,
       TotalTrabajado: row.totalHours,
       HorasExtraTotal: row.overtimeHours,
-      Estado: row.status,
-      Novedades: row.novelties.map((item) => `${item.dateKey || ''} ${item.code}`).join(' | ')
+      Estado: row.status === 'CON_NOVEDADES' ? 'Con novedades' : 'Calculado',
+      Novedades: row.novelties.map((item) => `${item.dateKey || 'Periodo'} · ${item.blocking === false ? 'Informativa' : 'Requiere revisión'} · ${item.message || 'Novedad pendiente de descripción.'}`).join(' | ')
     };
     for (const code of PAYROLL_CONCEPT_CODES) base[code] = row.conceptHours[code];
     return base;
