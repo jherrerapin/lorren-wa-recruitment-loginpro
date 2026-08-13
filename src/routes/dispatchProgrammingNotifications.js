@@ -14,11 +14,15 @@ import {
   deriveDispatchRequestOperationalState,
   operationalAssignments
 } from '../services/dispatchOperationalCoverage.js';
+import { normalizeDispatchWhatsappPhone } from '../services/dispatchWhatsappCloudConfig.js';
 import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappCloudService.js';
 
 const PROGRAMMING_FORMATS = new Set(['pdf', 'excel']);
 const XLSX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const RANGE_TOKEN_PATTERN = /^(\d{4}-\d{2}-\d{2})\s+a\s+(\d{4}-\d{2}-\d{2})$/;
+const PROGRAMMING_CONTACT_CONFIG_ENTITY = 'DISPATCH_PROGRAMMING_CONTACT_CONFIG';
+const PROGRAMMING_CONTACT_CONFIG_ID = 'operational';
+const PROGRAMMING_CONTACT_CONFIG_ACTION = 'SET_DISPATCH_PROGRAMMING_CONTACTS';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -32,28 +36,75 @@ function programmingDateFromInput(value) {
   return normalizeProgrammingDate(range ? range[2] : raw);
 }
 
-function normalizeRecipient(entry) {
+function normalizeProgrammingContact(entry, { allowAnonymous = false } = {}) {
   if (!entry) return null;
+  let name = null;
+  let phone = null;
   if (typeof entry === 'object') {
-    const phone = normalizeString(entry.phone || entry.telefono || entry.number || entry.numero);
-    if (!phone) return null;
-    return { name: normalizeString(entry.name || entry.nombre) || 'Destinatario', phone };
+    name = normalizeString(entry.name || entry.nombre);
+    phone = normalizeDispatchWhatsappPhone(entry.phone || entry.telefono || entry.number || entry.numero);
+  } else {
+    const [rawName, rawPhone] = String(entry).split('|');
+    name = normalizeString(rawPhone ? rawName : null);
+    phone = normalizeDispatchWhatsappPhone(rawPhone || rawName);
   }
-  const [rawName, rawPhone] = String(entry).split('|');
-  const phone = normalizeString(rawPhone || rawName);
-  if (!phone) return null;
-  return { name: normalizeString(rawPhone ? rawName : null) || 'Destinatario', phone };
+  if (!phone || (!name && !allowAnonymous)) return null;
+  return { name: name || 'Destinatario', phone };
 }
 
-function parseRecipientList(value) {
-  if (Array.isArray(value)) return value.map((entry) => normalizeRecipient(entry)).filter(Boolean);
-  const configuredList = normalizeString(value);
-  if (!configuredList) return [];
-  return configuredList.split(/[\n,;]+/).map((entry) => normalizeRecipient(entry)).filter(Boolean);
+export function normalizeProgrammingWhatsappRecipients(value, options = {}) {
+  let entries = value;
+  if (typeof value === 'string') {
+    const configured = value.trim();
+    if (!configured) return [];
+    try {
+      const parsed = JSON.parse(configured);
+      entries = Array.isArray(parsed) ? parsed : [parsed];
+    } catch (_error) {
+      entries = configured.split(/[\n,;]+/);
+    }
+  }
+  if (!Array.isArray(entries)) entries = entries ? [entries] : [];
+  const recipientsByPhone = new Map();
+  for (const entry of entries) {
+    const recipient = normalizeProgrammingContact(entry, options);
+    if (recipient) recipientsByPhone.set(recipient.phone, recipient);
+  }
+  return [...recipientsByPhone.values()];
 }
 
-function loadProgrammingWhatsappRecipients() {
-  return parseRecipientList(process.env.DISPATCH_PROGRAMMING_WHATSAPP_RECIPIENTS);
+export async function loadProgrammingWhatsappRecipients(prisma) {
+  const stored = prisma?.devAuditEvent?.findFirst
+    ? await prisma.devAuditEvent.findFirst({
+      where: {
+        entityType: PROGRAMMING_CONTACT_CONFIG_ENTITY,
+        entityId: PROGRAMMING_CONTACT_CONFIG_ID,
+        action: PROGRAMMING_CONTACT_CONFIG_ACTION
+      },
+      orderBy: { createdAt: 'desc' }
+    })
+    : null;
+  if (stored) return normalizeProgrammingWhatsappRecipients(stored?.metadata?.contacts || []);
+  return normalizeProgrammingWhatsappRecipients(process.env.DISPATCH_PROGRAMMING_WHATSAPP_RECIPIENTS, { allowAnonymous: true });
+}
+
+export async function saveProgrammingWhatsappRecipients(prisma, { recipients = [], actor = {} } = {}) {
+  const normalized = normalizeProgrammingWhatsappRecipients(recipients);
+  if (!prisma?.devAuditEvent?.create) throw new Error('No está disponible la persistencia de destinatarios.');
+  await prisma.devAuditEvent.create({
+    data: {
+      entityType: PROGRAMMING_CONTACT_CONFIG_ENTITY,
+      entityId: PROGRAMMING_CONTACT_CONFIG_ID,
+      entityLabel: 'Destinatarios de programación',
+      action: PROGRAMMING_CONTACT_CONFIG_ACTION,
+      actorUserId: normalizeString(actor.userId),
+      actorUsername: normalizeString(actor.username),
+      actorRole: normalizeString(actor.role) || 'dev',
+      actorSource: 'dispatch-programming-contacts',
+      metadata: { contacts: normalized }
+    }
+  });
+  return normalized;
 }
 
 function normalizeProgrammingFormats(value, fallback = ['pdf']) {
@@ -82,6 +133,11 @@ function requireOps(req, res, next) {
   const role = userRole(req);
   if (!role) return res.redirect('/login');
   if (!canUseOps(req)) return res.status(403).send('Modulo no habilitado para este usuario');
+  return next();
+}
+
+function requireDev(req, res, next) {
+  if (userRole(req) !== 'dev') return res.status(403).json({ ok: false, message: 'Configuración disponible únicamente para DEV.' });
   return next();
 }
 
@@ -242,9 +298,26 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     res.json({ ok: true, selectedDate, ...buildProgrammingCompletionSummary(requests) });
   });
 
+  router.get('/programacion/destinatarios', requireDev, async (_req, res) => {
+    const recipients = await loadProgrammingWhatsappRecipients(prisma);
+    return res.json({ ok: true, recipients });
+  });
+
+  router.post('/programacion/destinatarios', requireDev, async (req, res) => {
+    const recipients = await saveProgrammingWhatsappRecipients(prisma, {
+      recipients: Array.isArray(req.body?.recipients) ? req.body.recipients : [],
+      actor: {
+        userId: req.session?.userId || req.userId || null,
+        username: req.session?.username || req.username || null,
+        role: userRole(req)
+      }
+    });
+    return res.json({ ok: true, recipients });
+  });
+
   router.post('/programacion/whatsapp', async (req, res) => {
-    const recipients = loadProgrammingWhatsappRecipients();
-    if (!recipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación. Define DISPATCH_PROGRAMMING_WHATSAPP_RECIPIENTS.' });
+    const recipients = await loadProgrammingWhatsappRecipients(prisma);
+    if (!recipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación.' });
     const selectedDate = programmingDateFromInput(req.body?.fecha || req.body?.date);
     const managedBy = normalizeString(req.body?.managedBy) || 'Julián Herrera';
     const includePending = normalizeProgrammingIncludePending(req.body?.includePending, false);

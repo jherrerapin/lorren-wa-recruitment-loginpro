@@ -71,6 +71,28 @@ export function buildDispatchAssignmentInteractivePayload({ assignment, phone })
   };
 }
 
+export function buildDispatchReportMenuPayload({ phone, name }) {
+  const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
+  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para responder por WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  const displayName = parameterText(name, 'Destinatario');
+  return {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: normalizedPhone,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: `Hola ${displayName}. ¿Cómo te puedo ayudar hoy?` },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'dispatch_report:programming_today', title: 'Programación del día' } },
+          { type: 'reply', reply: { id: 'dispatch_report:summary_today', title: 'Resumen del día' } }
+        ]
+      }
+    }
+  };
+}
+
 export function buildDispatchAssignmentTemplatePayload({ config, assignment, phone }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
   if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
@@ -223,6 +245,23 @@ export async function sendCloudAssignmentInteractive({ scope = 'operational', as
   return { config, providerMessageId };
 }
 
+export async function sendDispatchWhatsappReportMenu({ scope = 'operational', phone, name, axiosClient = axios } = {}) {
+  const config = ensureDispatchWhatsappConfigured(scope);
+  try {
+    const response = await postGraph(config, buildDispatchReportMenuPayload({ phone, name }), axiosClient);
+    const providerMessageId = providerMessageIdFromResponse(response);
+    if (!providerMessageId) throw buildDispatchWhatsappError('Meta no devolvió el identificador del menú.', 502, 'dispatch_whatsapp_provider_message_missing');
+    const now = new Date().toISOString();
+    setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
+    return { phone: normalizeDispatchWhatsappPhone(phone), providerMessageId, provider: 'META_CLOUD_API' };
+  } catch (error) {
+    const message = error?.code?.startsWith?.('dispatch_') ? error.message : dispatchWhatsappProviderErrorMessage(error);
+    setDispatchWhatsappRuntimeState(scope, { lastError: message });
+    if (error?.statusCode) throw error;
+    throw buildDispatchWhatsappError(message, 502, 'dispatch_whatsapp_provider_error');
+  }
+}
+
 export async function sendDispatchWhatsappTextMessage({ scope = 'operational', phone, text, axiosClient = axios }) {
   const config = ensureDispatchWhatsappConfigured(scope);
   const payload = {
@@ -247,6 +286,45 @@ async function uploadMedia(config, { buffer, filename, mimeType }, axiosClient =
   const id = response?.data?.id;
   if (!id) throw buildDispatchWhatsappError('Meta no devolvió el identificador del archivo cargado.', 502, 'dispatch_whatsapp_media_upload_invalid');
   return id;
+}
+
+export async function sendDispatchWhatsappDocumentMessage({
+  phone,
+  buffer,
+  filename,
+  mimeType = 'application/pdf',
+  caption = '',
+  scope = 'operational',
+  axiosClient = axios
+} = {}) {
+  const config = ensureDispatchWhatsappConfigured(scope);
+  const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
+  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  try {
+    const mediaId = await uploadMedia(config, { buffer, filename, mimeType }, axiosClient);
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: normalizedPhone,
+      type: 'document',
+      document: {
+        id: mediaId,
+        filename: parameterText(filename, 'programacion.pdf'),
+        ...(String(caption || '').trim() ? { caption: parameterText(caption, '') } : {})
+      }
+    };
+    const response = await postGraph(config, payload, axiosClient);
+    const providerMessageId = providerMessageIdFromResponse(response);
+    if (!providerMessageId) throw buildDispatchWhatsappError('Meta no devolvió el identificador del documento.', 502, 'dispatch_whatsapp_provider_message_missing');
+    const now = new Date().toISOString();
+    setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
+    return { phone: normalizedPhone, providerMessageId, provider: 'META_CLOUD_API' };
+  } catch (error) {
+    const message = error?.code?.startsWith?.('dispatch_') ? error.message : dispatchWhatsappProviderErrorMessage(error);
+    setDispatchWhatsappRuntimeState(scope, { lastError: message });
+    if (error?.statusCode) throw error;
+    throw buildDispatchWhatsappError(message, 502, 'dispatch_whatsapp_provider_error');
+  }
 }
 
 export async function sendDispatchWhatsappMediaMessage({
