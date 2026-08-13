@@ -1,6 +1,7 @@
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
-  buildDispatchAttendanceExpectedWindow
+  buildDispatchAttendanceExpectedWindow,
+  getDispatchArrivalWindowState
 } from './registerArrival.js';
 import {
   INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES,
@@ -145,7 +146,7 @@ function buildBreakSummary({ breakStartAt, breakEndAt, departureReported }) {
   };
 }
 
-function buildPortalAssignment(assignment) {
+function buildPortalAssignment(assignment, now) {
   const request = assignment?.serviceRequest;
   if (!request) throw new Error('worker_portal_assignment_service_request_required');
 
@@ -160,17 +161,19 @@ function buildPortalAssignment(assignment) {
 
   let expectedStartAt = null;
   let expectedEndAt = null;
+  let arrivalWindow = { open: false, opensAt: null, closesAt: null, expired: false };
   if (request.startTime) {
     const expected = buildDispatchAttendanceExpectedWindow(request);
     expectedStartAt = expected.expectedStartAt;
     expectedEndAt = expected.expectedEndAt;
+    arrivalWindow = getDispatchArrivalWindowState({ now, expectedStartAt });
   }
 
   const arrivalReported = Boolean(session?.arrivalReportedAt);
   const departureReported = Boolean(session?.departureReportedAt);
   const attendanceEnabled = point?.attendanceEnabled === true;
   const sessionRejected = session?.validationStatus === 'REJECTED';
-  const canRegisterArrival = attendanceEnabled && Boolean(expectedStartAt) && !arrivalReported;
+  const canRegisterArrival = attendanceEnabled && arrivalWindow.open && !arrivalReported;
   const canStartBreak = attendanceEnabled
     && arrivalReported
     && !departureReported
@@ -207,6 +210,9 @@ function buildPortalAssignment(assignment) {
       : 'Registrar salida';
   } else if (!expectedStartAt) actionLabel = 'Horario pendiente';
   else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
+  else if (!arrivalWindow.open) {
+    actionLabel = arrivalWindow.expired ? 'Jornada vencida' : 'Disponible el día de la asignación';
+  }
 
   let breakActionType = null;
   let breakActionLabel = null;
@@ -230,10 +236,10 @@ function buildPortalAssignment(assignment) {
       : 'Horario por confirmar',
     expectedStartAt: expectedStartAt?.toISOString() || null,
     expectedEndAt: expectedEndAt?.toISOString() || null,
-    arrivalWindowOpen: Boolean(expectedStartAt),
-    arrivalWindowOpensAt: null,
-    arrivalWindowClosesAt: null,
-    arrivalWindowExpired: false,
+    arrivalWindowOpen: arrivalWindow.open,
+    arrivalWindowOpensAt: optionalIsoDate(arrivalWindow.opensAt),
+    arrivalWindowClosesAt: optionalIsoDate(arrivalWindow.closesAt),
+    arrivalWindowExpired: arrivalWindow.expired,
     attendanceEnabled,
     arrivalReported,
     arrivalReportedAt: optionalIsoDate(session?.arrivalReportedAt),
@@ -289,7 +295,7 @@ export async function loadWorkerPortalAssignments(prisma, input = {}) {
   requireAssignmentReader(prisma, 'findMany');
   requireWorkerReader(prisma);
   const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
-  if (input.now !== undefined) requireDate(input.now, 'worker_portal_now');
+  const now = input.now === undefined ? new Date() : requireDate(input.now, 'worker_portal_now');
   const [records, worker] = await Promise.all([
     prisma.dispatchAssignment.findMany({
       where: {
@@ -306,7 +312,7 @@ export async function loadWorkerPortalAssignments(prisma, input = {}) {
 
   if (!worker) throw new Error('worker_portal_worker_not_found');
   const assignments = records
-    .map((record) => buildPortalAssignment(record))
+    .map((record) => buildPortalAssignment(record, now))
     .sort((left, right) => {
       const leftTime = left.expectedStartAt ? new Date(left.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
       const rightTime = right.expectedStartAt ? new Date(right.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
@@ -329,6 +335,7 @@ export async function loadWorkerPortalAssignmentForMark(prisma, input = {}) {
   requireAssignmentReader(prisma, 'findFirst');
   const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
   const assignmentId = requireNonEmptyString(input.assignmentId, 'worker_portal_assignment_id');
+  const now = input.now === undefined ? new Date() : requireDate(input.now, 'worker_portal_now');
   const assignment = await prisma.dispatchAssignment.findFirst({
     where: {
       id: assignmentId,
@@ -337,7 +344,7 @@ export async function loadWorkerPortalAssignmentForMark(prisma, input = {}) {
     },
     include: assignmentInclude()
   });
-  return assignment ? buildPortalAssignment(assignment) : null;
+  return assignment ? buildPortalAssignment(assignment, now) : null;
 }
 
 export const loadWorkerPortalAssignmentForArrival = loadWorkerPortalAssignmentForMark;
