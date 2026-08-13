@@ -4,24 +4,9 @@
   const script = document.currentScript;
   const isDev = script?.dataset?.dev === 'true';
   const formats = document.querySelector('.programming-formats');
-  if (!formats) return;
-
-  formats.setAttribute('aria-label', 'Formatos para enviar reportes');
-  const formatsTitle = formats.querySelector(':scope > strong');
-  if (formatsTitle) formatsTitle.textContent = 'Enviar reportes:';
+  if (!formats || !isDev || document.getElementById('programRecipients')) return;
 
   const toast = document.getElementById('asyncToast');
-  if (toast) {
-    const replaceLegacyCopy = () => {
-      if (toast.textContent.includes('gerentes')) {
-        toast.textContent = toast.textContent.replace(/los gerentes/g, 'los destinatarios configurados').replace(/gerentes/g, 'destinatarios configurados');
-      }
-    };
-    new MutationObserver(replaceLegacyCopy).observe(toast, { childList: true, subtree: true, characterData: true });
-  }
-
-  if (!isDev || document.getElementById('programRecipients')) return;
-
   const section = document.createElement('div');
   section.className = 'programming-card';
   section.setAttribute('aria-label', 'Destinatarios de programación configurables por DEV');

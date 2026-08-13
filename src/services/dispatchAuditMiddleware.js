@@ -284,6 +284,15 @@ function injectPayrollUsersScript(html, req) {
   return html.replace(/<\/body>/i, `  <script src="${PAYROLL_USERS_SCRIPT}"></script>\n</body>`);
 }
 
+function normalizeProgrammingPresentation(html, req) {
+  const path = String(req.originalUrl || '').split('?')[0];
+  if (path !== '/admin/operaciones') return html;
+  return html
+    .replace('aria-label="Formatos para enviar a gerentes"', 'aria-label="Formatos para enviar reportes"')
+    .replace('<strong>Enviar a gerentes:</strong>', '<strong>Enviar reportes:</strong>')
+    .replace("showToast(formatLabel+' enviado a los gerentes.');", "showToast(formatLabel+' enviado a los destinatarios configurados.');");
+}
+
 function injectProgrammingContactsScript(html, req) {
   const path = String(req.originalUrl || '').split('?')[0];
   if (path !== '/admin/operaciones' || html.includes(PROGRAMMING_CONTACTS_SCRIPT)) return html;
@@ -297,7 +306,8 @@ function installAdminHtmlBridge(req, res) {
     if (!isHtmlResponse(body, res)) return originalSend(body);
     const withNavigation = injectAdminModuleNavigation(body, req);
     const withPayrollUsers = injectPayrollUsersScript(withNavigation, req);
-    return originalSend(injectProgrammingContactsScript(withPayrollUsers, req));
+    const withProgrammingCopy = normalizeProgrammingPresentation(withPayrollUsers, req);
+    return originalSend(injectProgrammingContactsScript(withProgrammingCopy, req));
   };
 }
 
