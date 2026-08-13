@@ -20,6 +20,7 @@ test('dashboard and summary tabs use the route mounted by dispatchDashboardMetri
 
   assert.match(serverSource, /app\.use\('\/admin\/operaciones', wrapAsyncRouter\(dispatchDashboardMetricsRouter\(prisma\)\)\)/);
   assert.match(routeSource, /router\.get\('\/resumen', requireOps/);
+  assert.match(routeSource, /router\.get\('\/resumen\/exportar', requireOps/);
 
   const metrics = {
     totalRequests: 3,
@@ -59,6 +60,10 @@ test('dashboard and summary tabs use the route mounted by dispatchDashboardMetri
     assert.ok(dashboardHtml.includes(expectedRenderedUrl(type)), `El panel debe enlazar el indicador ${type} a la ruta canónica.`);
     assert.ok(summaryHtml.includes(expectedRenderedUrl(type)), `Las pestañas deben conservar la ruta canónica para ${type}.`);
   }
+
+  assert.match(dashboardHtml, /name="fecha" type="date" value="2026-07-29"/);
+  assert.match(dashboardHtml, /formaction="\/admin\/operaciones\/resumen\/exportar">Descargar Excel<\/button>/);
+  assert.doesNotMatch(dashboardHtml, /\/admin\/operaciones\/programacion\.xlsx/);
 
   for (const html of [dashboardHtml, summaryHtml]) {
     assert.doesNotMatch(html, /\/admin\/operaciones\/dispatch\/operations\/summary/);
