@@ -86,22 +86,6 @@ async function enroll(prisma, vector = descriptor, now = NOW) {
   }, { now, env: ENV });
 }
 
-async function enrollStrict(prisma, vector = unitVector(descriptor), now = NOW) {
-  return enrollWorkerBiometric(prisma, {
-    workerId: 'worker-1',
-    workerLabel: 'Auxiliar Prueba',
-    evidenceVersion: 2,
-    modelVersion: 'human-3.3.6-faceres',
-    sampleDescriptors: [vector],
-    sampleRealScores: [0.93],
-    sampleLiveScores: [0.91],
-    captureDurationMs: 0,
-    consentAccepted: true,
-    actorUsername: 'coordinador',
-    actorRole: 'admin'
-  }, { now, env: ENV });
-}
-
 async function assess(prisma, vector, {
   idempotencyKey,
   markType = 'ARRIVAL',
@@ -125,40 +109,6 @@ async function assess(prisma, vector, {
   }, { now: new Date(NOW.getTime() + elapsedMs), env: ENV });
 }
 
-async function assessStrictSingle(prisma, vector, {
-  idempotencyKey,
-  markType = 'ARRIVAL',
-  realScore = 0.93,
-  liveScore = 0.9,
-  elapsedMs = 10_000
-}) {
-  const challenge = issueWorkerBiometricChallenge({
-    workerId: 'worker-1', assignmentId: 'assignment-1', idempotencyKey, markType
-  }, { now: NOW, env: ENV, randomIndex: 0 });
-  return assessWorkerBiometric(prisma, {
-    workerId: 'worker-1',
-    assignmentId: 'assignment-1',
-    idempotencyKey,
-    markType,
-    evidenceVersion: 2,
-    modelVersion: 'human-3.3.6-faceres',
-    challengeToken: challenge.token,
-    challengeAction: challenge.action,
-    challengeCompleted: true,
-    challengeEvidence: {
-      kind: 'MODEL_PASSIVE_LIVENESS_V2',
-      action: challenge.action,
-      frames: 1,
-      captureDurationMs: 0
-    },
-    sampleDescriptors: [vector],
-    sampleRealScores: [realScore],
-    sampleLiveScores: [liveScore],
-    realScore,
-    liveScore
-  }, { now: new Date(NOW.getTime() + elapsedMs), env: ENV });
-}
-
 test('cifra la plantilla y permite recuperarla únicamente con el secreto', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
@@ -178,7 +128,6 @@ test('la misma identidad con desafío válido queda verificada', async () => {
   assert.equal(assessment.verified, true);
   assert.equal(assessment.similarity, 1);
   assert.equal(assessment.matchThreshold, 0.82);
-  assert.equal(assessment.identityMatchEnforced, false);
   assert.deepEqual(assessment.riskFlags, []);
 });
 
@@ -193,74 +142,35 @@ test('una variación legítima entre 0.82 y 0.85 queda verificada', async () => 
   assert.deepEqual(assessment.riskFlags, []);
 });
 
-test('la similitud baja queda como telemetría y no bloquea una cara real', async () => {
+test('un impostor cercano permanece rechazado con el umbral conservador', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const nearImpostor = rotatedDescriptor(descriptor, 0.65);
   const assessment = await assess(prisma, nearImpostor, {
-    idempotencyKey: 'mark-key-low-similarity-1234',
+    idempotencyKey: 'mark-key-impostor-1234',
     markType: 'DEPARTURE',
     randomIndex: 1,
     elapsedMs: 12_000
   });
   assert.ok(assessment.similarity > 0.79 && assessment.similarity < 0.82);
-  assert.equal(assessment.decision, 'VERIFIED');
-  assert.equal(assessment.verified, true);
-  assert.equal(assessment.identityMatchEnforced, false);
-  assert.equal(assessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'), false);
+  assert.equal(assessment.decision, 'REVIEW_REQUIRED');
+  assert.equal(assessment.verified, false);
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
 });
 
-test('un rostro con similitud muy baja tampoco se convierte en bloqueo de identidad', async () => {
+test('un rostro claramente distinto queda rechazado', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const different = descriptor.map((value, index) => value + (index % 2 ? 1.8 : -1.8));
   const assessment = await assess(prisma, different, {
-    idempotencyKey: 'mark-key-unconfirmed-1234',
+    idempotencyKey: 'mark-key-87654321',
     markType: 'DEPARTURE',
     randomIndex: 1,
     elapsedMs: 12_000
   });
-  assert.ok(assessment.similarity < 0.60);
-  assert.equal(assessment.identityConfidence, 'UNCONFIRMED');
-  assert.equal(assessment.decision, 'VERIFIED');
-  assert.equal(assessment.verified, true);
-  assert.equal(assessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'), false);
-});
-
-test('una sola muestra pasiva real y viva completa la marcación', async () => {
-  const prisma = fakePrisma();
-  const registered = unitVector(descriptor);
-  await enrollStrict(prisma, registered);
-  const captured = rotatedDescriptor(registered, 1.05);
-  const assessment = await assessStrictSingle(prisma, captured, {
-    idempotencyKey: 'single-real-face-12345678',
-    markType: 'BREAK_START'
-  });
-
-  assert.equal(assessment.sampleCount, 1);
-  assert.equal(assessment.challengeEvidence.frames, 1);
-  assert.equal(assessment.identityMatchEnforced, false);
-  assert.ok(assessment.similarity < 0.60);
-  assert.equal(assessment.identityConfidence, 'UNCONFIRMED');
-  assert.equal(assessment.decision, 'VERIFIED');
-  assert.equal(assessment.verified, true);
-  assert.deepEqual(assessment.riskFlags, []);
-});
-
-test('una sola muestra que no supera anti-spoof sigue bloqueada', async () => {
-  const prisma = fakePrisma();
-  const registered = unitVector(descriptor);
-  await enrollStrict(prisma, registered);
-  const assessment = await assessStrictSingle(prisma, registered, {
-    idempotencyKey: 'single-spoof-low-12345678',
-    markType: 'ARRIVAL',
-    realScore: 0.54,
-    liveScore: 0.9
-  });
-
   assert.equal(assessment.decision, 'REVIEW_REQUIRED');
   assert.equal(assessment.verified, false);
-  assert.ok(assessment.riskFlags.includes('BIOMETRIC_ANTISPOOF_LOW'));
+  assert.ok(assessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
 });
 
 test('al actualizar o revocar se borra el material biométrico anterior', async () => {
@@ -279,7 +189,7 @@ test('al actualizar o revocar se borra el material biométrico anterior', async 
   assert.equal(status.get('worker-1').enrolled, false);
 });
 
-test('la similitud normalizada sigue disponible como señal diagnóstica', () => {
+test('la similitud normalizada separa variación legítima e impostor', () => {
   const genuineVariation = rotatedDescriptor(descriptor, 0.59);
   const nearImpostor = rotatedDescriptor(descriptor, 0.65);
   assert.equal(humanFaceSimilarity(descriptor, descriptor), 1);
@@ -290,7 +200,8 @@ test('la similitud normalizada sigue disponible como señal diagnóstica', () =>
   assert.ok(humanFaceSimilarity(descriptor, descriptor.map((value) => value + 4)) < 0.1);
 });
 
-test('se conserva compatibilidad con dos muestras pasivas históricas', async () => {
+
+test('la identidad registrada se reconoce con dos muestras pasivas en cualquier marcación', async () => {
   const prisma = fakePrisma();
   const normalized = unitVector(descriptor);
   await enrollWorkerBiometric(prisma, {

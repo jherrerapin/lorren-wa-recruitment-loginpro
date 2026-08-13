@@ -181,7 +181,7 @@ async function assess(prisma, {
   }, { now, env: ENV });
 }
 
-test('una llegada fuerte ancla el turno y conserva 0.82 como telemetría de confianza alta', async () => {
+test('una llegada fuerte ancla el turno y conserva 0.82 como frontera de confianza alta', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const arrivalDescriptor = descriptorAtCosine(0.8404);
@@ -195,7 +195,6 @@ test('una llegada fuerte ancla el turno y conserva 0.82 como telemetría de conf
   assert.equal(arrival.verified, true);
   assert.equal(arrival.referenceSource, 'ENROLLMENT');
   assert.equal(arrival.identityConfidence, 'STRONG');
-  assert.equal(arrival.identityMatchEnforced, false);
   assert.ok(arrival.baseSimilarity >= 0.82);
   assert.equal(arrival.matchThreshold, 0.82);
   assert.equal(arrival.attendanceIdentityThreshold, 0.60);
@@ -215,7 +214,7 @@ test('una llegada fuerte ancla el turno y conserva 0.82 como telemetría de conf
   assert.ok(humanFaceSimilarity(enrollment.sessionReferences[0].descriptor, arrivalDescriptor) > 0.999);
 });
 
-test('el mismo turno sigue calculando el ancla sin convertirla en barrera', async () => {
+test('el mismo turno usa el ancla cuando el enrolamiento cae por debajo de 0.60', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const arrivalDescriptor = descriptorAtCosine(0.8404);
@@ -238,7 +237,6 @@ test('el mismo turno sigue calculando el ancla sin convertirla en barrera', asyn
   assert.ok(breakAssessment.sessionSimilarity >= 0.60);
   assert.ok(breakAssessment.sessionSimilarity < 0.82);
   assert.equal(breakAssessment.identityConfidence, 'PROBABLE');
-  assert.equal(breakAssessment.identityMatchEnforced, false);
   assert.equal(breakAssessment.similarity, breakAssessment.sessionSimilarity);
   assert.equal(breakAssessment.referenceSource, 'SESSION');
   assert.equal(breakAssessment.verified, true);
@@ -263,7 +261,6 @@ test('una llegada probable sobre 0.60 puede marcar pero no crea un ancla del tur
   assert.ok(probableArrival.baseSimilarity < 0.82);
   assert.equal(probableArrival.referenceSource, 'ENROLLMENT_PROBABLE');
   assert.equal(probableArrival.identityConfidence, 'PROBABLE');
-  assert.equal(probableArrival.identityMatchEnforced, false);
   assert.equal(probableArrival.verified, true);
   assert.deepEqual(probableArrival.riskFlags, []);
 
@@ -271,7 +268,7 @@ test('una llegada probable sobre 0.60 puede marcar pero no crea un ancla del tur
   assert.equal(enrollmentEvent.metadata.sessionReferences.length, 0, 'solo una llegada fuerte puede anclar el turno');
 });
 
-test('el ancla no cruza asignaciones y una similitud bajo 0.60 no bloquea la marcación', async () => {
+test('el ancla no cruza asignaciones y un rostro bajo 0.60 sigue rechazado', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const arrivalDescriptor = descriptorAtCosine(0.8404);
@@ -291,27 +288,24 @@ test('el ancla no cruza asignaciones y una similitud bajo 0.60 no bloquea la mar
     now: new Date(START.getTime() + 3 * 60 * 60_000)
   });
   assert.equal(otherAssignment.sessionSimilarity, null);
-  assert.equal(otherAssignment.identityConfidence, 'UNCONFIRMED');
-  assert.equal(otherAssignment.identityMatchEnforced, false);
-  assert.equal(otherAssignment.verified, true);
-  assert.equal(otherAssignment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'), false);
+  assert.equal(otherAssignment.verified, false);
+  assert.ok(otherAssignment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
 
   const belowProbable = descriptorAtBaseAndSessionCosine(0.50, 0.55, arrivalDescriptor);
-  const unconfirmedAssessment = await assess(prisma, {
+  const rejectedAssessment = await assess(prisma, {
     descriptor: belowProbable,
     markType: 'DEPARTURE',
     idempotencyKey: 'TEST-below-probable-0004',
     now: new Date(START.getTime() + 5 * 60 * 60_000)
   });
-  assert.ok(unconfirmedAssessment.baseSimilarity < 0.60);
-  assert.ok(unconfirmedAssessment.sessionSimilarity < 0.60);
-  assert.equal(unconfirmedAssessment.identityConfidence, 'UNCONFIRMED');
-  assert.equal(unconfirmedAssessment.identityMatchEnforced, false);
-  assert.equal(unconfirmedAssessment.verified, true);
-  assert.equal(unconfirmedAssessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'), false);
+  assert.ok(rejectedAssessment.baseSimilarity < 0.60);
+  assert.ok(rejectedAssessment.sessionSimilarity < 0.60);
+  assert.equal(rejectedAssessment.identityConfidence, null);
+  assert.equal(rejectedAssessment.verified, false);
+  assert.ok(rejectedAssessment.riskFlags.includes('BIOMETRIC_FACE_MISMATCH'));
 });
 
-test('el ancla puede expirar sin bloquear y la revocación redacta todo el material biométrico adicional', async () => {
+test('el ancla expira y la revocación redacta todo el material biométrico adicional', async () => {
   const prisma = fakePrisma();
   await enroll(prisma);
   const arrivalDescriptor = descriptorAtCosine(0.8404);
@@ -329,9 +323,7 @@ test('el ancla puede expirar sin bloquear y la revocación redacta todo el mater
     now: new Date(START.getTime() + 25 * 60 * 60_000)
   });
   assert.equal(expiredAttempt.sessionSimilarity, null);
-  assert.equal(expiredAttempt.identityConfidence, 'UNCONFIRMED');
-  assert.equal(expiredAttempt.identityMatchEnforced, false);
-  assert.equal(expiredAttempt.verified, true);
+  assert.equal(expiredAttempt.verified, false);
 
   await revokeWorkerBiometric(prisma, {
     workerId: WORKER_ID,
