@@ -55,6 +55,10 @@ test('el dashboard conserva el mensaje canónico y elimina la previsualización 
     assert.equal(view.includes(obsolete), false);
     assert.equal(legacyView.includes(obsolete), false);
   }
+  assert.doesNotMatch(view, /Respuesta del auxiliar/i);
+  assert.doesNotMatch(view, /NO PUEDO/i);
+  assert.doesNotMatch(view, /dispatch-reply-preview/);
+  assert.match(view, /El auxiliar recibe las opciones de respuesta directamente en WhatsApp/);
   assert.match(canonicalSource, /function removeAssignmentReplyPreview/);
   assert.match(canonicalSource, /querySelectorAll\?\.\('\.dispatch-reply-preview'\)/);
   assert.match(view, /Enviar WhatsApp a todos/);
