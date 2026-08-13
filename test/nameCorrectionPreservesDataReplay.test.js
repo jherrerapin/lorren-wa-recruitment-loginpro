@@ -12,7 +12,7 @@ process.env.META_ACCESS_TOKEN = 'meta-access-token';
 const { processText } = await import('../src/routes/webhook.js');
 const { createDebugTrace } = await import('../src/services/debugTrace.js');
 
-function buildCorrectionCase() {
+function buildCorrectionCase(message = 'Corrijo mi nombre: Camila Torres') {
   return {
     id: 'name-correction-preserves-complete-profile',
     candidate: {
@@ -54,19 +54,23 @@ function buildCorrectionCase() {
         createdAt: new Date('2026-08-08T15:05:00.000Z')
       }
     ],
-    steps: ['Corrijo mi nombre: Camila Torres'],
+    steps: [message],
     vacancies: baseVacancies,
     operations: baseOperations
   };
 }
 
-async function runCorrectionReplay() {
-  return runConversationCase(buildCorrectionCase(), {
+async function runMessageReplay(message) {
+  return runConversationCase(buildCorrectionCase(message), {
     processText,
     createDebugTrace,
     recognizeCurrentEnginePrompt: true,
     assertExpectations: false
   });
+}
+
+async function runCorrectionReplay() {
+  return runMessageReplay('Corrijo mi nombre: Camila Torres');
 }
 
 function normalize(value = '') {
@@ -119,4 +123,12 @@ test('replay corrección: la traza persiste el nombre corregido sin reescribir c
   for (const field of ['documentType', 'documentNumber', 'age', 'neighborhood', 'medicalRestrictions', 'transportMode']) {
     assert.equal(persisted.has(field), false, `no debe reescribir ${field}`);
   }
+});
+
+test('replay corrección: un nombre suelto en ASK_CV no sobrescribe el perfil', async () => {
+  const result = await runMessageReplay('Camila Torres');
+  assert.equal(result.candidate.fullName, 'Nombre Anterior');
+
+  const persisted = new Set(result.debugTraces.flatMap((trace) => trace.persisted_fields || []));
+  assert.equal(persisted.has('fullName'), false);
 });
