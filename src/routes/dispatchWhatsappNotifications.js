@@ -3,10 +3,19 @@ import {
   getDispatchWhatsappStatusView,
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappCloudService.js';
-import { loadDispatchWhatsappTodayWindowMonitor } from '../services/dispatchWhatsappMonitor.js';
+import {
+  loadDispatchWhatsappTomorrowAssignmentMonitor,
+  loadDispatchWhatsappWindowStatusForAssignments
+} from '../services/dispatchWhatsappMonitor.js';
+import {
+  dispatchWhatsappProviderErrorMessage,
+  sendDispatchWhatsappTextMessage
+} from '../services/dispatchWhatsappCloudClient.js';
 
 const OPERATIONAL_API_ERROR = 'La integración oficial de WhatsApp de despacho no está disponible en este momento. Revisa su configuración o contacta al responsable técnico.';
 const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
+const MAX_ASSIGNMENT_WINDOW_IDS = 100;
+const MAX_MANUAL_MESSAGE_LENGTH = 1200;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -67,12 +76,19 @@ function validateAssignmentContext(context) {
 function viewerStatus(req, status) {
   const isDev = role(req) === 'dev';
   const technicalLastError = status.lastError || null;
-  const publicLastError = technicalLastError && !isDev ? OPERATIONAL_API_ERROR : technicalLastError;
+  const publicLastError = technicalLastError ? OPERATIONAL_API_ERROR : null;
+  if (!isDev) {
+    return {
+      ready: Boolean(status.ready),
+      isDev: false,
+      lastError: publicLastError
+    };
+  }
   return {
     ...status,
-    isDev,
-    lastError: publicLastError,
-    technicalLastError: isDev ? technicalLastError : null
+    isDev: true,
+    lastError: technicalLastError,
+    technicalLastError
   };
 }
 
@@ -86,6 +102,20 @@ function responseStatusCode(error) {
   return 500;
 }
 
+function assignmentIdsFromQuery(value) {
+  return [...new Set(String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean))]
+    .slice(0, MAX_ASSIGNMENT_WINDOW_IDS);
+}
+
+function manualMessageText(value) {
+  const message = normalizeString(value);
+  if (!message) return null;
+  return message.slice(0, MAX_MANUAL_MESSAGE_LENGTH);
+}
+
 export function dispatchWhatsappNotificationsRouter(prisma) {
   const router = express.Router();
   router.use(requireOps);
@@ -96,9 +126,11 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       pageTitle: 'WhatsApp de despacho',
       role: role(req),
       message: normalizeString(req.query?.message),
-      whatsappTitle: 'WhatsApp oficial de despacho',
+      whatsappTitle: role(req) === 'dev' ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
       whatsappEyebrow: 'Operaciones / Despacho',
-      whatsappDescription: 'Integración directa con WhatsApp Business Platform de Meta. No usa QR, navegador automatizado ni dispositivos vinculados.',
+      whatsappDescription: role(req) === 'dev'
+        ? 'Integración directa con WhatsApp Business Platform de Meta. No usa QR, navegador automatizado ni dispositivos vinculados.'
+        : 'Estado general del canal de WhatsApp usado por Despacho.',
       whatsappBasePath: '/admin/operaciones/whatsapp',
       whatsappReturnHref: '/admin/operaciones',
       whatsappReturnLabel: 'Volver a Operaciones',
@@ -113,14 +145,43 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
     res.json({ ok: true, ...await getStatusForViewer(req) });
   });
 
+  router.get('/ventanas-asignaciones', async (req, res, next) => {
+    try {
+      const assignmentIds = assignmentIdsFromQuery(req.query?.assignmentIds);
+      if (!assignmentIds.length) return res.json({ ok: true, windows: [] });
+      const assignments = await prisma.dispatchAssignment.findMany({
+        where: { id: { in: assignmentIds } },
+        include: { worker: true }
+      });
+      const statuses = await loadDispatchWhatsappWindowStatusForAssignments({ prismaClient: prisma, assignments });
+      const windows = assignments.map((assignment) => {
+        const status = statuses[assignment.id] || {};
+        return {
+          assignmentId: assignment.id,
+          isOpen: Boolean(status.isOpen),
+          expiresAt: status.expiresAt || null
+        };
+      });
+      return res.json({ ok: true, windows });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.get('/monitor', requireDevMonitor, async (req, res, next) => {
     try {
-      const monitor = await loadDispatchWhatsappTodayWindowMonitor({ prismaClient: prisma });
+      const [monitor, status] = await Promise.all([
+        loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma }),
+        getDispatchWhatsappStatusView({ scope: 'operational' })
+      ]);
       return res.render('operacionesWhatsappMonitor', {
-        pageTitle: 'Ventanas 24 h · WhatsApp Despacho · DEV',
+        pageTitle: 'Asignados de mañana · WhatsApp Despacho · DEV',
         role: role(req),
         monitor,
-        monitorDataEndpoint: '/admin/operaciones/whatsapp/monitor/datos'
+        assignmentTemplateName: status.assignmentTemplateName || null,
+        monitorDataEndpoint: '/admin/operaciones/whatsapp/monitor/datos',
+        bulkSendEndpoint: '/admin/operaciones/whatsapp/monitor/enviar-confirmaciones-manana',
+        manualSendEndpoint: '/admin/operaciones/whatsapp/monitor/mensaje'
       });
     } catch (error) {
       return next(error);
@@ -129,10 +190,94 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
 
   router.get('/monitor/datos', requireDevMonitor, async (_req, res, next) => {
     try {
-      const monitor = await loadDispatchWhatsappTodayWindowMonitor({ prismaClient: prisma });
+      const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma });
       return res.json({ ok: true, ...monitor });
     } catch (error) {
       return next(error);
+    }
+  });
+
+  router.post('/monitor/enviar-confirmaciones-manana', requireDevMonitor, async (req, res, next) => {
+    try {
+      const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma });
+      const pending = monitor.items.filter((item) => item.canSendConfirmation);
+      const results = [];
+      const actorUsername = normalizeString(req.session?.username || req.username);
+
+      for (const item of pending) {
+        try {
+          const result = await sendDispatchWhatsappMessage({
+            phone: item.phone,
+            context: {
+              assignmentId: item.assignmentId,
+              serviceRequestId: item.serviceRequestId,
+              workerId: item.workerId,
+              recipientName: item.workerName,
+              messageType: ASSIGNMENT_MESSAGE_TYPE
+            },
+            scope: 'operational',
+            actorUsername
+          });
+          results.push({
+            assignmentId: item.assignmentId,
+            workerName: item.workerName,
+            ok: true,
+            deliveryMode: result.deliveryMode,
+            templateName: result.templateName || null
+          });
+        } catch (error) {
+          results.push({
+            assignmentId: item.assignmentId,
+            workerName: item.workerName,
+            ok: false,
+            message: error?.message || 'No fue posible enviar la confirmación.'
+          });
+        }
+      }
+
+      const sent = results.filter((item) => item.ok).length;
+      const failed = results.length - sent;
+      return res.json({
+        ok: failed === 0,
+        dateKey: monitor.dateKey,
+        attempted: results.length,
+        sent,
+        failed,
+        skippedConfirmed: monitor.summary.confirmed,
+        results
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/monitor/mensaje', requireDevMonitor, async (req, res) => {
+    try {
+      const assignmentId = normalizeString(req.body?.assignmentId);
+      const message = manualMessageText(req.body?.message);
+      if (!assignmentId || !message) {
+        return res.status(400).json({ ok: false, message: 'Selecciona un auxiliar e indica el mensaje.' });
+      }
+      const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma });
+      const item = monitor.items.find((candidate) => candidate.assignmentId === assignmentId);
+      if (!item) return res.status(404).json({ ok: false, message: 'La asignación ya no corresponde a mañana.' });
+      if (!item.isOpen) {
+        return res.status(409).json({
+          ok: false,
+          message: 'La ventana de 24 horas está cerrada. No se puede enviar texto libre hasta que el auxiliar responda o exista una plantilla aprobada para ese mensaje.'
+        });
+      }
+      const providerMessageId = await sendDispatchWhatsappTextMessage({
+        scope: 'operational',
+        phone: item.phone,
+        text: message
+      });
+      return res.json({ ok: true, assignmentId, workerName: item.workerName, providerMessageId });
+    } catch (error) {
+      return res.status(502).json({
+        ok: false,
+        message: dispatchWhatsappProviderErrorMessage(error)
+      });
     }
   });
 
