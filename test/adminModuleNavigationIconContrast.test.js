@@ -2,21 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildAdminModuleNavbar } from '../src/services/adminNavigation.js';
 
-test('Reclutamiento usa un SVG azul estable y no depende del emoji del sistema', () => {
+function moduleMenu(html, key) {
+  return html.match(new RegExp(`<details[^>]*data-module-menu="${key}"[\\s\\S]*?<\\/details>`))?.[0] || '';
+}
+
+test('los tres modulos usan geometria Fluent azul estable y no dependen de emojis del sistema', () => {
   const html = buildAdminModuleNavbar(
-    { originalUrl: '/admin', userRole: 'admin', session: { userRole: 'admin' } },
+    { originalUrl: '/admin/operaciones', userRole: 'dev', session: { userRole: 'dev' } },
     '<nav class="navbar"><a href="/admin">Panel</a></nav>'
   );
 
-  const recruitment = html.match(/<details[^>]*data-module-menu="recruitment"[\s\S]*?<\/details>/)?.[0] || '';
+  assert.doesNotMatch(html, /[👥🚚🧾]/u);
+  assert.doesNotMatch(html, /#FF822D|#FCD53F|#321B41|#533566|#D3D3D3|#9B9B9B/);
 
-  assert.ok(recruitment, 'debe renderizar el modulo Reclutamiento');
-  assert.doesNotMatch(recruitment, /👥/u);
-  assert.match(recruitment, /<svg\b[^>]*class="admin-module-nav-icon-svg"/);
-  assert.match(recruitment, /fill="#60A5FA"/);
-  assert.match(recruitment, /fill="#2563EB"/);
-  assert.doesNotMatch(recruitment, /stroke="currentColor"/);
-  assert.match(recruitment, /width="16"/);
-  assert.match(recruitment, /height="16"/);
-  assert.match(recruitment, /aria-hidden="true"/);
+  for (const key of ['recruitment', 'operations', 'payroll']) {
+    const menu = moduleMenu(html, key);
+    assert.ok(menu, `debe renderizar el modulo ${key}`);
+    assert.match(menu, /<svg\b[^>]*class="admin-module-nav-icon-svg"/);
+    assert.match(menu, /viewBox="0 0 32 32"/);
+    assert.match(menu, /fill="#60A5FA"/);
+    assert.match(menu, /fill="#2563EB"/);
+    assert.match(menu, /width="16"/);
+    assert.match(menu, /height="16"/);
+    assert.match(menu, /aria-hidden="true"/);
+  }
+
+  assert.match(moduleMenu(html, 'recruitment'), /d="M15\.8402 23\.93C15\.8999/);
+  assert.match(moduleMenu(html, 'operations'), /d="M2\.16 19\.3L5\.53 12\.89/);
+  assert.match(moduleMenu(html, 'payroll'), /d="M25\.05 3\.105L24\.03 2\.165/);
 });
