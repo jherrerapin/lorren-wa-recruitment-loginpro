@@ -14,6 +14,7 @@ import {
   sendDispatchWhatsappProgrammingDateMenu,
   sendDispatchWhatsappProgrammingFormatMenu,
   sendDispatchWhatsappReportMenu,
+  sendDispatchWhatsappSummaryDateMenu,
   sendDispatchWhatsappTextMessage
 } from '../services/dispatchWhatsappCloudClient.js';
 import { recordDispatchWhatsappMessageAudit } from '../services/dispatchWhatsappMonitor.js';
@@ -69,7 +70,10 @@ function programmingContactAction(message = {}) {
   if (payload === 'dispatch_report:programming_today') return { type: 'PROGRAMMING_DATE' };
   if (payload === 'dispatch_report:programming_date_today') return { type: 'PROGRAMMING_FORMAT', dateChoice: 'today' };
   if (payload === 'dispatch_report:programming_date_tomorrow') return { type: 'PROGRAMMING_FORMAT', dateChoice: 'tomorrow' };
-  if (payload === 'dispatch_report:summary_today') return { type: 'SUMMARY_TODAY' };
+  if (payload === 'dispatch_report:summary') return { type: 'SUMMARY_DATE' };
+  if (payload === 'dispatch_report:summary_date_today') return { type: 'SUMMARY', dateChoice: 'today' };
+  if (payload === 'dispatch_report:summary_date_tomorrow') return { type: 'SUMMARY', dateChoice: 'tomorrow' };
+  if (payload === 'dispatch_report:summary_today') return { type: 'SUMMARY', dateChoice: 'today' };
   const reportAction = PROGRAMMING_REPORT_ACTIONS.get(payload);
   if (reportAction) return { type: 'PROGRAMMING_DOCUMENTS', ...reportAction };
   return null;
@@ -91,8 +95,8 @@ async function auditProgrammingReply(prisma, { phone, body, messageType, provide
   await recordDispatchWhatsappMessageAudit({ prismaClient: prisma, scope: 'operational', direction: 'OUTBOUND', phone, body, messageType, providerMessageId, source, occurredAt: new Date() });
 }
 
-async function sendProgrammingSummary(prisma, contact) {
-  const loaded = await loadProgrammingRequests(prisma, todayIsoDateCO());
+async function sendProgrammingSummary(prisma, contact, selectedDate = todayIsoDateCO()) {
+  const loaded = await loadProgrammingRequests(prisma, selectedDate);
   const summary = buildProgrammingCompletionSummary(loaded.requests);
   const confirmedWorkers = loaded.requests.reduce((sum, request) => sum + confirmedOperationalAssignments(request).length, 0);
   const pendingRequests = loaded.requests.filter((request) => PENDING_PROGRAMMING_STATUSES.has(deriveDispatchRequestOperationalState(request).status)).length;
@@ -120,14 +124,17 @@ async function sendProgrammingMenu(prisma, contact) {
   });
 }
 
-async function sendProgrammingDateMenu(prisma, contact) {
-  const result = await sendDispatchWhatsappProgrammingDateMenu({ scope: 'operational', phone: contact.phone });
+async function sendReportDateMenu(prisma, contact, reportType) {
+  const isSummary = reportType === 'summary';
+  const result = isSummary
+    ? await sendDispatchWhatsappSummaryDateMenu({ scope: 'operational', phone: contact.phone })
+    : await sendDispatchWhatsappProgrammingDateMenu({ scope: 'operational', phone: contact.phone });
   await auditProgrammingReply(prisma, {
     phone: contact.phone,
     body: '¿Qué día deseas consultar? [Hoy] [Mañana]',
     messageType: 'INTERACTIVE',
     providerMessageId: result.providerMessageId,
-    source: 'PROGRAMMING_CONTACT_DATE_MENU'
+    source: isSummary ? 'PROGRAMMING_CONTACT_SUMMARY_DATE_MENU' : 'PROGRAMMING_CONTACT_DATE_MENU'
   });
 }
 
@@ -155,13 +162,16 @@ async function processProgrammingContacts(prisma, payload, { allowGenericMenu = 
       const contact = byPhone.get(normalizeDispatchWhatsappPhone(message.from));
       if (!contact) continue;
       const action = programmingContactAction(message);
-      if (action?.type === 'PROGRAMMING_DATE') await sendProgrammingDateMenu(prisma, contact);
+      if (action?.type === 'PROGRAMMING_DATE') await sendReportDateMenu(prisma, contact, 'programming');
       else if (action?.type === 'PROGRAMMING_FORMAT') await sendProgrammingFormatMenu(prisma, contact, action.dateChoice);
       else if (action?.type === 'PROGRAMMING_DOCUMENTS') {
         const selectedDate = programmingDateForChoice(action.dateChoice);
         await sendProgrammingContactDocuments(prisma, contact, action.formats, selectedDate);
-      } else if (action?.type === 'SUMMARY_TODAY') await sendProgrammingSummary(prisma, contact);
-      else if (!action && allowGenericMenu && message?.type === 'text') await sendProgrammingMenu(prisma, contact);
+      } else if (action?.type === 'SUMMARY_DATE') await sendReportDateMenu(prisma, contact, 'summary');
+      else if (action?.type === 'SUMMARY') {
+        const selectedDate = programmingDateForChoice(action.dateChoice);
+        await sendProgrammingSummary(prisma, contact, selectedDate);
+      } else if (!action && allowGenericMenu && message?.type === 'text') await sendProgrammingMenu(prisma, contact);
     }
   }
 }
