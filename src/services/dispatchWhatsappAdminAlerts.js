@@ -285,10 +285,7 @@ async function loadAssignmentSendStates(prismaClient, userId, assignmentIds, dat
   ]));
   const [confirmations, attempts] = await Promise.all([
     prismaClient.dispatchWhatsappConfirmation.findMany({
-      where: {
-        assignmentId: { in: ids },
-        createdAt: { gte: bogotaDayStart(dateKey) }
-      },
+      where: { assignmentId: { in: ids } },
       select: { assignmentId: true, status: true, createdAt: true },
       orderBy: { createdAt: 'desc' }
     }),
@@ -557,18 +554,6 @@ async function runPendingConfirmationAlert({
     if (!eligibleAssignments.length) {
       await recordPendingAlertRun(prismaClient, user.id, dateKey, targetDateKey, summary, now);
       return summary;
-    }
-
-    if (sendAdminMessage === sendDispatchWhatsappTextMessage) {
-      const contactWindow = await getDispatchWhatsappContactWindowStatus({
-        scope: 'operational',
-        phone: user.dispatchAlertPhone,
-        now,
-        prismaClient
-      });
-      if (!contactWindow.isOpen) {
-        return { skipped: true, reason: 'alert_window_closed', pendingCount: eligibleAssignments.length };
-      }
     }
 
     try {
