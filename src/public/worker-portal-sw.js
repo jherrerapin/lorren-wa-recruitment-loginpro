@@ -2,7 +2,7 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v14';
+const CACHE_NAME = 'lorren-worker-portal-shell-v15';
 const NETWORK_FIRST_ASSETS = new Set([
   '/public/worker-biometric.js',
   '/public/worker-biometric-core.js',
@@ -24,9 +24,11 @@ const STATIC_ASSETS = [
   '/public/worker-portal-install.js'
 ];
 const DB_NAME = 'lorren-worker-portal-v1';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const QUEUE_STORE = 'arrivalQueue';
 const RECEIPT_STORE = 'arrivalReceipts';
+const CREW_QUEUE_STORE = 'crewPresenceQueue';
+const CREW_RECEIPT_STORE = 'crewPresenceReceipts';
 const SYNC_TAG = 'lorren-worker-arrivals';
 const MAX_QUEUE_AGE_MS = 72 * 60 * 60 * 1000;
 const DEFAULT_RETRY_DELAY_MS = 30 * 1000;
@@ -64,59 +66,74 @@ function normalizeRecord(record) {
   return { ...record, markType: normalizeMarkType(record?.markType) };
 }
 
+function ensureStore(database, storeName, configure) {
+  if (database.objectStoreNames.contains(storeName)) return;
+  const store = database.createObjectStore(storeName, { keyPath: 'idempotencyKey' });
+  configure(store);
+}
+
 function openDatabase() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
     request.addEventListener('upgradeneeded', () => {
       const database = request.result;
-      if (!database.objectStoreNames.contains(QUEUE_STORE)) {
-        const queue = database.createObjectStore(QUEUE_STORE, { keyPath: 'idempotencyKey' });
+      ensureStore(database, QUEUE_STORE, (queue) => {
         queue.createIndex('assignmentId', 'assignmentId', { unique: false });
         queue.createIndex('queuedAt', 'queuedAt', { unique: false });
-      }
-      if (!database.objectStoreNames.contains(RECEIPT_STORE)) {
-        const receipts = database.createObjectStore(RECEIPT_STORE, { keyPath: 'idempotencyKey' });
+      });
+      ensureStore(database, RECEIPT_STORE, (receipts) => {
         receipts.createIndex('assignmentId', 'assignmentId', { unique: false });
         receipts.createIndex('completedAt', 'completedAt', { unique: false });
-      }
+      });
+      ensureStore(database, CREW_QUEUE_STORE, (queue) => {
+        queue.createIndex('assignmentId', 'assignmentId', { unique: false });
+        queue.createIndex('serviceRequestId', 'serviceRequestId', { unique: false });
+        queue.createIndex('queuedAt', 'queuedAt', { unique: false });
+      });
+      ensureStore(database, CREW_RECEIPT_STORE, (receipts) => {
+        receipts.createIndex('assignmentId', 'assignmentId', { unique: false });
+        receipts.createIndex('serviceRequestId', 'serviceRequestId', { unique: false });
+        receipts.createIndex('completedAt', 'completedAt', { unique: false });
+      });
     });
     request.addEventListener('success', () => resolve(request.result), { once: true });
     request.addEventListener('error', () => reject(request.error || new Error('indexeddb_open_failed')), { once: true });
   });
 }
 
-async function readQueue() {
+async function readStore(storeName) {
   const database = await openDatabase();
   try {
-    const transaction = database.transaction(QUEUE_STORE, 'readonly');
-    const records = await requestPromise(transaction.objectStore(QUEUE_STORE).getAll());
+    const transaction = database.transaction(storeName, 'readonly');
+    const records = await requestPromise(transaction.objectStore(storeName).getAll());
     await transactionDone(transaction);
-    return (Array.isArray(records) ? records : []).map(normalizeRecord);
+    return Array.isArray(records) ? records : [];
   } finally {
     database.close();
   }
 }
 
-async function putQueueRecord(record) {
+async function putStoreRecord(storeName, record) {
   const database = await openDatabase();
   try {
-    const transaction = database.transaction(QUEUE_STORE, 'readwrite');
-    transaction.objectStore(QUEUE_STORE).put(record);
+    const transaction = database.transaction(storeName, 'readwrite');
+    transaction.objectStore(storeName).put(record);
     await transactionDone(transaction);
   } finally {
     database.close();
   }
 }
 
-async function completeQueueRecord(record, receipt) {
+async function completeStoreRecord(queueStore, receiptStore, record, receipt) {
   const database = await openDatabase();
   try {
-    const transaction = database.transaction([QUEUE_STORE, RECEIPT_STORE], 'readwrite');
-    transaction.objectStore(QUEUE_STORE).delete(record.idempotencyKey);
-    transaction.objectStore(RECEIPT_STORE).put({
+    const transaction = database.transaction([queueStore, receiptStore], 'readwrite');
+    transaction.objectStore(queueStore).delete(record.idempotencyKey);
+    transaction.objectStore(receiptStore).put({
       idempotencyKey: record.idempotencyKey,
       assignmentId: record.assignmentId,
-      markType: record.markType,
+      ...(record.serviceRequestId ? { serviceRequestId: record.serviceRequestId } : {}),
+      ...(record.markType ? { markType: record.markType } : {}),
       capturedAt: record.clientCapturedAt,
       queuedAt: record.queuedAt,
       completedAt: new Date().toISOString(),
@@ -126,6 +143,30 @@ async function completeQueueRecord(record, receipt) {
   } finally {
     database.close();
   }
+}
+
+async function readQueue() {
+  return (await readStore(QUEUE_STORE)).map(normalizeRecord);
+}
+
+function putQueueRecord(record) {
+  return putStoreRecord(QUEUE_STORE, record);
+}
+
+function completeQueueRecord(record, receipt) {
+  return completeStoreRecord(QUEUE_STORE, RECEIPT_STORE, record, receipt);
+}
+
+function readCrewQueue() {
+  return readStore(CREW_QUEUE_STORE);
+}
+
+function putCrewQueueRecord(record) {
+  return putStoreRecord(CREW_QUEUE_STORE, record);
+}
+
+function completeCrewQueueRecord(record, receipt) {
+  return completeStoreRecord(CREW_QUEUE_STORE, CREW_RECEIPT_STORE, record, receipt);
 }
 
 async function notifyClients(message) {
@@ -350,7 +391,7 @@ async function syncRecord(rawRecord) {
       state,
       validationStatus: payload.validationStatus || null,
       attendanceStatus: payload.attendanceStatus || null,
-      punctualityStatus: payload.punctualityStatus || null,
+      punctualityStatus,
       workedMinutes: payload.workedMinutes ?? null,
       message: payload.message || 'Marcación sincronizada.'
     });
