@@ -22,6 +22,9 @@ import { loadProgrammingWhatsappRecipients, sendProgrammingContactDocuments } fr
 import { logWhatsappWebhookDiagnostics } from '../services/whatsappWebhookDiagnostics.js';
 
 const PENDING_PROGRAMMING_STATUSES = new Set(['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION']);
+const DISPATCH_WHATSAPP_MESSAGE_ENTITY = 'DISPATCH_WHATSAPP_MESSAGE';
+const PROGRAMMING_CONTACT_CLAIM_ENTITY = 'DISPATCH_PROGRAMMING_CONTACT_INBOUND';
+const PROGRAMMING_CONTACT_CLAIM_ACTION = 'CLAIM_DISPATCH_PROGRAMMING_CONTACT_INBOUND';
 const PROGRAMMING_REPORT_ACTIONS = new Map([
   ['dispatch_report:programming_today_pdf', { dateChoice: 'today', formats: ['pdf'] }],
   ['dispatch_report:programming_today_excel', { dateChoice: 'today', formats: ['excel'] }],
@@ -58,6 +61,66 @@ function webhookMessageValues(payload = {}) {
     }
   }
   return values;
+}
+
+function inboundAuditEntityId(messageId) {
+  const id = String(messageId || '').trim();
+  return id ? `dispatch-wa:inbound:${id}` : '';
+}
+
+export async function loadPreviouslyAuditedProgrammingMessageIds(prisma, payload) {
+  if (!prisma?.devAuditEvent?.findMany) return new Set();
+  const messageIds = [];
+  for (const value of webhookMessageValues(payload)) {
+    if (resolveDispatchWhatsappScopeByPhoneNumberId(value?.metadata?.phone_number_id) !== 'operational') continue;
+    for (const message of value.messages) {
+      const messageId = String(message?.id || '').trim();
+      if (messageId) messageIds.push(messageId);
+    }
+  }
+  const uniqueMessageIds = [...new Set(messageIds)];
+  if (!uniqueMessageIds.length) return new Set();
+  const rows = await prisma.devAuditEvent.findMany({
+    where: {
+      entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
+      entityId: { in: uniqueMessageIds.map(inboundAuditEntityId) }
+    },
+    select: { entityId: true }
+  });
+  const prefix = 'dispatch-wa:inbound:';
+  return new Set(rows
+    .map((row) => String(row?.entityId || ''))
+    .filter((entityId) => entityId.startsWith(prefix))
+    .map((entityId) => entityId.slice(prefix.length))
+    .filter(Boolean));
+}
+
+function programmingClaimId(messageId) {
+  return `dispatch-programming-inbound:${messageId}`;
+}
+
+export async function claimProgrammingContactInbound(prisma, message, actionType = 'GENERIC_MENU') {
+  const messageId = String(message?.id || '').trim();
+  if (!messageId || !prisma?.devAuditEvent?.create) return { claimed: false, reason: 'missing_message_id' };
+  try {
+    await prisma.devAuditEvent.create({
+      data: {
+        id: programmingClaimId(messageId),
+        entityType: PROGRAMMING_CONTACT_CLAIM_ENTITY,
+        entityId: messageId,
+        action: PROGRAMMING_CONTACT_CLAIM_ACTION,
+        actorSource: 'dispatch-whatsapp-webhook',
+        metadata: {
+          messageType: String(message?.type || 'UNKNOWN').trim().toUpperCase(),
+          actionType: String(actionType || 'GENERIC_MENU').trim().toUpperCase()
+        }
+      }
+    });
+    return { claimed: true, messageId };
+  } catch (error) {
+    if (error?.code === 'P2002') return { claimed: false, duplicate: true, messageId };
+    throw error;
+  }
 }
 
 function inboundPayload(message = {}) {
@@ -150,30 +213,60 @@ async function sendProgrammingFormatMenu(prisma, contact, dateChoice) {
   });
 }
 
-async function processProgrammingContacts(prisma, payload, { allowGenericMenu = false } = {}) {
+export async function processProgrammingContacts(prisma, payload, {
+  allowGenericMenu = false,
+  skipMessageIds = [],
+  handlers = {}
+} = {}) {
   const messageValues = webhookMessageValues(payload);
-  if (!messageValues.length) return;
+  if (!messageValues.length) return { handled: 0, skipped: 0 };
   const recipients = await loadProgrammingWhatsappRecipients(prisma);
-  if (!recipients.length) return;
+  if (!recipients.length) return { handled: 0, skipped: 0 };
   const byPhone = new Map(recipients.map((recipient) => [recipient.phone, recipient]));
+  const skippedIds = skipMessageIds instanceof Set ? skipMessageIds : new Set(skipMessageIds || []);
+  const senders = {
+    menu: handlers.sendProgrammingMenu || sendProgrammingMenu,
+    reportDateMenu: handlers.sendReportDateMenu || sendReportDateMenu,
+    formatMenu: handlers.sendProgrammingFormatMenu || sendProgrammingFormatMenu,
+    documents: handlers.sendProgrammingContactDocuments || sendProgrammingContactDocuments,
+    summary: handlers.sendProgrammingSummary || sendProgrammingSummary
+  };
+  let handled = 0;
+  let skipped = 0;
+
   for (const value of messageValues) {
     if (resolveDispatchWhatsappScopeByPhoneNumberId(value?.metadata?.phone_number_id) !== 'operational') continue;
     for (const message of value.messages) {
       const contact = byPhone.get(normalizeDispatchWhatsappPhone(message.from));
       if (!contact) continue;
       const action = programmingContactAction(message);
-      if (action?.type === 'PROGRAMMING_DATE') await sendReportDateMenu(prisma, contact, 'programming');
-      else if (action?.type === 'PROGRAMMING_FORMAT') await sendProgrammingFormatMenu(prisma, contact, action.dateChoice);
+      const genericMenu = !action && allowGenericMenu && message?.type === 'text';
+      if (!action && !genericMenu) continue;
+      const messageId = String(message?.id || '').trim();
+      if (!messageId || skippedIds.has(messageId)) {
+        skipped += 1;
+        continue;
+      }
+      const claim = await claimProgrammingContactInbound(prisma, message, action?.type || 'GENERIC_MENU');
+      if (!claim.claimed) {
+        skipped += 1;
+        continue;
+      }
+
+      if (action?.type === 'PROGRAMMING_DATE') await senders.reportDateMenu(prisma, contact, 'programming');
+      else if (action?.type === 'PROGRAMMING_FORMAT') await senders.formatMenu(prisma, contact, action.dateChoice);
       else if (action?.type === 'PROGRAMMING_DOCUMENTS') {
         const selectedDate = programmingDateForChoice(action.dateChoice);
-        await sendProgrammingContactDocuments(prisma, contact, action.formats, selectedDate);
-      } else if (action?.type === 'SUMMARY_DATE') await sendReportDateMenu(prisma, contact, 'summary');
+        await senders.documents(prisma, contact, action.formats, selectedDate);
+      } else if (action?.type === 'SUMMARY_DATE') await senders.reportDateMenu(prisma, contact, 'summary');
       else if (action?.type === 'SUMMARY') {
         const selectedDate = programmingDateForChoice(action.dateChoice);
-        await sendProgrammingSummary(prisma, contact, selectedDate);
-      } else if (!action && allowGenericMenu && message?.type === 'text') await sendProgrammingMenu(prisma, contact);
+        await senders.summary(prisma, contact, selectedDate);
+      } else if (genericMenu) await senders.menu(prisma, contact);
+      handled += 1;
     }
   }
+  return { handled, skipped };
 }
 
 export function verifyDispatchWhatsappSignature(rawBody, signatureHeader, appSecret) {
@@ -216,8 +309,12 @@ export function dispatchWhatsappWebhookRouter(prisma) {
         return res.sendStatus(401);
       }
       logWhatsappWebhookDiagnostics(payload, '/webhook/dispatch');
+      const previouslyAuditedMessageIds = await loadPreviouslyAuditedProgrammingMessageIds(prisma, payload);
       const dispatchResult = await processDispatchWhatsappWebhook(payload, { prismaClient: prisma });
-      await processProgrammingContacts(prisma, payload, { allowGenericMenu: Number(dispatchResult?.messagesProcessed || 0) === 0 });
+      await processProgrammingContacts(prisma, payload, {
+        allowGenericMenu: Number(dispatchResult?.messagesProcessed || 0) === 0,
+        skipMessageIds: previouslyAuditedMessageIds
+      });
       return res.sendStatus(200);
     } catch (error) {
       return next(error);
