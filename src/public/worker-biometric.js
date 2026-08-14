@@ -80,8 +80,8 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
     return VALID_STATUSES.has(card.dataset.portalStatus) ? card.dataset.portalStatus : 'PENDING';
   }
 
-  function shouldPinActiveJourney(status) {
-    return status === 'IN_PROGRESS';
+  function shouldPinActiveJourney(status, activePreset) {
+    return status === 'IN_PROGRESS' && Boolean(activePreset);
   }
 
   function updateSummary(summary, items) {
@@ -175,6 +175,7 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
       const from = fromInput.value;
       const to = toInput.value;
       const status = statusSelect.value;
+      const activePreset = presetButtons.find((button) => button.classList.contains('active'))?.dataset.portalPreset || '';
       let visibleCount = 0;
 
       items.forEach((item) => {
@@ -183,7 +184,7 @@ document.write(`<script src="/public/worker-portal-install.js?v=${BIOMETRIC_ASSE
         const matchesFrom = !from || !item.dateKey || item.dateKey >= from;
         const matchesTo = !to || !item.dateKey || item.dateKey <= to;
         const matchesStatus = !status || status === item.status;
-        const keepActiveJourney = shouldPinActiveJourney(item.status);
+        const keepActiveJourney = shouldPinActiveJourney(item.status, activePreset);
         const visible = (keepActiveJourney || (matchesFrom && matchesTo)) && matchesStatus;
         item.card.hidden = !visible;
         if (visible) visibleCount += 1;
