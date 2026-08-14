@@ -63,60 +63,6 @@
   sendPdfCheckbox?.addEventListener('change', () => saveFormats(sendPdfCheckbox));
   sendExcelCheckbox?.addEventListener('change', () => saveFormats(sendExcelCheckbox));
 
-  function renderProgrammingUserAccess(users = []) {
-    if (!isDev || document.getElementById('programmingUserAccess')) return;
-    const section = document.createElement('div');
-    section.id = 'programmingUserAccess';
-    section.className = 'programming-recipients';
-    section.setAttribute('aria-label', 'Visibilidad de Programación por usuario');
-    const title = document.createElement('strong');
-    title.textContent = 'Mostrar Programación a:';
-    const choices = document.createElement('div');
-    choices.className = 'programming-recipient-choices';
-    const help = document.createElement('small');
-    help.textContent = 'DEV siempre tiene acceso. Marca los usuarios que podrán ver y usar Programación del día.';
-    const entries = Array.isArray(users) ? users : [];
-    if (!entries.length) {
-      const empty = document.createElement('span');
-      empty.textContent = 'No hay usuarios de Operaciones configurables.';
-      choices.appendChild(empty);
-    }
-    entries.forEach((user, index) => {
-      const label = document.createElement('label');
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = user.enabled === true;
-      input.id = `programmingAccess${index}`;
-      const text = document.createElement('span');
-      text.textContent = user.username || 'Usuario';
-      label.htmlFor = input.id;
-      label.append(input, text);
-      input.addEventListener('change', async () => {
-        const requested = input.checked;
-        input.disabled = true;
-        try {
-          const response = await fetch('/admin/operaciones/programacion/acceso', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: user.username, enabled: requested })
-          });
-          const data = await response.json();
-          if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo cambiar la visibilidad.');
-          input.checked = data.enabled === true;
-          showMessage(`Programación ${input.checked ? 'habilitada' : 'oculta'} para ${user.username}.`);
-        } catch (error) {
-          input.checked = !requested;
-          showMessage(error.message || 'No se pudo cambiar la visibilidad.');
-        } finally {
-          input.disabled = false;
-        }
-      });
-      choices.appendChild(label);
-    });
-    section.append(title, choices, help);
-    programmingCard.insertBefore(section, formats);
-  }
-
   function setupDevRecipients() {
     if (!isDev || document.getElementById('programRecipients')) return;
     const section = document.createElement('div');
@@ -260,10 +206,7 @@
       programmingCard.hidden = false;
       await loadFormats();
       if (typeof window.loadProgrammingRecipients === 'function') window.loadProgrammingRecipients();
-      if (isDev && data.isDev) {
-        renderProgrammingUserAccess(data.users);
-        setupDevRecipients();
-      }
+      if (isDev && data.isDev) setupDevRecipients();
     } catch (error) {
       programmingCard.hidden = true;
       if (isDev) showMessage(error.message || 'No se pudo validar el acceso a Programación.');
