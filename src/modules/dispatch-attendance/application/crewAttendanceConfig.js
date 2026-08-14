@@ -3,6 +3,7 @@ import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../../../services/dispatchO
 export const CREW_ATTENDANCE_OPERATION_ENTITY_TYPE = 'DISPATCH_CREW_ATTENDANCE_OPERATION';
 export const CREW_ATTENDANCE_SERVICE_ENTITY_TYPE = 'DISPATCH_CREW_ATTENDANCE_SERVICE';
 export const CREW_ATTENDANCE_CONFIG_ACTION = 'CREW_ATTENDANCE_CONFIG_UPDATED';
+export const CREW_LEADER_ASSIGNMENT_STATUS = 'CREW_LEADER';
 export const CREW_ATTENDANCE_MODE = Object.freeze({
   INDIVIDUAL: 'INDIVIDUAL',
   CREW: 'CREW'
@@ -11,6 +12,10 @@ export const CREW_BLUETOOTH_SERVICE_UUID = '8b7f5f60-4d6b-4f6d-9f80-8d37e8f97101
 export const CREW_BLUETOOTH_OPERATION_CHARACTERISTIC_UUID = '8b7f5f61-4d6b-4f6d-9f80-8d37e8f97101';
 
 const CREW_ATTENDANCE_MODES = new Set(Object.values(CREW_ATTENDANCE_MODE));
+const CREW_SERVICE_ASSIGNMENT_STATUSES = Object.freeze([
+  ...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
+  CREW_LEADER_ASSIGNMENT_STATUS
+]);
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 
 function normalizeString(value, maxLength = 200) {
@@ -80,6 +85,9 @@ function requireReadContract(prisma) {
   if (!prisma?.dispatchServiceRequest || typeof prisma.dispatchServiceRequest.findMany !== 'function') {
     throw new Error('crew_attendance_service_prisma_contract_invalid');
   }
+  if (!prisma?.dispatchWorker || typeof prisma.dispatchWorker.findMany !== 'function') {
+    throw new Error('crew_attendance_worker_prisma_contract_invalid');
+  }
   if (!prisma?.devAuditEvent || typeof prisma.devAuditEvent.findMany !== 'function') {
     throw new Error('crew_attendance_audit_prisma_contract_invalid');
   }
@@ -103,6 +111,16 @@ function requireWriteContract(prisma) {
   }
   if (typeof prisma.dispatchServiceRequest.findUnique !== 'function') {
     throw new Error('crew_attendance_service_prisma_contract_invalid');
+  }
+  if (typeof prisma.dispatchWorker.findFirst !== 'function') {
+    throw new Error('crew_attendance_worker_prisma_contract_invalid');
+  }
+  if (!prisma?.dispatchAssignment
+    || typeof prisma.dispatchAssignment.findUnique !== 'function'
+    || typeof prisma.dispatchAssignment.findMany !== 'function'
+    || typeof prisma.dispatchAssignment.create !== 'function'
+    || typeof prisma.dispatchAssignment.update !== 'function') {
+    throw new Error('crew_attendance_assignment_prisma_contract_invalid');
   }
   if (typeof prisma.devAuditEvent.findFirst !== 'function' || typeof prisma.devAuditEvent.create !== 'function') {
     throw new Error('crew_attendance_audit_prisma_contract_invalid');
@@ -129,6 +147,11 @@ function operationAllowedFromMetadata(metadata) {
   return metadata?.allowed === true;
 }
 
+function normalizedPreviousAssignmentStatus(value) {
+  const status = normalizeString(value, 40);
+  return ACTIVE_DISPATCH_ASSIGNMENT_STATUSES.includes(status) ? status : null;
+}
+
 function serviceConfigFromMetadata(metadata) {
   const mode = CREW_ATTENDANCE_MODES.has(String(metadata?.mode || '').toUpperCase())
     ? String(metadata.mode).toUpperCase()
@@ -137,6 +160,9 @@ function serviceConfigFromMetadata(metadata) {
     mode,
     crewLeaderWorkerId: mode === CREW_ATTENDANCE_MODE.CREW
       ? normalizeString(metadata?.crewLeaderWorkerId, 160)
+      : null,
+    leaderPreviousAssignmentStatus: mode === CREW_ATTENDANCE_MODE.CREW
+      ? normalizedPreviousAssignmentStatus(metadata?.leaderPreviousAssignmentStatus)
       : null
   };
 }
@@ -173,11 +199,26 @@ function serviceLabel(service) {
   return `${dateKey} · ${time}`;
 }
 
+function workerLabel(worker) {
+  const name = normalizeString(worker?.fullName, 200) || 'Personal operativo sin nombre';
+  const contract = normalizeString(worker?.contractType, 40);
+  return contract ? `${name} · ${contract === 'CONTRATISTA' ? 'Contratista' : 'Directo'}` : name;
+}
+
+function assignmentByWorker(assignments, workerId) {
+  return (Array.isArray(assignments) ? assignments : []).find((assignment) => assignment.workerId === workerId) || null;
+}
+
+async function runWriteTransaction(prisma, callback) {
+  if (typeof prisma?.$transaction === 'function') return prisma.$transaction((tx) => callback(tx));
+  return callback(prisma);
+}
+
 export async function loadCrewAttendanceConfiguration(prisma, input = {}, options = {}) {
   requireReadContract(prisma);
   const range = resolveCrewAttendanceRange(input, options.now || new Date());
 
-  const [operations, services] = await Promise.all([
+  const [operations, services, leaderCandidates] = await Promise.all([
     prisma.dispatchOperationPoint.findMany({
       where: { isActive: true },
       select: {
@@ -211,8 +252,9 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
           select: { id: true, isActive: true, attendanceEnabled: true }
         },
         assignments: {
-          where: { status: { in: ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } },
+          where: { status: { in: CREW_SERVICE_ASSIGNMENT_STATUSES } },
           select: {
+            id: true,
             workerId: true,
             status: true,
             worker: { select: { id: true, fullName: true } }
@@ -221,6 +263,16 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
         }
       },
       orderBy: [{ serviceDate: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
+    }),
+    prisma.dispatchWorker.findMany({
+      where: { operationalStatus: 'CONTRATADO' },
+      select: {
+        id: true,
+        fullName: true,
+        contractType: true,
+        isTestProfile: true
+      },
+      orderBy: { fullName: 'asc' }
     })
   ]);
 
@@ -277,14 +329,22 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
     const operation = operationById.get(service.operationPointId) || service.operationPoint || null;
     const crewAttendanceAllowed = operationAllowedFromMetadata(operationConfig.get(service.operationPointId));
     const crewAvailable = Boolean(operation?.isActive !== false && operation?.attendanceEnabled === true && crewAttendanceAllowed);
-    const assignments = (service.assignments || []).map((assignment) => ({
-      workerId: assignment.workerId,
-      fullName: assignment.worker?.fullName || 'Auxiliar sin nombre',
-      status: assignment.status
-    }));
-    const leaderValid = configuration.crewLeaderWorkerId
-      ? assignments.some((assignment) => assignment.workerId === configuration.crewLeaderWorkerId)
-      : assignments.length === 0;
+    const serviceAssignments = Array.isArray(service.assignments) ? service.assignments : [];
+    const assignments = serviceAssignments
+      .filter((assignment) => ACTIVE_DISPATCH_ASSIGNMENT_STATUSES.includes(assignment.status))
+      .map((assignment) => ({
+        workerId: assignment.workerId,
+        fullName: assignment.worker?.fullName || 'Auxiliar sin nombre',
+        status: assignment.status
+      }));
+    const leaderAssignment = configuration.crewLeaderWorkerId
+      ? assignmentByWorker(serviceAssignments, configuration.crewLeaderWorkerId)
+      : null;
+    const leaderValid = Boolean(
+      configuration.crewLeaderWorkerId
+      && leaderAssignment
+      && CREW_SERVICE_ASSIGNMENT_STATUSES.includes(leaderAssignment.status)
+    );
     return {
       id: service.id,
       operationPointId: service.operationPointId,
@@ -297,16 +357,27 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
       requiredWorkers: service.requiredWorkers,
       mode: configuration.mode,
       crewLeaderWorkerId: configuration.crewLeaderWorkerId,
+      crewLeaderAssignmentStatus: leaderAssignment?.status || null,
       assignments,
       crewAttendanceAllowed,
       crewAvailable,
       leaderValid,
       configurationReady: configuration.mode === CREW_ATTENDANCE_MODE.INDIVIDUAL
-        || (crewAvailable && (assignments.length === 0 || leaderValid))
+        || (crewAvailable && leaderValid)
     };
   });
 
-  return { range: { from: range.from, to: range.to }, operations: operationRows, services: serviceRows };
+  return {
+    range: { from: range.from, to: range.to },
+    operations: operationRows,
+    services: serviceRows,
+    leaderCandidates: leaderCandidates.map((worker) => ({
+      id: worker.id,
+      fullName: worker.fullName || 'Personal operativo sin nombre',
+      label: workerLabel(worker),
+      isTestProfile: worker.isTestProfile === true
+    }))
+  };
 }
 
 export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
@@ -315,11 +386,12 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
   const assignments = await prisma.dispatchAssignment.findMany({
     where: {
       workerId,
-      status: { in: ACTIVE_DISPATCH_ASSIGNMENT_STATUSES }
+      status: { in: CREW_SERVICE_ASSIGNMENT_STATUSES }
     },
     select: {
       id: true,
       workerId: true,
+      status: true,
       serviceRequest: {
         select: {
           id: true,
@@ -376,6 +448,7 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
       assignmentId: assignment.id,
       serviceRequestId: service?.id || null,
       operationPointId,
+      assignmentStatus: assignment.status,
       mode: configuration.mode,
       isCrewLeader,
       crewAvailable,
@@ -431,14 +504,14 @@ export async function saveCrewAttendanceServiceConfiguration(prisma, input = {})
       startTime: true,
       operationPoint: { select: { id: true, isActive: true, attendanceEnabled: true } },
       assignments: {
-        where: { status: { in: ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } },
-        select: { workerId: true, status: true }
+        select: { id: true, workerId: true, status: true }
       }
     }
   });
   if (!service) throw new Error('crew_attendance_service_not_found');
 
   let crewLeaderWorkerId = null;
+  let leaderWorker = null;
   if (mode === CREW_ATTENDANCE_MODE.CREW) {
     if (!service.operationPointId || service.operationPoint?.isActive !== true || service.operationPoint?.attendanceEnabled !== true) {
       throw new Error('crew_attendance_operation_unavailable');
@@ -447,37 +520,132 @@ export async function saveCrewAttendanceServiceConfiguration(prisma, input = {})
     if (!operationAllowedFromMetadata(eventMetadata(operationEvent))) {
       throw new Error('crew_attendance_operation_not_allowed');
     }
-    const activeWorkerIds = new Set((service.assignments || []).map((assignment) => assignment.workerId));
-    if (activeWorkerIds.size > 0 && !requestedLeaderWorkerId) {
-      throw new Error('crew_attendance_leader_required');
-    }
-    if (requestedLeaderWorkerId && !activeWorkerIds.has(requestedLeaderWorkerId)) {
-      throw new Error('crew_attendance_leader_not_assigned');
-    }
-    crewLeaderWorkerId = requestedLeaderWorkerId;
+    if (!requestedLeaderWorkerId) throw new Error('crew_attendance_leader_required');
+    leaderWorker = await prisma.dispatchWorker.findFirst({
+      where: { id: requestedLeaderWorkerId, operationalStatus: 'CONTRATADO' },
+      select: { id: true, fullName: true }
+    });
+    if (!leaderWorker) throw new Error('crew_attendance_leader_not_available');
+    crewLeaderWorkerId = leaderWorker.id;
   }
 
   const previous = await latestConfigEvent(prisma, CREW_ATTENDANCE_SERVICE_ENTITY_TYPE, service.id);
   const previousConfig = serviceConfigFromMetadata(eventMetadata(previous));
-  if (previous
-    && previousConfig.mode === mode
-    && previousConfig.crewLeaderWorkerId === crewLeaderWorkerId) {
-    return { serviceRequestId: service.id, mode, crewLeaderWorkerId, changed: false };
-  }
 
-  const metadata = { mode, crewLeaderWorkerId };
-  await prisma.devAuditEvent.create({
-    data: {
-      entityType: CREW_ATTENDANCE_SERVICE_ENTITY_TYPE,
-      entityId: service.id,
-      entityLabel: `service:${service.id} · ${serviceLabel(service)}`,
-      action: CREW_ATTENDANCE_CONFIG_ACTION,
-      ...auditActor(input),
-      toValue: metadata,
-      metadata
+  return runWriteTransaction(prisma, async (tx) => {
+    let assignmentChanged = false;
+    let leaderPreviousAssignmentStatus = null;
+
+    if (previousConfig.crewLeaderWorkerId
+      && (mode !== CREW_ATTENDANCE_MODE.CREW || previousConfig.crewLeaderWorkerId !== crewLeaderWorkerId)) {
+      const previousLeaderAssignment = assignmentByWorker(service.assignments, previousConfig.crewLeaderWorkerId)
+        || await tx.dispatchAssignment.findUnique({
+          where: {
+            serviceRequestId_workerId: {
+              serviceRequestId: service.id,
+              workerId: previousConfig.crewLeaderWorkerId
+            }
+          }
+        });
+      if (previousLeaderAssignment?.status === CREW_LEADER_ASSIGNMENT_STATUS) {
+        await tx.dispatchAssignment.update({
+          where: { id: previousLeaderAssignment.id },
+          data: {
+            status: previousConfig.leaderPreviousAssignmentStatus || 'CANCELLED'
+          }
+        });
+        assignmentChanged = true;
+      }
     }
+
+    if (mode === CREW_ATTENDANCE_MODE.CREW) {
+      const currentAssignment = assignmentByWorker(service.assignments, crewLeaderWorkerId)
+        || await tx.dispatchAssignment.findUnique({
+          where: {
+            serviceRequestId_workerId: {
+              serviceRequestId: service.id,
+              workerId: crewLeaderWorkerId
+            }
+          }
+        });
+      if (currentAssignment?.status === CREW_LEADER_ASSIGNMENT_STATUS) {
+        leaderPreviousAssignmentStatus = previousConfig.crewLeaderWorkerId === crewLeaderWorkerId
+          ? previousConfig.leaderPreviousAssignmentStatus
+          : null;
+      } else if (currentAssignment) {
+        leaderPreviousAssignmentStatus = ACTIVE_DISPATCH_ASSIGNMENT_STATUSES.includes(currentAssignment.status)
+          ? currentAssignment.status
+          : null;
+        await tx.dispatchAssignment.update({
+          where: { id: currentAssignment.id },
+          data: { status: CREW_LEADER_ASSIGNMENT_STATUS }
+        });
+        assignmentChanged = true;
+      } else {
+        await tx.dispatchAssignment.create({
+          data: {
+            serviceRequestId: service.id,
+            workerId: crewLeaderWorkerId,
+            status: CREW_LEADER_ASSIGNMENT_STATUS,
+            notes: 'Encargado / Líder de cuadrilla. No consume cupo de auxiliar.',
+            createdByUsername: normalizeString(input.actorUsername, 160)
+          }
+        });
+        assignmentChanged = true;
+      }
+
+      const duplicateLeaders = await tx.dispatchAssignment.findMany({
+        where: {
+          serviceRequestId: service.id,
+          status: CREW_LEADER_ASSIGNMENT_STATUS,
+          workerId: { not: crewLeaderWorkerId }
+        },
+        select: { id: true }
+      });
+      for (const duplicate of duplicateLeaders) {
+        await tx.dispatchAssignment.update({
+          where: { id: duplicate.id },
+          data: { status: 'CANCELLED' }
+        });
+        assignmentChanged = true;
+      }
+    }
+
+    const metadata = {
+      mode,
+      crewLeaderWorkerId,
+      leaderPreviousAssignmentStatus: mode === CREW_ATTENDANCE_MODE.CREW
+        ? leaderPreviousAssignmentStatus
+        : null
+    };
+    const configChanged = !previous
+      || previousConfig.mode !== mode
+      || previousConfig.crewLeaderWorkerId !== crewLeaderWorkerId
+      || previousConfig.leaderPreviousAssignmentStatus !== metadata.leaderPreviousAssignmentStatus;
+
+    if (!configChanged && !assignmentChanged) {
+      return { serviceRequestId: service.id, mode, crewLeaderWorkerId, changed: false };
+    }
+
+    await tx.devAuditEvent.create({
+      data: {
+        entityType: CREW_ATTENDANCE_SERVICE_ENTITY_TYPE,
+        entityId: service.id,
+        entityLabel: `service:${service.id} · ${serviceLabel(service)}`,
+        action: CREW_ATTENDANCE_CONFIG_ACTION,
+        ...auditActor(input),
+        toValue: metadata,
+        metadata
+      }
+    });
+    return {
+      serviceRequestId: service.id,
+      mode,
+      crewLeaderWorkerId,
+      changed: true,
+      assignmentStatus: mode === CREW_ATTENDANCE_MODE.CREW ? CREW_LEADER_ASSIGNMENT_STATUS : null
+    };
   });
-  return { serviceRequestId: service.id, mode, crewLeaderWorkerId, changed: true };
 }
 
 export function crewAttendanceConfigErrorMessage(error) {
@@ -490,8 +658,8 @@ export function crewAttendanceConfigErrorMessage(error) {
     crew_attendance_mode_invalid: 'Selecciona modalidad Individual o Cuadrilla.',
     crew_attendance_operation_unavailable: 'La operación no está disponible para marcación por cuadrilla.',
     crew_attendance_operation_not_allowed: 'La operación no tiene habilitada la marcación por cuadrilla.',
-    crew_attendance_leader_required: 'Selecciona el responsable de la cuadrilla entre los auxiliares asignados.',
-    crew_attendance_leader_not_assigned: 'El responsable debe tener una asignación activa en este mismo servicio.'
+    crew_attendance_leader_required: 'Selecciona un encargado o líder de cuadrilla.',
+    crew_attendance_leader_not_available: 'El encargado debe existir en Personal operativo y estar en estado Contratado.'
   };
   if (messages[code]) return messages[code];
   if (code.endsWith('_invalid') || code.endsWith('_required')) return 'Revisa la configuración de cuadrilla e intenta nuevamente.';
