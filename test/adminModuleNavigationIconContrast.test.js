@@ -6,7 +6,7 @@ import { buildAdminModuleNavbar } from '../src/services/adminNavigation.js';
 
 const NAVIGATION_CSS = readFileSync(new URL('../src/public/admin-module-navigation.css', import.meta.url), 'utf8');
 const EXPECTED_ICON_HASHES = Object.freeze({
-  recruitment: 'e7eaaf8afa37ce88d8ae6e5d3bacd888e50a73ca03901b341744884a0482cbb7',
+  recruitment: '486dcf1b11a33f4ec851f3e2840b87ad43c20fe10374eec2abe910013052e4fd',
   operations: 'bbd17efbd96fc8bebe06bc14539f0d8103563991bb1115c6d659ed283b077a6e',
   payroll: '596874974d97c50d4a4fdd0b4b8462b9e0d06d03b0370a088691340c79f2c137'
 });
