@@ -69,14 +69,14 @@ test('el envío manual permite marcar uno, varios o todos los destinatarios conf
   assert.match(view, /input\.checked=true/);
   assert.match(view, /Selecciona al menos un destinatario/);
   assert.match(route, /router\.get\('\/programacion\/destinatarios-envio'/);
-  assert.match(route, /selectProgrammingWhatsappRecipients\(settings\.recipients, req\.body\?\.recipientPhones\)/);
+  assert.match(route, /selectProgrammingWhatsappRecipients\(eligibleRecipients, req\.body\?\.recipientPhones\)/);
 });
 
-test('reclutador-general ve nombre y número en los destinatarios seleccionables', async () => {
+test('reclutador-general ve nombre y número en los destinatarios permitidos', async () => {
   const view = await readFile(new URL('../src/views/operacionesDashboard.ejs', import.meta.url), 'utf8');
   const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
   assert.match(route, /function isGeneralRecruiter\(req\) \{[\s\S]*=== 'reclutador-general'/);
-  assert.match(route, /showRecipientPhones: isGeneralRecruiter\(req\)/);
+  assert.match(route, /showRecipientPhones: userRole\(req\) === 'dev' \|\| isGeneralRecruiter\(req\)/);
   assert.match(view, /data\.showRecipientPhones&&recipient\.phone\?`\$\{recipientName\} · \$\{recipient\.phone\}`:recipientName/);
 });
 
@@ -90,6 +90,51 @@ test('backend filtra la selección manual contra los destinatarios configurados'
   assert.deepEqual(selected.map((recipient) => recipient.name), ['Contacto B']);
   assert.equal(selectProgrammingWhatsappRecipients(configured, undefined).length, 2);
   assert.equal(selectProgrammingWhatsappRecipients(configured, []).length, 0);
+});
+
+test('destinatarios Solo DEV no se exponen ni se pueden inyectar en un envío normal', async () => {
+  const {
+    filterProgrammingWhatsappRecipientsForRole,
+    normalizeProgrammingWhatsappRecipients,
+    selectProgrammingWhatsappRecipients
+  } = await import('../src/routes/dispatchProgrammingNotifications.js');
+  const configured = [
+    { name: 'Contacto reservado', phone: '0000000000', devOnly: true },
+    { name: 'Contacto operativo', phone: '0000000001', devOnly: false }
+  ];
+  const normalized = normalizeProgrammingWhatsappRecipients(configured);
+  assert.equal(normalized[0].devOnly, true);
+  assert.equal(normalized[1].devOnly, false);
+  assert.deepEqual(filterProgrammingWhatsappRecipientsForRole(configured, 'dev').map((item) => item.name), ['Contacto reservado', 'Contacto operativo']);
+  const visibleForAdmin = filterProgrammingWhatsappRecipientsForRole(configured, 'admin');
+  assert.deepEqual(visibleForAdmin.map((item) => item.name), ['Contacto operativo']);
+  assert.deepEqual(selectProgrammingWhatsappRecipients(visibleForAdmin, ['0000000000']), []);
+});
+
+test('Programación se habilita por usuario y DEV siempre conserva acceso', async () => {
+  const { resolveProgrammingAccess } = await import('../src/routes/dispatchProgrammingNotifications.js');
+  const settings = { userAccess: ['operador-prueba'] };
+  assert.equal(resolveProgrammingAccess(settings, { userRole: 'dev', username: 'dev-prueba' }).allowed, true);
+  assert.equal(resolveProgrammingAccess(settings, { userRole: 'admin', username: 'operador-prueba' }).allowed, true);
+  assert.equal(resolveProgrammingAccess(settings, { userRole: 'admin', username: 'otro-operador' }).allowed, false);
+  assert.equal(resolveProgrammingAccess(settings, { userRole: 'admin' }).allowed, false);
+});
+
+test('la autoridad de Programación protege rutas y persiste acceso junto a formatos y contactos', async () => {
+  const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
+  const browser = await readFile(new URL('../src/public/dispatch-programming-contacts.js', import.meta.url), 'utf8');
+  assert.match(route, /metadata: \{ contacts: normalizedRecipients, formats: normalizedFormats, userAccess: normalizedUserAccess \}/);
+  assert.match(route, /router\.get\('\/programacion\/acceso'/);
+  assert.match(route, /router\.post\('\/programacion\/acceso', requireDev/);
+  assert.match(route, /String\(req\.path \|\| ''\)\.startsWith\('\/programacion'\)/);
+  assert.match(route, /Programación del día no está habilitada para este usuario/);
+  assert.match(route, /filterProgrammingWhatsappRecipientsForRole\(settings\.recipients, userRole\(req\)\)/);
+  assert.match(browser, /programmingCard\.hidden = true/);
+  assert.match(browser, /fetch\('\/admin\/operaciones\/programacion\/acceso', \{ cache: 'no-store' \}\)/);
+  assert.match(browser, /body: JSON\.stringify\(\{ username: user\.username, enabled: requested \}\)/);
+  assert.match(browser, /data-recipient-dev-only/);
+  assert.match(browser, /devOnly: Boolean\(row\.querySelector\('\[data-recipient-dev-only\]'\)\?\.checked\)/);
+  assert.match(browser, /Solo DEV/);
 });
 
 test('el endpoint conserva incompletas y permite PDF o Excel', async () => {
@@ -106,14 +151,14 @@ test('el endpoint conserva incompletas y permite PDF o Excel', async () => {
 test('PDF y Excel se persisten como configuración y sobreviven a una recarga', async () => {
   const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
   const browser = await readFile(new URL('../src/public/dispatch-programming-contacts.js', import.meta.url), 'utf8');
-  assert.match(route, /metadata: \{ contacts: normalizedRecipients, formats: normalizedFormats \}/);
+  assert.match(route, /metadata: \{ contacts: normalizedRecipients, formats: normalizedFormats, userAccess: normalizedUserAccess \}/);
   assert.match(route, /router\.get\('\/programacion\/formatos'/);
   assert.match(route, /router\.post\('\/programacion\/formatos'/);
   assert.match(route, /saveProgrammingWhatsappFormats\(prisma/);
   assert.match(browser, /fetch\('\/admin\/operaciones\/programacion\/formatos', \{ cache: 'no-store' \}\)/);
   assert.match(browser, /JSON\.stringify\(\{ formats: selected \}\)/);
   assert.match(browser, /let applyingFormats = false/);
-  assert.match(browser, /if \(applyingFormats\) return/);
+  assert.match(browser, /if \(applyingFormats \|\| programmingCard\.hidden\) return/);
 });
 
 test('Programación pide Hoy o Mañana antes de preguntar el formato', async () => {
