@@ -275,9 +275,10 @@ test('deshabilitar la operación actúa como kill switch sin borrar el encargado
 });
 
 test('la UI configura modalidad en la operación pero el encargado se marca desde Asignaciones', async () => {
-  const [operationUi, assignmentUi, assignmentView, crewArrival, arrival, breakMark] = await Promise.all([
+  const [operationUi, assignmentLoader, assignmentUi, assignmentView, crewArrival, arrival, breakMark] = await Promise.all([
     readFile(new URL('../src/public/attendance-admin-crew.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/public/service-request-delete-confirm.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/public/dispatch-assignment-crew-leader.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/modules/dispatch-attendance/application/registerCrewArrival.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/modules/dispatch-attendance/application/registerArrival.js', import.meta.url), 'utf8'),
@@ -297,6 +298,7 @@ test('la UI configura modalidad en la operación pero el encargado se marca desd
   assert.match(assignmentView, /service-request-delete-confirm\.js/);
   assert.match(assignmentView, /activeCodes=\['ASSIGNED','CONFIRMATION_PENDING','CONFIRMED'\]/);
   assert.match(assignmentView, /Asignados activos: <%= activeCount %> \/ <%= request\.requiredWorkers %>/);
+  assert.match(assignmentLoader, /dispatch-assignment-crew-leader\.js/);
   assert.match(assignmentUi, /Encargado de cuadrilla/);
   assert.match(assignmentUi, /Encargado \/ Líder de cuadrilla/);
   assert.match(assignmentUi, /Esta persona hace parte del total requerido/);
