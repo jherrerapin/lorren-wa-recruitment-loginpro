@@ -8,6 +8,7 @@ const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
 const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
 const MODULE_MENU_GROUP = 'admin-primary-navigation';
+const RECRUITMENT_ICON = '<svg class="admin-module-nav-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>';
 
 function requestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0] || '/';
@@ -110,7 +111,7 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
   const active = activeModule(path);
   const access = moduleAccess(req, originalNav);
   const modules = [
-    moduleMenu({ key: 'recruitment', label: 'Reclutamiento', icon: '👥', active, items: recruitmentMenuItems(access) }),
+    moduleMenu({ key: 'recruitment', label: 'Reclutamiento', icon: RECRUITMENT_ICON, active, items: recruitmentMenuItems(access) }),
     moduleMenu({
       key: 'operations',
       label: 'Operaciones / Despacho',
