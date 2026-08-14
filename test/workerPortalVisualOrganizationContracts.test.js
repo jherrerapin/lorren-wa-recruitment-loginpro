@@ -5,6 +5,12 @@ import fs from 'node:fs';
 const source = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
 const view = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
 
+function loadShouldPinActiveJourney() {
+  const match = source.match(/function shouldPinActiveJourney\(status, activePreset\) \{([\s\S]*?)\n  \}/);
+  assert.ok(match, 'worker-biometric.js debe conservar la autoridad de jornada fijada');
+  return new Function('status', 'activePreset', match[1]);
+}
+
 test('el portal organiza las asignaciones sin modificar los botones de marcación', () => {
   assert.match(source, /querySelector\('\.assignment-list'\)/);
   assert.match(source, /const cards = Array\.from/);
@@ -31,13 +37,23 @@ test('la vista define una sola vez el rango, estado y periodos rápidos', () => 
   assert.match(view, /data-portal-preset="week"[^>]*>7 días</);
   assert.match(view, /data-portal-preset="all"[^>]*>Todas</);
   assert.match(source, /function applyFilters\(\)/);
+  assert.match(source, /setPreset\('today'\)/);
   assert.match(source, /setPreset\('all'\)/);
   assert.doesNotMatch(source, /\['today', 'Hoy'\]|\['upcoming', 'Próximas'\]|\['week', '7 días'\]|\['all', 'Todas'\]/);
 });
 
-test('una jornada en curso permanece visible en próximas', () => {
-  assert.match(source, /keepActiveJourney = activePreset === 'upcoming' && item\.status === 'IN_PROGRESS'/);
-  assert.match(source, /item\.status === 'IN_PROGRESS'/);
+test('una jornada en curso queda fijada en los filtros rápidos aunque cambie la fecha operativa', () => {
+  const shouldPinActiveJourney = loadShouldPinActiveJourney();
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', 'today'), true);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', 'upcoming'), true);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', 'week'), true);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', 'all'), true);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', ''), false);
+  assert.equal(shouldPinActiveJourney('PENDING', 'today'), false);
+  assert.equal(shouldPinActiveJourney('COMPLETED', 'today'), false);
+  assert.match(source, /const keepActiveJourney = shouldPinActiveJourney\(item\.status, activePreset\)/);
+  assert.match(source, /const visible = \(keepActiveJourney \|\| \(matchesFrom && matchesTo\)\) && matchesStatus/);
+  assert.doesNotMatch(source, /activePreset === 'upcoming' && item\.status === 'IN_PROGRESS'/);
 });
 
 test('la presentación usa nodos seguros y no interpola HTML', () => {
