@@ -87,7 +87,7 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(nativePresence, /Prueba local: todavía no registra asistencia/);
   assert.match(nativePresence, /Comprobar teléfonos cercanos/);
   assert.match(nativePresence, /Quedar listo para asistencia/);
-  assert.match(nativePresence, /crew\/proximidad\/contexto/);
+  assert.match(nativePresence, /cuadrillas\/proximidad\/contexto/);
   assert.match(nativePresence, /attendanceWriter !== false/);
   assert.doesNotMatch(nativePresence, /\/llegada|\/salida|inicio-almuerzo|fin-almuerzo|registerDispatchArrival|registerCrewArrivalForLeader/);
   assert.doesNotMatch(nativePresence, /alert\s*\(|confirm\s*\(|prompt\s*\(/);
