@@ -24,6 +24,215 @@ if ('serviceWorker' in navigator) {
     .catch(() => {});
 }
 
+(() => {
+  const PORTAL_PATH_PATTERN = /^\/operaciones\/portal\/?$/;
+  const CONTEXT_PATH = '/operaciones/portal/cuadrillas/proximidad/contexto';
+  if (!PORTAL_PATH_PATTERN.test(window.location.pathname)) return;
+
+  let contextReady = false;
+  let contextLoadPromise = null;
+  let protocol = null;
+  let contextsByAssignment = new Map();
+  const bypassOnce = new WeakSet();
+
+  function statusElement() {
+    let status = document.querySelector('[data-crew-bluetooth-status]');
+    if (status) return status;
+    const connectivity = document.getElementById('portal-connectivity');
+    if (!connectivity?.parentElement) return null;
+    status = document.createElement('div');
+    status.dataset.crewBluetoothStatus = 'true';
+    status.className = 'status crew-bluetooth-status';
+    status.hidden = true;
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'assertive');
+    connectivity.insertAdjacentElement('afterend', status);
+    return status;
+  }
+
+  function setCrewBluetoothStatus(message, tone = 'warning') {
+    const status = statusElement();
+    if (!status) return;
+    status.hidden = !message;
+    status.className = `status crew-bluetooth-status ${tone}`.trim();
+    status.textContent = message || '';
+  }
+
+  function crewContextError(message) {
+    const error = new Error(message);
+    error.crewBluetoothCode = message;
+    return error;
+  }
+
+  function normalizedProtocol(payload) {
+    const serviceUuid = String(payload?.protocol?.serviceUuid || '').trim().toLowerCase();
+    const operationCharacteristicUuid = String(payload?.protocol?.operationCharacteristicUuid || '').trim().toLowerCase();
+    if (!serviceUuid || !operationCharacteristicUuid) throw crewContextError('crew_bluetooth_protocol_unavailable');
+    return { serviceUuid, operationCharacteristicUuid };
+  }
+
+  async function loadCrewProximityContexts() {
+    if (!navigator.onLine) {
+      contextReady = false;
+      return false;
+    }
+    if (contextLoadPromise) return contextLoadPromise;
+    contextReady = false;
+    contextLoadPromise = fetch(CONTEXT_PATH, {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'worker-portal'
+      },
+      body: '{}'
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) throw crewContextError('crew_bluetooth_context_unavailable');
+        protocol = normalizedProtocol(payload);
+        const nextContexts = new Map();
+        (Array.isArray(payload.assignments) ? payload.assignments : []).forEach((item) => {
+          const assignmentId = String(item?.assignmentId || '').trim();
+          if (!assignmentId) return;
+          nextContexts.set(assignmentId, {
+            assignmentId,
+            operationPointId: String(item?.operationPointId || '').trim(),
+            mode: item?.mode === 'CREW' ? 'CREW' : 'INDIVIDUAL',
+            isCrewLeader: item?.isCrewLeader === true,
+            crewAvailable: item?.crewAvailable === true,
+            proximityRequired: item?.proximityRequired === true
+          });
+        });
+        contextsByAssignment = nextContexts;
+        contextReady = true;
+        return true;
+      })
+      .catch(() => {
+        protocol = null;
+        contextsByAssignment = new Map();
+        contextReady = false;
+        return false;
+      })
+      .finally(() => {
+        contextLoadPromise = null;
+      });
+    return contextLoadPromise;
+  }
+
+  function markButtonFromEvent(event) {
+    return event.target instanceof Element
+      ? event.target.closest('.mark-button[data-assignment-id][data-mark-type]')
+      : null;
+  }
+
+  async function verifyCrewBluetooth(context) {
+    if (!window.isSecureContext || typeof navigator.bluetooth?.requestDevice !== 'function') {
+      throw crewContextError('crew_bluetooth_unsupported');
+    }
+    if (!protocol?.serviceUuid || !protocol?.operationCharacteristicUuid || !context.operationPointId) {
+      throw crewContextError('crew_bluetooth_context_unavailable');
+    }
+
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [protocol.serviceUuid] }]
+    });
+    if (!device?.gatt) throw crewContextError('crew_bluetooth_connection_failed');
+
+    try {
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(protocol.serviceUuid);
+      const characteristic = await service.getCharacteristic(protocol.operationCharacteristicUuid);
+      const value = await characteristic.readValue();
+      const observedOperationPointId = new TextDecoder('utf-8').decode(value).trim();
+      if (observedOperationPointId !== context.operationPointId) {
+        throw crewContextError('crew_bluetooth_wrong_operation');
+      }
+      return true;
+    } finally {
+      try {
+        if (device.gatt.connected) device.gatt.disconnect();
+      } catch (_error) {
+        // La desconexión no cambia el resultado de una lectura ya validada.
+      }
+    }
+  }
+
+  function publicBluetoothError(error) {
+    if (error?.crewBluetoothCode === 'crew_bluetooth_unsupported') {
+      return 'Este teléfono o navegador no permite usar Bluetooth desde el portal. Para una cuadrilla, usa un navegador compatible con Web Bluetooth.';
+    }
+    if (error?.name === 'NotFoundError') {
+      return 'No se seleccionó el dispositivo Bluetooth de la operación.';
+    }
+    if (error?.crewBluetoothCode === 'crew_bluetooth_wrong_operation') {
+      return 'El dispositivo Bluetooth seleccionado no corresponde a esta operación.';
+    }
+    if (error?.crewBluetoothCode === 'crew_bluetooth_context_unavailable') {
+      return 'No fue posible preparar la validación Bluetooth de esta asignación. Actualiza el portal e intenta nuevamente.';
+    }
+    return 'No fue posible leer el dispositivo Bluetooth de la operación. Acércate e intenta nuevamente.';
+  }
+
+  document.addEventListener('click', (event) => {
+    const button = markButtonFromEvent(event);
+    if (!button || button.disabled || !navigator.onLine) return;
+    if (bypassOnce.has(button)) {
+      bypassOnce.delete(button);
+      return;
+    }
+
+    const assignmentId = String(button.dataset.assignmentId || '').trim();
+    if (!contextReady) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setCrewBluetoothStatus('Preparando la configuración de cuadrilla. Intenta nuevamente en un momento.', 'warning');
+      loadCrewProximityContexts();
+      return;
+    }
+
+    const context = contextsByAssignment.get(assignmentId);
+    if (!context) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setCrewBluetoothStatus('No fue posible validar la modalidad de esta asignación. Actualiza el portal e intenta nuevamente.', 'danger');
+      loadCrewProximityContexts();
+      return;
+    }
+    if (!context.proximityRequired) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    setCrewBluetoothStatus('Selecciona el dispositivo Bluetooth de esta operación para continuar.', 'warning');
+
+    // requestDevice se invoca desde el click original para conservar la activación del usuario.
+    const verification = verifyCrewBluetooth(context);
+    button.disabled = true;
+    verification
+      .then(() => {
+        setCrewBluetoothStatus('Dispositivo Bluetooth de la operación verificado. Continuando con ubicación y rostro.', 'ok');
+        bypassOnce.add(button);
+        button.disabled = false;
+        button.click();
+      })
+      .catch((error) => {
+        button.disabled = false;
+        setCrewBluetoothStatus(publicBluetoothError(error), 'danger');
+      });
+  }, { capture: true });
+
+  window.addEventListener('online', () => loadCrewProximityContexts());
+  window.addEventListener('offline', () => {
+    contextReady = false;
+    protocol = null;
+    contextsByAssignment = new Map();
+  });
+  window.addEventListener('pageshow', () => loadCrewProximityContexts());
+  loadCrewProximityContexts();
+})();
+
 document.write(`<script src="/public/worker-biometric-core.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 document.write(`<script src="/public/worker-biometric-mobile.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
 document.write(`<script src="/public/worker-portal-biometric-flow.js?v=${BIOMETRIC_ASSET_RELEASE}"><\/script>`);
