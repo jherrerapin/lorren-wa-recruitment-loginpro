@@ -26,6 +26,7 @@
     style.id = 'crewLeaderAssignmentStyles';
     style.textContent = `
       .crew-assignment-summary{margin-top:7px;padding:7px 9px;border:1px solid #99f6e4;border-radius:9px;background:#f0fdfa;color:#115e59;font-size:10.5px;font-weight:800;line-height:1.35}
+      .crew-assignment-summary.is-disabled{border-color:#f2d085;background:#fff8e7;color:#6b4700}
       .crew-leader-control{display:flex;align-items:flex-start;gap:6px;margin-top:5px;padding:6px 7px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;font-size:10px;font-weight:800;line-height:1.25;cursor:pointer}
       .crew-leader-control input{width:15px;height:15px;margin:0;accent-color:#0d7a6b;flex:0 0 auto}
       .crew-leader-control.is-current{border-color:#14b8a6;background:#f0fdfa;color:#115e59}
@@ -93,7 +94,7 @@
           crewLeaderWorkerId: selected ? workerId : ''
         })
       });
-      showCrewMessage(selected ? 'Encargado de cuadrilla actualizado.' : 'El turno quedó sin encargado. Marca otra persona antes de la llegada.');
+      showCrewMessage(selected ? 'Encargado de cuadrilla actualizado.' : 'La solicitud quedó sin encargado. Marca otra persona antes de la llegada.');
       lastBoardSignature = '';
       await loadCrewLeaderControls();
     } catch (error) {
@@ -107,18 +108,22 @@
 
   function renderCrewLeaderControls(service) {
     clearCrewDecorations();
-    if (!service || service.mode !== MODE_CREW) return;
+    if (!service || service.mode !== MODE_CREW || service.crewEligible !== true) return;
 
     const summary = document.getElementById('selectedRequestSummary');
     const meta = summary?.querySelector('.meta');
     if (meta) {
       const line = document.createElement('div');
       line.dataset.crewAssignmentSummary = 'true';
-      line.className = 'crew-assignment-summary';
+      line.className = `crew-assignment-summary${service.crewAvailable ? '' : ' is-disabled'}`;
       const leaderName = currentLeaderName(service);
-      line.textContent = leaderName
-        ? `Marcación por cuadrilla · Encargado: ${leaderName}. Esta persona hace parte del total requerido.`
-        : 'Marcación por cuadrilla · Encargado pendiente. Marca una de las personas asignadas; seguirá contando dentro del total requerido.';
+      if (!service.crewAvailable) {
+        line.textContent = 'Esta solicitud heredó marcación por cuadrilla al crearse, pero la operación está deshabilitada actualmente. Reactívala para cambiar encargado o marcar la cuadrilla.';
+      } else {
+        line.textContent = leaderName
+          ? `Marcación por cuadrilla · Encargado: ${leaderName}. Esta persona hace parte del total requerido.`
+          : 'Marcación por cuadrilla heredada desde la operación · Encargado pendiente. Marca una de las personas asignadas; seguirá contando dentro del total requerido.';
+      }
       meta.insertAdjacentElement('afterend', line);
     }
 
