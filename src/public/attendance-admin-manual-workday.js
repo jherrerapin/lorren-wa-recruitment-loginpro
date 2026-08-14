@@ -5,17 +5,6 @@
     return [...(root.querySelectorAll?.('form[data-manual-workday-form="true"]') || [])];
   }
 
-  function releaseBackendValidatedManualDateMax(root = document) {
-    const selector = [
-      'form[data-manual-attendance-form] input[name="breakStartAt"]',
-      'form[data-manual-attendance-form] input[name="breakEndAt"]',
-      'form[data-manual-attendance-form] input[name="departureReportedAt"]'
-    ].join(',');
-    [...(root.querySelectorAll?.(selector) || [])].forEach((input) => {
-      input.removeAttribute('max');
-    });
-  }
-
   function installManualWorkdayControls(form) {
     if (!form || form.dataset.manualWorkdayControls === 'true') return;
 
@@ -71,7 +60,6 @@
   }
 
   function initialize() {
-    releaseBackendValidatedManualDateMax();
     manualForms().forEach(installManualWorkdayControls);
   }
 
