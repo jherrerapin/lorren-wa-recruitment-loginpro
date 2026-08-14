@@ -331,7 +331,7 @@ export function dispatchPayrollRouter(prisma) {
       sheet.getRow(1).font = { bold: true };
       headers.forEach((header, index) => {
         if (header.startsWith('HE') || header.startsWith('RN') || header.startsWith('RD') || header === 'RNO' || header.includes('Horas') || header === 'TotalTrabajado') {
-          sheet.getColumn(index + 1).numFmt = '0.0000';
+          sheet.getColumn(index + 1).numFmt = '0.0';
         }
       });
       const buffer = await workbook.xlsx.writeBuffer();
