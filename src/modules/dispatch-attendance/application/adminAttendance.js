@@ -226,6 +226,7 @@ function attendanceWindow(assignment) {
     return {
       expectedStartAt: null,
       expectedEndAt: null,
+      recordingOpensAt: null,
       operationalEndAt: null,
       continuityClosesAt: null,
       operationalEndDateKey: null,
@@ -258,17 +259,20 @@ export function validateAttendanceTimelineAgainstAssignment(serviceRequest, inpu
   const breakStartAt = optionalTimelineDate(input.breakStartAt, 'attendance_manual_break_start_at');
   const breakEndAt = optionalTimelineDate(input.breakEndAt, 'attendance_manual_break_end_at');
   const departureAt = optionalTimelineDate(input.departureAt, 'attendance_manual_departure_reported_at');
+  const effectiveOperational = arrivalAt && arrivalAt.getTime() < operational.recordingOpensAt.getTime()
+    ? { ...operational, recordingOpensAt: arrivalAt }
+    : operational;
 
   if (arrivalAt && dispatchServiceDateKey(arrivalAt) !== serviceDateKey) {
     throw new Error('attendance_manual_arrival_date_mismatch');
   }
-  if (breakStartAt && !isDispatchBreakStartWithinOperationalWindow(operational, breakStartAt)) {
+  if (breakStartAt && !isDispatchBreakStartWithinOperationalWindow(effectiveOperational, breakStartAt)) {
     throw new Error('attendance_manual_break_operational_window_invalid');
   }
-  if (breakEndAt && !isDispatchBreakEndWithinOperationalWindow(operational, breakEndAt)) {
+  if (breakEndAt && !isDispatchBreakEndWithinOperationalWindow(effectiveOperational, breakEndAt)) {
     throw new Error('attendance_manual_break_operational_window_invalid');
   }
-  if (departureAt && !isDispatchDepartureWithinOperationalWindow(operational, departureAt)) {
+  if (departureAt && !isDispatchDepartureWithinOperationalWindow(effectiveOperational, departureAt)) {
     throw new Error('attendance_manual_departure_operational_window_invalid');
   }
   if (arrivalAt && departureAt && departureAt.getTime() < arrivalAt.getTime()) {
@@ -292,10 +296,10 @@ export function validateAttendanceTimelineAgainstAssignment(serviceRequest, inpu
 
   return {
     expected,
-    operational,
+    operational: effectiveOperational,
     serviceDateKey,
-    latestDateKey: operational.operationalEndDateKey,
-    overnight: operational.overnight
+    latestDateKey: effectiveOperational.operationalEndDateKey,
+    overnight: effectiveOperational.overnight
   };
 }
 
@@ -358,7 +362,7 @@ function buildBoardRow(assignment, now) {
   const markLongitude = numericCoordinate(mark?.longitude, -180, 180);
   const serviceDateIso = dispatchServiceDateKey(request?.serviceDate);
   const latestManualDateIso = expected.operationalEndDateKey || serviceDateIso;
-  const manualBreakStartMin = bogotaDateTimeLocalValue(expected.expectedStartAt);
+  const manualBreakStartMin = bogotaDateTimeLocalValue(expected.recordingOpensAt || expected.expectedStartAt);
   const manualBreakStartMax = bogotaDateTimeLocalValue(inclusiveMinuteBefore(expected.operationalEndAt));
   const manualBreakEndMin = manualBreakStartMin;
   const manualBreakEndMax = bogotaDateTimeLocalValue(inclusiveMinuteBefore(expected.continuityClosesAt));
