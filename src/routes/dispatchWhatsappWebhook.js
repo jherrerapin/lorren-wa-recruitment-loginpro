@@ -7,10 +7,11 @@ import {
   processDispatchWhatsappWebhook,
   resolveDispatchWhatsappScopeByPhoneNumberId
 } from '../services/dispatchWhatsappCloudService.js';
-import { todayIsoDateCO } from '../services/dispatchDate.js';
+import { addDispatchIsoDays, todayIsoDateCO } from '../services/dispatchDate.js';
 import { confirmedOperationalAssignments, deriveDispatchRequestOperationalState } from '../services/dispatchOperationalCoverage.js';
 import { buildProgrammingCompletionSummary, loadProgrammingRequests } from '../services/dispatchProgrammingPdfService.js';
 import {
+  sendDispatchWhatsappProgrammingDateMenu,
   sendDispatchWhatsappProgrammingFormatMenu,
   sendDispatchWhatsappReportMenu,
   sendDispatchWhatsappTextMessage
@@ -20,6 +21,17 @@ import { loadProgrammingWhatsappRecipients, sendProgrammingContactDocuments } fr
 import { logWhatsappWebhookDiagnostics } from '../services/whatsappWebhookDiagnostics.js';
 
 const PENDING_PROGRAMMING_STATUSES = new Set(['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION']);
+const PROGRAMMING_REPORT_ACTIONS = new Map([
+  ['dispatch_report:programming_today_pdf', { dateChoice: 'today', formats: ['pdf'] }],
+  ['dispatch_report:programming_today_excel', { dateChoice: 'today', formats: ['excel'] }],
+  ['dispatch_report:programming_today_both', { dateChoice: 'today', formats: ['pdf', 'excel'] }],
+  ['dispatch_report:programming_tomorrow_pdf', { dateChoice: 'tomorrow', formats: ['pdf'] }],
+  ['dispatch_report:programming_tomorrow_excel', { dateChoice: 'tomorrow', formats: ['excel'] }],
+  ['dispatch_report:programming_tomorrow_both', { dateChoice: 'tomorrow', formats: ['pdf', 'excel'] }],
+  ['dispatch_report:programming_pdf', { dateChoice: 'today', formats: ['pdf'] }],
+  ['dispatch_report:programming_excel', { dateChoice: 'today', formats: ['excel'] }],
+  ['dispatch_report:programming_both', { dateChoice: 'today', formats: ['pdf', 'excel'] }]
+]);
 
 function parsePayload(rawBody) {
   if (!Buffer.isBuffer(rawBody) || !rawBody.length) return null;
@@ -54,12 +66,18 @@ function inboundPayload(message = {}) {
 
 function programmingContactAction(message = {}) {
   const payload = inboundPayload(message).trim();
-  if (payload === 'dispatch_report:programming_today') return 'PROGRAMMING_FORMAT';
-  if (payload === 'dispatch_report:programming_pdf') return 'PROGRAMMING_PDF';
-  if (payload === 'dispatch_report:programming_excel') return 'PROGRAMMING_EXCEL';
-  if (payload === 'dispatch_report:programming_both') return 'PROGRAMMING_BOTH';
-  if (payload === 'dispatch_report:summary_today') return 'SUMMARY_TODAY';
+  if (payload === 'dispatch_report:programming_today') return { type: 'PROGRAMMING_DATE' };
+  if (payload === 'dispatch_report:programming_date_today') return { type: 'PROGRAMMING_FORMAT', dateChoice: 'today' };
+  if (payload === 'dispatch_report:programming_date_tomorrow') return { type: 'PROGRAMMING_FORMAT', dateChoice: 'tomorrow' };
+  if (payload === 'dispatch_report:summary_today') return { type: 'SUMMARY_TODAY' };
+  const reportAction = PROGRAMMING_REPORT_ACTIONS.get(payload);
+  if (reportAction) return { type: 'PROGRAMMING_DOCUMENTS', ...reportAction };
   return null;
+}
+
+function programmingDateForChoice(dateChoice) {
+  const today = todayIsoDateCO();
+  return dateChoice === 'tomorrow' ? addDispatchIsoDays(today, 1) : today;
 }
 
 function formatDateLabel(dateKey) {
@@ -95,18 +113,30 @@ async function sendProgrammingMenu(prisma, contact) {
   const result = await sendDispatchWhatsappReportMenu({ scope: 'operational', phone: contact.phone, name: contact.name });
   await auditProgrammingReply(prisma, {
     phone: contact.phone,
-    body: `Hola ${contact.name}. ¿Cómo te puedo ayudar hoy? [Programación del día] [Resumen del día]`,
+    body: `Hola ${contact.name}. ¿Cómo te puedo ayudar hoy? [Programación] [Resumen del día]`,
     messageType: 'INTERACTIVE',
     providerMessageId: result.providerMessageId,
     source: 'PROGRAMMING_CONTACT_MENU'
   });
 }
 
-async function sendProgrammingFormatMenu(prisma, contact) {
-  const result = await sendDispatchWhatsappProgrammingFormatMenu({ scope: 'operational', phone: contact.phone });
+async function sendProgrammingDateMenu(prisma, contact) {
+  const result = await sendDispatchWhatsappProgrammingDateMenu({ scope: 'operational', phone: contact.phone });
   await auditProgrammingReply(prisma, {
     phone: contact.phone,
-    body: '¿En qué formato deseas recibir la programación del día? [PDF] [Excel] [Ambos]',
+    body: '¿Qué día deseas consultar? [Hoy] [Mañana]',
+    messageType: 'INTERACTIVE',
+    providerMessageId: result.providerMessageId,
+    source: 'PROGRAMMING_CONTACT_DATE_MENU'
+  });
+}
+
+async function sendProgrammingFormatMenu(prisma, contact, dateChoice) {
+  const result = await sendDispatchWhatsappProgrammingFormatMenu({ scope: 'operational', phone: contact.phone, dateChoice });
+  const dayLabel = dateChoice === 'tomorrow' ? 'mañana' : 'hoy';
+  await auditProgrammingReply(prisma, {
+    phone: contact.phone,
+    body: `¿En qué formato deseas recibir la programación de ${dayLabel}? [PDF] [Excel] [Ambos]`,
     messageType: 'INTERACTIVE',
     providerMessageId: result.providerMessageId,
     source: 'PROGRAMMING_CONTACT_FORMAT_MENU'
@@ -125,12 +155,13 @@ async function processProgrammingContacts(prisma, payload, { allowGenericMenu = 
       const contact = byPhone.get(normalizeDispatchWhatsappPhone(message.from));
       if (!contact) continue;
       const action = programmingContactAction(message);
-      if (action === 'PROGRAMMING_FORMAT') await sendProgrammingFormatMenu(prisma, contact);
-      else if (action === 'PROGRAMMING_PDF') await sendProgrammingContactDocuments(prisma, contact, ['pdf']);
-      else if (action === 'PROGRAMMING_EXCEL') await sendProgrammingContactDocuments(prisma, contact, ['excel']);
-      else if (action === 'PROGRAMMING_BOTH') await sendProgrammingContactDocuments(prisma, contact, ['pdf', 'excel']);
-      else if (action === 'SUMMARY_TODAY') await sendProgrammingSummary(prisma, contact);
-      else if (allowGenericMenu && message?.type === 'text') await sendProgrammingMenu(prisma, contact);
+      if (action?.type === 'PROGRAMMING_DATE') await sendProgrammingDateMenu(prisma, contact);
+      else if (action?.type === 'PROGRAMMING_FORMAT') await sendProgrammingFormatMenu(prisma, contact, action.dateChoice);
+      else if (action?.type === 'PROGRAMMING_DOCUMENTS') {
+        const selectedDate = programmingDateForChoice(action.dateChoice);
+        await sendProgrammingContactDocuments(prisma, contact, action.formats, selectedDate);
+      } else if (action?.type === 'SUMMARY_TODAY') await sendProgrammingSummary(prisma, contact);
+      else if (!action && allowGenericMenu && message?.type === 'text') await sendProgrammingMenu(prisma, contact);
     }
   }
 }

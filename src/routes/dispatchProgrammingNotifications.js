@@ -85,6 +85,14 @@ export function normalizeProgrammingWhatsappRecipients(value, options = {}) {
   return [...recipientsByPhone.values()];
 }
 
+export function selectProgrammingWhatsappRecipients(configuredRecipients = [], requestedPhones) {
+  const recipients = normalizeProgrammingWhatsappRecipients(configuredRecipients);
+  if (requestedPhones === undefined || requestedPhones === null) return recipients;
+  const requested = Array.isArray(requestedPhones) ? requestedPhones : [requestedPhones];
+  const selectedPhones = new Set(requested.map((phone) => normalizeDispatchWhatsappPhone(phone)).filter(Boolean));
+  return recipients.filter((recipient) => selectedPhones.has(recipient.phone));
+}
+
 export function normalizeProgrammingFormats(value, fallback = ['pdf']) {
   const rawFormats = Array.isArray(value) ? value : String(value || '').split(/[\s,;]+/);
   const formats = [...new Set(rawFormats.map((item) => String(item || '').trim().toLowerCase()).filter((item) => PROGRAMMING_FORMATS.has(item)))];
@@ -168,6 +176,9 @@ function requireOps(req, res, next) {
 function requireDev(req, res, next) {
   if (userRole(req) !== 'dev') return res.status(403).json({ ok: false, message: 'Configuración disponible únicamente para DEV.' });
   return next();
+}
+function isGeneralRecruiter(req) {
+  return normalizeString(req.session?.username || req.username) === 'reclutador-general';
 }
 function programmingActor(req) {
   return { userId: req.session?.userId || req.userId || null, username: req.session?.username || req.username || null, role: userRole(req) };
@@ -280,16 +291,16 @@ export function buildProgrammingExcelFilename(selectedDate, suffix = 'completa')
   return `programacion-operativa-${suffix}-${selectedDate}.xlsx`.replace(/[^a-zA-Z0-9_.-]/g, '-');
 }
 
-export async function sendProgrammingContactDocuments(prisma, contact, formatSelection) {
-  const selectedDate = todayIsoDateCO();
+export async function sendProgrammingContactDocuments(prisma, contact, formatSelection, selectedDate = todayIsoDateCO()) {
+  const reportDate = normalizeProgrammingDate(selectedDate || todayIsoDateCO());
   const formats = normalizeProgrammingFormats(formatSelection, ['pdf']);
   const documents = [];
   if (formats.includes('pdf')) {
-    const report = await buildProgrammingPdfBuffer(prisma, { fecha: selectedDate, managedBy: 'LoginPro Operaciones', includePending: true });
+    const report = await buildProgrammingPdfBuffer(prisma, { fecha: reportDate, managedBy: 'LoginPro Operaciones', includePending: true });
     documents.push({ format: 'PDF', selectedDate: report.selectedDate, buffer: report.buffer, filename: buildProgrammingFilename(report.selectedDate, 'con-pendientes'), mimeType: 'application/pdf' });
   }
   if (formats.includes('excel')) {
-    const report = await buildProgrammingExcelBuffer(prisma, { selectedDate, managedBy: 'LoginPro Operaciones', includePending: true });
+    const report = await buildProgrammingExcelBuffer(prisma, { selectedDate: reportDate, managedBy: 'LoginPro Operaciones', includePending: true });
     documents.push({ format: 'Excel', selectedDate: report.selectedDate, buffer: report.buffer, filename: buildProgrammingExcelFilename(report.selectedDate, 'con-pendientes'), mimeType: XLSX_MIME_TYPE });
   }
   const sent = [];
@@ -345,6 +356,10 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     const saved = await saveProgrammingWhatsappFormats(prisma, { formats, actor: programmingActor(req) });
     return res.json({ ok: true, formats: saved });
   });
+  router.get('/programacion/destinatarios-envio', async (req, res) => {
+    const recipients = await loadProgrammingWhatsappRecipients(prisma);
+    return res.json({ ok: true, recipients, showRecipientPhones: isGeneralRecruiter(req) });
+  });
   router.get('/programacion/destinatarios', requireDev, async (_req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
     return res.json({ ok: true, recipients: settings.recipients, formats: settings.formats });
@@ -359,8 +374,9 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
   });
   router.post('/programacion/whatsapp', async (req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
-    const recipients = settings.recipients;
-    if (!recipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación.' });
+    if (!settings.recipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación.' });
+    const recipients = selectProgrammingWhatsappRecipients(settings.recipients, req.body?.recipientPhones);
+    if (!recipients.length) return res.status(400).json({ ok: false, message: 'Selecciona al menos un destinatario configurado.' });
     const selectedDate = programmingDateFromInput(req.body?.fecha || req.body?.date);
     const managedBy = normalizeString(req.body?.managedBy) || 'Julián Herrera';
     const includePending = normalizeProgrammingIncludePending(req.body?.includePending, false);
