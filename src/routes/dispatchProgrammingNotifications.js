@@ -37,6 +37,19 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeProgrammingEmail(value) {
+  const email = normalizeString(value)?.toLowerCase() || null;
+  return email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+}
+
+export function normalizeProgrammingDevContact(value = {}) {
+  if (!value || typeof value !== 'object') return { email: null, phone: null };
+  return {
+    email: normalizeProgrammingEmail(value.email || value.correo),
+    phone: normalizeDispatchWhatsappPhone(value.phone || value.telefono || value.number || value.numero)
+  };
+}
+
 function programmingDateFromInput(value) {
   const raw = normalizeString(value);
   const range = raw?.match(RANGE_TOKEN_PATTERN);
@@ -48,17 +61,27 @@ function normalizeProgrammingContact(entry, { allowAnonymous = false } = {}) {
   let name = null;
   let phone = null;
   let devOnly = false;
+  let email = null;
+  let isDevContact = false;
+  let checkedByDefault = true;
   if (typeof entry === 'object') {
     name = normalizeString(entry.name || entry.nombre);
     phone = normalizeDispatchWhatsappPhone(entry.phone || entry.telefono || entry.number || entry.numero);
     devOnly = entry.devOnly === true || entry.devOnly === 'true';
+    email = normalizeProgrammingEmail(entry.email || entry.correo);
+    isDevContact = entry.isDevContact === true;
+    checkedByDefault = entry.checkedByDefault !== false;
   } else {
     const [rawName, rawPhone] = String(entry).split('|');
     name = normalizeString(rawPhone ? rawName : null);
     phone = normalizeDispatchWhatsappPhone(rawPhone || rawName);
   }
   if (!phone || (!name && !allowAnonymous)) return null;
-  return { name: name || 'Destinatario', phone, devOnly };
+  const recipient = { name: name || 'Destinatario', phone, devOnly };
+  if (email) recipient.email = email;
+  if (isDevContact) recipient.isDevContact = true;
+  if (!checkedByDefault) recipient.checkedByDefault = false;
+  return recipient;
 }
 
 function isCompleteProgrammingContact(entry) {
@@ -95,11 +118,20 @@ export function selectProgrammingWhatsappRecipients(configuredRecipients = [], r
   return recipients.filter((recipient) => selectedPhones.has(recipient.phone));
 }
 
-export function filterProgrammingWhatsappRecipientsForRole(configuredRecipients = [], role) {
-  const recipients = normalizeProgrammingWhatsappRecipients(configuredRecipients);
-  return String(role || '').trim().toLowerCase() === 'dev'
-    ? recipients
-    : recipients.filter((recipient) => recipient.devOnly !== true);
+export function filterProgrammingWhatsappRecipientsForRole(configuredRecipients = [], role, devContact = {}) {
+  const normalizedDevContact = normalizeProgrammingDevContact(devContact);
+  const recipients = normalizeProgrammingWhatsappRecipients(configuredRecipients)
+    .filter((recipient) => recipient.devOnly !== true)
+    .filter((recipient) => !normalizedDevContact.phone || recipient.phone !== normalizedDevContact.phone);
+  if (String(role || '').trim().toLowerCase() !== 'dev' || !normalizedDevContact.phone) return recipients;
+  return [...recipients, {
+    name: 'DEV',
+    phone: normalizedDevContact.phone,
+    email: normalizedDevContact.email,
+    devOnly: true,
+    isDevContact: true,
+    checkedByDefault: false
+  }];
 }
 
 export function normalizeProgrammingFormats(value, fallback = ['pdf']) {
@@ -125,13 +157,15 @@ export async function loadProgrammingWhatsappSettings(prisma) {
     return {
       recipients: normalizeProgrammingWhatsappRecipients(stored?.metadata?.contacts || []),
       formats: normalizeProgrammingFormats(stored?.metadata?.formats, ['pdf']),
-      userAccess: normalizeProgrammingUserAccess(stored?.metadata?.userAccess)
+      userAccess: normalizeProgrammingUserAccess(stored?.metadata?.userAccess),
+      devContact: normalizeProgrammingDevContact(stored?.metadata?.devContact || {})
     };
   }
   return {
     recipients: normalizeProgrammingWhatsappRecipients(process.env.DISPATCH_PROGRAMMING_WHATSAPP_RECIPIENTS, { allowAnonymous: true }),
     formats: ['pdf'],
-    userAccess: []
+    userAccess: [],
+    devContact: { email: null, phone: null }
   };
 }
 
@@ -139,11 +173,12 @@ export async function loadProgrammingWhatsappRecipients(prisma) {
   return (await loadProgrammingWhatsappSettings(prisma)).recipients;
 }
 
-async function persistProgrammingWhatsappSettings(prisma, { recipients, formats, userAccess, actor = {}, actorSource }) {
+async function persistProgrammingWhatsappSettings(prisma, { recipients, formats, userAccess, devContact, actor = {}, actorSource }) {
   if (!prisma?.devAuditEvent?.create) throw new Error('No está disponible la persistencia de programación.');
   const normalizedRecipients = normalizeProgrammingWhatsappRecipients(recipients);
   const normalizedFormats = normalizeProgrammingFormats(formats, ['pdf']);
   const normalizedUserAccess = normalizeProgrammingUserAccess(userAccess);
+  const normalizedDevContact = normalizeProgrammingDevContact(devContact);
   await prisma.devAuditEvent.create({
     data: {
       entityType: PROGRAMMING_CONTACT_CONFIG_ENTITY,
@@ -154,23 +189,54 @@ async function persistProgrammingWhatsappSettings(prisma, { recipients, formats,
       actorUsername: normalizeString(actor.username),
       actorRole: normalizeString(actor.role) || null,
       actorSource,
-      metadata: { contacts: normalizedRecipients, formats: normalizedFormats, userAccess: normalizedUserAccess }
+      metadata: { contacts: normalizedRecipients, formats: normalizedFormats, userAccess: normalizedUserAccess, devContact: normalizedDevContact }
     }
   });
-  return { recipients: normalizedRecipients, formats: normalizedFormats, userAccess: normalizedUserAccess };
+  return { recipients: normalizedRecipients, formats: normalizedFormats, userAccess: normalizedUserAccess, devContact: normalizedDevContact };
 }
 
 export async function saveProgrammingWhatsappRecipients(prisma, { recipients = [], actor = {} } = {}) {
   const current = await loadProgrammingWhatsappSettings(prisma);
+  const submitted = normalizeProgrammingWhatsappRecipients(recipients).map((recipient) => ({
+    name: recipient.name,
+    phone: recipient.phone,
+    devOnly: false
+  }));
+  const submittedPhones = new Set(submitted.map((recipient) => recipient.phone));
+  const legacyPrivateRecipients = current.recipients.filter((recipient) => (
+    recipient.devOnly === true
+    && recipient.phone !== current.devContact.phone
+    && !submittedPhones.has(recipient.phone)
+  ));
   return (await persistProgrammingWhatsappSettings(prisma, {
-    recipients, formats: current.formats, userAccess: current.userAccess, actor, actorSource: 'dispatch-programming-contacts'
-  })).recipients;
+    recipients: [...submitted, ...legacyPrivateRecipients],
+    formats: current.formats,
+    userAccess: current.userAccess,
+    devContact: current.devContact,
+    actor,
+    actorSource: 'dispatch-programming-contacts'
+  })).recipients.filter((recipient) => recipient.devOnly !== true && recipient.phone !== current.devContact.phone);
+}
+
+export async function saveProgrammingDevContact(prisma, { devContact = {}, actor = {} } = {}) {
+  const current = await loadProgrammingWhatsappSettings(prisma);
+  const normalizedDevContact = normalizeProgrammingDevContact(devContact);
+  const privatePhones = new Set([current.devContact.phone, normalizedDevContact.phone].filter(Boolean));
+  const recipients = current.recipients.filter((recipient) => !privatePhones.has(recipient.phone));
+  return (await persistProgrammingWhatsappSettings(prisma, {
+    recipients,
+    formats: current.formats,
+    userAccess: current.userAccess,
+    devContact: normalizedDevContact,
+    actor,
+    actorSource: 'dispatch-programming-dev-contact'
+  })).devContact;
 }
 
 export async function saveProgrammingWhatsappFormats(prisma, { formats = [], actor = {} } = {}) {
   const current = await loadProgrammingWhatsappSettings(prisma);
   return (await persistProgrammingWhatsappSettings(prisma, {
-    recipients: current.recipients, formats, userAccess: current.userAccess, actor, actorSource: 'dispatch-programming-formats'
+    recipients: current.recipients, formats, userAccess: current.userAccess, devContact: current.devContact, actor, actorSource: 'dispatch-programming-formats'
   })).formats;
 }
 
@@ -185,6 +251,7 @@ export async function saveProgrammingUserAccess(prisma, { username, enabled, act
     recipients: current.recipients,
     formats: current.formats,
     userAccess: [...next],
+    devContact: current.devContact,
     actor,
     actorSource: 'dispatch-programming-user-access'
   })).userAccess;
@@ -452,12 +519,22 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
   });
   router.get('/programacion/destinatarios-envio', async (req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
-    const recipients = filterProgrammingWhatsappRecipientsForRole(settings.recipients, userRole(req));
+    const recipients = filterProgrammingWhatsappRecipientsForRole(settings.recipients, userRole(req), settings.devContact);
     return res.json({ ok: true, recipients, showRecipientPhones: userRole(req) === 'dev' || isGeneralRecruiter(req) });
   });
   router.get('/programacion/destinatarios', requireDev, async (_req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
-    return res.json({ ok: true, recipients: settings.recipients, formats: settings.formats });
+    const recipients = filterProgrammingWhatsappRecipientsForRole(settings.recipients, 'admin', settings.devContact);
+    return res.json({ ok: true, recipients, formats: settings.formats, devContact: settings.devContact });
+  });
+  router.post('/programacion/dev-contact', requireDev, async (req, res) => {
+    const rawEmail = normalizeString(req.body?.email);
+    const rawPhone = normalizeString(req.body?.phone);
+    const devContact = normalizeProgrammingDevContact({ email: rawEmail, phone: rawPhone });
+    if (rawEmail && !devContact.email) return res.status(400).json({ ok: false, message: 'Ingresa un correo DEV válido.' });
+    if (rawPhone && !devContact.phone) return res.status(400).json({ ok: false, message: 'Ingresa un teléfono DEV válido.' });
+    const saved = await saveProgrammingDevContact(prisma, { devContact, actor: programmingActor(req) });
+    return res.json({ ok: true, devContact: saved });
   });
   router.post('/programacion/destinatarios', requireDev, async (req, res) => {
     const submittedRecipients = Array.isArray(req.body?.recipients) ? req.body.recipients : [];
@@ -469,7 +546,7 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
   });
   router.post('/programacion/whatsapp', async (req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
-    const eligibleRecipients = filterProgrammingWhatsappRecipientsForRole(settings.recipients, userRole(req));
+    const eligibleRecipients = filterProgrammingWhatsappRecipientsForRole(settings.recipients, userRole(req), settings.devContact);
     if (!eligibleRecipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación.' });
     const recipients = selectProgrammingWhatsappRecipients(eligibleRecipients, req.body?.recipientPhones);
     if (!recipients.length) return res.status(400).json({ ok: false, message: 'Selecciona al menos un destinatario configurado.' });
