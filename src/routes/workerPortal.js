@@ -10,6 +10,11 @@ import {
   isAttendanceInsideGeofence
 } from '../modules/dispatch-attendance/domain/attendanceDistance.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../modules/dispatch-attendance/application/registerArrival.js';
+import {
+  CREW_BLUETOOTH_OPERATION_CHARACTERISTIC_UUID,
+  CREW_BLUETOOTH_SERVICE_UUID,
+  loadCrewAttendancePortalContexts
+} from '../modules/dispatch-attendance/application/crewAttendanceConfig.js';
 import { MAX_ATTENDANCE_EVIDENCE_BYTES } from '../services/attendanceEvidenceStorage.js';
 import {
   ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
@@ -172,6 +177,8 @@ export function workerPortalRouter(prisma, options = {}) {
   const issueChallengeFn = options.issueChallengeFn || issueWorkerBiometricChallenge;
   const assertAttemptAllowedFn = options.assertAttemptAllowedFn
     || ((input, attemptOptions) => assertWorkerBiometricAttemptAllowed(prisma, input, attemptOptions));
+  const loadCrewPortalContextsFn = options.loadCrewPortalContextsFn
+    || ((input) => loadCrewAttendancePortalContexts(prisma, input));
   const loadBiometricAssignmentFn = options.loadBiometricAssignmentFn || (async (workerId, assignmentId) => (
     prisma.dispatchAssignment.findFirst({
       where: {
@@ -376,6 +383,34 @@ export function workerPortalRouter(prisma, options = {}) {
   router.use(installBiometricCspBridge);
   router.use(coreRouter);
 
+  router.post('/cuadrillas/proximidad/contexto', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      const assignments = await loadCrewPortalContextsFn({ workerId: portalSession.workerId });
+      return res.status(200).json({
+        ok: true,
+        protocol: {
+          serviceUuid: CREW_BLUETOOTH_SERVICE_UUID,
+          operationCharacteristicUuid: CREW_BLUETOOTH_OPERATION_CHARACTERISTIC_UUID
+        },
+        assignments
+      });
+    } catch (error) {
+      console.error('[WORKER_PORTAL_CREW_PROXIMITY_CONTEXT_FAILED]', {
+        code: typeof error?.message === 'string' ? error.message : 'unknown'
+      });
+      return strictError(
+        res,
+        503,
+        'crew_proximity_temporarily_unavailable',
+        'No fue posible preparar la validación Bluetooth de la cuadrilla.'
+      );
+    }
+  });
+
   router.post('/biometria/estado', biometricJson, async (req, res) => {
     if (!requirePortalRequest(req, res)) return;
     try {
@@ -507,6 +542,9 @@ export function workerPortalRouter(prisma, options = {}) {
         realScore: req.body?.realScore,
         liveScore: req.body?.liveScore,
         modelVersion: normalizedString(req.body?.modelVersion, 100),
+        consentAccepted: req.body?.consentAccepted === true,
+        actorUsername: `worker-portal:${portalSession.workerId}`,
+        actorRole: 'worker',
         ipAddress: normalizedString(req.ip, 120),
         userAgent: normalizedString(req.get?.('user-agent'), 500)
       }, { now, env: options.env || process.env });
