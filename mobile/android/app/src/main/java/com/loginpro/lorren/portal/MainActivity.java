@@ -172,18 +172,24 @@ public final class MainActivity extends Activity {
     }
 
     private boolean isPortalUrl(Uri uri) {
-        return uri != null
-            && "https".equalsIgnoreCase(uri.getScheme())
-            && portalBaseUri.getHost().equalsIgnoreCase(uri.getHost())
-            && effectivePort(portalBaseUri) == effectivePort(uri);
+        if (!isPortalOriginUri(uri)) return false;
+        String path = uri.getPath();
+        return path != null && (path.equals(PORTAL_PATH) || path.startsWith(PORTAL_PATH + "/"));
     }
 
     private boolean isPortalOrigin(String origin) {
         try {
-            return isPortalUrl(Uri.parse(origin));
+            return isPortalOriginUri(Uri.parse(origin));
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private boolean isPortalOriginUri(Uri uri) {
+        return uri != null
+            && "https".equalsIgnoreCase(uri.getScheme())
+            && portalBaseUri.getHost().equalsIgnoreCase(uri.getHost())
+            && effectivePort(portalBaseUri) == effectivePort(uri);
     }
 
     private static int effectivePort(Uri uri) {
