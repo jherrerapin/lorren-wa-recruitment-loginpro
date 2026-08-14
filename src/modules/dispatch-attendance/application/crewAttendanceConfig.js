@@ -1,4 +1,7 @@
-import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../../../services/dispatchOperationalCoverage.js';
+import {
+  ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
+  recalculateDispatchServiceRequestStatus
+} from '../../../services/dispatchOperationalCoverage.js';
 
 export const CREW_ATTENDANCE_OPERATION_ENTITY_TYPE = 'DISPATCH_CREW_ATTENDANCE_OPERATION';
 export const CREW_ATTENDANCE_SERVICE_ENTITY_TYPE = 'DISPATCH_CREW_ATTENDANCE_SERVICE';
@@ -109,7 +112,7 @@ function requireWriteContract(prisma) {
   if (typeof prisma.dispatchOperationPoint.findFirst !== 'function') {
     throw new Error('crew_attendance_operation_prisma_contract_invalid');
   }
-  if (typeof prisma.dispatchServiceRequest.findUnique !== 'function') {
+  if (typeof prisma.dispatchServiceRequest.findUnique !== 'function' || typeof prisma.dispatchServiceRequest.update !== 'function') {
     throw new Error('crew_attendance_service_prisma_contract_invalid');
   }
   if (typeof prisma.dispatchWorker.findFirst !== 'function') {
@@ -610,6 +613,8 @@ export async function saveCrewAttendanceServiceConfiguration(prisma, input = {})
         assignmentChanged = true;
       }
     }
+
+    if (assignmentChanged) await recalculateDispatchServiceRequestStatus(tx, service.id);
 
     const metadata = {
       mode,
