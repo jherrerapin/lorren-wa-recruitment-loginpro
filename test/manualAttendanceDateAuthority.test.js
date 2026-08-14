@@ -198,7 +198,7 @@ test('un horario programado que termina el mismo día no habilita X+1 si la sesi
   );
 });
 
-test('una sesión diurna conserva el límite en la fecha X y rechaza X+1', () => {
+test('una sesión diurna conserva el límite backend en la fecha X y rechaza X+1', () => {
   const assignment = activeAssignment({ overnight: false });
 
   assert.throws(
@@ -214,15 +214,19 @@ test('una sesión diurna conserva el límite en la fecha X y rechaza X+1', () =>
   );
 });
 
-test('la UI solo presenta el acceso al día siguiente cuando el board clasifica la jornada como nocturna', () => {
+test('el navegador no conserva un max propio para almuerzo o salida manual', () => {
   const view = readFileSync(
     new URL('../src/views/operacionesAsistencia.ejs', import.meta.url),
     'utf8'
   );
+  const runtime = readFileSync(
+    new URL('../src/public/attendance-admin-manual-workday.js', import.meta.url),
+    'utf8'
+  );
 
-  assert.match(view, /hasOvernightManualDate = Boolean\(row\.serviceDateIso && row\.latestManualDateIso && row\.latestManualDateIso !== row\.serviceDateIso\)/);
-  assert.match(view, /<% if \(hasOvernightManualDate\) \{ %><div class="manual-day-picker">/);
-  assert.match(view, /Día siguiente · <%= row\.latestManualDateIso %>/);
   assert.match(view, /name="arrivalReportedAt" min="<%= serviceDateTimeMin %>" max="<%= serviceDateTimeMax %>"/);
-  assert.match(view, /name="breakStartAt" min="<%= serviceDateTimeMin %>" max="<%= latestManualDateTimeMax %>"/);
+  assert.match(runtime, /form\[data-manual-attendance-form\] input\[name="breakStartAt"\]/);
+  assert.match(runtime, /form\[data-manual-attendance-form\] input\[name="breakEndAt"\]/);
+  assert.match(runtime, /form\[data-manual-attendance-form\] input\[name="departureReportedAt"\]/);
+  assert.match(runtime, /input\.removeAttribute\('max'\)/);
 });
