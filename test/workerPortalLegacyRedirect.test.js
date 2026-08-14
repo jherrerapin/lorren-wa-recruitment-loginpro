@@ -115,13 +115,17 @@ test('la marca pública coincide con la constante de runtime', () => {
   assert.equal(marker.publicPortalPath, WORKER_PORTAL_PUBLIC_PATH);
 });
 
-test('los cambios funcionales de #610 permanecen presentes', () => {
-  const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
+test('la activación administrativa conserva su ruta y el header concentra su acceso visual', () => {
   const activationRouter = fs.readFileSync('src/routes/dispatchWorkerPortalActivationAdmin.js', 'utf8');
   const activationView = fs.readFileSync('src/views/operacionesPortalActivaciones.ejs', 'utf8');
+  const bridge = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
+  const navigation = fs.readFileSync('src/services/adminNavigation.js', 'utf8');
 
-  assert.match(personalView, /Activar Portal del Auxiliar/);
-  assert.match(personalView, /\/admin\/operaciones\/portal-activaciones/);
+  assert.match(navigation, /\/admin\/operaciones\/portal-activaciones/);
+  assert.match(navigation, /Activar portal del auxiliar/);
+  assert.doesNotMatch(bridge, /filterOperationsPersonalAttendanceHtml/);
+  assert.doesNotMatch(bridge, /WORKER_PORTAL_ACTIVATION_ADMIN_PATH/);
+  assert.match(bridge, /router\.use\(\s*['"]\/portal-activaciones['"]/);
   assert.match(activationRouter, /const ACTIVE_DISPATCH_WORKER_STATUS = 'CONTRATADO'/);
   assert.match(activationRouter, /operationalStatus:\s*ACTIVE_DISPATCH_WORKER_STATUS/);
   assert.match(activationRouter, /contractType/);

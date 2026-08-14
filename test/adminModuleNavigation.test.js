@@ -44,15 +44,42 @@ test('cada desplegable conserva sus opciones y permisos existentes', () => {
   assert.doesNotMatch(recruitment, /data-module-menu="operations"|data-module-menu="payroll"/);
 
   const operations = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones', { canAccessDispatch: true, canAccessAttendance: true })));
-  for (const href of ['/admin/operaciones/clientes', '/admin/operaciones/solicitudes', '/admin/operaciones/asignaciones', '/admin/operaciones/personal', '/admin/operaciones/asistencia', '/admin/operaciones/whatsapp']) {
+  for (const href of ['/admin/operaciones/clientes', '/admin/operaciones/solicitudes', '/admin/operaciones/asignaciones', '/admin/operaciones/personal', '/admin/operaciones/portal-activaciones', '/admin/operaciones/asistencia', '/admin/operaciones/whatsapp']) {
     assert.ok(operations.includes(`href="${href}"`), `Falta ${href} en Operaciones`);
   }
+
+  const operationsWithoutAttendance = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones', { canAccessDispatch: true, canAccessAttendance: false })));
+  assert.doesNotMatch(operationsWithoutAttendance, /href="\/admin\/operaciones\/portal-activaciones"/);
+  assert.doesNotMatch(operationsWithoutAttendance, /href="\/admin\/operaciones\/asistencia"/);
   assert.doesNotMatch(operations, /data-module-menu="payroll"/);
 
   const payroll = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/nomina', { canAccessDispatch: true, canAccessPayroll: true, canAccessTestWorkspace: true })));
   assert.match(payroll, /data-module-menu="payroll"/);
   assert.match(payroll, /href="\/admin\/operaciones\/asistencia\/nomina">Nómina y tiempo trabajado<\/a>/);
   assert.match(payroll, /href="\/admin\/operaciones\/pruebas">Entorno de pruebas<\/a>/);
+});
+
+test('el header elimina botones duplicados de opciones visibles y conserva acciones propias', () => {
+  const source = `<!DOCTYPE html><html><head><title>Personal</title></head><body>
+    <nav class="navbar"><a href="/admin">Panel</a><a href="/admin/operaciones">Operaciones</a></nav>
+    <main>
+      <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
+      <a class="btn btn-secondary" href="/admin/operaciones/personal">Personal operativo</a>
+      <a class="btn btn-success" href="/admin/operaciones/portal-activaciones">Activar Portal del Auxiliar</a>
+      <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">Crear auxiliar manual</a>
+      <a class="btn btn-secondary" href="/admin/operaciones/personal/importar-excel">Importar Excel</a>
+      <a class="text-link" href="/admin/operaciones">Enlace contextual sin apariencia de botón</a>
+    </main>
+  </body></html>`;
+  const html = injectAdminModuleNavigation(source, req('/admin/operaciones/personal', { canAccessDispatch: true, canAccessAttendance: true }));
+
+  assert.doesNotMatch(html, /class="btn btn-secondary" href="\/admin\/operaciones">Volver a Operaciones/);
+  assert.doesNotMatch(html, /class="btn btn-secondary" href="\/admin\/operaciones\/personal">Personal operativo/);
+  assert.doesNotMatch(html, /class="btn btn-success" href="\/admin\/operaciones\/portal-activaciones">Activar Portal del Auxiliar/);
+  assert.match(html, /class="btn btn-primary" href="\/admin\/operaciones\/personal\/nuevo">Crear auxiliar manual/);
+  assert.match(html, /class="btn btn-secondary" href="\/admin\/operaciones\/personal\/importar-excel">Importar Excel/);
+  assert.match(html, /class="text-link" href="\/admin\/operaciones">Enlace contextual sin apariencia de botón/);
+  assert.match(moduleMenu(nav(html), 'operations'), /href="\/admin\/operaciones\/portal-activaciones">Activar portal del auxiliar<\/a>/);
 });
 
 test('Usuarios se marca activo sin marcar Reclutamiento como modulo activo', () => {
