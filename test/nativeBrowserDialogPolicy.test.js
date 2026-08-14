@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(new URL('..', import.meta.url).pathname);
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLIENT_ROOTS = ['src/public', 'src/views'];
 
 // Deuda heredada inventariada en #1023. Esta lista es un ratchet: puede reducirse,
@@ -30,6 +31,7 @@ const LEGACY_NATIVE_DIALOG_FILES = new Set([
 const NATIVE_WINDOW_REFERENCE = /\b(?:window|globalThis)\s*\.\s*(?:alert|confirm|prompt)\b/;
 const NATIVE_WINDOW_BRACKET_REFERENCE = /\b(?:window|globalThis)\s*\[\s*['"](?:alert|confirm|prompt)['"]\s*\]/;
 const NATIVE_BARE_CALL = /(?<![\w$.])(?:alert|confirm|prompt)\s*\(/;
+const DIALOG_METHOD_DEFINITION = /^\s*(?:async\s+)?(?:function\s+)?(?:alert|confirm|prompt)\s*\([^)]*\)\s*\{/gm;
 
 function sourceFiles(relativeRoot) {
   const absoluteRoot = path.join(ROOT, relativeRoot);
@@ -44,9 +46,9 @@ function sourceFiles(relativeRoot) {
 }
 
 function containsNativeBrowserDialog(source) {
-  return NATIVE_WINDOW_REFERENCE.test(source)
-    || NATIVE_WINDOW_BRACKET_REFERENCE.test(source)
-    || NATIVE_BARE_CALL.test(source);
+  if (NATIVE_WINDOW_REFERENCE.test(source) || NATIVE_WINDOW_BRACKET_REFERENCE.test(source)) return true;
+  const withoutMethodDefinitions = source.replace(DIALOG_METHOD_DEFINITION, '');
+  return NATIVE_BARE_CALL.test(withoutMethodDefinitions);
 }
 
 test('archivos cliente nuevos no pueden introducir alert, confirm o prompt nativos', () => {
