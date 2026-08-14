@@ -29,11 +29,6 @@ const ASSIGNMENT_REQUESTS_LOOKBACK_DAYS = 60;
 
 const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'];
 
-// TEMPORAL: lista amplia de estados desactivados para rescatar a Juan Jose Garcia.
-// Incluye ELIMINADO y quita restriccion de source.
-// Revertir a ['DISABLED', 'INACTIVE'] con source filter despues de reactivarlo.
-const DISABLED_STATUSES = ['DISABLED', 'INACTIVE', 'ELIMINADO'];
-
 const MAX_EXCEL_SIZE_BYTES = 5 * 1024 * 1024;
 const DISPATCH_WORKER_IMPORT_REVIEW_TTL_MS = 2 * 60 * 60 * 1000;
 const ALLOWED_EXCEL_MIME_TYPES = new Set([
@@ -103,21 +98,7 @@ function buildUtcDayRangeFromDateValue(value) { const start = new Date(value); s
 function serviceRequestServiceData(service) { return { serviceId: service?.id || null, serviceName: service?.name || null }; }
 function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compatibleOperationalCityIds.length) return {}; return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } }; }
 function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((row) => normalizeString(row[fieldName])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')); }
-
-/**
- * buildDispatchEligibilityFilter
- *
- * TEMPORAL: vista desactivados sin filtro de source — busca cualquier auxiliar
- * con operationalStatus IN DISABLED_STATUSES sin importar source.
- * Revertir despues de rescatar a Juan Jose Garcia.
- */
-function buildDispatchEligibilityFilter(status) {
-  if (status === 'DISABLED' || status === 'INACTIVE') {
-    // TEMPORAL: sin restriccion de source para capturar cualquier valor legacy
-    return { operationalStatus: { in: DISABLED_STATUSES } };
-  }
-  return { operationalStatus: 'CONTRATADO' };
-}
+function buildDispatchEligibilityFilter() { return { operationalStatus: 'CONTRATADO' }; }
 
 function buildWorkerData(body = {}) {
   return {
@@ -432,8 +413,7 @@ export function dispatchOpsExtrasRouter(prisma) {
   router.get('/personal', requireOps, async (req, res) => {
     const operationalCityId = normalizeString(req.query.operationalCityId);
     const vacancyId = normalizeString(req.query.vacancyId);
-    const status = normalizeString(req.query.status);
-    const eligibilityFilter = buildDispatchEligibilityFilter(status);
+    const eligibilityFilter = buildDispatchEligibilityFilter();
     const [workers, cities, vacancies] = await Promise.all([
       prisma.dispatchWorker.findMany({
         where: {
@@ -454,7 +434,7 @@ export function dispatchOpsExtrasRouter(prisma) {
       workers,
       cities,
       vacancies,
-      filters: { operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', status: status || '' },
+      filters: { operationalCityId: operationalCityId || '', vacancyId: vacancyId || '' },
       message: normalizeString(req.query.message),
       role: req.session?.userRole || req.userRole,
       canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
@@ -621,7 +601,7 @@ export function dispatchOpsExtrasRouter(prisma) {
       const warningNote = affectedCount > 0
         ? ` Se cancelaron sus asignaciones activas en ${affectedCount} solicitud${affectedCount !== 1 ? 'es' : ''}. Revisa y asigna reemplazos.`
         : '';
-      return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent(`Auxiliar desactivado.${warningNote} Puedes reactivarlo desde aqui.`)}`);
+      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Auxiliar desactivado.${warningNote} Ya no aparece en el listado activo.`)}`);
     }
 
     return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar reactivado. Ya aparece disponible para asignaciones.')}`);
@@ -637,7 +617,7 @@ export function dispatchOpsExtrasRouter(prisma) {
       where: { workerId: worker.id, status: { in: ACTIVE_ASSIGNMENT_STATUSES } }
     });
     if (activeAssignmentCount > 0) {
-      const backUrl = normalizeString(req.headers.referer) || '/admin/operaciones/personal?status=DISABLED';
+      const backUrl = normalizeString(req.headers.referer) || '/admin/operaciones/personal';
       const sep = backUrl.includes('?') ? '&' : '?';
       return res.redirect(`${backUrl}${sep}message=${encodeURIComponent(`No se puede eliminar: ${worker.fullName} tiene ${activeAssignmentCount} asignacion${activeAssignmentCount !== 1 ? 'es' : ''} activa${activeAssignmentCount !== 1 ? 's' : ''}. Retirarla primero.`)}`);
     }

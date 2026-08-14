@@ -43,7 +43,7 @@ test('historial consulta todas las asignaciones aunque el auxiliar esté desacti
   assert.doesNotMatch(historyRoute, /status:\s*\{\s*in:\s*ACTIVE_ASSIGNMENT_STATUSES/);
 });
 
-test('la interfaz avisa el estado desactivado y mantiene acceso a los registros históricos', () => {
+test('personal activo conserva acceso al historial sin volver a listar desactivados', () => {
   const historyView = source('src/views/operacionesPersonalHistorial.ejs');
   const personnelView = source('src/views/operacionesPersonal.ejs');
   const assignmentView = source('src/views/operacionesAsignacionesConfirmacion.ejs');
@@ -54,9 +54,9 @@ test('la interfaz avisa el estado desactivado y mantiene acceso a los registros 
   assert.match(historyView, /registros históricos de asignación se conservan/);
   assert.match(historyView, /incluso cuando el auxiliar ya está desactivado/);
 
-  assert.match(personnelView, /value="DISABLED"/);
   assert.match(personnelView, /\/personal\/<%= w\.id %>\/historial/);
-  assert.match(personnelView, /isActive \? 'Activo' : 'Desactivado'/);
+  assert.match(personnelView, />Desactivar<\/button>/);
+  assert.doesNotMatch(personnelView, /value="DISABLED"|\bReactivar\b|>Estado<\/th>/);
 
   assert.match(assignmentView, /selectedServiceRequest\.assignments\.forEach/);
   assert.match(assignmentView, /NO_CONFIRMO:'No confirmó'/);
