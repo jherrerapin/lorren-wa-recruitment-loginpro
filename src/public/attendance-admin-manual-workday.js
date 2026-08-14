@@ -1,8 +1,23 @@
 'use strict';
 
 (() => {
+  const BACKEND_DATE_AUTHORITY_FIELDS = Object.freeze([
+    'breakStartAt',
+    'breakEndAt',
+    'departureReportedAt'
+  ]);
+
   function manualForms(root = document) {
     return [...(root.querySelectorAll?.('form[data-manual-workday-form="true"]') || [])];
+  }
+
+  function removeDuplicatedManualDateLimits(root = document) {
+    const forms = root.querySelectorAll?.('form[data-manual-attendance-form]') || [];
+    forms.forEach((form) => {
+      BACKEND_DATE_AUTHORITY_FIELDS.forEach((name) => {
+        form.querySelector(`input[name="${name}"]`)?.removeAttribute('max');
+      });
+    });
   }
 
   function installManualWorkdayControls(form) {
@@ -60,6 +75,7 @@
   }
 
   function initialize() {
+    removeDuplicatedManualDateLimits();
     manualForms().forEach(installManualWorkdayControls);
   }
 
