@@ -7,6 +7,8 @@ export const CREW_ATTENDANCE_MODE = Object.freeze({
   INDIVIDUAL: 'INDIVIDUAL',
   CREW: 'CREW'
 });
+export const CREW_BLUETOOTH_SERVICE_UUID = '8b7f5f60-4d6b-4f6d-9f80-8d37e8f97101';
+export const CREW_BLUETOOTH_OPERATION_CHARACTERISTIC_UUID = '8b7f5f61-4d6b-4f6d-9f80-8d37e8f97101';
 
 const CREW_ATTENDANCE_MODES = new Set(Object.values(CREW_ATTENDANCE_MODE));
 const BOGOTA_TIME_ZONE = 'America/Bogota';
@@ -77,6 +79,16 @@ function requireReadContract(prisma) {
   }
   if (!prisma?.dispatchServiceRequest || typeof prisma.dispatchServiceRequest.findMany !== 'function') {
     throw new Error('crew_attendance_service_prisma_contract_invalid');
+  }
+  if (!prisma?.devAuditEvent || typeof prisma.devAuditEvent.findMany !== 'function') {
+    throw new Error('crew_attendance_audit_prisma_contract_invalid');
+  }
+  return prisma;
+}
+
+function requirePortalContextContract(prisma) {
+  if (!prisma?.dispatchAssignment || typeof prisma.dispatchAssignment.findMany !== 'function') {
+    throw new Error('crew_attendance_assignment_prisma_contract_invalid');
   }
   if (!prisma?.devAuditEvent || typeof prisma.devAuditEvent.findMany !== 'function') {
     throw new Error('crew_attendance_audit_prisma_contract_invalid');
@@ -295,6 +307,81 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
   });
 
   return { range: { from: range.from, to: range.to }, operations: operationRows, services: serviceRows };
+}
+
+export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
+  requirePortalContextContract(prisma);
+  const workerId = requireString(input.workerId, 'crew_attendance_worker_id');
+  const assignments = await prisma.dispatchAssignment.findMany({
+    where: {
+      workerId,
+      status: { in: ACTIVE_DISPATCH_ASSIGNMENT_STATUSES }
+    },
+    select: {
+      id: true,
+      workerId: true,
+      serviceRequest: {
+        select: {
+          id: true,
+          operationPointId: true,
+          operationPoint: {
+            select: { id: true, isActive: true, attendanceEnabled: true }
+          }
+        }
+      }
+    }
+  });
+
+  const serviceIds = [...new Set(assignments.map((assignment) => assignment.serviceRequest?.id).filter(Boolean))];
+  const operationIds = [...new Set(assignments.map((assignment) => assignment.serviceRequest?.operationPointId).filter(Boolean))];
+  const [serviceEvents, operationEvents] = await Promise.all([
+    serviceIds.length
+      ? prisma.devAuditEvent.findMany({
+          where: {
+            entityType: CREW_ATTENDANCE_SERVICE_ENTITY_TYPE,
+            entityId: { in: serviceIds },
+            action: CREW_ATTENDANCE_CONFIG_ACTION
+          },
+          orderBy: { createdAt: 'desc' }
+        })
+      : [],
+    operationIds.length
+      ? prisma.devAuditEvent.findMany({
+          where: {
+            entityType: CREW_ATTENDANCE_OPERATION_ENTITY_TYPE,
+            entityId: { in: operationIds },
+            action: CREW_ATTENDANCE_CONFIG_ACTION
+          },
+          orderBy: { createdAt: 'desc' }
+        })
+      : []
+  ]);
+
+  const serviceConfig = latestMetadataByEntity(serviceEvents);
+  const operationConfig = latestMetadataByEntity(operationEvents);
+  return assignments.map((assignment) => {
+    const service = assignment.serviceRequest || null;
+    const operationPointId = service?.operationPointId || null;
+    const configuration = serviceConfigFromMetadata(serviceConfig.get(service?.id));
+    const crewAllowed = operationAllowedFromMetadata(operationConfig.get(operationPointId));
+    const crewAvailable = Boolean(
+      operationPointId
+      && service?.operationPoint?.isActive !== false
+      && service?.operationPoint?.attendanceEnabled === true
+      && crewAllowed
+    );
+    const isCrewLeader = configuration.mode === CREW_ATTENDANCE_MODE.CREW
+      && configuration.crewLeaderWorkerId === workerId;
+    return {
+      assignmentId: assignment.id,
+      serviceRequestId: service?.id || null,
+      operationPointId,
+      mode: configuration.mode,
+      isCrewLeader,
+      crewAvailable,
+      proximityRequired: Boolean(isCrewLeader && crewAvailable)
+    };
+  });
 }
 
 export async function saveCrewAttendanceOperationCapability(prisma, input = {}) {
