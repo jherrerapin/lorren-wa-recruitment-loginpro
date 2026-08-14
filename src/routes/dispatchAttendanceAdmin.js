@@ -13,11 +13,13 @@ import {
   saveCrewAttendanceOperationCapability,
   saveCrewAttendanceServiceConfiguration
 } from '../modules/dispatch-attendance/application/crewAttendanceConfig.js';
+import { resolveIncompleteDispatchBreakPenaltyEndAt } from '../modules/dispatch-attendance/domain/attendanceWorkdayPolicy.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
 import { dispatchPayrollRouter } from './dispatchPayroll.js';
 
 const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'q']);
 const CORRECTION_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
+const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -162,11 +164,32 @@ function applyNoStore(res) {
 
 function validAttendanceEvidenceKey(value) {
   return typeof value === 'string'
-    && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120}\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
+    && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
 }
 
 function validDate(value) {
   return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+function administrativeBogotaDateTime(value, label) {
+  const normalized = normalizeString(value);
+  if (!normalized) throw new Error(`${label}_required`);
+  const match = normalized.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!match) throw new Error(`${label}_invalid`);
+  const candidate = new Date(`${match[1]}T${match[2]}:${match[3]}:${match[4] || '00'}-05:00`);
+  if (Number.isNaN(candidate.getTime())) throw new Error(`${label}_invalid`);
+  return candidate;
+}
+
+function bogotaDateTimeLocalValue(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error('attendance_manual_break_end_at_invalid');
+  return new Date(date.getTime() - BOGOTA_OFFSET_MS).toISOString().slice(0, 16);
+}
+
+export function resolveManualBreakPenaltyEndAt(value) {
+  const breakStartAt = administrativeBogotaDateTime(value, 'attendance_manual_break_start_at');
+  return bogotaDateTimeLocalValue(resolveIncompleteDispatchBreakPenaltyEndAt(breakStartAt));
 }
 
 function automaticLateReason(minutesLate) {
@@ -348,6 +371,10 @@ export function dispatchAttendanceAdminRouter(prisma) {
 
   router.post('/assignments/:assignmentId/manual', formParser, async (req, res) => {
     try {
+      const penalizeMissingBreak = req.body.penalizeMissingBreak === 'true';
+      const breakEndAt = penalizeMissingBreak
+        ? resolveManualBreakPenaltyEndAt(req.body.breakStartAt)
+        : req.body.breakEndAt;
       await registerManualAttendance(prisma, {
         assignmentId: req.params.assignmentId,
         attendanceStatus: req.body.attendanceStatus,
@@ -355,12 +382,20 @@ export function dispatchAttendanceAdminRouter(prisma) {
         arrivalReportedAt: req.body.arrivalReportedAt,
         departureReportedAt: req.body.departureReportedAt,
         breakStartAt: req.body.breakStartAt,
-        breakEndAt: req.body.breakEndAt,
-        reason: req.body.reason,
-        notes: req.body.notes,
+        breakEndAt,
+        reason: penalizeMissingBreak
+          ? 'Penalización administrativa de almuerzo por falta de marcación del auxiliar.'
+          : req.body.reason,
+        notes: penalizeMissingBreak
+          ? 'Coordinación generó automáticamente un intervalo de 90 minutos por falta de marcación de almuerzo.'
+          : req.body.notes,
         ...actorFromRequest(req)
       });
-      return redirectToBoard(res, req.body, { success: 'Las marcaciones manuales ingresadas quedaron guardadas con auditoría.' });
+      return redirectToBoard(res, req.body, {
+        success: penalizeMissingBreak
+          ? 'La penalización de almuerzo quedó registrada por 1 h 30 min con auditoría.'
+          : 'Las marcaciones manuales ingresadas quedaron guardadas con auditoría.'
+      });
     } catch (error) {
       console.warn('[ATTENDANCE_ADMIN_MANUAL_FAILED]', { code: error?.message, assignmentId: req.params.assignmentId });
       return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
