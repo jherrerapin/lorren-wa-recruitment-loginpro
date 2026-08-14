@@ -10,9 +10,13 @@ import {
 import { todayIsoDateCO } from '../services/dispatchDate.js';
 import { confirmedOperationalAssignments, deriveDispatchRequestOperationalState } from '../services/dispatchOperationalCoverage.js';
 import { buildProgrammingCompletionSummary, loadProgrammingRequests } from '../services/dispatchProgrammingPdfService.js';
-import { sendDispatchWhatsappReportMenu, sendDispatchWhatsappTextMessage } from '../services/dispatchWhatsappCloudClient.js';
+import {
+  sendDispatchWhatsappProgrammingFormatMenu,
+  sendDispatchWhatsappReportMenu,
+  sendDispatchWhatsappTextMessage
+} from '../services/dispatchWhatsappCloudClient.js';
 import { recordDispatchWhatsappMessageAudit } from '../services/dispatchWhatsappMonitor.js';
-import { loadProgrammingWhatsappSettings, sendProgrammingContactDocuments } from './dispatchProgrammingNotifications.js';
+import { loadProgrammingWhatsappRecipients, sendProgrammingContactDocuments } from './dispatchProgrammingNotifications.js';
 import { logWhatsappWebhookDiagnostics } from '../services/whatsappWebhookDiagnostics.js';
 
 const PENDING_PROGRAMMING_STATUSES = new Set(['PENDING_ASSIGNMENT', 'ASSIGNMENT_PARTIAL', 'PENDING_CONFIRMATION']);
@@ -50,7 +54,10 @@ function inboundPayload(message = {}) {
 
 function programmingContactAction(message = {}) {
   const payload = inboundPayload(message).trim();
-  if (payload === 'dispatch_report:programming_today') return 'PROGRAMMING_TODAY';
+  if (payload === 'dispatch_report:programming_today') return 'PROGRAMMING_FORMAT';
+  if (payload === 'dispatch_report:programming_pdf') return 'PROGRAMMING_PDF';
+  if (payload === 'dispatch_report:programming_excel') return 'PROGRAMMING_EXCEL';
+  if (payload === 'dispatch_report:programming_both') return 'PROGRAMMING_BOTH';
   if (payload === 'dispatch_report:summary_today') return 'SUMMARY_TODAY';
   return null;
 }
@@ -95,19 +102,33 @@ async function sendProgrammingMenu(prisma, contact) {
   });
 }
 
+async function sendProgrammingFormatMenu(prisma, contact) {
+  const result = await sendDispatchWhatsappProgrammingFormatMenu({ scope: 'operational', phone: contact.phone });
+  await auditProgrammingReply(prisma, {
+    phone: contact.phone,
+    body: '¿En qué formato deseas recibir la programación del día? [PDF] [Excel] [Ambos]',
+    messageType: 'INTERACTIVE',
+    providerMessageId: result.providerMessageId,
+    source: 'PROGRAMMING_CONTACT_FORMAT_MENU'
+  });
+}
+
 async function processProgrammingContacts(prisma, payload, { allowGenericMenu = false } = {}) {
   const messageValues = webhookMessageValues(payload);
   if (!messageValues.length) return;
-  const settings = await loadProgrammingWhatsappSettings(prisma);
-  if (!settings.recipients.length) return;
-  const byPhone = new Map(settings.recipients.map((recipient) => [recipient.phone, recipient]));
+  const recipients = await loadProgrammingWhatsappRecipients(prisma);
+  if (!recipients.length) return;
+  const byPhone = new Map(recipients.map((recipient) => [recipient.phone, recipient]));
   for (const value of messageValues) {
     if (resolveDispatchWhatsappScopeByPhoneNumberId(value?.metadata?.phone_number_id) !== 'operational') continue;
     for (const message of value.messages) {
       const contact = byPhone.get(normalizeDispatchWhatsappPhone(message.from));
       if (!contact) continue;
       const action = programmingContactAction(message);
-      if (action === 'PROGRAMMING_TODAY') await sendProgrammingContactDocuments(prisma, contact, settings.formats);
+      if (action === 'PROGRAMMING_FORMAT') await sendProgrammingFormatMenu(prisma, contact);
+      else if (action === 'PROGRAMMING_PDF') await sendProgrammingContactDocuments(prisma, contact, ['pdf']);
+      else if (action === 'PROGRAMMING_EXCEL') await sendProgrammingContactDocuments(prisma, contact, ['excel']);
+      else if (action === 'PROGRAMMING_BOTH') await sendProgrammingContactDocuments(prisma, contact, ['pdf', 'excel']);
       else if (action === 'SUMMARY_TODAY') await sendProgrammingSummary(prisma, contact);
       else if (allowGenericMenu && message?.type === 'text') await sendProgrammingMenu(prisma, contact);
     }
