@@ -248,21 +248,32 @@ test('deshabilitar la operación actúa como kill switch sin borrar el modo hist
   assert.equal(loaded.services[0].configurationReady, false);
 });
 
-test('contrato de transporte y UI mantiene Bluetooth y la marcación grupal fuera de esta fase', async () => {
-  const [route, loader, ui] = await Promise.all([
+test('el configurador de cuadrillas vive en Configurar asistencia de cada operación y no en el tablero global', async () => {
+  const [route, loader, ui, operationsView] = await Promise.all([
     readFile(new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/public/attendance-admin-runtime.js', import.meta.url), 'utf8'),
-    readFile(new URL('../src/public/attendance-admin-crew.js', import.meta.url), 'utf8')
+    readFile(new URL('../src/public/attendance-admin-crew.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/operacionesClienteOperaciones.ejs', import.meta.url), 'utf8')
   ]);
 
   assert.match(route, /\/cuadrillas\/config/);
   assert.match(route, /\/cuadrillas\/operaciones\/:operationPointId/);
   assert.match(route, /\/cuadrillas\/servicios\/:serviceRequestId/);
-  assert.match(loader, /attendance-admin-crew\.js/);
-  assert.match(ui, /Marcación por cuadrillas/);
+
+  assert.doesNotMatch(loader, /attendance-admin-crew\.js/);
+  assert.match(operationsView, /details class="crud-details attendance-config"/);
+  assert.match(operationsView, /<script src="\/public\/attendance-admin-crew\.js"><\/script>/);
+
+  assert.match(ui, /details\.attendance-config/);
+  assert.match(ui, /form\.attendance-map-form/);
+  assert.match(ui, /Marcación por cuadrilla/);
   assert.match(ui, /Permitir marcación por cuadrilla/);
+  assert.match(ui, /Servicios \/ turnos de esta operación/);
+  assert.match(ui, /service\.operationPointId === state\.operationId/);
   assert.match(ui, /Individual/);
   assert.match(ui, /Cuadrilla/);
-  assert.match(ui, /Bluetooth y la marcación grupal se habilitarán en una fase posterior/);
+  assert.match(ui, /Primero guarda y habilita Asistencia para esta operación/);
+  assert.doesNotMatch(ui, /main\.attendance-page|filter-card/);
+  assert.doesNotMatch(ui, /Bluetooth y la marcación grupal se habilitarán en una fase posterior/);
   assert.doesNotMatch(ui, /navigator\.bluetooth/);
 });
