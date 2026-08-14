@@ -6,6 +6,11 @@ import {
   ATTENDANCE_RISK_FLAG,
   ATTENDANCE_VALIDATION_STATUS
 } from '../domain/attendanceValidationPolicy.js';
+import {
+  isDispatchBreakEndWithinOperationalWindow,
+  isDispatchBreakStartWithinOperationalWindow,
+  resolveDispatchAttendanceOperationalWindow
+} from './registerArrival.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = new Set(['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED']);
 const BREAK_MARK_TYPES = new Set(['BREAK_START', 'BREAK_END']);
@@ -228,6 +233,19 @@ async function insideTransaction(client, input) {
   if (session.departureReportedAt) throw new Error('attendance_break_after_departure');
   if (input.reportedAt.getTime() < session.arrivalReportedAt.getTime()) {
     throw new Error('attendance_break_before_arrival');
+  }
+
+  const operationalWindow = resolveDispatchAttendanceOperationalWindow(
+    assignment.serviceRequest,
+    session
+  );
+  if (input.markType === 'BREAK_START'
+    && !isDispatchBreakStartWithinOperationalWindow(operationalWindow, input.reportedAt)) {
+    throw new Error('attendance_break_operational_window_invalid');
+  }
+  if (input.markType === 'BREAK_END'
+    && !isDispatchBreakEndWithinOperationalWindow(operationalWindow, input.reportedAt)) {
+    throw new Error('attendance_break_operational_window_invalid');
   }
 
   const breakMarks = await client.dispatchAttendanceMark.findMany({

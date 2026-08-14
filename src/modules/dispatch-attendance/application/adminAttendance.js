@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { addDispatchIsoDays, dispatchServiceDateKey } from '../../../services/dispatchDate.js';
+import { dispatchServiceDateKey } from '../../../services/dispatchDate.js';
 import { calculateDispatchWorkedTime } from '../domain/attendanceWorkdayPolicy.js';
-import { buildDispatchAttendanceExpectedWindow } from './registerArrival.js';
+import {
+  buildDispatchAttendanceExpectedWindow,
+  isDispatchBreakEndWithinOperationalWindow,
+  isDispatchBreakStartWithinOperationalWindow,
+  isDispatchDepartureWithinOperationalWindow,
+  resolveDispatchAttendanceOperationalWindow
+} from './registerArrival.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = Object.freeze([
   'ASSIGNED',
@@ -12,6 +18,7 @@ const VALID_MANUAL_STATUSES = new Set(['ON_TIME', 'LATE']);
 const VALID_REVIEW_ACTIONS = new Set(['VALIDATE', 'REJECT', 'REOPEN']);
 const DEFAULT_ABSENCE_GRACE_MINUTES = 15;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
+const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
 const RISK_MARK_LABELS = Object.freeze({
   ARRIVAL: 'Llegada',
   BREAK_START: 'Inicio de almuerzo',
@@ -147,6 +154,16 @@ function formatTime(value) {
   }).format(value);
 }
 
+function bogotaDateTimeLocalValue(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return '';
+  return new Date(value.getTime() - BOGOTA_OFFSET_MS).toISOString().slice(0, 16);
+}
+
+function inclusiveMinuteBefore(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return null;
+  return new Date(value.getTime() - 60_000);
+}
+
 function toRiskFlags(value) {
   return Array.isArray(value) ? value.filter((item) => typeof item === 'string') : [];
 }
@@ -202,79 +219,52 @@ function latestByDate(items, fieldName) {
   })[0] || null;
 }
 
-function resolveAttendanceExpectedWindow(serviceRequest, session = null) {
-  const persistedExpectedStartAt = optionalTimelineDate(
-    session?.expectedStartAt,
-    'attendance_session_expected_start_at'
-  );
-  if (persistedExpectedStartAt) {
-    return {
-      expectedStartAt: persistedExpectedStartAt,
-      expectedEndAt: optionalTimelineDate(
-        session?.expectedEndAt,
-        'attendance_session_expected_end_at'
-      )
-    };
-  }
-  return buildDispatchAttendanceExpectedWindow(serviceRequest);
-}
-
-function manualAttendanceLatestDateKey(serviceRequest, session = null) {
-  const serviceDateKey = dispatchServiceDateKey(serviceRequest?.serviceDate);
-  if (!serviceDateKey) return null;
-  const nextDateKey = addDispatchIsoDays(serviceDateKey, 1);
-  const persistedExpectedEndAt = optionalTimelineDate(
-    session?.expectedEndAt,
-    'attendance_session_expected_end_at'
-  );
-  if (persistedExpectedEndAt && dispatchServiceDateKey(persistedExpectedEndAt) === nextDateKey) {
-    return nextDateKey;
-  }
-  if (serviceRequest?.startTime) {
-    const scheduled = buildDispatchAttendanceExpectedWindow(serviceRequest);
-    if (scheduled.expectedEndAt && dispatchServiceDateKey(scheduled.expectedEndAt) === nextDateKey) {
-      return nextDateKey;
-    }
-  }
-  return serviceDateKey;
-}
-
 function attendanceWindow(assignment) {
   const request = assignment.serviceRequest;
   const session = assignment.attendanceSession || null;
   if (!session?.expectedStartAt && !request?.startTime) {
-    return { expectedStartAt: null, expectedEndAt: null, closesAt: null };
+    return {
+      expectedStartAt: null,
+      expectedEndAt: null,
+      recordingOpensAt: null,
+      operationalEndAt: null,
+      continuityClosesAt: null,
+      operationalEndDateKey: null,
+      overnight: false,
+      derivedOperationalEnd: false,
+      closesAt: null
+    };
   }
-  const expected = resolveAttendanceExpectedWindow(request, session);
+  const operational = resolveDispatchAttendanceOperationalWindow(request, session);
   const graceMinutes = Math.max(
     0,
     finiteNumber(request?.operationPoint?.absenceGraceMinutes, DEFAULT_ABSENCE_GRACE_MINUTES)
   );
   return {
-    ...expected,
-    closesAt: new Date(expected.expectedStartAt.getTime() + graceMinutes * 60_000)
+    ...operational,
+    closesAt: new Date(operational.expectedStartAt.getTime() + graceMinutes * 60_000)
   };
 }
 
 export function validateAttendanceTimelineAgainstAssignment(serviceRequest, input = {}, session = null) {
   const serviceDateKey = dispatchServiceDateKey(serviceRequest?.serviceDate);
   if (!serviceDateKey) throw new Error('attendance_manual_service_date_invalid');
-  const expected = resolveAttendanceExpectedWindow(serviceRequest, session);
-  const latestDateKey = manualAttendanceLatestDateKey(serviceRequest, session) || serviceDateKey;
-  const allowedDateKeys = new Set([serviceDateKey, latestDateKey]);
+  const operational = resolveDispatchAttendanceOperationalWindow(serviceRequest, session);
+  const expected = {
+    expectedStartAt: operational.expectedStartAt,
+    expectedEndAt: operational.expectedEndAt
+  };
 
   const arrivalAt = optionalTimelineDate(input.arrivalAt, 'attendance_manual_arrival_reported_at');
   const breakStartAt = optionalTimelineDate(input.breakStartAt, 'attendance_manual_break_start_at');
   const breakEndAt = optionalTimelineDate(input.breakEndAt, 'attendance_manual_break_end_at');
   const departureAt = optionalTimelineDate(input.departureAt, 'attendance_manual_departure_reported_at');
+  const effectiveOperational = arrivalAt && arrivalAt.getTime() < operational.recordingOpensAt.getTime()
+    ? { ...operational, recordingOpensAt: arrivalAt }
+    : operational;
 
   if (arrivalAt && dispatchServiceDateKey(arrivalAt) !== serviceDateKey) {
     throw new Error('attendance_manual_arrival_date_mismatch');
-  }
-  for (const markAt of [breakStartAt, breakEndAt, departureAt]) {
-    if (markAt && !allowedDateKeys.has(dispatchServiceDateKey(markAt))) {
-      throw new Error('attendance_manual_mark_date_outside_assignment');
-    }
   }
   if (arrivalAt && departureAt && departureAt.getTime() < arrivalAt.getTime()) {
     throw new Error('attendance_manual_departure_before_arrival');
@@ -294,12 +284,22 @@ export function validateAttendanceTimelineAgainstAssignment(serviceRequest, inpu
   )) {
     throw new Error('attendance_manual_break_after_departure');
   }
+  if (breakStartAt && !isDispatchBreakStartWithinOperationalWindow(effectiveOperational, breakStartAt)) {
+    throw new Error('attendance_manual_break_operational_window_invalid');
+  }
+  if (breakEndAt && !isDispatchBreakEndWithinOperationalWindow(effectiveOperational, breakEndAt)) {
+    throw new Error('attendance_manual_break_operational_window_invalid');
+  }
+  if (departureAt && !isDispatchDepartureWithinOperationalWindow(effectiveOperational, departureAt)) {
+    throw new Error('attendance_manual_departure_operational_window_invalid');
+  }
 
   return {
     expected,
+    operational: effectiveOperational,
     serviceDateKey,
-    latestDateKey,
-    overnight: latestDateKey !== serviceDateKey
+    latestDateKey: effectiveOperational.operationalEndDateKey,
+    overnight: effectiveOperational.overnight
   };
 }
 
@@ -361,7 +361,13 @@ function buildBoardRow(assignment, now) {
   const markLatitude = numericCoordinate(mark?.latitude, -90, 90);
   const markLongitude = numericCoordinate(mark?.longitude, -180, 180);
   const serviceDateIso = dispatchServiceDateKey(request?.serviceDate);
-  const latestManualDateIso = manualAttendanceLatestDateKey(request, session) || serviceDateIso;
+  const latestManualDateIso = expected.operationalEndDateKey || serviceDateIso;
+  const manualBreakStartMin = bogotaDateTimeLocalValue(expected.recordingOpensAt || expected.expectedStartAt);
+  const manualBreakStartMax = bogotaDateTimeLocalValue(inclusiveMinuteBefore(expected.operationalEndAt));
+  const manualBreakEndMin = manualBreakStartMin;
+  const manualBreakEndMax = bogotaDateTimeLocalValue(inclusiveMinuteBefore(expected.continuityClosesAt));
+  const manualDepartureMin = manualBreakStartMin;
+  const manualDepartureMax = manualBreakEndMax;
   const riskGroups = riskGroupsForSession(session);
   const riskFlags = riskGroups.flatMap((group) => (
     group.riskFlags.map((flag) => `${group.markType}::${flag}`)
@@ -382,6 +388,15 @@ function buildBoardRow(assignment, now) {
     serviceDateLabel: serviceDateIso ? formatDate(request.serviceDate) : 'Fecha sin definir',
     serviceDateIso,
     latestManualDateIso,
+    manualBreakStartMin,
+    manualBreakStartMax,
+    manualBreakEndMin,
+    manualBreakEndMax,
+    manualDepartureMin,
+    manualDepartureMax,
+    operationalEndAt: expected.operationalEndAt?.toISOString() || null,
+    continuityClosesAt: expected.continuityClosesAt?.toISOString() || null,
+    operationalWindowDerived: expected.derivedOperationalEnd === true,
     scheduleLabel: expected.expectedStartAt
       ? `${formatTime(expected.expectedStartAt)}${expected.expectedEndAt ? ` – ${formatTime(expected.expectedEndAt)}` : ''}`
       : 'Horario pendiente',

@@ -394,7 +394,7 @@ test('una jornada diurna no permite llevar la salida manual al día siguiente', 
       actorRole: 'admin',
       now: new Date('2026-08-10T06:30:00.000Z')
     }),
-    /attendance_manual_mark_date_outside_assignment/
+    /attendance_manual_departure_operational_window_invalid/
   );
   assert.equal(state.createdMarks.length, 0);
 });
@@ -437,7 +437,6 @@ test('la reposición individual de entrada tampoco acepta otra fecha', async () 
     actorRole: 'admin',
     now: new Date('2026-08-09T23:30:00.000Z')
   });
-
   await assert.rejects(
     reviewAttendanceWorkdaySession(prisma, {
       sessionId: session.id,
@@ -511,7 +510,7 @@ test('el panel muestra eliminar solo para marcas existentes y repone únicamente
   assert.match(view, /correctionFocused \? 'open' : ''/);
   assert.match(view, /scrollIntoView/);
   assert.match(view, /name="arrivalReportedAt" min="<%= serviceDateTimeMin %>" max="<%= serviceDateTimeMax %>"/);
-  assert.match(view, /name="departureReportedAt" min="<%= serviceDateTimeMin %>" max="<%= latestManualDateTimeMax %>"/);
+  assert.match(view, /name="departureReportedAt" min="<%= manualDepartureMin %>" max="<%= manualDepartureMax %>"/);
   assert.match(route, /router\.post\('\/sessions\/:sessionId\/review'/);
   assert.match(route, /markId:\s*req\.body\.markId/);
   assert.match(route, /markType:\s*req\.body\.markType/);
@@ -524,7 +523,8 @@ test('el panel muestra eliminar solo para marcas existentes y repone únicamente
   assert.match(route, /reviewAttendanceWorkdaySession/);
   assert.match(adminAttendance, /validateAttendanceTimelineAgainstAssignment/);
   assert.match(adminAttendance, /attendance_manual_arrival_date_mismatch/);
-  assert.match(adminAttendance, /attendance_manual_mark_date_outside_assignment/);
+  assert.match(adminAttendance, /attendance_manual_break_operational_window_invalid/);
+  assert.match(adminAttendance, /attendance_manual_departure_operational_window_invalid/);
   assert.match(adminAttendance, /latestManualDateIso/);
   assert.match(workday, /dispatchAttendanceMark\.deleteMany/);
   assert.match(workday, /dispatchAttendanceMark\.delete\(/);

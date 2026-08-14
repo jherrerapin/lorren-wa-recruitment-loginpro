@@ -126,7 +126,7 @@ test('coordinación puede materializar 90 minutos de penalización en un turno n
   assert.equal(reviews[0].metadata.workedMinutes, 390);
 });
 
-test('la interfaz hace explícito el día siguiente y el check de penalización sin ampliar la fecha de entrada', () => {
+test('la interfaz mantiene el check de penalización y usa los límites continuos sin ampliar la entrada', () => {
   const view = fs.readFileSync(
     new URL('../src/views/operacionesAsistencia.ejs', import.meta.url),
     'utf8'
@@ -144,8 +144,8 @@ test('la interfaz hace explícito el día siguiente y el check de penalización 
   assert.match(form, /Día siguiente · <%= row\.latestManualDateIso %>/);
   assert.match(form, /data-manual-date="<%= row\.latestManualDateIso %>"/);
   assert.match(form, /name="arrivalReportedAt" min="<%= serviceDateTimeMin %>" max="<%= serviceDateTimeMax %>"/);
-  assert.match(form, /name="breakStartAt" min="<%= serviceDateTimeMin %>" max="<%= latestManualDateTimeMax %>"/);
-  assert.match(form, /name="departureReportedAt" min="<%= serviceDateTimeMin %>" max="<%= latestManualDateTimeMax %>"/);
+  assert.match(form, /name="breakStartAt" min="<%= manualBreakStartMin %>" max="<%= manualBreakStartMax %>"/);
+  assert.match(form, /name="departureReportedAt" min="<%= manualDepartureMin %>" max="<%= manualDepartureMax %>"/);
   assert.match(view, /breakEnd\.disabled = active/);
   assert.match(view, /breakEndField\.hidden = active/);
   assert.match(view, /breakStart\.required = active/);

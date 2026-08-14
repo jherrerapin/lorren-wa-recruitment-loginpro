@@ -7,11 +7,15 @@ import {
   validateAttendanceTimelineAgainstAssignment
 } from '../src/modules/dispatch-attendance/application/adminAttendance.js';
 
-function activeAssignment({ overnight = true } = {}) {
-  const expectedStartAt = new Date('2026-08-14T03:00:00.000Z'); // 13-ago 22:00 Bogotá
-  const expectedEndAt = overnight
-    ? new Date('2026-08-14T11:00:00.000Z') // 14-ago 06:00 Bogotá
-    : new Date('2026-08-14T04:00:00.000Z'); // 13-ago 23:00 Bogotá
+function assignmentFixture({
+  startTime = '22:00',
+  endTime = null,
+  sessionExpectedEndAt = null
+} = {}) {
+  const serviceDate = new Date('2026-08-13T00:00:00.000Z');
+  const startHour = Number(startTime.split(':')[0]);
+  const startMinute = Number(startTime.split(':')[1]);
+  const expectedStartAt = new Date(Date.UTC(2026, 7, 13, startHour + 5, startMinute));
   const arrivalMark = {
     id: 'mark-arrival-test',
     markType: 'ARRIVAL',
@@ -25,7 +29,7 @@ function activeAssignment({ overnight = true } = {}) {
     id: 'session-test',
     assignmentId: 'assignment-test',
     expectedStartAt,
-    expectedEndAt,
+    expectedEndAt: sessionExpectedEndAt,
     attendanceStatus: 'ARRIVAL_REPORTED',
     validationStatus: 'REVIEW_REQUIRED',
     punctualityStatus: 'ON_TIME',
@@ -45,21 +49,16 @@ function activeAssignment({ overnight = true } = {}) {
     workerId: 'worker-test',
     serviceRequestId: 'request-test',
     status: 'CONFIRMED',
-    worker: {
-      id: 'worker-test',
-      fullName: 'Auxiliar Prueba'
-    },
+    worker: { id: 'worker-test', fullName: 'Auxiliar Prueba' },
     serviceRequest: {
       id: 'request-test',
       clientName: 'Cliente Prueba',
       operationPointName: 'Operación Prueba',
       cityName: 'Bogotá',
       address: 'Dirección de prueba',
-      serviceDate: new Date('2026-08-13T00:00:00.000Z'),
-      startTime: '22:00',
-      // El fin ya no está disponible para reconstruir la ventana desde la solicitud.
-      // La sesión activa conserva la ventana con la que realmente inició.
-      endTime: null,
+      serviceDate,
+      startTime,
+      endTime,
       operationPoint: {
         id: 'point-test',
         manualAttendanceAllowed: true,
@@ -111,8 +110,8 @@ function prismaContract(assignment) {
   return { prisma, createdMarks, reviews };
 }
 
-test('el panel habilita el día siguiente cuando la sesión activa conserva una ventana nocturna', async () => {
-  const assignment = activeAssignment({ overnight: true });
+test('22:00 sin hora fin deriva una ventana operativa hasta 06:00 del día siguiente sin inventar expectedEndAt', async () => {
+  const assignment = assignmentFixture();
   const { prisma } = prismaContract(assignment);
   const board = await loadAttendanceAdminBoard(prisma, {
     from: '2026-08-13',
@@ -121,53 +120,17 @@ test('el panel habilita el día siguiente cuando la sesión activa conserva una 
   });
 
   assert.equal(board.rows.length, 1);
-  assert.equal(board.rows[0].serviceDateIso, '2026-08-13');
-  assert.equal(board.rows[0].latestManualDateIso, '2026-08-14');
-  assert.equal(board.rows[0].expectedEndAt, '2026-08-14T11:00:00.000Z');
-});
-
-test('la marcación manual del almuerzo acepta X+1 usando la ventana persistida de la sesión nocturna', async () => {
-  const assignment = activeAssignment({ overnight: true });
-  const { prisma, createdMarks } = prismaContract(assignment);
-
-  const result = await registerManualAttendance(prisma, {
-    assignmentId: assignment.id,
-    breakStartAt: '2026-08-14T01:00',
-    actorUsername: 'coordinacion-prueba',
-    actorRole: 'admin',
-    now: new Date('2026-08-14T07:05:00.000Z')
-  });
-
-  assert.equal(result.attendanceStatus, 'ARRIVAL_REPORTED');
-  assert.equal(createdMarks.length, 1);
-  assert.equal(createdMarks[0].markType, 'BREAK_START');
-  assert.equal(createdMarks[0].clientCapturedAt.toISOString(), '2026-08-14T06:00:00.000Z');
-});
-
-test('el horario nocturno programado habilita X+1 aunque una sesión anterior no tenga expectedEndAt', async () => {
-  const assignment = activeAssignment({ overnight: true });
-  assignment.attendanceSession.expectedEndAt = null;
-  assignment.serviceRequest.endTime = '06:00';
-  const { prisma, createdMarks } = prismaContract(assignment);
-
-  const board = await loadAttendanceAdminBoard(prisma, {
-    from: '2026-08-13',
-    to: '2026-08-13',
-    now: new Date('2026-08-14T07:00:00.000Z')
-  });
-  assert.equal(board.rows[0].latestManualDateIso, '2026-08-14');
   assert.equal(board.rows[0].expectedEndAt, null);
+  assert.equal(board.rows[0].operationalWindowDerived, true);
+  assert.equal(board.rows[0].latestManualDateIso, '2026-08-14');
+  assert.equal(board.rows[0].manualBreakStartMin, '2026-08-13T22:00');
+  assert.equal(board.rows[0].manualBreakStartMax, '2026-08-14T05:59');
+  assert.equal(board.rows[0].manualDepartureMax, '2026-08-14T13:59');
+});
 
-  const timeline = validateAttendanceTimelineAgainstAssignment(
-    assignment.serviceRequest,
-    {
-      arrivalAt: assignment.attendanceSession.arrivalReportedAt,
-      breakStartAt: new Date('2026-08-14T07:00:00.000Z')
-    },
-    assignment.attendanceSession
-  );
-  assert.equal(timeline.latestDateKey, '2026-08-14');
-  assert.equal(timeline.overnight, true);
+test('coordinación puede marcar almuerzo a las 02:00 de X+1 en una jornada iniciada a las 22:00', async () => {
+  const assignment = assignmentFixture();
+  const { prisma, createdMarks } = prismaContract(assignment);
 
   await registerManualAttendance(prisma, {
     assignmentId: assignment.id,
@@ -176,15 +139,54 @@ test('el horario nocturno programado habilita X+1 aunque una sesión anterior no
     actorRole: 'admin',
     now: new Date('2026-08-14T07:10:00.000Z')
   });
+
   assert.equal(createdMarks.at(-1)?.markType, 'BREAK_START');
   assert.equal(createdMarks.at(-1)?.clientCapturedAt.toISOString(), '2026-08-14T07:00:00.000Z');
 });
 
-test('un horario programado que termina el mismo día no habilita X+1 si la sesión no tiene fin', () => {
-  const assignment = activeAssignment({ overnight: true });
-  assignment.attendanceSession.expectedEndAt = null;
-  assignment.serviceRequest.endTime = '23:00';
+test('una jornada 22:00→06:00 explícita acepta la madrugada de X+1', () => {
+  const assignment = assignmentFixture({ endTime: '06:00' });
+  const timeline = validateAttendanceTimelineAgainstAssignment(
+    assignment.serviceRequest,
+    {
+      arrivalAt: assignment.attendanceSession.arrivalReportedAt,
+      breakStartAt: new Date('2026-08-14T07:00:00.000Z')
+    },
+    assignment.attendanceSession
+  );
 
+  assert.equal(timeline.overnight, true);
+  assert.equal(timeline.latestDateKey, '2026-08-14');
+  assert.equal(timeline.operational.operationalEndAt.toISOString(), '2026-08-14T11:00:00.000Z');
+});
+
+test('una jornada iniciada a las 22:00 rechaza un almuerzo a las 22:00 de la noche siguiente', () => {
+  const assignment = assignmentFixture();
+  assert.throws(
+    () => validateAttendanceTimelineAgainstAssignment(
+      assignment.serviceRequest,
+      {
+        arrivalAt: assignment.attendanceSession.arrivalReportedAt,
+        breakStartAt: new Date('2026-08-15T03:00:00.000Z')
+      },
+      assignment.attendanceSession
+    ),
+    /attendance_manual_break_operational_window_invalid/
+  );
+});
+
+test('un turno diurno 08:00 sin hora fin no habilita marcaciones en X+1', async () => {
+  const assignment = assignmentFixture({ startTime: '08:00' });
+  const { prisma } = prismaContract(assignment);
+  const board = await loadAttendanceAdminBoard(prisma, {
+    from: '2026-08-13',
+    to: '2026-08-13',
+    now: new Date('2026-08-13T18:00:00.000Z')
+  });
+
+  assert.equal(board.rows[0].latestManualDateIso, '2026-08-13');
+  assert.equal(board.rows[0].manualBreakStartMax, '2026-08-13T15:59');
+  assert.equal(board.rows[0].manualDepartureMax, '2026-08-13T23:59');
   assert.throws(
     () => validateAttendanceTimelineAgainstAssignment(
       assignment.serviceRequest,
@@ -194,27 +196,11 @@ test('un horario programado que termina el mismo día no habilita X+1 si la sesi
       },
       assignment.attendanceSession
     ),
-    /attendance_manual_mark_date_outside_assignment/
+    /attendance_manual_break_operational_window_invalid/
   );
 });
 
-test('una sesión diurna conserva el límite backend en la fecha X y rechaza X+1', () => {
-  const assignment = activeAssignment({ overnight: false });
-
-  assert.throws(
-    () => validateAttendanceTimelineAgainstAssignment(
-      assignment.serviceRequest,
-      {
-        arrivalAt: assignment.attendanceSession.arrivalReportedAt,
-        breakStartAt: new Date('2026-08-14T07:00:00.000Z')
-      },
-      assignment.attendanceSession
-    ),
-    /attendance_manual_mark_date_outside_assignment/
-  );
-});
-
-test('el navegador no conserva un max propio para almuerzo o salida manual', () => {
+test('el formulario refleja los límites exactos del backend y el runtime no los elimina', () => {
   const view = readFileSync(
     new URL('../src/views/operacionesAsistencia.ejs', import.meta.url),
     'utf8'
@@ -225,8 +211,8 @@ test('el navegador no conserva un max propio para almuerzo o salida manual', () 
   );
 
   assert.match(view, /name="arrivalReportedAt" min="<%= serviceDateTimeMin %>" max="<%= serviceDateTimeMax %>"/);
-  assert.match(runtime, /form\[data-manual-attendance-form\] input\[name="breakStartAt"\]/);
-  assert.match(runtime, /form\[data-manual-attendance-form\] input\[name="breakEndAt"\]/);
-  assert.match(runtime, /form\[data-manual-attendance-form\] input\[name="departureReportedAt"\]/);
-  assert.match(runtime, /input\.removeAttribute\('max'\)/);
+  assert.match(view, /name="breakStartAt" min="<%= manualBreakStartMin %>" max="<%= manualBreakStartMax %>"/);
+  assert.match(view, /name="breakEndAt" min="<%= manualBreakEndMin %>" max="<%= manualBreakEndMax %>"/);
+  assert.match(view, /name="departureReportedAt" min="<%= manualDepartureMin %>" max="<%= manualDepartureMax %>"/);
+  assert.doesNotMatch(runtime, /removeAttribute\(['"]max['"]\)/);
 });
