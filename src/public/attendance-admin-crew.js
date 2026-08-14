@@ -5,6 +5,7 @@
   const CONFIG_PATH = '/admin/operaciones/asistencia/cuadrillas/config';
   const MODE_INDIVIDUAL = 'INDIVIDUAL';
   const MODE_CREW = 'CREW';
+  const CREW_LEADER_STATUS = 'CREW_LEADER';
   const DEFAULT_RANGE_DAYS = 30;
   const states = new WeakMap();
 
@@ -33,6 +34,7 @@
       .crew-operation-warning{padding:9px 10px;border:1px solid #f2d085;border-radius:9px;background:#fff8e7;color:#6b4700;font-size:11px;line-height:1.4}
       .crew-operation-empty{padding:12px;border:1px dashed #cbd5e1;border-radius:10px;color:var(--muted);font-size:12px;text-align:center}
       .crew-operation-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.crew-operation-actions .btn{width:auto}
+      .crew-operation-help{color:var(--muted);font-size:11px;line-height:1.4;margin-top:4px}
       @media(max-width:760px){.crew-operation-range,.crew-operation-service-grid{grid-template-columns:1fr}.crew-operation-range button,.crew-operation-actions .btn{width:100%}}
     `;
     document.head.appendChild(style);
@@ -98,7 +100,7 @@
     const copy = element('div');
     copy.append(
       element('h4', '', 'Marcación por cuadrilla'),
-      element('p', '', 'Esta configuración pertenece a esta operación. Habilita cuadrillas aquí y define por turno si la marcación será Individual o Cuadrilla.')
+      element('p', '', 'Esta configuración pertenece a esta operación. Por cada turno puedes escoger un encargado del Personal operativo; aparecerá dentro de la petición sin consumir uno de los cupos de auxiliares.')
     );
     heading.append(copy);
 
@@ -187,7 +189,7 @@
     return `${service.serviceDate || 'Sin fecha'}${time} · ${service.operationPointName || 'Operación'}`;
   }
 
-  function renderServiceEditor(panel, operation, services, selectedServiceId, reload) {
+  function renderServiceEditor(panel, operation, services, leaderCandidates, selectedServiceId, reload) {
     const area = panel.querySelector('[data-crew-service-area]');
     if (!area) return;
     area.replaceChildren();
@@ -238,25 +240,30 @@
     grid.append(serviceField, modeField);
 
     const summary = element('div', 'crew-operation-summary');
-    summary.textContent = `Requeridos: ${requested.requiredWorkers} · Asignados activos: ${requested.assignments.length} · ${requested.crewAvailable ? 'Cuadrilla disponible' : 'Cuadrilla no disponible'}.`;
+    const currentLeader = leaderCandidates.find((candidate) => candidate.id === requested.crewLeaderWorkerId) || null;
+    summary.textContent = `Auxiliares requeridos: ${requested.requiredWorkers} · Auxiliares que cuentan cobertura: ${requested.assignments.length} · Encargado: ${currentLeader?.fullName || 'sin definir'}.`;
 
     const leaderField = element('div', 'field');
-    leaderField.appendChild(element('label', '', 'Responsable de la cuadrilla'));
+    leaderField.appendChild(element('label', '', 'Encargado / líder de cuadrilla'));
     const leaderSelect = document.createElement('select');
     const emptyOption = document.createElement('option');
     emptyOption.value = '';
-    emptyOption.textContent = requested.assignments.length
-      ? 'Selecciona un auxiliar asignado'
-      : 'Pendiente hasta asignar auxiliares';
+    emptyOption.textContent = leaderCandidates.length
+      ? 'Selecciona un encargado del Personal operativo'
+      : 'No hay personal contratado disponible';
     leaderSelect.appendChild(emptyOption);
-    requested.assignments.forEach((assignment) => {
+    leaderCandidates.forEach((candidate) => {
       const option = document.createElement('option');
-      option.value = assignment.workerId;
-      option.textContent = assignment.fullName;
-      option.selected = requested.crewLeaderWorkerId === assignment.workerId;
+      const currentlyAuxiliary = requested.assignments.some((assignment) => assignment.workerId === candidate.id);
+      option.value = candidate.id;
+      option.textContent = `${candidate.label || candidate.fullName}${candidate.isTestProfile ? ' · PERFIL DE PRUEBA' : ''}${currentlyAuxiliary ? ' · actualmente auxiliar; dejará de contar como cupo' : ''}`;
+      option.selected = requested.crewLeaderWorkerId === candidate.id;
       leaderSelect.appendChild(option);
     });
-    leaderField.appendChild(leaderSelect);
+    leaderField.append(
+      leaderSelect,
+      element('div', 'crew-operation-help', 'El encargado queda incluido en la petición con una asignación propia. No aumenta la cobertura de auxiliares requerida por el cliente y usa el mismo Portal del Auxiliar en su celular.')
+    );
 
     const warning = element('div', 'crew-operation-warning');
     warning.hidden = true;
@@ -279,21 +286,23 @@
         warning.textContent = 'Activa “Permitir marcación por cuadrilla” en esta misma operación.';
         warning.hidden = false;
         blocked = true;
-      } else if (crew && requested.assignments.length > 0 && !leaderSelect.value) {
-        warning.textContent = requested.crewLeaderWorkerId && !requested.leaderValid
-          ? 'El responsable guardado ya no tiene una asignación activa. Selecciona otro auxiliar.'
-          : 'Selecciona el responsable entre los auxiliares asignados a este turno.';
+      } else if (crew && !leaderCandidates.length) {
+        warning.textContent = 'Primero registra o activa al encargado en Personal operativo con estado Contratado.';
         warning.hidden = false;
         blocked = true;
-      } else if (crew && requested.assignments.length === 0) {
-        warning.textContent = 'Puedes preparar este turno como Cuadrilla. Cuando asignes auxiliares, vuelve aquí para definir el responsable antes de marcar.';
+      } else if (crew && !leaderSelect.value) {
+        warning.textContent = 'Selecciona el encargado o líder de cuadrilla para este turno.';
+        warning.hidden = false;
+        blocked = true;
+      } else if (crew && requested.crewLeaderWorkerId && requested.crewLeaderAssignmentStatus !== CREW_LEADER_STATUS) {
+        warning.textContent = 'Este turno conserva una configuración anterior. Guarda nuevamente para separar al encargado de los cupos de auxiliares.';
         warning.hidden = false;
       }
       saveButton.disabled = blocked;
     }
 
     serviceSelect.addEventListener('change', () => {
-      renderServiceEditor(panel, operation, services, serviceSelect.value, reload);
+      renderServiceEditor(panel, operation, services, leaderCandidates, serviceSelect.value, reload);
     });
     modeSelect.addEventListener('change', syncControls);
     leaderSelect.addEventListener('change', syncControls);
@@ -309,7 +318,7 @@
           })
         });
         setStatus(panel, modeSelect.value === MODE_CREW
-          ? 'Turno configurado para marcación por cuadrilla.'
+          ? 'Turno configurado para cuadrilla. El encargado quedó incluido en la petición sin consumir cupo auxiliar.'
           : 'Turno configurado para marcación individual.');
         await reload(requested.id);
       } catch (error) {
@@ -337,9 +346,10 @@
       const configuration = await requestJson(`${CONFIG_PATH}?${params.toString()}`);
       const operation = (configuration.operations || []).find((item) => item.id === state.operationId) || null;
       const services = (configuration.services || []).filter((service) => service.operationPointId === state.operationId);
+      const leaderCandidates = Array.isArray(configuration.leaderCandidates) ? configuration.leaderCandidates : [];
       const reload = async (nextServiceId = state.selectedServiceId) => loadPanel(panel, nextServiceId);
       renderCapability(panel, operation, reload);
-      renderServiceEditor(panel, operation, services, selectedServiceId || state.selectedServiceId, reload);
+      renderServiceEditor(panel, operation, services, leaderCandidates, selectedServiceId || state.selectedServiceId, reload);
       state.loaded = true;
       setStatus(panel, operation
         ? 'Configuración de cuadrilla cargada para esta operación.'

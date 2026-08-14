@@ -157,9 +157,9 @@ test('calcula distancia y geocerca sin depender de Prisma', () => {
   assert.equal(calculateAttendanceDistanceMeters({}, {}), null);
 });
 
-test('conserva el catálogo de asignaciones activas', () => {
+test('conserva el catálogo de asignaciones activas de asistencia incluyendo encargado de cuadrilla', () => {
   assert.deepEqual(ACTIVE_DISPATCH_ASSIGNMENT_STATUSES, [
-    'ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'
+    'ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED', 'CREW_LEADER'
   ]);
 });
 
@@ -174,13 +174,17 @@ test('auto-valida una llegada confiable en transacción serializable', async () 
   assert.equal(state.markCreates, 1);
 });
 
+test('permite registrar la llegada del encargado sin convertirlo en cupo de cobertura', async () => {
+  const { prisma } = createFixture({ assignment: { status: 'CREW_LEADER' } });
+  const result = await registerDispatchArrival(prisma, trustedInput({ idempotencyKey: 'crew-leader-arrival' }));
+  assert.equal(result.recorded, true);
+  assert.equal(result.validation.validationStatus, 'AUTO_VALIDATED');
+});
+
 test('registra una entrada anticipada con su hora real', async () => {
   const { prisma } = createFixture();
   const arrivalAt = new Date('2026-07-19T12:15:00.000Z');
-  const result = await registerDispatchArrival(prisma, trustedInput({
-    now: arrivalAt,
-    clientCapturedAt: arrivalAt
-  }));
+  const result = await registerDispatchArrival(prisma, trustedInput({ now: arrivalAt, clientCapturedAt: arrivalAt }));
   assert.equal(result.recorded, true);
   assert.equal(result.attendanceSession.arrivalReportedAt.toISOString(), arrivalAt.toISOString());
   assert.equal(result.attendanceSession.expectedStartAt.toISOString(), '2026-07-19T13:00:00.000Z');
@@ -189,10 +193,7 @@ test('registra una entrada anticipada con su hora real', async () => {
 test('registra una llegada tarde sin bloquearla', async () => {
   const { prisma } = createFixture();
   const lateAt = new Date('2026-07-19T15:00:00.000Z');
-  const result = await registerDispatchArrival(prisma, trustedInput({
-    now: lateAt,
-    clientCapturedAt: lateAt
-  }));
+  const result = await registerDispatchArrival(prisma, trustedInput({ now: lateAt, clientCapturedAt: lateAt }));
   assert.equal(result.recorded, true);
   assert.equal(result.validation.reportedPunctuality, 'LATE');
 });
@@ -202,10 +203,7 @@ test('sincroniza una llegada offline tardía y la deja en revisión', async () =
   const capturedAt = new Date('2026-07-19T15:00:00.000Z');
   const receivedAt = new Date('2026-07-19T16:00:00.000Z');
   const result = await registerDispatchArrival(prisma, trustedInput({
-    idempotencyKey: 'offline-arrival-1',
-    captureMode: 'OFFLINE_WEB',
-    clientCapturedAt: capturedAt,
-    now: receivedAt
+    idempotencyKey: 'offline-arrival-1', captureMode: 'OFFLINE_WEB', clientCapturedAt: capturedAt, now: receivedAt
   }));
   assert.equal(result.recorded, true);
   assert.equal(result.validation.validationStatus, 'REVIEW_REQUIRED');
@@ -216,14 +214,11 @@ test('sincroniza una llegada offline tardía y la deja en revisión', async () =
 
 test('rechaza una captura offline de más de 72 horas', async () => {
   const { prisma } = createFixture();
-  await assert.rejects(
-    registerDispatchArrival(prisma, trustedInput({
-      captureMode: 'OFFLINE_WEB',
-      clientCapturedAt: new Date('2026-07-19T13:00:00.000Z'),
-      now: new Date('2026-07-22T13:00:01.000Z')
-    })),
-    /attendance_offline_capture_expired/
-  );
+  await assert.rejects(registerDispatchArrival(prisma, trustedInput({
+    captureMode: 'OFFLINE_WEB',
+    clientCapturedAt: new Date('2026-07-19T13:00:00.000Z'),
+    now: new Date('2026-07-22T13:00:01.000Z')
+  })), /attendance_offline_capture_expired/);
 });
 
 test('un dispositivo nuevo registra llegada provisional y exige revisión', async () => {
@@ -245,10 +240,7 @@ test('repetir la misma idempotencia no duplica la llegada', async () => {
 test('una segunda clave después de la llegada queda rechazada', async () => {
   const { prisma, state } = createFixture();
   await registerDispatchArrival(prisma, trustedInput());
-  const duplicate = await registerDispatchArrival(
-    prisma,
-    trustedInput({ idempotencyKey: 'arrival-2' })
-  );
+  const duplicate = await registerDispatchArrival(prisma, trustedInput({ idempotencyKey: 'arrival-2' }));
   assert.equal(duplicate.recorded, false);
   assert.deepEqual(duplicate.validation.riskFlags, [ATTENDANCE_RISK_FLAG.DUPLICATE_ARRIVAL]);
   assert.equal(state.markCreates, 1);
@@ -273,10 +265,7 @@ test('una asignación inactiva no crea efectos secundarios', async () => {
 
 test('rechaza una asignación perteneciente a otro auxiliar', async () => {
   const { prisma } = createFixture({ assignment: { workerId: 'worker-2' } });
-  await assert.rejects(
-    () => registerDispatchArrival(prisma, trustedInput()),
-    /attendance_assignment_not_found/
-  );
+  await assert.rejects(() => registerDispatchArrival(prisma, trustedInput()), /attendance_assignment_not_found/);
 });
 
 test('reintenta un conflicto serializable antes de registrar', async () => {
@@ -284,4 +273,32 @@ test('reintenta un conflicto serializable antes de registrar', async () => {
   const result = await registerDispatchArrival(prisma, trustedInput());
   assert.equal(result.recorded, true);
   assert.equal(state.transactionCalls, 2);
+});
+
+test('reintenta hasta tres veces y propaga el último conflicto', async () => {
+  const { prisma, state } = createFixture({ transactionFailures: ['P2034', 'P2034', 'P2034'] });
+  await assert.rejects(registerDispatchArrival(prisma, trustedInput()), (error) => error.code === 'P2034');
+  assert.equal(state.transactionCalls, 3);
+});
+
+test('el replay posterior a P2002 devuelve la marca persistida', async () => {
+  const { prisma, state } = createFixture({ transactionFailures: ['P2002', 'P2002', 'P2002'] });
+  state.sessions.set('assignment-1', {
+    id: 'session-existing',
+    assignmentId: 'assignment-1',
+    attendanceStatus: 'ON_TIME',
+    validationStatus: 'AUTO_VALIDATED',
+    punctualityStatus: 'ON_TIME'
+  });
+  state.marks.set('arrival-1', {
+    id: 'mark-existing',
+    attendanceSessionId: 'session-existing',
+    idempotencyKey: 'arrival-1',
+    decision: 'AUTO_VALIDATED',
+    riskScore: 0,
+    riskFlags: []
+  });
+  const replay = await registerDispatchArrival(prisma, trustedInput());
+  assert.equal(replay.replayed, true);
+  assert.equal(replay.attendanceMark.id, 'mark-existing');
 });
