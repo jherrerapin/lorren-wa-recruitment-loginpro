@@ -24,9 +24,11 @@ function formatDatePartsInColombia(value = new Date()) {
   return `${lookup.year}-${lookup.month}-${lookup.day}`;
 }
 
-function addIsoDays(dateText, days) {
-  const [year, month, day] = dateText.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day + days, 0, 0, 0, 0));
+export function addDispatchIsoDays(dateText, days = 0) {
+  const normalizedDate = normalizeDispatchDateParam(dateText);
+  const offset = Number.isFinite(Number(days)) ? Math.trunc(Number(days)) : 0;
+  const [year, month, day] = normalizedDate.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + offset, 0, 0, 0, 0));
   return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
@@ -56,7 +58,7 @@ export function parseDispatchServiceDate(dateText) {
 
 export function buildDispatchServiceDateSearchRange(dateText) {
   const normalizedDate = normalizeDispatchDateParam(dateText);
-  const nextDate = addIsoDays(normalizedDate, 1);
+  const nextDate = addDispatchIsoDays(normalizedDate, 1);
   return {
     start: new Date(`${normalizedDate}T00:00:00.000Z`),
     end: new Date(`${nextDate}T05:00:00.000Z`)
