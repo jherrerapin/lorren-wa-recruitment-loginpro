@@ -144,6 +144,60 @@ test('la marcación manual del almuerzo acepta X+1 usando la ventana persistida 
   assert.equal(createdMarks[0].clientCapturedAt.toISOString(), '2026-08-14T06:00:00.000Z');
 });
 
+test('el horario nocturno programado habilita X+1 aunque una sesión anterior no tenga expectedEndAt', async () => {
+  const assignment = activeAssignment({ overnight: true });
+  assignment.attendanceSession.expectedEndAt = null;
+  assignment.serviceRequest.endTime = '06:00';
+  const { prisma, createdMarks } = prismaContract(assignment);
+
+  const board = await loadAttendanceAdminBoard(prisma, {
+    from: '2026-08-13',
+    to: '2026-08-13',
+    now: new Date('2026-08-14T07:00:00.000Z')
+  });
+  assert.equal(board.rows[0].latestManualDateIso, '2026-08-14');
+  assert.equal(board.rows[0].expectedEndAt, null);
+
+  const timeline = validateAttendanceTimelineAgainstAssignment(
+    assignment.serviceRequest,
+    {
+      arrivalAt: assignment.attendanceSession.arrivalReportedAt,
+      breakStartAt: new Date('2026-08-14T07:00:00.000Z')
+    },
+    assignment.attendanceSession
+  );
+  assert.equal(timeline.latestDateKey, '2026-08-14');
+  assert.equal(timeline.overnight, true);
+
+  await registerManualAttendance(prisma, {
+    assignmentId: assignment.id,
+    breakStartAt: '2026-08-14T02:00',
+    actorUsername: 'coordinacion-prueba',
+    actorRole: 'admin',
+    now: new Date('2026-08-14T07:10:00.000Z')
+  });
+  assert.equal(createdMarks.at(-1)?.markType, 'BREAK_START');
+  assert.equal(createdMarks.at(-1)?.clientCapturedAt.toISOString(), '2026-08-14T07:00:00.000Z');
+});
+
+test('un horario programado que termina el mismo día no habilita X+1 si la sesión no tiene fin', () => {
+  const assignment = activeAssignment({ overnight: true });
+  assignment.attendanceSession.expectedEndAt = null;
+  assignment.serviceRequest.endTime = '23:00';
+
+  assert.throws(
+    () => validateAttendanceTimelineAgainstAssignment(
+      assignment.serviceRequest,
+      {
+        arrivalAt: assignment.attendanceSession.arrivalReportedAt,
+        breakStartAt: new Date('2026-08-14T07:00:00.000Z')
+      },
+      assignment.attendanceSession
+    ),
+    /attendance_manual_mark_date_outside_assignment/
+  );
+});
+
 test('una sesión diurna conserva el límite en la fecha X y rechaza X+1', () => {
   const assignment = activeAssignment({ overnight: false });
 

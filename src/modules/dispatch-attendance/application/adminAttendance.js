@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { dispatchServiceDateKey } from '../../../services/dispatchDate.js';
+import { addDispatchIsoDays, dispatchServiceDateKey } from '../../../services/dispatchDate.js';
 import { calculateDispatchWorkedTime } from '../domain/attendanceWorkdayPolicy.js';
 import { buildDispatchAttendanceExpectedWindow } from './registerArrival.js';
 
@@ -219,6 +219,26 @@ function resolveAttendanceExpectedWindow(serviceRequest, session = null) {
   return buildDispatchAttendanceExpectedWindow(serviceRequest);
 }
 
+function manualAttendanceLatestDateKey(serviceRequest, session = null) {
+  const serviceDateKey = dispatchServiceDateKey(serviceRequest?.serviceDate);
+  if (!serviceDateKey) return null;
+  const nextDateKey = addDispatchIsoDays(serviceDateKey, 1);
+  const persistedExpectedEndAt = optionalTimelineDate(
+    session?.expectedEndAt,
+    'attendance_session_expected_end_at'
+  );
+  if (persistedExpectedEndAt && dispatchServiceDateKey(persistedExpectedEndAt) === nextDateKey) {
+    return nextDateKey;
+  }
+  if (serviceRequest?.startTime) {
+    const scheduled = buildDispatchAttendanceExpectedWindow(serviceRequest);
+    if (scheduled.expectedEndAt && dispatchServiceDateKey(scheduled.expectedEndAt) === nextDateKey) {
+      return nextDateKey;
+    }
+  }
+  return serviceDateKey;
+}
+
 function attendanceWindow(assignment) {
   const request = assignment.serviceRequest;
   const session = assignment.attendanceSession || null;
@@ -240,10 +260,7 @@ export function validateAttendanceTimelineAgainstAssignment(serviceRequest, inpu
   const serviceDateKey = dispatchServiceDateKey(serviceRequest?.serviceDate);
   if (!serviceDateKey) throw new Error('attendance_manual_service_date_invalid');
   const expected = resolveAttendanceExpectedWindow(serviceRequest, session);
-  const expectedEndDateKey = expected.expectedEndAt
-    ? dispatchServiceDateKey(expected.expectedEndAt)
-    : serviceDateKey;
-  const latestDateKey = expectedEndDateKey || serviceDateKey;
+  const latestDateKey = manualAttendanceLatestDateKey(serviceRequest, session) || serviceDateKey;
   const allowedDateKeys = new Set([serviceDateKey, latestDateKey]);
 
   const arrivalAt = optionalTimelineDate(input.arrivalAt, 'attendance_manual_arrival_reported_at');
@@ -344,9 +361,7 @@ function buildBoardRow(assignment, now) {
   const markLatitude = numericCoordinate(mark?.latitude, -90, 90);
   const markLongitude = numericCoordinate(mark?.longitude, -180, 180);
   const serviceDateIso = dispatchServiceDateKey(request?.serviceDate);
-  const latestManualDateIso = expected.expectedEndAt
-    ? dispatchServiceDateKey(expected.expectedEndAt)
-    : serviceDateIso;
+  const latestManualDateIso = manualAttendanceLatestDateKey(request, session) || serviceDateIso;
   const riskGroups = riskGroupsForSession(session);
   const riskFlags = riskGroups.flatMap((group) => (
     group.riskFlags.map((flag) => `${group.markType}::${flag}`)
@@ -366,7 +381,7 @@ function buildBoardRow(assignment, now) {
     address: request?.address || point?.address || 'Dirección sin definir',
     serviceDateLabel: serviceDateIso ? formatDate(request.serviceDate) : 'Fecha sin definir',
     serviceDateIso,
-    latestManualDateIso: latestManualDateIso || serviceDateIso,
+    latestManualDateIso,
     scheduleLabel: expected.expectedStartAt
       ? `${formatTime(expected.expectedStartAt)}${expected.expectedEndAt ? ` – ${formatTime(expected.expectedEndAt)}` : ''}`
       : 'Horario pendiente',
