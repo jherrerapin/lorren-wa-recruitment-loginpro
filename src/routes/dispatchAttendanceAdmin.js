@@ -7,6 +7,12 @@ import {
   enrichAttendanceBoardWithWorkday,
   reviewAttendanceWorkdaySession
 } from '../modules/dispatch-attendance/application/attendanceAdminWorkday.js';
+import {
+  crewAttendanceConfigErrorMessage,
+  loadCrewAttendanceConfiguration,
+  saveCrewAttendanceOperationCapability,
+  saveCrewAttendanceServiceConfiguration
+} from '../modules/dispatch-attendance/application/crewAttendanceConfig.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
 import { dispatchPayrollRouter } from './dispatchPayroll.js';
 
@@ -44,6 +50,14 @@ function actorFromRequest(req) {
   return {
     actorUsername: normalizeString(req.session?.username || req.username) || 'operaciones',
     actorRole: normalizeString(req.session?.userRole || req.userRole)
+  };
+}
+
+function crewAuditActorFromRequest(req) {
+  return {
+    ...actorFromRequest(req),
+    ipAddress: normalizeString(req.ip),
+    userAgent: normalizeString(req.get?.('user-agent'))
   };
 }
 
@@ -133,6 +147,13 @@ function publicErrorMessage(error) {
   return messages[code] || 'No fue posible completar la acción de asistencia.';
 }
 
+function crewConfigErrorStatus(error) {
+  const code = typeof error?.message === 'string' ? error.message : '';
+  if (code.endsWith('_not_found')) return 404;
+  if (code.startsWith('crew_attendance_')) return 400;
+  return 500;
+}
+
 function applyNoStore(res) {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('Pragma', 'no-cache');
@@ -210,6 +231,51 @@ export function dispatchAttendanceAdminRouter(prisma) {
   const formParser = express.urlencoded({ extended: false, limit: '16kb' });
 
   router.use('/nomina', dispatchPayrollRouter(prisma));
+
+  router.get('/cuadrillas/config', async (req, res) => {
+    applyNoStore(res);
+    try {
+      const configuration = await loadCrewAttendanceConfiguration(prisma, {
+        from: req.query?.from,
+        to: req.query?.to
+      });
+      return res.status(200).json({ ok: true, ...configuration });
+    } catch (error) {
+      console.error('[CREW_ATTENDANCE_CONFIG_LOAD_FAILED]', { code: error?.message });
+      return res.status(500).json({ ok: false, error: 'No fue posible cargar la configuración de cuadrillas.' });
+    }
+  });
+
+  router.post('/cuadrillas/operaciones/:operationPointId', formParser, async (req, res) => {
+    applyNoStore(res);
+    try {
+      const result = await saveCrewAttendanceOperationCapability(prisma, {
+        operationPointId: req.params.operationPointId,
+        allowed: req.body.allowed,
+        ...crewAuditActorFromRequest(req)
+      });
+      return res.status(200).json({ ok: true, ...result });
+    } catch (error) {
+      console.warn('[CREW_ATTENDANCE_OPERATION_SAVE_FAILED]', { code: error?.message });
+      return res.status(crewConfigErrorStatus(error)).json({ ok: false, error: crewAttendanceConfigErrorMessage(error) });
+    }
+  });
+
+  router.post('/cuadrillas/servicios/:serviceRequestId', formParser, async (req, res) => {
+    applyNoStore(res);
+    try {
+      const result = await saveCrewAttendanceServiceConfiguration(prisma, {
+        serviceRequestId: req.params.serviceRequestId,
+        mode: req.body.mode,
+        crewLeaderWorkerId: req.body.crewLeaderWorkerId,
+        ...crewAuditActorFromRequest(req)
+      });
+      return res.status(200).json({ ok: true, ...result });
+    } catch (error) {
+      console.warn('[CREW_ATTENDANCE_SERVICE_SAVE_FAILED]', { code: error?.message });
+      return res.status(crewConfigErrorStatus(error)).json({ ok: false, error: crewAttendanceConfigErrorMessage(error) });
+    }
+  });
 
   router.get('/', async (req, res) => {
     applyNoStore(res);
