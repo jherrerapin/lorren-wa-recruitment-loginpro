@@ -78,14 +78,37 @@ test('PDF y Excel se persisten como configuración y sobreviven a una recarga', 
   assert.match(browser, /if \(applyingFormats\) return/);
 });
 
-test('Programación del día inbound respeta PDF, Excel o ambos guardados', async () => {
+test('Programación del día ofrece exactamente PDF, Excel y Ambos', async () => {
+  const client = await readFile(new URL('../src/services/dispatchWhatsappCloudClient.js', import.meta.url), 'utf8');
+  assert.match(client, /¿En qué formato deseas recibir la programación del día\?/);
+  assert.match(client, /dispatch_report:programming_pdf', title: 'PDF'/);
+  assert.match(client, /dispatch_report:programming_excel', title: 'Excel'/);
+  assert.match(client, /dispatch_report:programming_both', title: 'Ambos'/);
+  const formatButtons = client.match(/dispatch_report:programming_(?:pdf|excel|both)'/g) || [];
+  assert.equal(formatButtons.length, 3);
+});
+
+test('la elección inbound usa el formato pulsado y no los checks persistidos', async () => {
   const webhook = await readFile(new URL('../src/routes/dispatchWhatsappWebhook.js', import.meta.url), 'utf8');
+  assert.match(webhook, /dispatch_report:programming_today'\) return 'PROGRAMMING_FORMAT'/);
+  assert.match(webhook, /action === 'PROGRAMMING_FORMAT'\) await sendProgrammingFormatMenu/);
+  assert.match(webhook, /action === 'PROGRAMMING_PDF'\) await sendProgrammingContactDocuments\(prisma, contact, \['pdf'\]\)/);
+  assert.match(webhook, /action === 'PROGRAMMING_EXCEL'\) await sendProgrammingContactDocuments\(prisma, contact, \['excel'\]\)/);
+  assert.match(webhook, /action === 'PROGRAMMING_BOTH'\) await sendProgrammingContactDocuments\(prisma, contact, \['pdf', 'excel'\]\)/);
+  assert.doesNotMatch(webhook, /settings\.formats/);
+});
+
+test('el envío manual saluda por nombre antes de documentos cuando la ventana está abierta', async () => {
   const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
-  assert.match(webhook, /loadProgrammingWhatsappSettings\(prisma\)/);
-  assert.match(webhook, /sendProgrammingContactDocuments\(prisma, contact, settings\.formats\)/);
-  assert.match(route, /export async function sendProgrammingContactDocuments/);
-  assert.match(route, /formats\.includes\('pdf'\)/);
-  assert.match(route, /formats\.includes\('excel'\)/);
+  assert.match(route, /if \(windowStatus\.isOpen\) \{[\s\S]*const introText = `Hola, \$\{recipient\.name\}\. Te envío la programación del día \$\{dateLabel\}\.`/);
+  assert.match(route, /sendDispatchWhatsappTextMessage\(\{ scope: 'operational', phone: recipient\.phone, text: introText \}\)/);
+  assert.match(route, /No se enviaron los archivos porque falló el mensaje introductorio/);
+});
+
+test('la ayuda DEV separa los checks manuales de la elección inbound', async () => {
+  const browser = await readFile(new URL('../src/public/dispatch-programming-contacts.js', import.meta.url), 'utf8');
+  assert.match(browser, /Los checks PDF\/Excel se usan para los envíos manuales/);
+  assert.match(browser, /se le pregunta si la quiere en PDF, Excel o ambos/);
 });
 
 test('el envío manual usa sesión abierta antes de exigir plantilla', async () => {
