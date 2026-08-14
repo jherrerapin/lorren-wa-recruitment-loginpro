@@ -55,11 +55,12 @@
     .programming-options input { width: 17px; height: 17px; accent-color: var(--teal); cursor: pointer; }
     .programming-options label { cursor: pointer; font-size: 13px; font-weight: 800; }
     .programming-options small { display: block; color: #475569; font-size: 11px; font-weight: 500; margin-top: 2px; }
-    .programming-formats { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 11px 12px; border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 12px; color: #166534; }
-    .programming-formats > strong { font-size: 13px; }
-    .programming-formats label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 800; }
-    .programming-formats input { width: 17px; height: 17px; accent-color: var(--teal); cursor: pointer; }
-    .programming-formats small { flex: 1 1 100%; color: #475569; font-size: 11px; }
+    .programming-formats, .programming-recipients { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 11px 12px; border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 12px; color: #166534; }
+    .programming-formats > strong, .programming-recipients > strong { font-size: 13px; }
+    .programming-formats label, .programming-recipients label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 800; }
+    .programming-formats input, .programming-recipients input { width: 17px; height: 17px; accent-color: var(--teal); cursor: pointer; }
+    .programming-formats small, .programming-recipients small { flex: 1 1 100%; color: #475569; font-size: 11px; }
+    .programming-recipient-choices { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .programming-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     .programming-actions .btn[disabled] { opacity: .55; cursor: not-allowed; }
     .programming-note { color: var(--muted); font-size: 12px; line-height: 1.45; }
@@ -209,11 +210,16 @@
         <input id="includePendingProgramming" type="checkbox" />
         <label for="includePendingProgramming">Incluir solicitudes pendientes o por confirmar<small>Marcado: incluye asignación pendiente, parcial y pendientes de confirmación. Sin marcar: envía únicamente solicitudes completas.</small></label>
       </div>
-      <div class="programming-formats" aria-label="Formatos para enviar a gerentes">
-        <strong>Enviar a gerentes:</strong>
+      <div class="programming-formats" aria-label="Formatos para enviar">
+        <strong>Enviar reportes:</strong>
         <label for="sendProgramPdf"><input id="sendProgramPdf" type="checkbox" value="pdf" checked /> PDF</label>
         <label for="sendProgramExcel"><input id="sendProgramExcel" type="checkbox" value="excel" /> Excel</label>
         <small>Puedes marcar PDF, Excel o ambos. Los formatos seleccionados usan exactamente el mismo alcance de solicitudes.</small>
+      </div>
+      <div class="programming-recipients" aria-label="Destinatarios del envío de programación">
+        <strong>Destinatarios:</strong>
+        <div class="programming-recipient-choices" id="programRecipientChoices"><span>Cargando destinatarios...</span></div>
+        <small>Marca uno, varios o todos. Esta selección aplica solo al envío actual y no modifica la configuración guardada.</small>
       </div>
       <div class="programming-actions">
         <a class="btn" id="programPdfLink" href="/admin/operaciones/programacion.pdf?fecha=<%= selectedDate %>&includePending=false">Descargar PDF</a>
@@ -243,6 +249,7 @@
     const includePendingCheckbox = document.getElementById('includePendingProgramming');
     const sendPdfCheckbox = document.getElementById('sendProgramPdf');
     const sendExcelCheckbox = document.getElementById('sendProgramExcel');
+    const recipientChoices = document.getElementById('programRecipientChoices');
     const pdfLink = document.getElementById('programPdfLink');
     const excelLink = document.getElementById('programExcelLink');
     const emailLink = document.getElementById('programEmailLink');
@@ -257,6 +264,8 @@
     function currentManager(){return managerSelect?.value || 'Julián Herrera';}
     function includePendingRequests(){return Boolean(includePendingCheckbox?.checked);}
     function selectedFormats(){const formats=[];if(sendPdfCheckbox?.checked)formats.push('pdf');if(sendExcelCheckbox?.checked)formats.push('excel');return formats;}
+    function selectedRecipientPhones(){return [...document.querySelectorAll('[data-program-recipient]:checked')].map((input)=>input.value).filter(Boolean);}
+    async function loadProgrammingRecipients(){if(!recipientChoices)return;try{const response=await fetch('/admin/operaciones/programacion/destinatarios-envio',{cache:'no-store'});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.message||'No se pudieron cargar los destinatarios.');recipientChoices.replaceChildren();const recipients=Array.isArray(data.recipients)?data.recipients:[];if(!recipients.length){recipientChoices.textContent='No hay destinatarios configurados.';return;}recipients.forEach((recipient,index)=>{const label=document.createElement('label');const input=document.createElement('input');input.type='checkbox';input.checked=true;input.value=recipient.phone||'';input.setAttribute('data-program-recipient','true');input.id=`programRecipient${index}`;const text=document.createElement('span');text.textContent=recipient.name||'Destinatario';label.htmlFor=input.id;label.append(input,text);recipientChoices.appendChild(label);});}catch(error){recipientChoices.textContent='No fue posible cargar los destinatarios.';showToast(error.message||'No se pudieron cargar los destinatarios.');}}
     function loadManagers(){try{return JSON.parse(localStorage.getItem(MANAGERS_KEY)||'[]');}catch(_error){return[];}}
     function saveManager(name){const clean=String(name||'').trim();if(!clean)return;const managers=[...new Set(['Julián Herrera',...loadManagers(),clean])];localStorage.setItem(MANAGERS_KEY,JSON.stringify(managers.filter((item)=>item!=='Julián Herrera')));renderManagers(clean);}
     function renderManagers(selected='Julián Herrera'){if(!managerSelect)return;const managers=[...new Set(['Julián Herrera',...loadManagers()])];managerSelect.innerHTML=managers.map((name)=>`<option value="${name.replace(/"/g,'&quot;')}">${name}</option>`).join('');managerSelect.value=managers.includes(selected)?selected:'Julián Herrera';refreshProgrammingLinks();}
@@ -291,8 +300,9 @@
     customManagerInput?.addEventListener('blur',()=>{if(customManagerInput.value.trim()){saveManager(customManagerInput.value);customManagerInput.value='';}customManagerWrap.hidden=true;});
     managerSelect?.addEventListener('change',refreshProgrammingLinks);
     includePendingCheckbox?.addEventListener('change',refreshProgrammingLinks);
-    whatsappButton?.addEventListener('click',async()=>{const includePending=includePendingRequests();const formats=selectedFormats();if(!formats.length){showToast('Selecciona PDF, Excel o ambos para enviar.');return;}whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager(),includePending,formats})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name} (${item.format||'archivo'}): ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar la programación.');}const formatLabel=formats.length===2?'PDF y Excel':formats[0]==='excel'?'Excel':'PDF';showToast(formatLabel+' enviado a los gerentes.');}catch(error){showToast(error.message||'No fue posible enviar la programación.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
+    whatsappButton?.addEventListener('click',async()=>{const includePending=includePendingRequests();const formats=selectedFormats();const recipientPhones=selectedRecipientPhones();if(!formats.length){showToast('Selecciona PDF, Excel o ambos para enviar.');return;}if(!recipientPhones.length){showToast('Selecciona al menos un destinatario.');return;}whatsappButton.disabled=true;const original=whatsappButton.textContent;whatsappButton.textContent='Enviando...';try{const response=await fetch('/admin/operaciones/programacion/whatsapp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fecha:selectedDate,managedBy:currentManager(),includePending,formats,recipientPhones})});const data=await response.json();if(!response.ok||!data.ok){const details=Array.isArray(data.results)?data.results.filter((item)=>!item.ok).map((item)=>`${item.name} (${item.format||'archivo'}): ${item.message}`).join(' · '):'';throw new Error(details||data.message||'No se pudo enviar la programación.');}const formatLabel=formats.length===2?'PDF y Excel':formats[0]==='excel'?'Excel':'PDF';const sentNames=[...new Set((data.results||[]).filter((item)=>item.ok).map((item)=>item.name).filter(Boolean))];showToast(formatLabel+' enviado a '+(sentNames.length===1?sentNames[0]:`${sentNames.length} destinatarios`)+'.');}catch(error){showToast(error.message||'No fue posible enviar la programación.');}finally{whatsappButton.disabled=false;whatsappButton.textContent=original;}});
     renderManagers();
+    loadProgrammingRecipients();
     refreshDispatchSessionState();
     window.setInterval(refreshDispatchSessionState,30000);
   </script>
