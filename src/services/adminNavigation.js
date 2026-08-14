@@ -9,6 +9,8 @@ const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
 const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
 const MODULE_MENU_GROUP = 'admin-primary-navigation';
 const RECRUITMENT_ICON = '<svg class="admin-module-nav-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" focusable="false" aria-hidden="true"><circle cx="15.5" cy="7" r="3.25" fill="#60A5FA"/><path d="M10.5 18.5c0-3.45 2.2-5.55 5-5.55s5 2.1 5 5.55V20h-10v-1.5Z" fill="#60A5FA"/><circle cx="8" cy="8" r="3.75" fill="#2563EB"/><path d="M1.5 20.25c0-4.05 2.8-6.55 6.5-6.55s6.5 2.5 6.5 6.55V22h-13v-1.75Z" fill="#2563EB"/></svg>';
+const OPERATIONS_ICON = '<svg class="admin-module-nav-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" focusable="false" aria-hidden="true"><rect x="1.5" y="6.5" width="12.5" height="9.5" rx="2" fill="#60A5FA"/><path d="M14 9.5h3.5l4 4V16H14V9.5Z" fill="#2563EB"/><rect x="4" y="8.8" width="6.7" height="4.1" rx="1" fill="#DBEAFE"/><path d="M16.2 11.3h1.2l2 2h-3.2v-2Z" fill="#BFDBFE"/><circle cx="6" cy="17.2" r="2.25" fill="#1D4ED8"/><circle cx="18" cy="17.2" r="2.25" fill="#1D4ED8"/><circle cx="6" cy="17.2" r=".85" fill="#BFDBFE"/><circle cx="18" cy="17.2" r=".85" fill="#BFDBFE"/></svg>';
+const PAYROLL_ICON = '<svg class="admin-module-nav-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" focusable="false" aria-hidden="true"><path d="M5 2.5h14v18.8l-2-1.15-2 1.15-2-1.15-2 1.15-2-1.15-2 1.15-2-1.15V2.5Z" fill="#60A5FA"/><rect x="8" y="6" width="8" height="2.1" rx="1.05" fill="#DBEAFE"/><rect x="8" y="10.1" width="8" height="1.7" rx=".85" fill="#2563EB"/><rect x="8" y="13.5" width="5.5" height="1.7" rx=".85" fill="#2563EB"/><rect x="8" y="16.9" width="7" height="1.7" rx=".85" fill="#1D4ED8"/></svg>';
 
 function requestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0] || '/';
@@ -115,12 +117,12 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
     moduleMenu({
       key: 'operations',
       label: 'Operaciones / Despacho',
-      icon: '🚚',
+      icon: OPERATIONS_ICON,
       active,
       items: operationsMenuItems(access),
       allowed: access.dispatch || access.testWorkspace
     }),
-    moduleMenu({ key: 'payroll', label: 'Nómina', icon: '🧾', active, items: payrollMenuItems(access), allowed: access.payroll })
+    moduleMenu({ key: 'payroll', label: 'Nómina', icon: PAYROLL_ICON, active, items: payrollMenuItems(access), allowed: access.payroll })
   ].filter(Boolean).join('\n    ');
   const usersLink = standaloneUsersLink(access, path);
 
