@@ -85,6 +85,14 @@ export function normalizeProgrammingWhatsappRecipients(value, options = {}) {
   return [...recipientsByPhone.values()];
 }
 
+export function selectProgrammingWhatsappRecipients(configuredRecipients = [], requestedPhones) {
+  const recipients = normalizeProgrammingWhatsappRecipients(configuredRecipients);
+  if (requestedPhones === undefined || requestedPhones === null) return recipients;
+  const requested = Array.isArray(requestedPhones) ? requestedPhones : [requestedPhones];
+  const selectedPhones = new Set(requested.map((phone) => normalizeDispatchWhatsappPhone(phone)).filter(Boolean));
+  return recipients.filter((recipient) => selectedPhones.has(recipient.phone));
+}
+
 export function normalizeProgrammingFormats(value, fallback = ['pdf']) {
   const rawFormats = Array.isArray(value) ? value : String(value || '').split(/[\s,;]+/);
   const formats = [...new Set(rawFormats.map((item) => String(item || '').trim().toLowerCase()).filter((item) => PROGRAMMING_FORMATS.has(item)))];
@@ -345,6 +353,10 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     const saved = await saveProgrammingWhatsappFormats(prisma, { formats, actor: programmingActor(req) });
     return res.json({ ok: true, formats: saved });
   });
+  router.get('/programacion/destinatarios-envio', async (_req, res) => {
+    const recipients = await loadProgrammingWhatsappRecipients(prisma);
+    return res.json({ ok: true, recipients });
+  });
   router.get('/programacion/destinatarios', requireDev, async (_req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
     return res.json({ ok: true, recipients: settings.recipients, formats: settings.formats });
@@ -359,8 +371,9 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
   });
   router.post('/programacion/whatsapp', async (req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
-    const recipients = settings.recipients;
-    if (!recipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación.' });
+    if (!settings.recipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación.' });
+    const recipients = selectProgrammingWhatsappRecipients(settings.recipients, req.body?.recipientPhones);
+    if (!recipients.length) return res.status(400).json({ ok: false, message: 'Selecciona al menos un destinatario configurado.' });
     const selectedDate = programmingDateFromInput(req.body?.fecha || req.body?.date);
     const managedBy = normalizeString(req.body?.managedBy) || 'Julián Herrera';
     const includePending = normalizeProgrammingIncludePending(req.body?.includePending, false);
