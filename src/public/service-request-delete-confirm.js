@@ -132,3 +132,12 @@
     openDialog(form);
   }, true);
 })();
+
+(() => {
+  if (!document.querySelector('.assignment-page')) return;
+  if (document.querySelector('script[data-dispatch-assignment-crew-leader]')) return;
+  const script = document.createElement('script');
+  script.src = '/public/dispatch-assignment-crew-leader.js';
+  script.dataset.dispatchAssignmentCrewLeader = 'true';
+  document.head.appendChild(script);
+})();
