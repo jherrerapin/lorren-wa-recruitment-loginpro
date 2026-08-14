@@ -18,6 +18,38 @@ import {
   setPayrollFeatureAccess
 } from '../services/payrollFeatureAccess.js';
 
+const PAYROLL_EXCEL_HEADER_ROW = 4;
+const PAYROLL_EXCEL_COLORS = Object.freeze({
+  navy: 'FF1E2D3D',
+  teal: 'FF0D7A6B',
+  tealSoft: 'FFE6F4F1',
+  border: 'FFE1E4E8',
+  stripe: 'FFF8FAFC',
+  muted: 'FF64748B',
+  green: 'FF166534',
+  greenSoft: 'FFDCFCE7',
+  amber: 'FF92400E',
+  amberSoft: 'FFFEF3C7',
+  white: 'FFFFFFFF'
+});
+
+const PAYROLL_EXCEL_COLUMN_WIDTHS = Object.freeze({
+  Documento: 17,
+  TipoDocumento: 15,
+  Nombre: 30,
+  FechaInicial: 13,
+  FechaFinal: 13,
+  DiasTrabajados: 14,
+  DiasDescontados: 16,
+  DiasLaboradosNetos: 18,
+  Descansos: 32,
+  HorasOrdinarias: 16,
+  TotalTrabajado: 16,
+  HorasExtraTotal: 16,
+  Estado: 16,
+  Novedades: 42
+});
+
 function normalizeString(value, maxLength = 200) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
@@ -124,6 +156,142 @@ function reportFilename(report, extension) {
 
 function sumRows(rows, field) {
   return rows.reduce((sum, row) => sum + Number(row?.[field] || 0), 0);
+}
+
+function payrollExcelHeaders(rows) {
+  return rows.length
+    ? Object.keys(rows[0])
+    : ['Documento', 'Nombre', 'FechaInicial', 'FechaFinal', ...PAYROLL_CONCEPT_CODES];
+}
+
+function payrollExcelColumnWidth(header) {
+  if (PAYROLL_CONCEPT_CODES.includes(header)) return 11;
+  return PAYROLL_EXCEL_COLUMN_WIDTHS[header] || Math.max(12, Math.min(24, header.length + 3));
+}
+
+function isPayrollHourHeader(header) {
+  return PAYROLL_CONCEPT_CODES.includes(header)
+    || header.includes('Horas')
+    || header === 'TotalTrabajado';
+}
+
+export function buildPayrollExcelWorkbook(report) {
+  const rows = buildPayrollExportRows(report);
+  const headers = payrollExcelHeaders(rows);
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Lórren · LoginPro';
+  workbook.company = 'LoginPro Service';
+  workbook.title = 'Nómina y tiempo trabajado';
+  workbook.subject = `Corte ${report.period.from} a ${report.period.to}`;
+  workbook.created = report.generatedAt instanceof Date ? report.generatedAt : new Date();
+
+  const sheet = workbook.addWorksheet('Nómina');
+  sheet.properties.defaultRowHeight = 20;
+  sheet.columns = headers.map((header) => ({
+    key: header,
+    width: payrollExcelColumnWidth(header)
+  }));
+
+  const lastColumnLetter = sheet.getColumn(headers.length).letter;
+  sheet.mergeCells(`A1:${lastColumnLetter}1`);
+  sheet.mergeCells(`A2:${lastColumnLetter}2`);
+
+  const titleCell = sheet.getCell('A1');
+  titleCell.value = 'Nómina y tiempo trabajado';
+  titleCell.font = { bold: true, size: 16, color: { argb: PAYROLL_EXCEL_COLORS.white } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PAYROLL_EXCEL_COLORS.navy } };
+  titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+  sheet.getRow(1).height = 30;
+
+  const subtitleCell = sheet.getCell('A2');
+  subtitleCell.value = `Corte ${report.period.from} a ${report.period.to} · ${rows.length} auxiliar(es)`;
+  subtitleCell.font = { bold: true, size: 11, color: { argb: PAYROLL_EXCEL_COLORS.teal } };
+  subtitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PAYROLL_EXCEL_COLORS.tealSoft } };
+  subtitleCell.alignment = { vertical: 'middle', horizontal: 'left' };
+  sheet.getRow(2).height = 22;
+  sheet.getRow(3).height = 8;
+
+  const headerRow = sheet.getRow(PAYROLL_EXCEL_HEADER_ROW);
+  headers.forEach((header, index) => {
+    const cell = headerRow.getCell(index + 1);
+    cell.value = header;
+    cell.font = { bold: true, size: 10, color: { argb: PAYROLL_EXCEL_COLORS.white } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PAYROLL_EXCEL_COLORS.teal } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+    cell.border = {
+      top: { style: 'thin', color: { argb: PAYROLL_EXCEL_COLORS.teal } },
+      bottom: { style: 'thin', color: { argb: PAYROLL_EXCEL_COLORS.navy } },
+      left: { style: 'thin', color: { argb: PAYROLL_EXCEL_COLORS.border } },
+      right: { style: 'thin', color: { argb: PAYROLL_EXCEL_COLORS.border } }
+    };
+  });
+  headerRow.height = 32;
+
+  const statusIndex = headers.indexOf('Estado') + 1;
+  const wrapHeaders = new Set(['Nombre', 'Descansos', 'Novedades']);
+  const centeredHeaders = new Set(['TipoDocumento', 'FechaInicial', 'FechaFinal', 'DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos', 'Estado']);
+
+  rows.forEach((sourceRow, rowIndex) => {
+    const row = sheet.addRow(Object.fromEntries(headers.map((header) => [header, sourceRow[header] ?? ''])));
+    row.height = 22;
+    row.eachCell({ includeEmpty: true }, (cell, columnIndex) => {
+      const header = headers[columnIndex - 1];
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: rowIndex % 2 ? PAYROLL_EXCEL_COLORS.stripe : PAYROLL_EXCEL_COLORS.white }
+      };
+      cell.border = {
+        bottom: { style: 'thin', color: { argb: PAYROLL_EXCEL_COLORS.border } },
+        left: { style: 'thin', color: { argb: PAYROLL_EXCEL_COLORS.border } },
+        right: { style: 'thin', color: { argb: PAYROLL_EXCEL_COLORS.border } }
+      };
+      cell.alignment = {
+        vertical: 'middle',
+        horizontal: centeredHeaders.has(header) ? 'center' : (isPayrollHourHeader(header) ? 'right' : 'left'),
+        wrapText: wrapHeaders.has(header)
+      };
+      if (isPayrollHourHeader(header)) cell.numFmt = '0.0';
+      if (['DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos'].includes(header)) cell.numFmt = '0.##';
+    });
+
+    if (statusIndex > 0) {
+      const statusCell = row.getCell(statusIndex);
+      const hasNovelties = statusCell.value === 'Con novedades';
+      statusCell.font = {
+        bold: true,
+        color: { argb: hasNovelties ? PAYROLL_EXCEL_COLORS.amber : PAYROLL_EXCEL_COLORS.green }
+      };
+      statusCell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: hasNovelties ? PAYROLL_EXCEL_COLORS.amberSoft : PAYROLL_EXCEL_COLORS.greenSoft }
+      };
+    }
+  });
+
+  sheet.views = [{
+    state: 'frozen',
+    xSplit: 3,
+    ySplit: PAYROLL_EXCEL_HEADER_ROW,
+    topLeftCell: 'D5',
+    activeCell: 'D5',
+    showGridLines: false
+  }];
+  sheet.autoFilter = {
+    from: `A${PAYROLL_EXCEL_HEADER_ROW}`,
+    to: `${lastColumnLetter}${PAYROLL_EXCEL_HEADER_ROW}`
+  };
+  sheet.pageSetup = {
+    orientation: 'landscape',
+    fitToPage: true,
+    fitToWidth: 1,
+    fitToHeight: 0,
+    margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
+  };
+  sheet.headerFooter.oddFooter = '&LLoginPro Service&C&P de &N&RReporte de Nómina';
+
+  return workbook;
 }
 
 export function applyPayrollWorkerSelection(report, requestedWorkerIds = []) {
@@ -318,22 +486,7 @@ export function dispatchPayrollRouter(prisma) {
   router.get('/export.xlsx', async (req, res) => {
     try {
       const report = await reportForRequest(prisma, req, req.query || {});
-      const rows = buildPayrollExportRows(report);
-      const workbook = new ExcelJS.Workbook();
-      workbook.creator = 'Lórren · LoginPro';
-      workbook.created = new Date();
-      const sheet = workbook.addWorksheet('Nómina');
-      const headers = rows.length ? Object.keys(rows[0]) : ['Documento', 'Nombre', 'FechaInicial', 'FechaFinal', ...PAYROLL_CONCEPT_CODES];
-      sheet.columns = headers.map((header) => ({ header, key: header, width: Math.max(12, Math.min(30, header.length + 3)) }));
-      rows.forEach((row) => sheet.addRow(row));
-      sheet.views = [{ state: 'frozen', ySplit: 1 }];
-      sheet.autoFilter = { from: 'A1', to: `${sheet.getColumn(headers.length).letter}1` };
-      sheet.getRow(1).font = { bold: true };
-      headers.forEach((header, index) => {
-        if (header.startsWith('HE') || header.startsWith('RN') || header.startsWith('RD') || header === 'RNO' || header.includes('Horas') || header === 'TotalTrabajado') {
-          sheet.getColumn(index + 1).numFmt = '0.0';
-        }
-      });
+      const workbook = buildPayrollExcelWorkbook(report);
       const buffer = await workbook.xlsx.writeBuffer();
       res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.set('Content-Disposition', `attachment; filename="${reportFilename(report, 'xlsx')}"`);
