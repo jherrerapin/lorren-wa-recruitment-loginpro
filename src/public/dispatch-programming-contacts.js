@@ -2,9 +2,10 @@
   if (window.location.pathname !== '/admin/operaciones') return;
   const script = document.currentScript;
   const isDev = script?.dataset?.dev === 'true';
-  const programmingCard = document.getElementById('programmingCard');
+  const programmingCard = document.getElementById('programmingCard') || document.querySelector('[aria-label="Programación del día"]');
   const formats = document.querySelector('.programming-formats');
   if (!programmingCard || !formats) return;
+  programmingCard.hidden = true;
   const toast = document.getElementById('asyncToast');
   const sendPdfCheckbox = document.getElementById('sendProgramPdf');
   const sendExcelCheckbox = document.getElementById('sendProgramExcel');
