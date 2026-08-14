@@ -318,7 +318,37 @@ export function workerPortalRouter(prisma, options = {}) {
       const location = requireStrictAttendanceLocation(res, assignment.serviceRequest.operationPoint, req.body);
       if (!location) return;
 
-      if (BIOMETRIC_MARK_TYPES.has(markType) && captureMode === ONLINE_WEB_CAPTURE_MODE) {
+      const requestedCrewGroup = markType === 'ARRIVAL'
+        && captureMode === ONLINE_WEB_CAPTURE_MODE
+        && req.get?.('x-lorren-crew-group') === 'true';
+
+      if (requestedCrewGroup) {
+        const contexts = await loadCrewPortalContextsFn({ workerId: portalSession.workerId });
+        const crewContext = (Array.isArray(contexts) ? contexts : [])
+          .find((context) => context?.assignmentId === assignment.id);
+        const observedOperationPointId = normalizedString(req.get?.('x-lorren-crew-operation-point-id'), 160);
+        const assignmentOperationPointId = normalizedString(assignment.serviceRequest?.operationPoint?.id, 160);
+        if (
+          !crewContext
+          || crewContext.mode !== 'CREW'
+          || crewContext.isCrewLeader !== true
+          || crewContext.crewAvailable !== true
+          || !crewContext.operationPointId
+          || crewContext.operationPointId !== assignmentOperationPointId
+          || observedOperationPointId !== crewContext.operationPointId
+        ) {
+          return strictError(
+            res,
+            409,
+            'crew_group_not_available',
+            'La llegada grupal no está disponible para esta asignación o el dispositivo Bluetooth no corresponde a la operación.'
+          );
+        }
+        req.lorrenCrewGroup = true;
+        req.lorrenCrewForceMajeure = req.get?.('x-lorren-crew-force-majeure') === 'true';
+      }
+
+      if (BIOMETRIC_MARK_TYPES.has(markType) && captureMode === ONLINE_WEB_CAPTURE_MODE && !requestedCrewGroup) {
         const event = await prisma.devAuditEvent.findFirst({
           where: {
             entityType: ATTENDANCE_BIOMETRIC_ENTITY_TYPE,

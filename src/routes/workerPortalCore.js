@@ -17,6 +17,7 @@ import {
   resolveWorkerPortalSession
 } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
 import { registerDispatchArrival } from '../modules/dispatch-attendance/application/registerArrival.js';
+import { registerCrewArrivalForLeader } from '../modules/dispatch-attendance/application/registerCrewArrival.js';
 import { registerDispatchDeparture } from '../modules/dispatch-attendance/application/registerDeparture.js';
 import { registerDispatchBreak } from '../modules/dispatch-attendance/application/registerBreak.js';
 import {
@@ -204,6 +205,50 @@ function arrivalPublicResult(result) {
   };
 }
 
+function crewArrivalPublicResult(result) {
+  const summary = result?.summary;
+  if (!summary) return arrivalPublicResult(result?.leaderResult);
+  const leaderValidationStatus = result?.leaderResult?.validation?.validationStatus
+    || result?.leaderResult?.attendanceSession?.validationStatus
+    || null;
+  const processedCount = summary.newlyRecordedCount + summary.replayedCount + summary.alreadyRecordedCount;
+  let message = summary.newlyRecordedCount > 0
+    ? `Llegada de cuadrilla registrada para ${summary.newlyRecordedCount} integrante${summary.newlyRecordedCount === 1 ? '' : 's'}.`
+    : 'La llegada de la cuadrilla ya estaba registrada para los integrantes procesados.';
+  if (summary.alreadyRecordedCount > 0) {
+    message += ` ${summary.alreadyRecordedCount} ya tenía${summary.alreadyRecordedCount === 1 ? '' : 'n'} llegada previa.`;
+  }
+  if (summary.failedCount > 0) {
+    message += ` ${summary.failedCount} no pudo${summary.failedCount === 1 ? '' : 'ieron'} registrarse y requiere${summary.failedCount === 1 ? '' : 'n'} revisión.`;
+  }
+  if (summary.reviewPendingCount > 0) {
+    message += ` ${summary.reviewPendingCount} llegada${summary.reviewPendingCount === 1 ? '' : 's'} quedó${summary.reviewPendingCount === 1 ? '' : 'aron'} pendiente${summary.reviewPendingCount === 1 ? '' : 's'} de revisión.`;
+  }
+  if (summary.forceMajeure) {
+    message += ' Se dejó constancia de fuerza mayor por uno o más auxiliares sin celular.';
+  }
+  return {
+    status: 200,
+    payload: {
+      ok: true,
+      markType: 'ARRIVAL',
+      crewGroup: true,
+      recorded: processedCount > 0,
+      replayed: summary.newlyRecordedCount === 0 && summary.replayedCount > 0,
+      validationStatus: leaderValidationStatus,
+      requiresReview: leaderValidationStatus === 'REVIEW_REQUIRED' || summary.reviewPendingCount > 0 || summary.failedCount > 0,
+      totalMembers: summary.totalMembers,
+      newlyRecordedCount: summary.newlyRecordedCount,
+      replayedCount: summary.replayedCount,
+      alreadyRecordedCount: summary.alreadyRecordedCount,
+      failedCount: summary.failedCount,
+      reviewPendingCount: summary.reviewPendingCount,
+      forceMajeure: summary.forceMajeure,
+      message
+    }
+  };
+}
+
 function departurePublicResult(result) {
   const validationStatus = result.validation?.validationStatus || 'REVIEW_REQUIRED';
   const riskFlags = Array.isArray(result.validation?.riskFlags) ? result.validation.riskFlags : [];
@@ -370,6 +415,7 @@ export function workerPortalRouter(prisma, options = {}) {
   const loadAssignmentForDepartureFn = options.loadAssignmentForDepartureFn || loadWorkerPortalAssignmentForMark;
   const loadAssignmentForBreakFn = options.loadAssignmentForBreakFn || loadWorkerPortalAssignmentForMark;
   const registerArrivalFn = options.registerArrivalFn || registerDispatchArrival;
+  const registerCrewArrivalFn = options.registerCrewArrivalFn || registerCrewArrivalForLeader;
   const registerDepartureFn = options.registerDepartureFn || registerDispatchDeparture;
   const registerBreakFn = options.registerBreakFn || registerDispatchBreak;
   const storeArrivalEvidenceFn = options.storeArrivalEvidenceFn || storeAttendanceArrivalEvidence;
@@ -407,6 +453,7 @@ export function workerPortalRouter(prisma, options = {}) {
     const isArrival = markType === 'ARRIVAL';
     const isDeparture = markType === 'DEPARTURE';
     const isBreak = BREAK_MARK_TYPES.has(markType);
+    const isCrewGroupArrival = isArrival && req.lorrenCrewGroup === true;
     const loadAssignment = isArrival
       ? loadAssignmentForArrivalFn
       : (isDeparture ? loadAssignmentForDepartureFn : loadAssignmentForBreakFn);
@@ -458,8 +505,11 @@ export function workerPortalRouter(prisma, options = {}) {
       const latitude = requiredBodyNumber(req.body?.latitude, 'attendance_latitude', { min: -90, max: 90 });
       const longitude = requiredBodyNumber(req.body?.longitude, 'attendance_longitude', { min: -180, max: 180 });
       const accuracyMeters = requiredBodyNumber(req.body?.accuracyMeters, 'attendance_accuracy', { min: 0, max: 100_000 });
-      if (!isBreak && assignment.photoRequired && !req.file) {
+      if (!isBreak && !isCrewGroupArrival && assignment.photoRequired && !req.file) {
         return res.status(400).json({ ok: false, error: 'selfie_required' });
+      }
+      if (isCrewGroupArrival && req.file) {
+        return res.status(400).json({ ok: false, error: 'crew_group_selfie_not_allowed' });
       }
       if (req.file && req.body?.photoConsent !== 'true') {
         return res.status(400).json({ ok: false, error: 'photo_consent_required' });
@@ -469,7 +519,7 @@ export function workerPortalRouter(prisma, options = {}) {
       if (!rawInstallationId) return res.status(401).json({ ok: false, error: 'device_activation_required' });
       const installationIdHash = hashInstallationId(normalizeInstallationId(rawInstallationId), installationPepper);
 
-      if (!isBreak) {
+      if (!isBreak && !isCrewGroupArrival) {
         evidence = await storeEvidence({
           workerId: portalSession.workerId,
           assignmentId: assignment.id,
@@ -478,7 +528,7 @@ export function workerPortalRouter(prisma, options = {}) {
         });
       }
 
-      const result = await register(prisma, {
+      const markInput = {
         assignmentId: assignment.id,
         expectedWorkerId: portalSession.workerId,
         idempotencyKey,
@@ -498,11 +548,30 @@ export function workerPortalRouter(prisma, options = {}) {
         evidenceMimeType: evidence?.mimeType || null,
         ipAddress: requestIp(req),
         userAgent: requestUserAgent(req)
-      });
+      };
+
+      let crewResult = null;
+      let result = null;
+      if (isCrewGroupArrival) {
+        if (captureMode !== ONLINE_WEB_CAPTURE_MODE) {
+          return res.status(409).json({ ok: false, error: 'crew_group_online_required' });
+        }
+        crewResult = await registerCrewArrivalFn(prisma, {
+          ...markInput,
+          leaderWorkerId: portalSession.workerId,
+          forceMajeure: req.lorrenCrewForceMajeure === true
+        });
+        if (!crewResult?.applied) {
+          return res.status(409).json({ ok: false, error: 'crew_group_not_available' });
+        }
+        result = crewResult.leaderResult;
+      } else {
+        result = await register(prisma, markInput);
+      }
 
       if (!result.recorded && evidence?.created) await discardEvidence(evidence).catch(() => {});
       const publicResult = isArrival
-        ? arrivalPublicResult(result)
+        ? (isCrewGroupArrival ? crewArrivalPublicResult(crewResult) : arrivalPublicResult(result))
         : (isDeparture ? departurePublicResult(result) : breakPublicResult(result, markType));
       return res.status(publicResult.status).json(publicResult.payload);
     } catch (error) {
@@ -531,7 +600,8 @@ export function workerPortalRouter(prisma, options = {}) {
         attendance_break_already_completed: [409, 'break_already_completed'],
         attendance_break_end_before_start: [409, 'break_end_before_start'],
         attendance_offline_capture_expired: [409, 'offline_capture_expired'],
-        attendance_offline_capture_future_invalid: [400, 'offline_capture_time_invalid']
+        attendance_offline_capture_future_invalid: [400, 'offline_capture_time_invalid'],
+        crew_group_arrival_leader_not_assigned: [409, 'assignment_not_available']
       };
       if (publicCodes[code]) {
         return res.status(publicCodes[code][0]).json({ ok: false, error: publicCodes[code][1] });
