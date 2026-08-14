@@ -202,15 +202,33 @@ function latestByDate(items, fieldName) {
   })[0] || null;
 }
 
+function resolveAttendanceExpectedWindow(serviceRequest, session = null) {
+  const persistedExpectedStartAt = optionalTimelineDate(
+    session?.expectedStartAt,
+    'attendance_session_expected_start_at'
+  );
+  if (persistedExpectedStartAt) {
+    return {
+      expectedStartAt: persistedExpectedStartAt,
+      expectedEndAt: optionalTimelineDate(
+        session?.expectedEndAt,
+        'attendance_session_expected_end_at'
+      )
+    };
+  }
+  return buildDispatchAttendanceExpectedWindow(serviceRequest);
+}
+
 function attendanceWindow(assignment) {
   const request = assignment.serviceRequest;
-  if (!request?.startTime) {
+  const session = assignment.attendanceSession || null;
+  if (!session?.expectedStartAt && !request?.startTime) {
     return { expectedStartAt: null, expectedEndAt: null, closesAt: null };
   }
-  const expected = buildDispatchAttendanceExpectedWindow(request);
+  const expected = resolveAttendanceExpectedWindow(request, session);
   const graceMinutes = Math.max(
     0,
-    finiteNumber(request.operationPoint?.absenceGraceMinutes, DEFAULT_ABSENCE_GRACE_MINUTES)
+    finiteNumber(request?.operationPoint?.absenceGraceMinutes, DEFAULT_ABSENCE_GRACE_MINUTES)
   );
   return {
     ...expected,
@@ -218,10 +236,10 @@ function attendanceWindow(assignment) {
   };
 }
 
-export function validateAttendanceTimelineAgainstAssignment(serviceRequest, input = {}) {
+export function validateAttendanceTimelineAgainstAssignment(serviceRequest, input = {}, session = null) {
   const serviceDateKey = dispatchServiceDateKey(serviceRequest?.serviceDate);
   if (!serviceDateKey) throw new Error('attendance_manual_service_date_invalid');
-  const expected = buildDispatchAttendanceExpectedWindow(serviceRequest);
+  const expected = resolveAttendanceExpectedWindow(serviceRequest, session);
   const expectedEndDateKey = expected.expectedEndAt
     ? dispatchServiceDateKey(expected.expectedEndAt)
     : serviceDateKey;
@@ -795,7 +813,11 @@ export async function registerManualAttendance(prisma, input = {}) {
       breakEndAt: manualMarkMoment(latestManualMark(nextMarks, 'BREAK_END')),
       departureAt: manualMarkMoment(latestManualMark(nextMarks, 'DEPARTURE')) || existingSession?.departureReportedAt || null
     };
-    const timeline = validateAttendanceTimelineAgainstAssignment(assignment.serviceRequest, timelineValues);
+    const timeline = validateAttendanceTimelineAgainstAssignment(
+      assignment.serviceRequest,
+      timelineValues,
+      existingSession
+    );
     const submittedMarkTypes = new Set(submittedMarks.map(([markType]) => markType));
     const state = manualWorkdayState(existingSession, nextMarks, timeline.expected, validationAt, submittedMarkTypes);
     const session = existingSession

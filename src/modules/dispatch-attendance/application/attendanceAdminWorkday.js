@@ -600,7 +600,7 @@ async function editAttendanceWorkdayMark(prisma, input = {}) {
       breakStartAt: markMoment(latestMark(nextMarks, 'BREAK_START')),
       breakEndAt: markMoment(latestMark(nextMarks, 'BREAK_END')),
       departureAt: markMoment(latestMark(nextMarks, 'DEPARTURE'))
-    });
+    }, session);
     const pendingCorrections = pendingCorrectionMarkTypes(session.reviews);
     const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival, pendingCorrections);
 
@@ -685,7 +685,7 @@ async function addAttendanceWorkdayMark(prisma, input = {}) {
       breakStartAt: markMoment(latestMark(nextMarks, 'BREAK_START')),
       breakEndAt: markMoment(latestMark(nextMarks, 'BREAK_END')),
       departureAt: markMoment(latestMark(nextMarks, 'DEPARTURE'))
-    });
+    }, session);
     const pendingCorrections = pendingCorrectionMarkTypes(session.reviews).filter((type) => type !== markType);
     const next = correctedSessionData(session, nextMarks, now, recognizeEarlyArrival, pendingCorrections);
 
