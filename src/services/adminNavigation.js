@@ -143,27 +143,67 @@ function dropdownMenuHrefs(navHtml) {
   return hrefs;
 }
 
+function attributeValue(attributes, name) {
+  return attributes.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i'))?.[1] || null;
+}
+
+function hasClassToken(attributes, token) {
+  return (attributeValue(attributes, 'class') || '').split(/\s+/).filter(Boolean).includes(token);
+}
+
+function stripDuplicateActionItems(fragment, menuHrefs) {
+  return fragment.replace(
+    /<div\b([^>]*\bclass\s*=\s*["'][^"']*\baction-item\b[^"']*["'][^>]*)>([\s\S]*?)<\/div>/gi,
+    (block, _attributes, content) => {
+      const anchors = [...content.matchAll(/<a\b([^>]*)>[\s\S]*?<\/a>/gi)];
+      if (anchors.length !== 1) return block;
+      const anchorAttributes = anchors[0][1];
+      if (!hasClassToken(anchorAttributes, 'btn')) return block;
+      const href = attributeValue(anchorAttributes, 'href');
+      if (!href || !menuHrefs.has(href)) return block;
+
+      const anchorStart = anchors[0].index || 0;
+      const remainder = `${content.slice(0, anchorStart)}${content.slice(anchorStart + anchors[0][0].length)}`.trim();
+      if (remainder && !/^(?:<small\b[^>]*>[\s\S]*?<\/small>\s*)+$/i.test(remainder)) return block;
+      return '';
+    }
+  );
+}
+
+function stripDuplicateButtons(fragment, menuHrefs) {
+  return fragment.replace(
+    /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
+    (anchor, attributes) => {
+      if (!hasClassToken(attributes, 'btn')) return anchor;
+      const href = attributeValue(attributes, 'href');
+      return href && menuHrefs.has(href) ? '' : anchor;
+    }
+  );
+}
+
+function stripEmptyActionContainers(fragment) {
+  return fragment.replace(
+    /<div\b(?=[^>]*\bclass\s*=\s*["'][^"']*\bactions\b[^"']*["'])[^>]*>\s*<\/div>/gi,
+    ''
+  );
+}
+
 function stripDuplicateModuleButtons(html, navHtml) {
   const menuHrefs = dropdownMenuHrefs(navHtml);
   if (!menuHrefs.size) return html;
   const navIndex = html.indexOf(navHtml);
   if (navIndex < 0) return html;
 
-  const stripButtons = (fragment) => fragment.replace(
-    /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
-    (anchor, attributes) => {
-      const classValue = attributes.match(/\bclass\s*=\s*["']([^"']*)["']/i)?.[1] || '';
-      const classes = classValue.split(/\s+/).filter(Boolean);
-      if (!classes.includes('btn')) return anchor;
-      const href = attributes.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || null;
-      return href && menuHrefs.has(href) ? '' : anchor;
-    }
-  );
+  const stripNavigationDuplicates = (fragment) => {
+    let output = stripDuplicateActionItems(fragment, menuHrefs);
+    output = stripDuplicateButtons(output, menuHrefs);
+    return stripEmptyActionContainers(output);
+  };
 
   const before = html.slice(0, navIndex);
   const afterStart = navIndex + navHtml.length;
   const after = html.slice(afterStart);
-  return `${stripButtons(before)}${navHtml}${stripButtons(after)}`;
+  return `${stripNavigationDuplicates(before)}${navHtml}${stripNavigationDuplicates(after)}`;
 }
 
 function ensureNavigationStylesheet(html) {

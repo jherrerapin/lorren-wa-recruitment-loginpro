@@ -59,27 +59,65 @@ test('cada desplegable conserva sus opciones y permisos existentes', () => {
   assert.match(payroll, /href="\/admin\/operaciones\/pruebas">Entorno de pruebas<\/a>/);
 });
 
-test('el header elimina botones duplicados de opciones visibles y conserva acciones propias', () => {
+test('el header elimina bloques duplicados y conserva acciones propias', () => {
   const source = `<!DOCTYPE html><html><head><title>Personal</title></head><body>
     <nav class="navbar"><a href="/admin">Panel</a><a href="/admin/operaciones">Operaciones</a></nav>
     <main>
+      <div class="actions">
+        <div class="action-item">
+          <a class="btn btn-secondary" href="/admin/operaciones/personal">Personal operativo</a>
+          <small>Consulta, sincroniza o crea auxiliares manualmente.</small>
+        </div>
+        <div class="action-item">
+          <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">Crear auxiliar manual</a>
+          <small>Acción propia que no está en el header.</small>
+        </div>
+      </div>
       <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
-      <a class="btn btn-secondary" href="/admin/operaciones/personal">Personal operativo</a>
       <a class="btn btn-success" href="/admin/operaciones/portal-activaciones">Activar Portal del Auxiliar</a>
-      <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">Crear auxiliar manual</a>
       <a class="btn btn-secondary" href="/admin/operaciones/personal/importar-excel">Importar Excel</a>
       <a class="text-link" href="/admin/operaciones">Enlace contextual sin apariencia de botón</a>
     </main>
   </body></html>`;
   const html = injectAdminModuleNavigation(source, req('/admin/operaciones/personal', { canAccessDispatch: true, canAccessAttendance: true }));
 
+  assert.doesNotMatch(html, /Personal operativo<\/a>[\s\S]*Consulta, sincroniza o crea auxiliares manualmente/);
   assert.doesNotMatch(html, /class="btn btn-secondary" href="\/admin\/operaciones">Volver a Operaciones/);
-  assert.doesNotMatch(html, /class="btn btn-secondary" href="\/admin\/operaciones\/personal">Personal operativo/);
   assert.doesNotMatch(html, /class="btn btn-success" href="\/admin\/operaciones\/portal-activaciones">Activar Portal del Auxiliar/);
-  assert.match(html, /class="btn btn-primary" href="\/admin\/operaciones\/personal\/nuevo">Crear auxiliar manual/);
+  assert.match(html, /class="action-item">[\s\S]*href="\/admin\/operaciones\/personal\/nuevo">Crear auxiliar manual/);
+  assert.match(html, /Acción propia que no está en el header/);
+  assert.match(html, /class="actions"/);
   assert.match(html, /class="btn btn-secondary" href="\/admin\/operaciones\/personal\/importar-excel">Importar Excel/);
   assert.match(html, /class="text-link" href="\/admin\/operaciones">Enlace contextual sin apariencia de botón/);
   assert.match(moduleMenu(nav(html), 'operations'), /href="\/admin\/operaciones\/portal-activaciones">Activar portal del auxiliar<\/a>/);
+});
+
+test('dashboard de despacho queda compacto cuando todos sus accesos ya estan en el header', () => {
+  const source = `<!DOCTYPE html><html><head><title>Operaciones</title></head><body>
+    <nav class="navbar"><a href="/admin">Panel</a><a href="/admin/operaciones">Operaciones</a></nav>
+    <main class="page">
+      <section class="hero">
+        <div><h1>Operaciones / Despacho</h1><p>Gestión operativa.</p></div>
+        <div class="actions" aria-label="Acciones principales de operaciones">
+          <div class="action-item"><a class="btn btn-primary" href="/admin/operaciones/clientes">Clientes</a><small>Crea clientes, puntos operativos y links públicos de solicitud.</small></div>
+          <div class="action-item"><a class="btn" href="/admin/operaciones/solicitudes">Crear solicitud</a><small>Abre el formulario para registrar una nueva solicitud operativa.</small></div>
+          <div class="action-item"><a class="btn" href="/admin/operaciones/asignaciones">Asignación de auxiliares</a><small>Arrastra auxiliares disponibles y guarda asignaciones.</small></div>
+          <div class="action-item"><a class="btn" href="/admin/operaciones/personal">Personal operativo</a><small>Consulta, sincroniza o crea auxiliares manualmente.</small></div>
+          <div class="action-item attendance"><a class="btn" href="/admin/operaciones/asistencia">Asistencia</a><small>Valida llegadas, revisa geocerca, evidencia y ausencias.</small></div>
+          <div class="action-item session-checking"><a class="btn" href="/admin/operaciones/whatsapp">WhatsApp despacho</a><small>Revisando estado de la sesión...</small></div>
+        </div>
+      </section>
+    </main>
+  </body></html>`;
+  const html = injectAdminModuleNavigation(source, req('/admin/operaciones', { canAccessDispatch: true, canAccessAttendance: true }));
+
+  assert.doesNotMatch(html, /Crea clientes, puntos operativos/);
+  assert.doesNotMatch(html, /Revisando estado de la sesión/);
+  assert.doesNotMatch(html, /\baction-item\b/);
+  assert.doesNotMatch(html, /class="actions"/);
+  assert.match(html, /<h1>Operaciones \/ Despacho<\/h1><p>Gestión operativa\.<\/p>/);
+  assert.match(moduleMenu(nav(html), 'operations'), /href="\/admin\/operaciones\/clientes">Clientes<\/a>/);
+  assert.match(moduleMenu(nav(html), 'operations'), /href="\/admin\/operaciones\/whatsapp">WhatsApp despacho<\/a>/);
 });
 
 test('Usuarios se marca activo sin marcar Reclutamiento como modulo activo', () => {
