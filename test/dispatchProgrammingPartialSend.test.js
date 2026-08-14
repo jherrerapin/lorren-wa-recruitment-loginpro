@@ -56,8 +56,32 @@ test('el dashboard mantiene el envío flexible y agrega rango y Excel', async ()
   assert.match(view, /id="sendProgramExcel"/);
   assert.match(view, /id="sendProgramWhatsapp">Enviar<\/button>/);
   assert.doesNotMatch(view, /Enviar PDF por WhatsApp/);
-  assert.match(view, /JSON\.stringify\(\{fecha:selectedDate,managedBy:currentManager\(\),includePending,formats\}\)/);
+  assert.match(view, /JSON\.stringify\(\{fecha:selectedDate,managedBy:currentManager\(\),includePending,formats,recipientPhones\}\)/);
   assert.doesNotMatch(view, /if\(!programmingComplete\)/);
+});
+
+test('el envío manual permite marcar uno, varios o todos los destinatarios configurados', async () => {
+  const view = await readFile(new URL('../src/views/operacionesDashboard.ejs', import.meta.url), 'utf8');
+  const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
+  assert.match(view, /id="programRecipientChoices"/);
+  assert.match(view, /programacion\/destinatarios-envio/);
+  assert.match(view, /data-program-recipient/);
+  assert.match(view, /input\.checked=true/);
+  assert.match(view, /Selecciona al menos un destinatario/);
+  assert.match(route, /router\.get\('\/programacion\/destinatarios-envio'/);
+  assert.match(route, /selectProgrammingWhatsappRecipients\(settings\.recipients, req\.body\?\.recipientPhones\)/);
+});
+
+test('backend filtra la selección manual contra los destinatarios configurados', async () => {
+  const { selectProgrammingWhatsappRecipients } = await import('../src/routes/dispatchProgrammingNotifications.js');
+  const configured = [
+    { name: 'Contacto A', phone: '0000000000' },
+    { name: 'Contacto B', phone: '0000000001' }
+  ];
+  const selected = selectProgrammingWhatsappRecipients(configured, ['0000000001', '9999999999']);
+  assert.deepEqual(selected.map((recipient) => recipient.name), ['Contacto B']);
+  assert.equal(selectProgrammingWhatsappRecipients(configured, undefined).length, 2);
+  assert.equal(selectProgrammingWhatsappRecipients(configured, []).length, 0);
 });
 
 test('el endpoint conserva incompletas y permite PDF o Excel', async () => {
