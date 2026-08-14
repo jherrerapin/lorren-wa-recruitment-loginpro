@@ -219,10 +219,9 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     if (isLeader) {
       leaderResult = memberResult;
       if (!memberResult.recorded) {
-        // En el flujo legacy una llegada previa distinta sigue bloqueando el fan-out. En el
-        // flujo de presencia, la sesión/dispositivo/geocerca del encargado se revalidaron
-        // para este nuevo intento, por lo que una llegada ya registrada permite completar
-        // exclusivamente a los integrantes detectados que todavía falten.
+        // El flujo legacy conserva el bloqueo. En presencia verificable, una llegada previa
+        // del encargado no impide completar a integrantes detectados en un nuevo intento,
+        // porque sesión, dispositivo y geocerca del encargado se revalidan otra vez.
         if (!presenceValidated || !duplicateArrival(memberResult)) {
           return {
             applied: true,
@@ -295,14 +294,12 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
 
   const newlyRecordedCount = results.filter((item) => item.status === 'RECORDED').length;
   const replayedCount = results.filter((item) => item.status === 'REPLAYED').length;
-  const alreadyRecordedCount = results.filter((item) => item.status === 'ALREADY_RECORDED').length;
+  const selectedAlreadyRecordedCount = results.filter((item) => item.status === 'ALREADY_RECORDED').length;
+  const alreadyRecordedCount = selectedAlreadyRecordedCount + previouslyRecordedOutsideSelection;
   const failedCount = results.filter((item) => item.status === 'NOT_RECORDED').length;
   const reviewPendingCount = results.filter((item) => item.pendingReview === true).length;
   const delegatedCount = results.filter((item) => item.isLeader === false && ['RECORDED', 'REPLAYED'].includes(item.status)).length;
-  const processedCount = previouslyRecordedOutsideSelection
-    + newlyRecordedCount
-    + replayedCount
-    + alreadyRecordedCount;
+  const processedCount = newlyRecordedCount + replayedCount + alreadyRecordedCount;
   const notDetectedCount = Math.max(
     0,
     members.length - selectedMembers.length - previouslyRecordedOutsideSelection
