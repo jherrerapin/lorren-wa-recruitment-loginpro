@@ -31,7 +31,7 @@ test('la tabla queda contenida en su panel y no expande el viewport móvil', asy
 
   assert.match(css, /\.page>\*\{min-width:0;max-width:100%\}/);
   assert.match(css, /\.panel\{[^}]*min-width:0;max-width:100%\}/);
-  assert.match(css, /\.payroll-results-panel\{overflow:hidden\}/);
+  assert.match(css, /\.payroll-results-panel\{[^}]*min-width:0;max-width:100%;overflow:hidden\}/);
   assert.match(css, /\.table-wrap\{[^}]*overflow-x:auto;overflow-y:hidden;max-width:100%;min-width:0;width:100%/);
   assert.match(css, /-webkit-overflow-scrolling:touch/);
   assert.match(css, /th:first-child,td:first-child\{text-align:left\}/);
