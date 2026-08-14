@@ -57,15 +57,6 @@ function transactionDone(transaction) {
   });
 }
 
-function normalizeMarkType(value) {
-  const normalized = String(value || 'ARRIVAL').trim().toUpperCase();
-  return MARK_TYPES.has(normalized) ? normalized : 'ARRIVAL';
-}
-
-function normalizeRecord(record) {
-  return { ...record, markType: normalizeMarkType(record?.markType) };
-}
-
 function ensureStore(database, storeName, configure) {
   if (database.objectStoreNames.contains(storeName)) return;
   const store = database.createObjectStore(storeName, { keyPath: 'idempotencyKey' });
@@ -145,28 +136,13 @@ async function completeStoreRecord(queueStore, receiptStore, record, receipt) {
   }
 }
 
-async function readQueue() {
-  return (await readStore(QUEUE_STORE)).map(normalizeRecord);
+function normalizeMarkType(value) {
+  const normalized = String(value || 'ARRIVAL').trim().toUpperCase();
+  return MARK_TYPES.has(normalized) ? normalized : 'ARRIVAL';
 }
 
-function putQueueRecord(record) {
-  return putStoreRecord(QUEUE_STORE, record);
-}
-
-function completeQueueRecord(record, receipt) {
-  return completeStoreRecord(QUEUE_STORE, RECEIPT_STORE, record, receipt);
-}
-
-function readCrewQueue() {
-  return readStore(CREW_QUEUE_STORE);
-}
-
-function putCrewQueueRecord(record) {
-  return putStoreRecord(CREW_QUEUE_STORE, record);
-}
-
-function completeCrewQueueRecord(record, receipt) {
-  return completeStoreRecord(CREW_QUEUE_STORE, CREW_RECEIPT_STORE, record, receipt);
+function normalizeRecord(record) {
+  return { ...record, markType: normalizeMarkType(record?.markType) };
 }
 
 async function notifyClients(message) {
@@ -256,7 +232,7 @@ function buildMarkForm(record) {
   return form;
 }
 
-function terminalRejection(status, error) {
+function terminalMarkRejection(status, error) {
   if (status === 400 || status === 404) return true;
   return status === 409 && [
     'arrival_already_registered',
@@ -279,6 +255,10 @@ function terminalRejection(status, error) {
     'location_accuracy_insufficient',
     'biometric_verification_required'
   ].includes(error);
+}
+
+function terminalCrewRejection(status) {
+  return status === 400 || status === 404 || status === 409;
 }
 
 function isAlreadyRecorded(error) {
@@ -308,12 +288,22 @@ function retryDelayMs(response, now = Date.now()) {
   return DEFAULT_RETRY_DELAY_MS;
 }
 
-async function syncRecord(rawRecord) {
-  const record = normalizeRecord(rawRecord);
-  const nowMs = Date.now();
+function queueExpired(record, nowMs = Date.now()) {
   const queuedAt = new Date(record.queuedAt || 0).getTime();
-  if (!Number.isFinite(queuedAt) || nowMs - queuedAt > MAX_QUEUE_AGE_MS) {
-    await completeQueueRecord(record, {
+  return !Number.isFinite(queuedAt) || nowMs - queuedAt > MAX_QUEUE_AGE_MS;
+}
+
+function retryDeferred(record, nowMs = Date.now()) {
+  const retryNotBefore = new Date(record.retryNotBefore || 0).getTime();
+  return Number.isFinite(retryNotBefore) && retryNotBefore > nowMs
+    ? retryNotBefore - nowMs
+    : 0;
+}
+
+async function syncMarkRecord(rawRecord) {
+  const record = normalizeRecord(rawRecord);
+  if (queueExpired(record)) {
+    await completeStoreRecord(QUEUE_STORE, RECEIPT_STORE, record, {
       state: 'REJECTED',
       error: 'offline_capture_expired',
       message: 'La marcación offline venció antes de sincronizarse.'
@@ -327,17 +317,16 @@ async function syncRecord(rawRecord) {
     return { retry: false, sessionRequired: false, blockAssignment: true };
   }
 
-  const retryNotBefore = new Date(record.retryNotBefore || 0).getTime();
-  if (Number.isFinite(retryNotBefore) && retryNotBefore > nowMs) {
-    const retryAfterMs = retryNotBefore - nowMs;
+  const deferredMs = retryDeferred(record);
+  if (deferredMs > 0) {
     await notifyClients({
       type: 'ARRIVAL_SYNC_RETRY',
       assignmentId: record.assignmentId,
       markType: record.markType,
       error: record.lastError || 'retry_deferred',
-      retryAfterMs
+      retryAfterMs: deferredMs
     });
-    return { retry: true, retryAfterMs, sessionRequired: false, blockAssignment: true };
+    return { retry: true, retryAfterMs: deferredMs, sessionRequired: false, blockAssignment: true };
   }
 
   const inProgress = {
@@ -348,7 +337,7 @@ async function syncRecord(rawRecord) {
     retryNotBefore: null,
     lastError: null
   };
-  await putQueueRecord(inProgress);
+  await putStoreRecord(QUEUE_STORE, inProgress);
   await notifyClients({
     type: 'ARRIVAL_QUEUE_UPDATED',
     assignmentId: record.assignmentId,
@@ -367,7 +356,7 @@ async function syncRecord(rawRecord) {
     });
   } catch (error) {
     const retryAfterMs = DEFAULT_RETRY_DELAY_MS;
-    await putQueueRecord({
+    await putStoreRecord(QUEUE_STORE, {
       ...inProgress,
       state: 'PENDING',
       retryNotBefore: new Date(Date.now() + retryAfterMs).toISOString(),
@@ -387,11 +376,11 @@ async function syncRecord(rawRecord) {
   const payload = await response.json().catch(() => ({}));
   if (response.ok && payload.ok) {
     const state = payload.requiresReview ? 'REVIEW_REQUIRED' : 'SYNCED';
-    await completeQueueRecord(record, {
+    await completeStoreRecord(QUEUE_STORE, RECEIPT_STORE, record, {
       state,
       validationStatus: payload.validationStatus || null,
       attendanceStatus: payload.attendanceStatus || null,
-      punctualityStatus,
+      punctualityStatus: payload.punctualityStatus || null,
       workedMinutes: payload.workedMinutes ?? null,
       message: payload.message || 'Marcación sincronizada.'
     });
@@ -406,7 +395,7 @@ async function syncRecord(rawRecord) {
   }
 
   if (response.status === 401 || response.status === 403) {
-    await putQueueRecord({
+    await putStoreRecord(QUEUE_STORE, {
       ...inProgress,
       state: 'SESSION_REQUIRED',
       retryNotBefore: null,
@@ -423,9 +412,9 @@ async function syncRecord(rawRecord) {
     return { retry: false, sessionRequired: true, blockAssignment: true };
   }
 
-  if (terminalRejection(response.status, payload.error)) {
+  if (terminalMarkRejection(response.status, payload.error)) {
     const alreadyRecorded = isAlreadyRecorded(payload.error);
-    await completeQueueRecord(record, {
+    await completeStoreRecord(QUEUE_STORE, RECEIPT_STORE, record, {
       state: alreadyRecorded ? 'ALREADY_RECORDED' : 'REJECTED',
       error: payload.error || 'mark_rejected',
       message: alreadyRecorded
@@ -443,7 +432,7 @@ async function syncRecord(rawRecord) {
 
   const retry = retryableHttpStatus(response.status);
   const retryAfterMs = retry ? retryDelayMs(response) : 0;
-  await putQueueRecord({
+  await putStoreRecord(QUEUE_STORE, {
     ...inProgress,
     state: 'PENDING',
     retryNotBefore: retry ? new Date(Date.now() + retryAfterMs).toISOString() : null,
@@ -460,19 +449,205 @@ async function syncRecord(rawRecord) {
   return { retry, retryAfterMs, sessionRequired: false, blockAssignment: true };
 }
 
-async function syncQueue({ throwOnRetry = false } = {}) {
-  const records = (await readQueue()).sort((left, right) => String(left.queuedAt).localeCompare(String(right.queuedAt)));
+async function syncCrewPresenceRecord(record) {
+  if (queueExpired(record)) {
+    await completeStoreRecord(CREW_QUEUE_STORE, CREW_RECEIPT_STORE, record, {
+      state: 'REJECTED',
+      error: 'offline_capture_expired',
+      message: 'La comprobación de cuadrilla venció antes de sincronizarse.'
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_REJECTED',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: 'offline_capture_expired'
+    });
+    return { retry: false, sessionRequired: false, blockService: false };
+  }
+
+  const deferredMs = retryDeferred(record);
+  if (deferredMs > 0) {
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_RETRY',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: record.lastError || 'retry_deferred',
+      retryAfterMs: deferredMs
+    });
+    return { retry: true, retryAfterMs: deferredMs, sessionRequired: false, blockService: true };
+  }
+
+  const inProgress = {
+    ...record,
+    state: 'SYNCING',
+    attempts: Number(record.attempts || 0) + 1,
+    updatedAt: new Date().toISOString(),
+    retryNotBefore: null,
+    lastError: null
+  };
+  await putStoreRecord(CREW_QUEUE_STORE, inProgress);
+  await notifyClients({
+    type: 'CREW_PRESENCE_QUEUE_UPDATED',
+    assignmentId: record.assignmentId,
+    serviceRequestId: record.serviceRequestId,
+    state: 'SYNCING'
+  });
+
+  let response;
+  try {
+    response = await fetch(`${PORTAL_PATH}/cuadrillas/presencia/sincronizar`, {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'worker-portal'
+      },
+      body: JSON.stringify({
+        idempotencyKey: record.idempotencyKey,
+        assignmentId: record.assignmentId,
+        serviceRequestId: record.serviceRequestId,
+        latitude: record.latitude,
+        longitude: record.longitude,
+        accuracyMeters: record.accuracyMeters,
+        clientCapturedAt: record.clientCapturedAt,
+        proofBundle: record.proofBundle
+      })
+    });
+  } catch (error) {
+    const retryAfterMs = DEFAULT_RETRY_DELAY_MS;
+    await putStoreRecord(CREW_QUEUE_STORE, {
+      ...inProgress,
+      state: 'PENDING',
+      retryNotBefore: new Date(Date.now() + retryAfterMs).toISOString(),
+      lastError: 'network_unavailable',
+      updatedAt: new Date().toISOString()
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_RETRY',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: 'network_unavailable',
+      retryAfterMs
+    });
+    return { retry: true, retryAfterMs, sessionRequired: false, blockService: true, error };
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (response.ok && payload.ok) {
+    const state = payload.requiresReview ? 'REVIEW_REQUIRED' : 'SYNCED';
+    await completeStoreRecord(CREW_QUEUE_STORE, CREW_RECEIPT_STORE, record, {
+      state,
+      totalMembers: payload.totalMembers ?? null,
+      detectedMembers: payload.detectedMembers ?? null,
+      processedCount: payload.processedCount ?? null,
+      newlyRecordedCount: payload.newlyRecordedCount ?? null,
+      alreadyRecordedCount: payload.alreadyRecordedCount ?? null,
+      notDetectedCount: payload.notDetectedCount ?? null,
+      rejectedProofCount: payload.rejectedProofCount ?? null,
+      message: payload.message || 'Comprobación de cuadrilla sincronizada.'
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNCED',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      state,
+      payload
+    });
+    return { retry: false, sessionRequired: false, blockService: false };
+  }
+
+  if (response.status === 401 || response.status === 403) {
+    await putStoreRecord(CREW_QUEUE_STORE, {
+      ...inProgress,
+      state: 'SESSION_REQUIRED',
+      retryNotBefore: null,
+      lastError: payload.error || 'portal_session_required',
+      updatedAt: new Date().toISOString()
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_RETRY',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: 'portal_session_required',
+      retryAfterMs: 0
+    });
+    return { retry: false, sessionRequired: true, blockService: true };
+  }
+
+  if (terminalCrewRejection(response.status)) {
+    await completeStoreRecord(CREW_QUEUE_STORE, CREW_RECEIPT_STORE, record, {
+      state: 'REJECTED',
+      error: payload.error || 'crew_presence_rejected',
+      message: payload.message || 'La comprobación de cuadrilla fue rechazada por el servidor.'
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_REJECTED',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: payload.error || 'crew_presence_rejected',
+      payload
+    });
+    return { retry: false, sessionRequired: false, blockService: false };
+  }
+
+  const retry = retryableHttpStatus(response.status);
+  const retryAfterMs = retry ? retryDelayMs(response) : 0;
+  await putStoreRecord(CREW_QUEUE_STORE, {
+    ...inProgress,
+    state: 'PENDING',
+    retryNotBefore: retry ? new Date(Date.now() + retryAfterMs).toISOString() : null,
+    lastError: payload.error || `http_${response.status}`,
+    updatedAt: new Date().toISOString()
+  });
+  await notifyClients({
+    type: 'CREW_PRESENCE_SYNC_RETRY',
+    assignmentId: record.assignmentId,
+    serviceRequestId: record.serviceRequestId,
+    error: payload.error || `http_${response.status}`,
+    retryAfterMs
+  });
+  return { retry, retryAfterMs, sessionRequired: false, blockService: true };
+}
+
+async function syncMarkQueue() {
+  const records = (await readStore(QUEUE_STORE))
+    .map(normalizeRecord)
+    .sort((left, right) => String(left.queuedAt).localeCompare(String(right.queuedAt)));
   const blockedAssignments = new Set();
   let shouldRetry = false;
   for (const record of records) {
     const assignmentId = String(record.assignmentId || '');
     if (blockedAssignments.has(assignmentId)) continue;
-    const result = await syncRecord(record);
+    const result = await syncMarkRecord(record);
     shouldRetry = shouldRetry || result.retry;
     if (result.blockAssignment) blockedAssignments.add(assignmentId);
     if (result.sessionRequired) break;
   }
-  if (throwOnRetry && shouldRetry) throw new Error('arrival_sync_retry_required');
+  return shouldRetry;
+}
+
+async function syncCrewPresenceQueue() {
+  const records = (await readStore(CREW_QUEUE_STORE))
+    .sort((left, right) => String(left.queuedAt).localeCompare(String(right.queuedAt)));
+  const blockedServices = new Set();
+  let shouldRetry = false;
+  for (const record of records) {
+    const serviceRequestId = String(record.serviceRequestId || '');
+    if (blockedServices.has(serviceRequestId)) continue;
+    const result = await syncCrewPresenceRecord(record);
+    shouldRetry = shouldRetry || result.retry;
+    if (result.blockService) blockedServices.add(serviceRequestId);
+    if (result.sessionRequired) break;
+  }
+  return shouldRetry;
+}
+
+async function syncAll({ throwOnRetry = false } = {}) {
+  const markRetry = await syncMarkQueue();
+  const crewRetry = await syncCrewPresenceQueue();
+  if (throwOnRetry && (markRetry || crewRetry)) throw new Error('portal_sync_retry_required');
 }
 
 self.addEventListener('install', (event) => {
@@ -510,12 +685,12 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('sync', (event) => {
-  if (event.tag === SYNC_TAG) event.waitUntil(syncQueue({ throwOnRetry: true }));
+  if (event.tag === SYNC_TAG) event.waitUntil(syncAll({ throwOnRetry: true }));
 });
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SYNC_ARRIVALS') {
-    event.waitUntil(syncQueue().catch(() => {}));
+    event.waitUntil(syncAll().catch(() => {}));
     return;
   }
   if (event.data?.type === 'CACHE_PORTAL') event.waitUntil(cacheActivePortal().catch(() => false));
