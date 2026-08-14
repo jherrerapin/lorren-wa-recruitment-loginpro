@@ -1,7 +1,10 @@
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
-  buildDispatchAttendanceExpectedWindow,
-  getDispatchArrivalWindowState
+  getDispatchArrivalWindowState,
+  isDispatchBreakEndWithinOperationalWindow,
+  isDispatchBreakStartWithinOperationalWindow,
+  isDispatchDepartureWithinOperationalWindow,
+  resolveDispatchAttendanceOperationalWindow
 } from './registerArrival.js';
 import {
   INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES,
@@ -159,13 +162,14 @@ function buildPortalAssignment(assignment, now) {
   const breakEnded = Boolean(breakEndAt);
   const breakPending = breakStarted && !breakEnded;
 
+  let operationalWindow = null;
   let expectedStartAt = null;
   let expectedEndAt = null;
   let arrivalWindow = { open: false, opensAt: null, closesAt: null, expired: false };
-  if (request.startTime) {
-    const expected = buildDispatchAttendanceExpectedWindow(request);
-    expectedStartAt = expected.expectedStartAt;
-    expectedEndAt = expected.expectedEndAt;
+  if (request.startTime || session?.expectedStartAt) {
+    operationalWindow = resolveDispatchAttendanceOperationalWindow(request, session);
+    expectedStartAt = operationalWindow.expectedStartAt;
+    expectedEndAt = operationalWindow.expectedEndAt;
     arrivalWindow = getDispatchArrivalWindowState({ now, expectedStartAt });
   }
 
@@ -178,16 +182,19 @@ function buildPortalAssignment(assignment, now) {
     && arrivalReported
     && !departureReported
     && !breakStarted
-    && !sessionRejected;
+    && !sessionRejected
+    && Boolean(operationalWindow && isDispatchBreakStartWithinOperationalWindow(operationalWindow, now));
   const canEndBreak = attendanceEnabled
     && arrivalReported
     && !departureReported
     && breakPending
-    && !sessionRejected;
+    && !sessionRejected
+    && Boolean(operationalWindow && isDispatchBreakEndWithinOperationalWindow(operationalWindow, now));
   const canRegisterDeparture = attendanceEnabled
     && arrivalReported
     && !departureReported
-    && !sessionRejected;
+    && !sessionRejected
+    && Boolean(operationalWindow && isDispatchDepartureWithinOperationalWindow(operationalWindow, now));
   const photoPolicy = normalizePhotoPolicy(point?.attendancePhotoPolicy);
   const breakSummary = buildBreakSummary({ breakStartAt, breakEndAt, departureReported });
   const workedMinutes = Number.isInteger(session?.workedMinutes) ? session.workedMinutes : null;
@@ -203,6 +210,9 @@ function buildPortalAssignment(assignment, now) {
   if (departureReported) {
     actionType = 'DONE';
     actionLabel = `Jornada finalizada · ${formatDispatchMinutes(workedMinutes)}`;
+  } else if (arrivalReported && !canRegisterDeparture) {
+    actionType = 'BLOCKED';
+    actionLabel = 'Jornada fuera de ventana · requiere coordinación';
   } else if (arrivalReported) {
     actionType = 'DEPARTURE';
     actionLabel = breakPending
@@ -236,6 +246,9 @@ function buildPortalAssignment(assignment, now) {
       : 'Horario por confirmar',
     expectedStartAt: expectedStartAt?.toISOString() || null,
     expectedEndAt: expectedEndAt?.toISOString() || null,
+    operationalEndAt: optionalIsoDate(operationalWindow?.operationalEndAt),
+    continuityClosesAt: optionalIsoDate(operationalWindow?.continuityClosesAt),
+    operationalWindowDerived: operationalWindow?.derivedOperationalEnd === true,
     arrivalWindowOpen: arrivalWindow.open,
     arrivalWindowOpensAt: optionalIsoDate(arrivalWindow.opensAt),
     arrivalWindowClosesAt: optionalIsoDate(arrivalWindow.closesAt),
