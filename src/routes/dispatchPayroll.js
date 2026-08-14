@@ -251,7 +251,7 @@ export function buildPayrollExcelWorkbook(report) {
         horizontal: centeredHeaders.has(header) ? 'center' : (isPayrollHourHeader(header) ? 'right' : 'left'),
         wrapText: wrapHeaders.has(header)
       };
-      if (isPayrollHourHeader(header)) cell.numFmt = '0.0000';
+      if (isPayrollHourHeader(header)) cell.numFmt = '0.0';
       if (['DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos'].includes(header)) cell.numFmt = '0.##';
     });
 
