@@ -40,14 +40,14 @@ function session({ minutes, id = `session-${minutes}` }) {
   };
 }
 
-test('convierte minutos a horas con máximo dos decimales', () => {
-  assert.equal(minutesToDecimalHours(500), 8.33);
-  assert.equal(minutesToDecimalHours(455), 7.58);
+test('convierte minutos a horas con máximo un decimal', () => {
+  assert.equal(minutesToDecimalHours(500), 8.3);
+  assert.equal(minutesToDecimalHours(455), 7.6);
   assert.equal(minutesToDecimalHours(450), 7.5);
   assert.equal(minutesToDecimalHours(480), 8);
 });
 
-test('el reporte usa dos decimales sin alterar los minutos originales', () => {
+test('el reporte usa un decimal sin alterar los minutos originales', () => {
   const report = calculatePayrollConceptReport({
     sessions: [session({ minutes: 500 })],
     policiesByClientId: new Map(),
@@ -57,12 +57,12 @@ test('el reporte usa dos decimales sin alterar los minutos originales', () => {
   const row = report.rows[0];
 
   assert.equal(row.totalMinutes, 500);
-  assert.equal(row.totalHours, 8.33);
+  assert.equal(row.totalHours, 8.3);
   assert.equal(row.ordinaryMinutes, 420);
   assert.equal(row.ordinaryHours, 7);
   assert.equal(row.overtimeMinutes, 80);
-  assert.equal(row.overtimeHours, 1.33);
+  assert.equal(row.overtimeHours, 1.3);
   assert.equal(row.conceptMinutes.HEDO, 80);
-  assert.equal(row.conceptHours.HEDO, 1.33);
-  assert.equal(report.totals.totalHours, 8.33);
+  assert.equal(row.conceptHours.HEDO, 1.3);
+  assert.equal(report.totals.totalHours, 8.3);
 });
