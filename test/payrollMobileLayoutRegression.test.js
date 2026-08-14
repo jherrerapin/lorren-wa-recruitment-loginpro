@@ -61,3 +61,11 @@ test('el panel conserva ancho completo sin estirar los filtros en escritorio', a
   assert.match(view, /\.payroll-filter-actions\{display:flex;justify-content:flex-start;grid-column:1\/-1\}/);
   assert.doesNotMatch(view, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
 });
+
+test('Auxiliares no hereda el margen superior global de details', async () => {
+  const view = await readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8');
+  const css = await readFile(new URL('../src/public/operaciones-nomina.css', import.meta.url), 'utf8');
+
+  assert.match(css, /details\{margin-top:6px\}/);
+  assert.match(view, /\.worker-picker\{position:relative;margin-top:0\}/);
+});
