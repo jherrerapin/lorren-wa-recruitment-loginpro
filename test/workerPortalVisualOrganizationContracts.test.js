@@ -6,9 +6,9 @@ const source = fs.readFileSync(new URL('../src/public/worker-biometric.js', impo
 const view = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
 
 function loadShouldPinActiveJourney() {
-  const match = source.match(/function shouldPinActiveJourney\(status\) \{([\s\S]*?)\n  \}/);
+  const match = source.match(/function shouldPinActiveJourney\(status, activePreset\) \{([\s\S]*?)\n  \}/);
   assert.ok(match, 'worker-biometric.js debe conservar la autoridad de jornada fijada');
-  return new Function('status', match[1]);
+  return new Function('status', 'activePreset', match[1]);
 }
 
 test('el portal organiza las asignaciones sin modificar los botones de marcación', () => {
@@ -42,12 +42,16 @@ test('la vista define una sola vez el rango, estado y periodos rápidos', () => 
   assert.doesNotMatch(source, /\['today', 'Hoy'\]|\['upcoming', 'Próximas'\]|\['week', '7 días'\]|\['all', 'Todas'\]/);
 });
 
-test('una jornada en curso queda fijada aunque cambie la fecha operativa', () => {
+test('una jornada en curso queda fijada en los filtros rápidos aunque cambie la fecha operativa', () => {
   const shouldPinActiveJourney = loadShouldPinActiveJourney();
-  assert.equal(shouldPinActiveJourney('IN_PROGRESS'), true);
-  assert.equal(shouldPinActiveJourney('PENDING'), false);
-  assert.equal(shouldPinActiveJourney('COMPLETED'), false);
-  assert.match(source, /const keepActiveJourney = shouldPinActiveJourney\(item\.status\)/);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', 'today'), true);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', 'upcoming'), true);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', 'week'), true);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', 'all'), true);
+  assert.equal(shouldPinActiveJourney('IN_PROGRESS', ''), false);
+  assert.equal(shouldPinActiveJourney('PENDING', 'today'), false);
+  assert.equal(shouldPinActiveJourney('COMPLETED', 'today'), false);
+  assert.match(source, /const keepActiveJourney = shouldPinActiveJourney\(item\.status, activePreset\)/);
   assert.match(source, /const visible = \(keepActiveJourney \|\| \(matchesFrom && matchesTo\)\) && matchesStatus/);
   assert.doesNotMatch(source, /activePreset === 'upcoming' && item\.status === 'IN_PROGRESS'/);
 });
