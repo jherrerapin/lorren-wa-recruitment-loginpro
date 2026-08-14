@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { addDispatchIsoDays } from '../src/services/dispatchDate.js';
 import {
   normalizeProgrammingIncludePending,
   selectProgrammingRequests
@@ -38,6 +39,11 @@ test('el flag includePending se interpreta de forma explícita', () => {
   assert.equal(normalizeProgrammingIncludePending('on', false), true);
   assert.equal(normalizeProgrammingIncludePending('false', true), false);
   assert.equal(normalizeProgrammingIncludePending(undefined, false), false);
+});
+
+test('la fecha operativa permite resolver el día siguiente incluso entre años', () => {
+  assert.equal(addDispatchIsoDays('2026-08-13', 1), '2026-08-14');
+  assert.equal(addDispatchIsoDays('2026-12-31', 1), '2027-01-01');
 });
 
 test('el dashboard mantiene el envío flexible y agrega rango y Excel', async () => {
@@ -78,24 +84,40 @@ test('PDF y Excel se persisten como configuración y sobreviven a una recarga', 
   assert.match(browser, /if \(applyingFormats\) return/);
 });
 
-test('Programación del día ofrece exactamente PDF, Excel y Ambos', async () => {
+test('Programación pide Hoy o Mañana antes de preguntar el formato', async () => {
   const client = await readFile(new URL('../src/services/dispatchWhatsappCloudClient.js', import.meta.url), 'utf8');
-  assert.match(client, /¿En qué formato deseas recibir la programación del día\?/);
-  assert.match(client, /dispatch_report:programming_pdf', title: 'PDF'/);
-  assert.match(client, /dispatch_report:programming_excel', title: 'Excel'/);
-  assert.match(client, /dispatch_report:programming_both', title: 'Ambos'/);
-  const formatButtons = client.match(/dispatch_report:programming_(?:pdf|excel|both)'/g) || [];
-  assert.equal(formatButtons.length, 3);
+  assert.match(client, /title: 'Programación'/);
+  assert.match(client, /¿Qué día deseas consultar\?/);
+  assert.match(client, /dispatch_report:programming_date_today', title: 'Hoy'/);
+  assert.match(client, /dispatch_report:programming_date_tomorrow', title: 'Mañana'/);
+  const dateButtons = client.match(/dispatch_report:programming_date_(?:today|tomorrow)'/g) || [];
+  assert.equal(dateButtons.length, 2);
 });
 
-test('la elección inbound usa el formato pulsado y no los checks persistidos', async () => {
+test('cada fecha ofrece exactamente PDF, Excel y Ambos', async () => {
+  const client = await readFile(new URL('../src/services/dispatchWhatsappCloudClient.js', import.meta.url), 'utf8');
+  for (const dateChoice of ['today', 'tomorrow']) {
+    assert.match(client, new RegExp(`dispatch_report:programming_${dateChoice}_pdf`));
+    assert.match(client, new RegExp(`dispatch_report:programming_${dateChoice}_excel`));
+    assert.match(client, new RegExp(`dispatch_report:programming_${dateChoice}_both`));
+  }
+  assert.match(client, /¿En qué formato deseas recibir la programación de/);
+});
+
+test('la elección inbound transporta fecha y formato sin usar los checks persistidos', async () => {
   const webhook = await readFile(new URL('../src/routes/dispatchWhatsappWebhook.js', import.meta.url), 'utf8');
-  assert.match(webhook, /dispatch_report:programming_today'\) return 'PROGRAMMING_FORMAT'/);
-  assert.match(webhook, /action === 'PROGRAMMING_FORMAT'\) await sendProgrammingFormatMenu/);
-  assert.match(webhook, /action === 'PROGRAMMING_PDF'\) await sendProgrammingContactDocuments\(prisma, contact, \['pdf'\]\)/);
-  assert.match(webhook, /action === 'PROGRAMMING_EXCEL'\) await sendProgrammingContactDocuments\(prisma, contact, \['excel'\]\)/);
-  assert.match(webhook, /action === 'PROGRAMMING_BOTH'\) await sendProgrammingContactDocuments\(prisma, contact, \['pdf', 'excel'\]\)/);
+  assert.match(webhook, /dispatch_report:programming_today'\) return \{ type: 'PROGRAMMING_DATE' \}/);
+  assert.match(webhook, /dispatch_report:programming_date_today'\) return \{ type: 'PROGRAMMING_FORMAT', dateChoice: 'today' \}/);
+  assert.match(webhook, /dispatch_report:programming_date_tomorrow'\) return \{ type: 'PROGRAMMING_FORMAT', dateChoice: 'tomorrow' \}/);
+  assert.match(webhook, /addDispatchIsoDays\(today, 1\)/);
+  assert.match(webhook, /sendProgrammingContactDocuments\(prisma, contact, action\.formats, selectedDate\)/);
   assert.doesNotMatch(webhook, /settings\.formats/);
+});
+
+test('el envío documental inbound acepta la fecha seleccionada', async () => {
+  const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
+  assert.match(route, /sendProgrammingContactDocuments\(prisma, contact, formatSelection, selectedDate = todayIsoDateCO\(\)\)/);
+  assert.match(route, /normalizeProgrammingDate\(selectedDate \|\| todayIsoDateCO\(\)\)/);
 });
 
 test('el envío manual saluda por nombre antes de documentos cuando la ventana está abierta', async () => {
