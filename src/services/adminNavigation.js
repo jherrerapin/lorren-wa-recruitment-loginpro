@@ -7,6 +7,7 @@ const WORKER_PORTAL_ACTIVATION_PATH = '/admin/operaciones/portal-activaciones';
 const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
 const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
+const USERS_PROGRAMMING_ACCESS_SCRIPT = '/public/users-programming-access.js';
 const MODULE_MENU_GROUP = 'admin-primary-navigation';
 const RECRUITMENT_ICON = '';
 const OPERATIONS_ICON = '';
@@ -222,6 +223,11 @@ function ensureNavigationStylesheet(html) {
   return html.replace(/<\/head>/i, `  ${stylesheets.join('\n  ')}\n</head>`);
 }
 
+function ensureUsersProgrammingAccessScript(html, path) {
+  if (!path.startsWith(USERS_PATH) || html.includes(USERS_PROGRAMMING_ACCESS_SCRIPT) || !/<\/body>/i.test(html)) return html;
+  return html.replace(/<\/body>/i, `  <script src="${USERS_PROGRAMMING_ACCESS_SCRIPT}" defer></script>\n</body>`);
+}
+
 export function injectAdminModuleNavigation(html, req = {}) {
   if (typeof html !== 'string') return html;
   const path = requestPath(req);
@@ -235,7 +241,8 @@ export function injectAdminModuleNavigation(html, req = {}) {
   const moduleNavbar = buildAdminModuleNavbar(req, originalNav);
   let output = ensureNavigationStylesheet(html);
   output = output.replace(navPattern, moduleNavbar);
-  return stripDuplicateModuleButtons(output, moduleNavbar);
+  output = stripDuplicateModuleButtons(output, moduleNavbar);
+  return ensureUsersProgrammingAccessScript(output, path);
 }
 
 export const ADMIN_MODULE_PATHS = Object.freeze({
