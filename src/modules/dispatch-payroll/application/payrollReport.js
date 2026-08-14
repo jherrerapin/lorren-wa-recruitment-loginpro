@@ -45,6 +45,12 @@ const PAYROLL_MARK_TIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
   minute: '2-digit',
   hour12: true
 });
+const PAYROLL_MARK_TYPE_LABELS = Object.freeze({
+  ARRIVAL: 'Entrada',
+  BREAK_START: 'Inicio de almuerzo',
+  BREAK_END: 'Fin de almuerzo',
+  DEPARTURE: 'Salida'
+});
 
 function normalizeString(value, maxLength = 200) {
   if (typeof value !== 'string') return null;
@@ -520,6 +526,25 @@ function payrollMarkTimeLabel(value, workdayKey) {
   return `${time} · ${localDateKey}`;
 }
 
+function manualMarkCorrections(session, workdayKey) {
+  return (Array.isArray(session?.reviews) ? session.reviews : [])
+    .filter((review) => review?.action === 'WORKDAY_EDIT_MARK')
+    .map((review) => {
+      const metadata = review?.metadata && typeof review.metadata === 'object' ? review.metadata : {};
+      const markType = normalizeString(metadata.markType, 40)?.toUpperCase() || null;
+      const reason = normalizeString(review?.reason, 500);
+      if (!markType || !reason) return null;
+      return {
+        markType,
+        markTypeLabel: PAYROLL_MARK_TYPE_LABELS[markType] || 'Marcación',
+        previousLabel: payrollMarkTimeLabel(metadata.previousCapturedAt, workdayKey),
+        newLabel: payrollMarkTimeLabel(metadata.newCapturedAt, workdayKey),
+        reason
+      };
+    })
+    .filter(Boolean);
+}
+
 function sessionPayrollMarking(session) {
   const workerId = session?.assignment?.workerId || session?.assignment?.worker?.id || null;
   const arrivalAt = dateValue(session?.arrivalReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'ARRIVAL'));
@@ -540,6 +565,7 @@ function sessionPayrollMarking(session) {
     breakStartLabel: payrollMarkTimeLabel(breakStartAt, workdayKey),
     breakEndLabel: payrollMarkTimeLabel(breakEndAt, workdayKey),
     departureLabel: payrollMarkTimeLabel(departureAt, workdayKey),
+    corrections: manualMarkCorrections(session, workdayKey),
     sortAt: arrivalAt?.getTime?.() || 0
   };
 }
@@ -650,6 +676,11 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
       },
       include: {
         marks: { orderBy: { serverReceivedAt: 'asc' } },
+        reviews: {
+          where: { action: 'WORKDAY_EDIT_MARK' },
+          orderBy: { createdAt: 'asc' },
+          select: { action: true, reason: true, metadata: true }
+        },
         assignment: {
           include: {
             worker: true,
