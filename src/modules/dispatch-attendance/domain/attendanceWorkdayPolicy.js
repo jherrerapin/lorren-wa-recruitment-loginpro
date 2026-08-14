@@ -29,6 +29,11 @@ function clampDate(value, minimum, maximum) {
   return value;
 }
 
+export function resolveIncompleteDispatchBreakPenaltyEndAt(breakStartAt) {
+  const startAt = validDate(breakStartAt, 'attendance_work_break_start');
+  return new Date(startAt.getTime() + INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES * 60_000);
+}
+
 export function resolveDispatchEffectiveWorkStart(input = {}) {
   const arrivalAt = validDate(input.arrivalAt, 'attendance_work_arrival');
   const expectedStartAt = optionalDate(input.expectedStartAt, 'attendance_work_expected_start');
