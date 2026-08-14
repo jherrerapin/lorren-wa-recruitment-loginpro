@@ -57,6 +57,8 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(mainActivity, /PresenceBridge\.JS_NAME/);
   assert.match(mainActivity, /\/operaciones\/portal\/sesion-transferencia\/continuar/);
   assert.match(mainActivity, /Uri\.encode\(token\.trim\(\)\)/);
+  assert.match(mainActivity, /path\.equals\(PORTAL_PATH\) \|\| path\.startsWith\(PORTAL_PATH \+ "\/"\)/);
+  assert.match(mainActivity, /isPortalOriginUri/);
   assert.match(mainActivity, /setMixedContentMode\(WebSettings\.MIXED_CONTENT_NEVER_ALLOW\)/);
   assert.match(mainActivity, /setAllowFileAccess\(false\)/);
   assert.match(mainActivity, /setAcceptThirdPartyCookies\(webView, false\)/);
@@ -70,6 +72,10 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
 
   assert.match(nearby, /Strategy\.P2P_STAR/);
   assert.match(nearby, /ENDPOINT_NAME = "LORREN"/);
+  assert.match(nearby, /synchronized void startReady[\s\S]{0,1200}startDiscovery/);
+  assert.match(nearby, /synchronized void startLeaderScan[\s\S]{0,2200}startAdvertising/);
+  assert.match(nearby, /role != Role\.READY/);
+  assert.match(nearby, /role == Role\.LEADER && requestedEndpoints\.add/);
   assert.match(nearby, /"attemptId"/);
   assert.match(nearby, /"serviceRequestId"/);
   assert.match(nearby, /"challenge"/);
