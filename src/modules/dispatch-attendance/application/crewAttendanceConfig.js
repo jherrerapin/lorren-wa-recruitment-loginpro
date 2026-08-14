@@ -448,9 +448,6 @@ export async function saveCrewAttendanceServiceConfiguration(prisma, input = {})
       throw new Error('crew_attendance_operation_not_allowed');
     }
     const activeWorkerIds = new Set((service.assignments || []).map((assignment) => assignment.workerId));
-    if (activeWorkerIds.size > 0 && !requestedLeaderWorkerId) {
-      throw new Error('crew_attendance_leader_required');
-    }
     if (requestedLeaderWorkerId && !activeWorkerIds.has(requestedLeaderWorkerId)) {
       throw new Error('crew_attendance_leader_not_assigned');
     }
