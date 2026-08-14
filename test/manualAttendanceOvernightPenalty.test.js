@@ -39,6 +39,7 @@ function prismaContract() {
   const assignment = overnightAssignment();
   const prisma = {
     dispatchAssignment: {
+      async findMany() { return []; },
       async findUnique() {
         return {
           ...assignment,
@@ -47,6 +48,7 @@ function prismaContract() {
       }
     },
     dispatchAttendanceSession: {
+      async findUnique() { return session ? { ...session } : null; },
       async create({ data }) {
         session = { id: 'session-overnight-penalty', ...data };
         return { ...session };
@@ -58,11 +60,13 @@ function prismaContract() {
       }
     },
     dispatchAttendanceMark: {
+      async findFirst() { return null; },
       async create({ data }) {
         const mark = { id: `mark-${marks.length + 1}`, ...data };
         marks.push(mark);
         return mark;
-      }
+      },
+      async update({ where, data }) { return { id: where.id, ...data }; }
     },
     dispatchAttendanceReview: {
       async create({ data }) {
