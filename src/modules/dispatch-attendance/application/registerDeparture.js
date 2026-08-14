@@ -10,7 +10,8 @@ import {
 import { calculateDispatchWorkedTime } from '../domain/attendanceWorkdayPolicy.js';
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
-  buildDispatchAttendanceExpectedWindow
+  isDispatchDepartureWithinOperationalWindow,
+  resolveDispatchAttendanceOperationalWindow
 } from './registerArrival.js';
 
 const ACTIVE_ASSIGNMENT_STATUS_SET = new Set(ACTIVE_DISPATCH_ASSIGNMENT_STATUSES);
@@ -232,6 +233,14 @@ async function insideTransaction(client, input) {
     throw new Error('attendance_departure_before_arrival');
   }
 
+  const operationalWindow = resolveDispatchAttendanceOperationalWindow(
+    assignment.serviceRequest,
+    session
+  );
+  if (!isDispatchDepartureWithinOperationalWindow(operationalWindow, input.reportedAt)) {
+    throw new Error('attendance_departure_operational_window_invalid');
+  }
+
   const breakMarks = await client.dispatchAttendanceMark.findMany({
     where: {
       attendanceSessionId: session.id,
@@ -265,9 +274,10 @@ async function insideTransaction(client, input) {
   });
   throwRequiredGeofenceRejection(departureValidation);
 
-  const expected = session.expectedStartAt
-    ? { expectedStartAt: session.expectedStartAt, expectedEndAt: session.expectedEndAt }
-    : buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
+  const expected = {
+    expectedStartAt: operationalWindow.expectedStartAt,
+    expectedEndAt: operationalWindow.expectedEndAt
+  };
   const work = calculateDispatchWorkedTime({
     arrivalAt: session.arrivalReportedAt,
     departureAt: input.reportedAt,
