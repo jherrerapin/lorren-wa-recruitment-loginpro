@@ -47,16 +47,18 @@ function normalizeProgrammingContact(entry, { allowAnonymous = false } = {}) {
   if (!entry) return null;
   let name = null;
   let phone = null;
+  let devOnly = false;
   if (typeof entry === 'object') {
     name = normalizeString(entry.name || entry.nombre);
     phone = normalizeDispatchWhatsappPhone(entry.phone || entry.telefono || entry.number || entry.numero);
+    devOnly = entry.devOnly === true || entry.devOnly === 'true';
   } else {
     const [rawName, rawPhone] = String(entry).split('|');
     name = normalizeString(rawPhone ? rawName : null);
     phone = normalizeDispatchWhatsappPhone(rawPhone || rawName);
   }
   if (!phone || (!name && !allowAnonymous)) return null;
-  return { name: name || 'Destinatario', phone };
+  return { name: name || 'Destinatario', phone, devOnly };
 }
 
 function isCompleteProgrammingContact(entry) {
@@ -93,11 +95,23 @@ export function selectProgrammingWhatsappRecipients(configuredRecipients = [], r
   return recipients.filter((recipient) => selectedPhones.has(recipient.phone));
 }
 
+export function filterProgrammingWhatsappRecipientsForRole(configuredRecipients = [], role) {
+  const recipients = normalizeProgrammingWhatsappRecipients(configuredRecipients);
+  return String(role || '').trim().toLowerCase() === 'dev'
+    ? recipients
+    : recipients.filter((recipient) => recipient.devOnly !== true);
+}
+
 export function normalizeProgrammingFormats(value, fallback = ['pdf']) {
   const rawFormats = Array.isArray(value) ? value : String(value || '').split(/[\s,;]+/);
   const formats = [...new Set(rawFormats.map((item) => String(item || '').trim().toLowerCase()).filter((item) => PROGRAMMING_FORMATS.has(item)))];
   if (formats.length) return formats;
   return [...fallback].filter((item) => PROGRAMMING_FORMATS.has(item));
+}
+
+export function normalizeProgrammingUserAccess(value) {
+  const entries = Array.isArray(value) ? value : [];
+  return [...new Set(entries.map((item) => normalizeString(item)).filter(Boolean))];
 }
 
 export async function loadProgrammingWhatsappSettings(prisma) {
@@ -110,12 +124,14 @@ export async function loadProgrammingWhatsappSettings(prisma) {
   if (stored) {
     return {
       recipients: normalizeProgrammingWhatsappRecipients(stored?.metadata?.contacts || []),
-      formats: normalizeProgrammingFormats(stored?.metadata?.formats, ['pdf'])
+      formats: normalizeProgrammingFormats(stored?.metadata?.formats, ['pdf']),
+      userAccess: normalizeProgrammingUserAccess(stored?.metadata?.userAccess)
     };
   }
   return {
     recipients: normalizeProgrammingWhatsappRecipients(process.env.DISPATCH_PROGRAMMING_WHATSAPP_RECIPIENTS, { allowAnonymous: true }),
-    formats: ['pdf']
+    formats: ['pdf'],
+    userAccess: []
   };
 }
 
@@ -123,10 +139,11 @@ export async function loadProgrammingWhatsappRecipients(prisma) {
   return (await loadProgrammingWhatsappSettings(prisma)).recipients;
 }
 
-async function persistProgrammingWhatsappSettings(prisma, { recipients, formats, actor = {}, actorSource }) {
+async function persistProgrammingWhatsappSettings(prisma, { recipients, formats, userAccess, actor = {}, actorSource }) {
   if (!prisma?.devAuditEvent?.create) throw new Error('No está disponible la persistencia de programación.');
   const normalizedRecipients = normalizeProgrammingWhatsappRecipients(recipients);
   const normalizedFormats = normalizeProgrammingFormats(formats, ['pdf']);
+  const normalizedUserAccess = normalizeProgrammingUserAccess(userAccess);
   await prisma.devAuditEvent.create({
     data: {
       entityType: PROGRAMMING_CONTACT_CONFIG_ENTITY,
@@ -137,29 +154,46 @@ async function persistProgrammingWhatsappSettings(prisma, { recipients, formats,
       actorUsername: normalizeString(actor.username),
       actorRole: normalizeString(actor.role) || null,
       actorSource,
-      metadata: { contacts: normalizedRecipients, formats: normalizedFormats }
+      metadata: { contacts: normalizedRecipients, formats: normalizedFormats, userAccess: normalizedUserAccess }
     }
   });
-  return { recipients: normalizedRecipients, formats: normalizedFormats };
+  return { recipients: normalizedRecipients, formats: normalizedFormats, userAccess: normalizedUserAccess };
 }
 
 export async function saveProgrammingWhatsappRecipients(prisma, { recipients = [], actor = {} } = {}) {
   const current = await loadProgrammingWhatsappSettings(prisma);
   return (await persistProgrammingWhatsappSettings(prisma, {
-    recipients, formats: current.formats, actor, actorSource: 'dispatch-programming-contacts'
+    recipients, formats: current.formats, userAccess: current.userAccess, actor, actorSource: 'dispatch-programming-contacts'
   })).recipients;
 }
 
 export async function saveProgrammingWhatsappFormats(prisma, { formats = [], actor = {} } = {}) {
   const current = await loadProgrammingWhatsappSettings(prisma);
   return (await persistProgrammingWhatsappSettings(prisma, {
-    recipients: current.recipients, formats, actor, actorSource: 'dispatch-programming-formats'
+    recipients: current.recipients, formats, userAccess: current.userAccess, actor, actorSource: 'dispatch-programming-formats'
   })).formats;
 }
 
+export async function saveProgrammingUserAccess(prisma, { username, enabled, actor = {} } = {}) {
+  const cleanUsername = normalizeString(username);
+  if (!cleanUsername) throw new Error('Usuario inválido para Programación.');
+  const current = await loadProgrammingWhatsappSettings(prisma);
+  const next = new Set(current.userAccess);
+  if (enabled === true) next.add(cleanUsername);
+  else next.delete(cleanUsername);
+  return (await persistProgrammingWhatsappSettings(prisma, {
+    recipients: current.recipients,
+    formats: current.formats,
+    userAccess: [...next],
+    actor,
+    actorSource: 'dispatch-programming-user-access'
+  })).userAccess;
+}
+
 function userRole(req) { return req.session?.userRole || req.userRole; }
+function requestUsername(req) { return normalizeString(req.session?.username || req.username); }
 function isOpsUser(req) {
-  const username = normalizeString(req.session?.username || req.username);
+  const username = requestUsername(req);
   return Boolean(username?.startsWith('operaciones-despacho'));
 }
 function canUseOps(req) {
@@ -178,10 +212,18 @@ function requireDev(req, res, next) {
   return next();
 }
 function isGeneralRecruiter(req) {
-  return normalizeString(req.session?.username || req.username) === 'reclutador-general';
+  return requestUsername(req) === 'reclutador-general';
+}
+export function resolveProgrammingAccess(settings = {}, source = {}) {
+  const role = normalizeString(source.userRole || source.role)?.toLowerCase();
+  if (role === 'dev') return { allowed: true, reason: 'dev' };
+  const username = normalizeString(source.username);
+  if (!username) return { allowed: false, reason: 'user_not_identified' };
+  const allowed = normalizeProgrammingUserAccess(settings.userAccess).includes(username);
+  return { allowed, reason: allowed ? 'user_permission_enabled' : 'user_permission_disabled' };
 }
 function programmingActor(req) {
-  return { userId: req.session?.userId || req.userId || null, username: req.session?.username || req.username || null, role: userRole(req) };
+  return { userId: req.session?.userId || req.userId || null, username: requestUsername(req), role: userRole(req) };
 }
 
 function buildProgrammingTemplateValues({ selectedDate, summary, includedSummary, managedBy, includePending }) {
@@ -320,6 +362,56 @@ export async function sendProgrammingContactDocuments(prisma, contact, formatSel
 export function dispatchProgrammingNotificationsRouter(prisma) {
   const router = express.Router();
   router.use(requireOps);
+
+  router.get('/programacion/acceso', async (req, res) => {
+    const settings = await loadProgrammingWhatsappSettings(prisma);
+    const access = resolveProgrammingAccess(settings, { userRole: userRole(req), username: requestUsername(req) });
+    if (userRole(req) !== 'dev') return res.json({ ok: true, allowed: access.allowed, isDev: false });
+    const users = prisma?.appUser?.findMany
+      ? await prisma.appUser.findMany({
+        where: {
+          isActive: true,
+          role: 'ADMIN',
+          OR: [{ canAccessDispatch: true }, { canAccessAttendance: true }]
+        },
+        select: { username: true },
+        orderBy: { username: 'asc' }
+      })
+      : [];
+    return res.json({
+      ok: true,
+      allowed: true,
+      isDev: true,
+      users: users.map((user) => ({ username: user.username, enabled: settings.userAccess.includes(user.username) }))
+    });
+  });
+
+  router.post('/programacion/acceso', requireDev, async (req, res) => {
+    const username = normalizeString(req.body?.username);
+    const enabled = req.body?.enabled === true || req.body?.enabled === 'true';
+    if (!username) return res.status(400).json({ ok: false, message: 'Selecciona un usuario válido.' });
+    const target = prisma?.appUser?.findUnique
+      ? await prisma.appUser.findUnique({
+        where: { username },
+        select: { username: true, role: true, isActive: true, canAccessDispatch: true, canAccessAttendance: true }
+      })
+      : null;
+    if (!target || !target.isActive || String(target.role || '').toUpperCase() !== 'ADMIN' || (!target.canAccessDispatch && !target.canAccessAttendance)) {
+      return res.status(400).json({ ok: false, message: 'El usuario no está habilitado para Operaciones / Despacho.' });
+    }
+    const userAccess = await saveProgrammingUserAccess(prisma, { username, enabled, actor: programmingActor(req) });
+    return res.json({ ok: true, username, enabled: userAccess.includes(username) });
+  });
+
+  router.use(async (req, res, next) => {
+    if (!String(req.path || '').startsWith('/programacion')) return next();
+    if (userRole(req) === 'dev') return next();
+    const settings = await loadProgrammingWhatsappSettings(prisma);
+    const access = resolveProgrammingAccess(settings, { userRole: userRole(req), username: requestUsername(req) });
+    if (!access.allowed) return res.status(403).json({ ok: false, message: 'Programación del día no está habilitada para este usuario.' });
+    return next();
+  });
+
   router.get('/programacion.pdf', async (req, res) => {
     const selectedDate = programmingDateFromInput(req.query.fecha || req.query.date);
     const requestId = normalizeString(req.query.requestId);
@@ -357,8 +449,9 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     return res.json({ ok: true, formats: saved });
   });
   router.get('/programacion/destinatarios-envio', async (req, res) => {
-    const recipients = await loadProgrammingWhatsappRecipients(prisma);
-    return res.json({ ok: true, recipients, showRecipientPhones: isGeneralRecruiter(req) });
+    const settings = await loadProgrammingWhatsappSettings(prisma);
+    const recipients = filterProgrammingWhatsappRecipientsForRole(settings.recipients, userRole(req));
+    return res.json({ ok: true, recipients, showRecipientPhones: userRole(req) === 'dev' || isGeneralRecruiter(req) });
   });
   router.get('/programacion/destinatarios', requireDev, async (_req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
@@ -374,8 +467,9 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
   });
   router.post('/programacion/whatsapp', async (req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
-    if (!settings.recipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación.' });
-    const recipients = selectProgrammingWhatsappRecipients(settings.recipients, req.body?.recipientPhones);
+    const eligibleRecipients = filterProgrammingWhatsappRecipientsForRole(settings.recipients, userRole(req));
+    if (!eligibleRecipients.length) return res.status(503).json({ ok: false, message: 'No hay destinatarios configurados para el envío de programación.' });
+    const recipients = selectProgrammingWhatsappRecipients(eligibleRecipients, req.body?.recipientPhones);
     if (!recipients.length) return res.status(400).json({ ok: false, message: 'Selecciona al menos un destinatario configurado.' });
     const selectedDate = programmingDateFromInput(req.body?.fecha || req.body?.date);
     const managedBy = normalizeString(req.body?.managedBy) || 'Julián Herrera';
