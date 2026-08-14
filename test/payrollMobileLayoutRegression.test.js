@@ -50,14 +50,14 @@ test('la tabla de Nómina compacta columnas iniciales y muestra Ver más', async
   assert.match(css, /\.payroll-results-panel td:last-child summary::marker\{font-size:11px/);
 });
 
-test('el panel de filtros usa el mismo ancho de resultados y responde 3-2-1 columnas', async () => {
+test('el panel conserva ancho completo sin estirar los filtros en escritorio', async () => {
   const view = await readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8');
 
   assert.match(view, /\.payroll-filter-panel\{width:100%;max-width:none\}/);
-  assert.doesNotMatch(view, /\.payroll-filter-panel\{max-width:980px\}/);
-  assert.match(view, /\.payroll-filter-stack\{display:grid;grid-template-columns:repeat\(3,minmax\(0,1fr\)\);gap:10px\}/);
+  assert.match(view, /\.payroll-filter-stack\{display:grid;grid-template-columns:repeat\(3,minmax\(220px,320px\)\);justify-content:start;gap:10px\}/);
   assert.match(view, /\.payroll-filter-row\{display:contents\}/);
-  assert.match(view, /@media\(max-width:1050px\)\{\.payroll-filter-stack\{grid-template-columns:repeat\(2,minmax\(0,1fr\)\)\}\}/);
-  assert.match(view, /@media\(max-width:760px\)\{\.payroll-filter-stack\{grid-template-columns:1fr\}/);
+  assert.match(view, /@media\(max-width:1050px\)\{\.payroll-filter-stack\{grid-template-columns:repeat\(2,minmax\(220px,320px\)\)\}\}/);
+  assert.match(view, /@media\(max-width:760px\)\{\.payroll-filter-stack\{grid-template-columns:minmax\(0,1fr\);justify-content:stretch\}/);
   assert.match(view, /\.payroll-filter-actions\{display:flex;justify-content:flex-start;grid-column:1\/-1\}/);
+  assert.doesNotMatch(view, /grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);
 });
