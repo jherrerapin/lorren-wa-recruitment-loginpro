@@ -199,20 +199,6 @@ function sessionMinuteRecords(session, policy, novelties) {
     });
   }
 
-  const storedWorkedMinutes = Number.isInteger(session?.workedMinutes) && session.workedMinutes >= 0
-    ? session.workedMinutes
-    : null;
-  if (storedWorkedMinutes !== null && storedWorkedMinutes !== minutes.length) {
-    pushNovelty(novelties, 'WORKED_MINUTES_MISMATCH', 'El tiempo guardado no coincide con las marcaciones calculadas.', {
-      sessionId: session.id,
-      dateKey: bogotaDateKey(arrivalAt),
-      blocking: true,
-      storedWorkedMinutes,
-      calculatedWorkedMinutes: minutes.length
-    });
-    if (minutes.length > storedWorkedMinutes) minutes = minutes.slice(0, storedWorkedMinutes);
-  }
-
   const validationStatus = String(session?.validationStatus || '').toUpperCase();
   if (!['AUTO_VALIDATED', 'MANUAL_VALIDATED'].includes(validationStatus)) {
     pushNovelty(novelties, 'SESSION_NOT_VALIDATED', 'La jornada todavía no ha sido validada para nómina.', {
