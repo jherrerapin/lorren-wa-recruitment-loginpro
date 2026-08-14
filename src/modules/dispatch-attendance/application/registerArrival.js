@@ -167,7 +167,13 @@ function nextLocalMidnight(expectedStartAt) {
 }
 
 function validWindowEnd(candidate, expectedStartAt) {
-  return candidate && candidate.getTime() > expectedStartAt.getTime() ? candidate : null;
+  if (!candidate) return null;
+  const delta = candidate.getTime() - expectedStartAt.getTime();
+  return delta > 0 && delta <= OPERATIONAL_DAY_MS ? candidate : null;
+}
+
+function latestValidEnd(...values) {
+  return values.filter(Boolean).sort((left, right) => right.getTime() - left.getTime())[0] || null;
 }
 
 export function resolveDispatchAttendanceOperationalWindow(serviceRequest, session = null) {
@@ -193,10 +199,15 @@ export function resolveDispatchAttendanceOperationalWindow(serviceRequest, sessi
     expectedStartAt
   );
   const scheduledExpectedEndAt = validWindowEnd(scheduled?.expectedEndAt || null, expectedStartAt);
+
+  // La sesión conserva la autoridad histórica del fin esperado para cálculos. Para
+  // continuidad operativa se usa el alcance válido más amplio entre sesión y horario,
+  // evitando que un expectedEndAt legado demasiado corto cierre falsamente un nocturno.
   const expectedEndAt = persistedExpectedEndAt || scheduledExpectedEndAt || null;
-  const derivedOperationalEnd = !expectedEndAt;
-  const operationalEndAt = expectedEndAt
-    ? new Date(expectedEndAt.getTime())
+  const operationalExpectedEndAt = latestValidEnd(persistedExpectedEndAt, scheduledExpectedEndAt);
+  const derivedOperationalEnd = !operationalExpectedEndAt;
+  const operationalEndAt = operationalExpectedEndAt
+    ? new Date(operationalExpectedEndAt.getTime())
     : new Date(expectedStartAt.getTime() + DEFAULT_OPERATIONAL_SPAN_MS);
   const serviceDateKey = serviceRequest?.serviceDate
     ? dateKeyInBogota(serviceRequest.serviceDate)
