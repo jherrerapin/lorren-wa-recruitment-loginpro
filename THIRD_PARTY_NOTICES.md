@@ -2,7 +2,7 @@
 
 ## Microsoft Fluent UI Emoji
 
-The module-navigation icons for Recruitment, Operations / Dispatch, and Payroll use adapted SVG geometry from Microsoft Fluent UI Emoji assets (`Busts in silhouette`, `Delivery truck`, and `Receipt`). The geometry is recolored to the LoginPro blue palette and embedded in `src/services/adminNavigation.js` so rendering does not depend on the operating system emoji font.
+The module-navigation icons for Recruitment, Operations / Dispatch, and Payroll use adapted visual representations based on Microsoft Fluent UI Emoji assets (`Busts in silhouette`, `Delivery truck`, and `Receipt`). The approved reference is embedded locally in `src/public/admin-module-navigation.css` so rendering does not depend on the operating system emoji font. Recruitment is recolored to the LoginPro blue palette; Operations / Dispatch and Payroll preserve the multicolor/light appearance of the approved reference.
 
 MIT License
 
