@@ -17,7 +17,10 @@ import {
 } from '../services/dispatchOperationalCoverage.js';
 import { getDispatchWhatsappContactWindowStatus } from '../services/dispatchWhatsappAdminAlerts.js';
 import { normalizeDispatchWhatsappPhone } from '../services/dispatchWhatsappCloudConfig.js';
-import { sendDispatchWhatsappDocumentMessage } from '../services/dispatchWhatsappCloudClient.js';
+import {
+  sendDispatchWhatsappDocumentMessage,
+  sendDispatchWhatsappTextMessage
+} from '../services/dispatchWhatsappCloudClient.js';
 import { sendDispatchWhatsappMediaMessage } from '../services/dispatchWhatsappCloudService.js';
 import { recordDispatchWhatsappMessageAudit } from '../services/dispatchWhatsappMonitor.js';
 
@@ -381,7 +384,29 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     const results = [];
     for (const recipient of recipients) {
       const windowStatus = await getDispatchWhatsappContactWindowStatus({ scope: 'operational', phone: recipient.phone, prismaClient: prisma });
+      let introError = null;
+      if (windowStatus.isOpen) {
+        const dateLabel = String(documentContext.selectedDate || '').split('-').reverse().join('/');
+        const introText = `Hola, ${recipient.name}. Te envío la programación del día ${dateLabel}.`;
+        try {
+          const providerMessageId = await sendDispatchWhatsappTextMessage({ scope: 'operational', phone: recipient.phone, text: introText });
+          if (!providerMessageId) throw new Error('Meta no devolvió el identificador del mensaje introductorio.');
+        } catch (error) {
+          introError = error?.message || 'No se pudo enviar el mensaje introductorio.';
+        }
+      }
       for (const document of documents) {
+        if (introError) {
+          results.push({
+            name: recipient.name,
+            phone: recipient.phone,
+            format: document.format,
+            deliveryMode: 'session',
+            ok: false,
+            message: `No se enviaron los archivos porque falló el mensaje introductorio: ${introError}`
+          });
+          continue;
+        }
         try {
           const result = windowStatus.isOpen
             ? await sendDispatchWhatsappDocumentMessage({ phone: recipient.phone, buffer: document.buffer, filename: document.filename, mimeType: document.mimeType, caption: `Programación operativa — ${documentContext.selectedDate}`, scope: 'operational' })

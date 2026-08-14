@@ -72,7 +72,7 @@
   const title = document.createElement('h2');
   title.textContent = 'Destinatarios de programación';
   const description = document.createElement('p');
-  description.textContent = 'Estos números reciben los reportes. Cuando escriben al WhatsApp operativo, Programación del día respeta el formato guardado: PDF, Excel o ambos.';
+  description.textContent = 'Los checks PDF/Excel se usan para los envíos manuales. Cuando un destinatario pide Programación del día por WhatsApp, se le pregunta si la quiere en PDF, Excel o ambos.';
   headText.append(title, description);
   head.appendChild(headText);
   const recipientsWrap = document.createElement('div');
@@ -100,7 +100,7 @@
     input.maxLength = type === 'tel' ? 20 : 80;
     input.setAttribute(attribute, 'true');
     if (type === 'tel') input.inputMode = 'numeric';
-    input.placeholder = type === 'tel' ? '3001234567' : 'Nombre';
+    input.placeholder = type === 'tel' ? 'Número de WhatsApp' : 'Nombre';
     label.appendChild(input);
     wrap.appendChild(label);
     return { wrap, input };
