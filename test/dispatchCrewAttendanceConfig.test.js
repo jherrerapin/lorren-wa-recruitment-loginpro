@@ -202,6 +202,40 @@ test('una solicitud creada después de habilitar la operación hereda Cuadrilla 
   assert.equal(portalContext.proximityRequired, false);
 });
 
+test('un modo Individual histórico no puede contradecir la herencia de una solicitud creada con cuadrillas habilitadas', async () => {
+  const { prisma, operation, service, events } = testFixture();
+  await saveCrewAttendanceOperationCapability(prisma, {
+    operationPointId: operation.id,
+    allowed: true,
+    ...actor
+  });
+  events.push({
+    id: 'TEST-AUDIT-INDIVIDUAL-LEGACY',
+    entityType: CREW_ATTENDANCE_SERVICE_ENTITY_TYPE,
+    entityId: service.id,
+    action: CREW_ATTENDANCE_CONFIG_ACTION,
+    metadata: { mode: CREW_ATTENDANCE_MODE.INDIVIDUAL, crewLeaderWorkerId: null },
+    createdAt: new Date('2026-08-14T12:02:00.000Z')
+  });
+
+  const loaded = await loadCrewAttendanceConfiguration(prisma, {
+    from: '2026-08-14',
+    to: '2026-08-14'
+  });
+  assert.equal(loaded.services[0].crewEnabledAtCreation, true);
+  assert.equal(loaded.services[0].crewEligible, true);
+  assert.equal(loaded.services[0].mode, CREW_ATTENDANCE_MODE.CREW);
+
+  await assert.rejects(
+    saveCrewAttendanceServiceConfiguration(prisma, {
+      serviceRequestId: service.id,
+      mode: CREW_ATTENDANCE_MODE.INDIVIDUAL,
+      ...actor
+    }),
+    /crew_attendance_service_mode_inherited/
+  );
+});
+
 test('habilitar la operación después no convierte retroactivamente una solicitud antigua en cuadrilla', async () => {
   const { prisma, operation, service, events } = testFixture({
     serviceCreatedAt: '2026-08-14T12:00:30.000Z'
