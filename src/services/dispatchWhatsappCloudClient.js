@@ -170,7 +170,7 @@ export function buildDispatchAssignmentTemplatePayload({ config, assignment, pho
 
 export function buildDispatchWindowCheckTemplatePayload({ config, assignmentId, phone }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
-  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para verificar la ventana de WhatsApp.', 400, 'dispatch_window_check_phone_invalid');
+  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para verificar la ventana de WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
   const safeAssignmentId = String(assignmentId || '').trim();
   if (!safeAssignmentId) throw buildDispatchWhatsappError('No se pudo identificar la asignación para verificar la ventana.', 400, 'dispatch_window_check_assignment_missing');
   return {
