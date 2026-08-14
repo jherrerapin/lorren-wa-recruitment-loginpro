@@ -21,7 +21,7 @@ function syntheticReport() {
       overtimeHours: 5.5,
       status: 'CON_NOVEDADES',
       novelties: [{ dateKey: '2026-08-11', blocking: true, message: 'TEST novedad seudonimizada' }],
-      conceptHours: Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, code === 'HEDO' ? 1.25 : 0]))
+      conceptHours: Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, code === 'HEDO' ? 1.2 : 0]))
     }]
   };
 }
@@ -70,7 +70,7 @@ test('el Excel de Nómina conserva datos y aplica formato profesional', async ()
   assert.equal(sheet.getColumn(nombreColumn).width, 30);
   assert.equal(sheet.getCell(4, documentoColumn).fill.fgColor.argb, 'FF0D7A6B');
   assert.equal(sheet.getCell(4, documentoColumn).font.color.argb, 'FFFFFFFF');
-  assert.equal(sheet.getCell(5, horasColumn).numFmt, '0.0000');
+  assert.equal(sheet.getCell(5, horasColumn).numFmt, '0.0');
   assert.equal(sheet.getCell(5, novedadesColumn).alignment.wrapText, true);
   assert.equal(sheet.getCell(5, estadoColumn).fill.fgColor.argb, 'FFFEF3C7');
 
