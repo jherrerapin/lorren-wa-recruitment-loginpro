@@ -126,7 +126,7 @@ test('coordinación puede materializar 90 minutos de penalización en un turno n
   assert.equal(reviews[0].metadata.workedMinutes, 390);
 });
 
-test('la interfaz mantiene el check de penalización y usa los límites continuos sin ampliar la entrada', () => {
+test('la interfaz conserva límites continuos y no muestra atajos redundantes de fecha', () => {
   const view = fs.readFileSync(
     new URL('../src/views/operacionesAsistencia.ejs', import.meta.url),
     'utf8'
@@ -137,15 +137,18 @@ test('la interfaz mantiene el check de penalización y usa los límites continuo
   );
   const form = view.match(/<form class="review-form" method="post" action="\/admin\/operaciones\/asistencia\/assignments\/<%= row\.assignmentId %>\/manual" data-manual-attendance-form>[\s\S]*?<\/form>/)?.[0] || '';
 
-  assert.match(view, /hasOvernightManualDate/);
   assert.match(form, /name="penalizeMissingBreak"/);
   assert.match(form, /data-manual-break-penalty/);
   assert.match(form, /Penalizar no marcación de almuerzo/);
-  assert.match(form, /Día siguiente · <%= row\.latestManualDateIso %>/);
-  assert.match(form, /data-manual-date="<%= row\.latestManualDateIso %>"/);
   assert.match(form, /name="arrivalReportedAt" min="<%= serviceDateTimeMin %>" max="<%= serviceDateTimeMax %>"/);
   assert.match(form, /name="breakStartAt" min="<%= manualBreakStartMin %>" max="<%= manualBreakStartMax %>"/);
+  assert.match(form, /name="breakEndAt" min="<%= manualBreakEndMin %>" max="<%= manualBreakEndMax %>"/);
   assert.match(form, /name="departureReportedAt" min="<%= manualDepartureMin %>" max="<%= manualDepartureMax %>"/);
+  assert.doesNotMatch(view, /hasOvernightManualDate/);
+  assert.doesNotMatch(view, /manual-day-picker/);
+  assert.doesNotMatch(view, /data-manual-date/);
+  assert.doesNotMatch(view, /Día del turno/);
+  assert.doesNotMatch(view, /Día siguiente/);
   assert.match(view, /breakEnd\.disabled = active/);
   assert.match(view, /breakEndField\.hidden = active/);
   assert.match(view, /breakStart\.required = active/);
