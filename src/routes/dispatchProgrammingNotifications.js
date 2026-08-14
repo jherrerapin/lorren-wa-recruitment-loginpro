@@ -280,16 +280,16 @@ export function buildProgrammingExcelFilename(selectedDate, suffix = 'completa')
   return `programacion-operativa-${suffix}-${selectedDate}.xlsx`.replace(/[^a-zA-Z0-9_.-]/g, '-');
 }
 
-export async function sendProgrammingContactDocuments(prisma, contact, formatSelection) {
-  const selectedDate = todayIsoDateCO();
+export async function sendProgrammingContactDocuments(prisma, contact, formatSelection, selectedDate = todayIsoDateCO()) {
+  const reportDate = normalizeProgrammingDate(selectedDate || todayIsoDateCO());
   const formats = normalizeProgrammingFormats(formatSelection, ['pdf']);
   const documents = [];
   if (formats.includes('pdf')) {
-    const report = await buildProgrammingPdfBuffer(prisma, { fecha: selectedDate, managedBy: 'LoginPro Operaciones', includePending: true });
+    const report = await buildProgrammingPdfBuffer(prisma, { fecha: reportDate, managedBy: 'LoginPro Operaciones', includePending: true });
     documents.push({ format: 'PDF', selectedDate: report.selectedDate, buffer: report.buffer, filename: buildProgrammingFilename(report.selectedDate, 'con-pendientes'), mimeType: 'application/pdf' });
   }
   if (formats.includes('excel')) {
-    const report = await buildProgrammingExcelBuffer(prisma, { selectedDate, managedBy: 'LoginPro Operaciones', includePending: true });
+    const report = await buildProgrammingExcelBuffer(prisma, { selectedDate: reportDate, managedBy: 'LoginPro Operaciones', includePending: true });
     documents.push({ format: 'Excel', selectedDate: report.selectedDate, buffer: report.buffer, filename: buildProgrammingExcelFilename(report.selectedDate, 'con-pendientes'), mimeType: XLSX_MIME_TYPE });
   }
   const sent = [];
