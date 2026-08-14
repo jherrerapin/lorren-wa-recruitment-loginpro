@@ -137,7 +137,21 @@ test('la autoridad deriva 22:00→06:00 para continuidad cuando no existe endTim
   assert.equal(window.derivedOperationalEnd, true);
 });
 
-test('un turno diurno sin endTime termina su la misma fecha operativa y no obtiene X+1', () => {
+test('un expectedEndAt legado corto no anula un horario programado 22:00→06:00', () => {
+  const assignment = overnightAssignment();
+  assignment.attendanceSession.expectedEndAt = new Date('2026-08-14T04:00:00.000Z'); // 13-ago 23:00
+  assignment.serviceRequest.endTime = '06:00';
+  const window = resolveDispatchAttendanceOperationalWindow(
+    assignment.serviceRequest,
+    assignment.attendanceSession
+  );
+
+  assert.equal(window.expectedEndAt.toISOString(), '2026-08-14T04:00:00.000Z');
+  assert.equal(window.operationalEndAt.toISOString(), '2026-08-14T11:00:00.000Z');
+  assert.equal(window.overnight, true);
+});
+
+test('un turno diurno sin endTime termina en la misma fecha operativa y no obtiene X+1', () => {
   const request = {
     serviceDate: SERVICE_DATE,
     startTime: '08:00',
