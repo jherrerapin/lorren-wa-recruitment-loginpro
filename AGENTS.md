@@ -140,6 +140,7 @@ Todo cambio debe seguir este proceso, salvo una emergencia documentada:
 - Usar datos personales reales en pruebas.
 - Desactivar pruebas o controles para conseguir un resultado verde.
 - Declarar una tarea como probada cuando no fue posible ejecutarla.
+- Usar `alert()`, `confirm()` o `prompt()` nativos del navegador, incluyendo `window.*`/`globalThis.*`, en código cliente nuevo o modificado. Las confirmaciones y entradas interactivas deben reutilizar la autoridad visual canónica de Lórren (`src/public/lorren-dialog.js`) y los avisos no bloqueantes deben usar el toast diseñado existente. El legado inventariado en #1023 solo puede reducirse, nunca ampliarse.
 
 ## Base de datos y Prisma
 

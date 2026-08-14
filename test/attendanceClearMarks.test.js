@@ -475,6 +475,7 @@ test('la jornada manual rechaza un almuerzo fuera del orden entrada salida', asy
 
 test('el panel muestra eliminar solo para marcas existentes y repone únicamente correcciones auditadas', () => {
   const ui = readFileSync(new URL('../src/public/attendance-admin-clear-marks.js', import.meta.url), 'utf8');
+  const dialog = readFileSync(new URL('../src/public/lorren-dialog.js', import.meta.url), 'utf8');
   const view = readFileSync(new URL('../src/views/operacionesAsistencia.ejs', import.meta.url), 'utf8');
   const runtime = readFileSync(new URL('../src/public/attendance-admin-runtime.js', import.meta.url), 'utf8');
   const route = readFileSync(new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url), 'utf8');
@@ -491,12 +492,19 @@ test('el panel muestra eliminar solo para marcas existentes y repone únicamente
   assert.match(ui, /Guardar nueva \$\{mark\.label\}/);
   assert.match(ui, /correctionSessionId/);
   assert.match(ui, /pendingCorrectionMarkTypes/);
-  assert.match(ui, /window\.confirm/);
+  assert.doesNotMatch(ui, /window\.confirm/);
+  assert.match(ui, /window\.LorrenDialog/);
+  assert.match(ui, /installDestructiveConfirmation/);
+  assert.match(ui, /form\.requestSubmit\(\)/);
   assert.match(ui, /Las demás marcaciones de la jornada se conservarán/);
   assert.match(ui, /Corregir jornada completa/);
   assert.match(ui, /hiddenInput\('action', 'CLEAR'\)/);
   assert.match(ui, /Eliminar todas las marcaciones/);
+  assert.match(runtime, /lorren-dialog\.js/);
   assert.match(runtime, /attendance-admin-clear-marks\.js/);
+  assert.match(dialog, /role', 'alertdialog'/);
+  assert.match(dialog, /aria-modal/);
+  assert.match(dialog, /data-tone="danger"/);
   assert.match(view, /data-attendance-review-action/);
   assert.match(view, /data-arrival-mark-id/);
   assert.match(view, /data-break-start-mark-id/);

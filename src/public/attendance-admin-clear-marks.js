@@ -62,6 +62,33 @@
     return pending;
   }
 
+  function installDestructiveConfirmation(form, options) {
+    form.addEventListener('submit', async (event) => {
+      if (form.dataset.lorrenDialogConfirmed === 'true') {
+        delete form.dataset.lorrenDialogConfirmed;
+        return;
+      }
+
+      event.preventDefault();
+      const dialog = window.LorrenDialog;
+      if (!dialog || typeof dialog.confirm !== 'function') {
+        console.error('[ATTENDANCE_DIALOG_UNAVAILABLE] No se cargó el diálogo visual de Lórren.');
+        return;
+      }
+
+      const confirmed = await dialog.confirm({
+        tone: 'danger',
+        cancelLabel: 'Cancelar',
+        confirmLabel: 'Sí, eliminar',
+        ...options
+      });
+      if (!confirmed) return;
+
+      form.dataset.lorrenDialogConfirmed = 'true';
+      form.requestSubmit();
+    });
+  }
+
   function deleteMarkForm(mark, markId, reviewAction) {
     const form = correctionForm('DELETE_MARK', mark.markType, reviewAction);
     form.dataset.attendanceDeleteMark = mark.markType;
@@ -73,9 +100,9 @@
     button.textContent = `Eliminar ${mark.label}`;
     form.appendChild(button);
 
-    form.addEventListener('submit', (event) => {
-      const confirmed = window.confirm(`¿Eliminar ${mark.label}? Las demás marcaciones de la jornada se conservarán.`);
-      if (!confirmed) event.preventDefault();
+    installDestructiveConfirmation(form, {
+      title: `Eliminar ${mark.label}`,
+      text: `¿Eliminar ${mark.label}? Las demás marcaciones de la jornada se conservarán.`
     });
     return form;
   }
@@ -196,9 +223,9 @@
     button.textContent = 'Eliminar todas las marcaciones';
     form.appendChild(button);
 
-    form.addEventListener('submit', (event) => {
-      const confirmed = window.confirm('¿Eliminar todas las marcaciones de esta jornada? La asignación y la auditoría se conservarán.');
-      if (!confirmed) event.preventDefault();
+    installDestructiveConfirmation(form, {
+      title: 'Eliminar todas las marcaciones',
+      text: '¿Eliminar todas las marcaciones de esta jornada? La asignación y la auditoría se conservarán.'
     });
 
     details.appendChild(form);
