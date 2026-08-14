@@ -37,3 +37,15 @@ test('la tabla queda contenida en su panel y no expande el viewport móvil', asy
   assert.match(css, /th:first-child,td:first-child\{text-align:left\}/);
   assert.doesNotMatch(css, /th:nth-child\(2\),td:nth-child\(2\)\{text-align:left\}/);
 });
+
+test('la tabla de Nómina compacta columnas iniciales y muestra Ver más', async () => {
+  const css = await readFile(new URL('../src/public/operaciones-nomina.css', import.meta.url), 'utf8');
+
+  assert.match(css, /\.payroll-results-panel th:first-child,\.payroll-results-panel td:first-child\{width:240px;min-width:240px;max-width:240px;white-space:normal\}/);
+  assert.match(css, /\.payroll-results-panel th:nth-child\(2\),\.payroll-results-panel td:nth-child\(2\)\{width:76px;min-width:76px;max-width:76px/);
+  assert.match(css, /\.payroll-results-panel th:nth-child\(3\),\.payroll-results-panel td:nth-child\(3\)\{width:84px;min-width:84px;max-width:84px/);
+  assert.match(css, /\.payroll-results-panel th:nth-child\(4\),\.payroll-results-panel td:nth-child\(4\)\{width:64px;min-width:64px;max-width:64px/);
+  assert.match(css, /\.payroll-results-panel th:last-child::before\{content:'Ver más'/);
+  assert.match(css, /\.payroll-results-panel td:last-child summary::before\{content:'Ver más'/);
+  assert.match(css, /\.payroll-results-panel td:last-child summary::marker\{font-size:11px/);
+});
