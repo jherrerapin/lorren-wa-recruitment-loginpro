@@ -33,7 +33,7 @@ test('el navbar fija los modelos de la referencia sin depender del emoji del sis
   );
 
   assert.doesNotMatch(html, /[👥🚚🧾]/u);
-  assert.match(NAVIGATION_CSS, /\.admin-module-menu\[data-module-menu\] \.admin-module-nav-icon-svg\s*\{[^}]*opacity:\s*0;/s);
+  assert.doesNotMatch(html, /admin-module-nav-icon-svg|<svg\b/i);
 
   for (const key of ['recruitment', 'operations', 'payroll']) {
     assert.ok(moduleMenu(html, key), `debe renderizar el modulo ${key}`);
