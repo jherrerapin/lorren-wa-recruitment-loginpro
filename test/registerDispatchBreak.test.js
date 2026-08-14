@@ -5,6 +5,8 @@ import { registerDispatchBreak } from '../src/modules/dispatch-attendance/applic
 function createFixture(overrides = {}) {
   const session = {
     id: 'session-1',
+    expectedStartAt: new Date('2026-07-25T13:00:00.000Z'),
+    expectedEndAt: new Date('2026-07-25T22:00:00.000Z'),
     arrivalReportedAt: new Date('2026-07-25T13:00:00.000Z'),
     departureReportedAt: null,
     validationStatus: 'AUTO_VALIDATED',
@@ -18,6 +20,9 @@ function createFixture(overrides = {}) {
     status: 'CONFIRMED',
     attendanceSession: session,
     serviceRequest: {
+      serviceDate: new Date('2026-07-25T00:00:00.000Z'),
+      startTime: '08:00',
+      endTime: '17:00',
       operationPoint: {
         attendanceEnabled: true,
         attendanceLatitude: 4.711,
