@@ -542,9 +542,6 @@ export function workerPortalRouter(prisma, options = {}) {
         realScore: req.body?.realScore,
         liveScore: req.body?.liveScore,
         modelVersion: normalizedString(req.body?.modelVersion, 100),
-        consentAccepted: req.body?.consentAccepted === true,
-        actorUsername: `worker-portal:${portalSession.workerId}`,
-        actorRole: 'worker',
         ipAddress: normalizedString(req.ip, 120),
         userAgent: normalizedString(req.get?.('user-agent'), 500)
       }, { now, env: options.env || process.env });
