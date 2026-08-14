@@ -267,7 +267,11 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
       serviceRequestId,
       status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
     },
-    select: { id: true, workerId: true },
+    select: {
+      id: true,
+      workerId: true,
+      attendanceSession: { select: { arrivalReportedAt: true } }
+    },
     orderBy: { createdAt: 'asc' }
   });
   if (!members.some((member) => member.id === assignmentId && member.workerId === leaderWorkerId)) {
@@ -363,6 +367,12 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
     validatedWorkerIds.push(candidate.workerId);
   }
 
+  const validatedSet = new Set(validatedWorkerIds);
+  const notDetectedCount = members.filter((member) => (
+    !validatedSet.has(member.workerId)
+    && !member.attendanceSession?.arrivalReportedAt
+  )).length;
+
   return {
     serviceRequestId,
     assignmentId,
@@ -370,7 +380,7 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
     totalMembers: members.length,
     verifiedProofCount: Math.max(0, validatedWorkerIds.length - 1),
     rejectedProofCount,
-    notDetectedCount: Math.max(0, members.length - validatedWorkerIds.length),
+    notDetectedCount,
     leaderInstallationIdHash: leaderDevice.installationIdHash || null
   };
 }
