@@ -52,7 +52,7 @@
     return finalUrl.href;
   }
 
-  function buildProgrammingPermission({ form, username, enabled, isActive }) {
+  function buildProgrammingPermission({ form, username, enabled }) {
     const dispatchInput = form.querySelector('input[name="canAccessDispatch"]');
     if (!dispatchInput) return;
 
@@ -71,16 +71,13 @@
     input.name = 'canAccessProgramming';
     input.value = 'true';
     input.checked = enabled;
-    input.disabled = !isActive;
     input.setAttribute('data-programming-initial', enabled ? 'true' : 'false');
 
     const text = document.createElement('span');
     const title = document.createElement('strong');
     title.textContent = 'Programación del día';
     const help = document.createElement('small');
-    help.textContent = isActive
-      ? 'DEV habilita o deshabilita este acceso para este usuario. Al activarlo también se habilita Operaciones / Despacho.'
-      : 'Activa primero este usuario para poder habilitar Programación del día.';
+    help.textContent = 'DEV habilita o deshabilita este acceso para este usuario. Al activarlo también se habilita Operaciones / Despacho.';
     text.append(title, help);
     label.append(input, text);
     dispatchLabel.insertAdjacentElement('afterend', label);
@@ -138,13 +135,10 @@
       editableForms.forEach((form) => {
         const username = formUsername(form);
         if (!username) return;
-        const row = form.closest('tr');
-        const isActive = !row?.querySelector('.badge-inactive');
         buildProgrammingPermission({
           form,
           username,
-          enabled: accessByUsername.get(username) === true,
-          isActive
+          enabled: accessByUsername.get(username) === true
         });
       });
     } catch (_error) {
