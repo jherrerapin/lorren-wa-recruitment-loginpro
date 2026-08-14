@@ -93,6 +93,28 @@ export function buildDispatchReportMenuPayload({ phone, name }) {
   };
 }
 
+export function buildDispatchProgrammingFormatMenuPayload({ phone }) {
+  const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
+  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para responder por WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  return {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: normalizedPhone,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: '¿En qué formato deseas recibir la programación del día?' },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: 'dispatch_report:programming_pdf', title: 'PDF' } },
+          { type: 'reply', reply: { id: 'dispatch_report:programming_excel', title: 'Excel' } },
+          { type: 'reply', reply: { id: 'dispatch_report:programming_both', title: 'Ambos' } }
+        ]
+      }
+    }
+  };
+}
+
 export function buildDispatchAssignmentTemplatePayload({ config, assignment, phone }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
   if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
@@ -251,6 +273,23 @@ export async function sendDispatchWhatsappReportMenu({ scope = 'operational', ph
     const response = await postGraph(config, buildDispatchReportMenuPayload({ phone, name }), axiosClient);
     const providerMessageId = providerMessageIdFromResponse(response);
     if (!providerMessageId) throw buildDispatchWhatsappError('Meta no devolvió el identificador del menú.', 502, 'dispatch_whatsapp_provider_message_missing');
+    const now = new Date().toISOString();
+    setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
+    return { phone: normalizeDispatchWhatsappPhone(phone), providerMessageId, provider: 'META_CLOUD_API' };
+  } catch (error) {
+    const message = error?.code?.startsWith?.('dispatch_') ? error.message : dispatchWhatsappProviderErrorMessage(error);
+    setDispatchWhatsappRuntimeState(scope, { lastError: message });
+    if (error?.statusCode) throw error;
+    throw buildDispatchWhatsappError(message, 502, 'dispatch_whatsapp_provider_error');
+  }
+}
+
+export async function sendDispatchWhatsappProgrammingFormatMenu({ scope = 'operational', phone, axiosClient = axios } = {}) {
+  const config = ensureDispatchWhatsappConfigured(scope);
+  try {
+    const response = await postGraph(config, buildDispatchProgrammingFormatMenuPayload({ phone }), axiosClient);
+    const providerMessageId = providerMessageIdFromResponse(response);
+    if (!providerMessageId) throw buildDispatchWhatsappError('Meta no devolvió el identificador del selector de formato.', 502, 'dispatch_whatsapp_provider_message_missing');
     const now = new Date().toISOString();
     setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
     return { phone: normalizeDispatchWhatsappPhone(phone), providerMessageId, provider: 'META_CLOUD_API' };
