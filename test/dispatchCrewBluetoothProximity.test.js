@@ -130,7 +130,7 @@ test('el contexto del portal deriva el trabajador de la sesión y expone solo el
   assert.match(route, /operationCharacteristicUuid: CREW_BLUETOOTH_OPERATION_CHARACTERISTIC_UUID/);
 });
 
-test('Web Bluetooth solo actúa como preflight y no reemplaza GPS ni biometría', async () => {
+test('Web Bluetooth solo actúa como preflight online y no reemplaza GPS, biometría ni contingencia offline', async () => {
   const [loader, flow, route] = await Promise.all([
     readFile(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/public/worker-portal-biometric-flow.js', import.meta.url), 'utf8'),
@@ -145,6 +145,7 @@ test('Web Bluetooth solo actúa como preflight y no reemplaza GPS ni biometría'
   assert.match(loader, /new TextDecoder\('utf-8'\)\.decode\(value\)\.trim\(\)/);
   assert.match(loader, /observedOperationPointId !== context\.operationPointId/);
   assert.match(loader, /requestDevice se invoca desde el click original/);
+  assert.match(loader, /if \(!button \|\| button\.disabled \|\| !navigator\.onLine\) return;/);
   assert.doesNotMatch(loader, /watchAdvertisements|\brssi\b|\bRSSI\b/);
 
   assert.match(flow, /navigator\.geolocation\.getCurrentPosition/);
@@ -152,4 +153,6 @@ test('Web Bluetooth solo actúa como preflight y no reemplaza GPS ni biometría'
   assert.match(flow, /form\.set\('captureMode', 'ONLINE_WEB'\)/);
   assert.match(route, /requireStrictAttendanceLocation/);
   assert.match(route, /biometric_verification_required/);
+  assert.match(route, /captureMode === OFFLINE_WEB_CAPTURE_MODE/);
+  assert.match(route, /requiresReview: captureMode === OFFLINE_WEB_CAPTURE_MODE/);
 });
