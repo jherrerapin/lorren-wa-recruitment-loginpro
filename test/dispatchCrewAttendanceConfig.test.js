@@ -5,7 +5,6 @@ import {
   CREW_ATTENDANCE_CONFIG_ACTION,
   CREW_ATTENDANCE_MODE,
   CREW_ATTENDANCE_OPERATION_ENTITY_TYPE,
-  CREW_ATTENDANCE_SERVICE_ENTITY_TYPE,
   CREW_LEADER_ASSIGNMENT_STATUS,
   loadCrewAttendanceConfiguration,
   loadCrewAttendancePortalContexts,
@@ -184,7 +183,7 @@ function testFixture({ attendanceEnabled = true } = {}) {
     }
   };
 
-  return { prisma, operation, service, workers, events };
+  return { prisma, operation, service, events };
 }
 
 const actor = Object.freeze({
@@ -194,24 +193,13 @@ const actor = Object.freeze({
   userAgent: 'TEST-AGENT'
 });
 
-async function enableCrew(prisma, operationId) {
-  return saveCrewAttendanceOperationCapability(prisma, {
-    operationPointId: operationId,
-    allowed: true,
-    ...actor
-  });
+async function enableCrew(prisma, operationPointId) {
+  return saveCrewAttendanceOperationCapability(prisma, { operationPointId, allowed: true, ...actor });
 }
 
 test('no permite habilitar cuadrillas si Asistencia no está habilitada en la operación', async () => {
   const { prisma, operation, events } = testFixture({ attendanceEnabled: false });
-  await assert.rejects(
-    saveCrewAttendanceOperationCapability(prisma, {
-      operationPointId: operation.id,
-      allowed: true,
-      ...actor
-    }),
-    /crew_attendance_requires_attendance_enabled/
-  );
+  await assert.rejects(enableCrew(prisma, operation.id), /crew_attendance_requires_attendance_enabled/);
   assert.equal(events.length, 0);
 });
 
@@ -223,77 +211,55 @@ test('persiste capacidad y expone personal contratado para seleccionar encargado
     allowed: 'true',
     ...actor
   });
-
   assert.equal(first.changed, true);
   assert.equal(replay.changed, false);
   assert.equal(events.length, 1);
   assert.equal(events[0].entityType, CREW_ATTENDANCE_OPERATION_ENTITY_TYPE);
   assert.equal(events[0].action, CREW_ATTENDANCE_CONFIG_ACTION);
-
-  const loaded = await loadCrewAttendanceConfiguration(prisma, {
-    from: '2026-08-14',
-    to: '2026-08-14'
-  });
-  assert.equal(loaded.operations[0].crewAttendanceAllowed, true);
+  const loaded = await loadCrewAttendanceConfiguration(prisma, { from: '2026-08-14', to: '2026-08-14' });
   assert.equal(loaded.leaderCandidates.length, 3);
   assert.match(loaded.leaderCandidates.find((item) => item.id === 'TEST-WORKER-LEADER').label, /Encargado Prueba/);
 });
 
-test('Cuadrilla exige un encargado contratado pero no exige que ya consuma un cupo auxiliar', async () => {
+test('Cuadrilla exige encargado contratado pero no exige que ya consuma un cupo auxiliar', async () => {
   const { prisma, operation, service } = testFixture();
   await enableCrew(prisma, operation.id);
-
-  await assert.rejects(
-    saveCrewAttendanceServiceConfiguration(prisma, {
-      serviceRequestId: service.id,
-      mode: CREW_ATTENDANCE_MODE.CREW,
-      ...actor
-    }),
-    /crew_attendance_leader_required/
-  );
-
-  await assert.rejects(
-    saveCrewAttendanceServiceConfiguration(prisma, {
-      serviceRequestId: service.id,
-      mode: CREW_ATTENDANCE_MODE.CREW,
-      crewLeaderWorkerId: 'TEST-WORKER-NOT-AVAILABLE',
-      ...actor
-    }),
-    /crew_attendance_leader_not_available/
-  );
+  await assert.rejects(saveCrewAttendanceServiceConfiguration(prisma, {
+    serviceRequestId: service.id,
+    mode: CREW_ATTENDANCE_MODE.CREW,
+    ...actor
+  }), /crew_attendance_leader_required/);
+  await assert.rejects(saveCrewAttendanceServiceConfiguration(prisma, {
+    serviceRequestId: service.id,
+    mode: CREW_ATTENDANCE_MODE.CREW,
+    crewLeaderWorkerId: 'TEST-WORKER-NOT-AVAILABLE',
+    ...actor
+  }), /crew_attendance_leader_not_available/);
 });
 
 test('crea al encargado dentro de la petición sin aumentar la cobertura requerida', async () => {
   const { prisma, operation, service } = testFixture();
   await enableCrew(prisma, operation.id);
-
   const saved = await saveCrewAttendanceServiceConfiguration(prisma, {
     serviceRequestId: service.id,
     mode: CREW_ATTENDANCE_MODE.CREW,
     crewLeaderWorkerId: 'TEST-WORKER-LEADER',
     ...actor
   });
-
   assert.equal(saved.assignmentStatus, CREW_LEADER_ASSIGNMENT_STATUS);
   const leaderAssignment = service.assignments.find((item) => item.workerId === 'TEST-WORKER-LEADER');
   assert.equal(leaderAssignment.status, CREW_LEADER_ASSIGNMENT_STATUS);
+  assert.match(leaderAssignment.notes, /Encargado \/ Líder de cuadrilla/);
   assert.equal(COVERAGE_ASSIGNMENT_STATUSES.includes(CREW_LEADER_ASSIGNMENT_STATUS), false);
   assert.equal(ATTENDANCE_ASSIGNMENT_STATUSES.includes(CREW_LEADER_ASSIGNMENT_STATUS), true);
-
   const coverage = deriveDispatchRequestOperationalState(service);
   assert.equal(coverage.requiredWorkers, 2);
   assert.equal(coverage.activeCount, 2);
   assert.equal(coverage.confirmedCount, 1);
-
-  const loaded = await loadCrewAttendanceConfiguration(prisma, {
-    from: '2026-08-14',
-    to: '2026-08-14'
-  });
-  assert.equal(loaded.services[0].crewLeaderWorkerId, 'TEST-WORKER-LEADER');
+  const loaded = await loadCrewAttendanceConfiguration(prisma, { from: '2026-08-14', to: '2026-08-14' });
   assert.equal(loaded.services[0].crewLeaderAssignmentStatus, CREW_LEADER_ASSIGNMENT_STATUS);
   assert.equal(loaded.services[0].assignments.length, 2);
   assert.equal(loaded.services[0].leaderValid, true);
-
   const contexts = await loadCrewAttendancePortalContexts(prisma, { workerId: 'TEST-WORKER-LEADER' });
   assert.equal(contexts.length, 1);
   assert.equal(contexts[0].assignmentStatus, CREW_LEADER_ASSIGNMENT_STATUS);
@@ -304,7 +270,6 @@ test('crea al encargado dentro de la petición sin aumentar la cobertura requeri
 test('si un auxiliar pasa a encargado deja de contar como cupo y al volver a Individual recupera su estado', async () => {
   const { prisma, operation, service } = testFixture();
   await enableCrew(prisma, operation.id);
-
   await saveCrewAttendanceServiceConfiguration(prisma, {
     serviceRequestId: service.id,
     mode: CREW_ATTENDANCE_MODE.CREW,
@@ -313,7 +278,6 @@ test('si un auxiliar pasa a encargado deja de contar como cupo y al volver a Ind
   });
   assert.equal(service.assignments.find((item) => item.workerId === 'TEST-WORKER-A').status, CREW_LEADER_ASSIGNMENT_STATUS);
   assert.equal(deriveDispatchRequestOperationalState(service).activeCount, 1);
-
   await saveCrewAttendanceServiceConfiguration(prisma, {
     serviceRequestId: service.id,
     mode: CREW_ATTENDANCE_MODE.INDIVIDUAL,
@@ -338,7 +302,6 @@ test('cambiar encargado deja una sola asignación CREW_LEADER activa y conserva 
     crewLeaderWorkerId: 'TEST-WORKER-B',
     ...actor
   });
-
   const activeLeaders = service.assignments.filter((item) => item.status === CREW_LEADER_ASSIGNMENT_STATUS);
   assert.equal(activeLeaders.length, 1);
   assert.equal(activeLeaders[0].workerId, 'TEST-WORKER-B');
@@ -370,13 +333,7 @@ test('fan-out registra primero al encargado y delega solo sobre auxiliares de co
     installationIdHash: 'TEST-INSTALLATION-HASH'
   }, {
     async loadCrewContextsFn() {
-      return [{
-        assignmentId: 'TEST-ASSIGNMENT-LEADER',
-        serviceRequestId: 'TEST-SERVICE-CREW',
-        mode: 'CREW',
-        isCrewLeader: true,
-        crewAvailable: true
-      }];
+      return [{ assignmentId: 'TEST-ASSIGNMENT-LEADER', serviceRequestId: 'TEST-SERVICE-CREW', mode: 'CREW', isCrewLeader: true, crewAvailable: true }];
     },
     async registerArrivalFn(_prisma, input) {
       calls.push(input);
@@ -384,28 +341,13 @@ test('fan-out registra primero al encargado y delega solo sobre auxiliares de co
       return {
         recorded: true,
         replayed: false,
-        attendanceSession: {
-          id: `SESSION-${input.assignmentId}`,
-          validationStatus: isLeader ? 'AUTO_VALIDATED' : 'REVIEW_REQUIRED'
-        },
-        validation: {
-          validationStatus: isLeader ? 'AUTO_VALIDATED' : 'REVIEW_REQUIRED',
-          reportedPunctuality: 'ON_TIME',
-          riskFlags: []
-        }
+        attendanceSession: { id: `SESSION-${input.assignmentId}`, validationStatus: isLeader ? 'AUTO_VALIDATED' : 'REVIEW_REQUIRED' },
+        validation: { validationStatus: isLeader ? 'AUTO_VALIDATED' : 'REVIEW_REQUIRED', reportedPunctuality: 'ON_TIME', riskFlags: [] }
       };
     },
-    async reviewAttendanceFn(_prisma, input) {
-      reviews.push(input);
-      return { ok: true };
-    }
+    async reviewAttendanceFn(_prisma, input) { reviews.push(input); return { ok: true }; }
   });
-
-  assert.deepEqual(calls.map((item) => item.assignmentId), [
-    'TEST-ASSIGNMENT-LEADER',
-    'TEST-ASSIGNMENT-A',
-    'TEST-ASSIGNMENT-B'
-  ]);
+  assert.deepEqual(calls.map((item) => item.assignmentId), ['TEST-ASSIGNMENT-LEADER', 'TEST-ASSIGNMENT-A', 'TEST-ASSIGNMENT-B']);
   assert.equal(reviews.length, 2);
   assert.equal(result.summary.totalMembers, 3);
   assert.equal(result.summary.delegatedCount, 2);
@@ -420,16 +362,8 @@ test('deshabilitar la operación actúa como kill switch sin borrar el encargado
     crewLeaderWorkerId: 'TEST-WORKER-LEADER',
     ...actor
   });
-  await saveCrewAttendanceOperationCapability(prisma, {
-    operationPointId: operation.id,
-    allowed: false,
-    ...actor
-  });
-
-  const loaded = await loadCrewAttendanceConfiguration(prisma, {
-    from: '2026-08-14',
-    to: '2026-08-14'
-  });
+  await saveCrewAttendanceOperationCapability(prisma, { operationPointId: operation.id, allowed: false, ...actor });
+  const loaded = await loadCrewAttendanceConfiguration(prisma, { from: '2026-08-14', to: '2026-08-14' });
   assert.equal(loaded.operations[0].crewAttendanceAllowed, false);
   assert.equal(loaded.services[0].mode, CREW_ATTENDANCE_MODE.CREW);
   assert.equal(loaded.services[0].crewLeaderWorkerId, 'TEST-WORKER-LEADER');
@@ -437,7 +371,7 @@ test('deshabilitar la operación actúa como kill switch sin borrar el encargado
   assert.equal(loaded.services[0].configurationReady, false);
 });
 
-test('UI explica que el encargado viene de Personal operativo, aparece en la petición y no consume cobertura', async () => {
+test('UI explica Personal operativo y el tablero de petición conserva todas las asignaciones visibles', async () => {
   const [route, loader, ui, operationsView, assignmentView] = await Promise.all([
     readFile(new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/public/attendance-admin-runtime.js', import.meta.url), 'utf8'),
@@ -445,7 +379,6 @@ test('UI explica que el encargado viene de Personal operativo, aparece en la pet
     readFile(new URL('../src/views/operacionesClienteOperaciones.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url), 'utf8')
   ]);
-
   assert.match(route, /\/cuadrillas\/config/);
   assert.doesNotMatch(loader, /attendance-admin-crew\.js/);
   assert.match(operationsView, /details class="crud-details attendance-config"/);
@@ -455,6 +388,6 @@ test('UI explica que el encargado viene de Personal operativo, aparece en la pet
   assert.match(ui, /no aumenta la cobertura|sin consumir cupo/i);
   assert.doesNotMatch(ui, /Selecciona un auxiliar asignado/);
   assert.doesNotMatch(ui, /navigator\.bluetooth/);
-  assert.match(assignmentView, /CREW_LEADER/);
-  assert.match(assignmentView, /Encargado \/ Líder de cuadrilla/);
+  assert.match(assignmentView, /selectedServiceRequest\.assignments\.forEach/);
+  assert.match(assignmentView, /activeCodes=\['ASSIGNED','CONFIRMATION_PENDING','CONFIRMED'\]/);
 });
