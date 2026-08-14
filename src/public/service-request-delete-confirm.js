@@ -136,12 +136,12 @@
 (() => {
   const CONFIG_PATH = '/admin/operaciones/asistencia/cuadrillas/config';
   const MODE_CREW = 'CREW';
-  const PANEL_SELECTOR = '.assignment-body';
   let loadSequence = 0;
   let saveInProgress = false;
+  let lastBoardSignature = '';
 
   function assignmentPageActive() {
-    return Boolean(document.querySelector('#selectedRequestSummary') && document.querySelector(PANEL_SELECTOR));
+    return Boolean(document.querySelector('#selectedRequestSummary') && document.querySelector('.assignment-body'));
   }
 
   function showCrewMessage(message) {
@@ -171,10 +171,19 @@
   function selectedRequestContext() {
     const summary = document.getElementById('selectedRequestSummary');
     return {
-      summary,
       serviceRequestId: summary?.dataset.serviceRequestId || '',
       serviceDate: summary?.dataset.requestDate || ''
     };
+  }
+
+  function boardSignature() {
+    if (!assignmentPageActive()) return '';
+    const { serviceRequestId, serviceDate } = selectedRequestContext();
+    const assignments = [...document.querySelectorAll('.assigned-card')].map((card) => {
+      const status = card.querySelector('.assignment-status-line')?.textContent || '';
+      return `${card.dataset.workerId || ''}:${status.trim()}`;
+    }).join('|');
+    return `${serviceRequestId}:${serviceDate}:${assignments}`;
   }
 
   function clearCrewDecorations() {
@@ -207,8 +216,7 @@
   async function saveLeader(service, workerId, selected) {
     if (saveInProgress) return;
     saveInProgress = true;
-    const controls = [...document.querySelectorAll('[data-crew-leader-control] input')];
-    controls.forEach((input) => { input.disabled = true; });
+    document.querySelectorAll('[data-crew-leader-control] input').forEach((input) => { input.disabled = true; });
     try {
       await requestJson(`/admin/operaciones/asistencia/cuadrillas/servicios/${encodeURIComponent(service.id)}`, {
         method: 'POST',
@@ -219,9 +227,11 @@
         })
       });
       showCrewMessage(selected ? 'Encargado de cuadrilla actualizado.' : 'El turno quedó sin encargado. Marca otra persona antes de la llegada.');
+      lastBoardSignature = '';
       await loadCrewLeaderControls();
     } catch (error) {
       showCrewMessage(error.message || 'No fue posible actualizar el encargado.');
+      lastBoardSignature = '';
       await loadCrewLeaderControls();
     } finally {
       saveInProgress = false;
@@ -279,7 +289,10 @@
   }
 
   async function loadCrewLeaderControls() {
-    if (!assignmentPageActive()) return;
+    if (!assignmentPageActive()) {
+      clearCrewDecorations();
+      return;
+    }
     const { serviceRequestId, serviceDate } = selectedRequestContext();
     if (!serviceRequestId || !serviceDate) {
       clearCrewDecorations();
@@ -292,26 +305,30 @@
       if (sequence !== loadSequence) return;
       const service = (configuration.services || []).find((item) => item.id === serviceRequestId) || null;
       renderCrewLeaderControls(service);
+      lastBoardSignature = boardSignature();
     } catch (error) {
       if (sequence !== loadSequence) return;
       clearCrewDecorations();
+      lastBoardSignature = boardSignature();
       if (error.status !== 403) showCrewMessage(error.message || 'No fue posible cargar la configuración de cuadrilla.');
     }
   }
 
-  function observeAssignmentBoard() {
-    if (!assignmentPageActive()) return;
-    installCrewStyles();
+  function syncWhenBoardChanges() {
+    const signature = boardSignature();
+    if (!signature || signature === lastBoardSignature || saveInProgress) return;
+    lastBoardSignature = signature;
     loadCrewLeaderControls();
-    const body = document.querySelector(PANEL_SELECTOR);
-    if (!body) return;
-    const observer = new MutationObserver(() => {
-      window.clearTimeout(observeAssignmentBoard._timer);
-      observeAssignmentBoard._timer = window.setTimeout(loadCrewLeaderControls, 60);
-    });
-    observer.observe(body, { childList: true, subtree: true });
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', observeAssignmentBoard, { once: true });
-  else observeAssignmentBoard();
+  function initializeCrewLeaderAssignment() {
+    if (!assignmentPageActive()) return;
+    installCrewStyles();
+    lastBoardSignature = '';
+    syncWhenBoardChanges();
+    window.setInterval(syncWhenBoardChanges, 500);
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeCrewLeaderAssignment, { once: true });
+  else initializeCrewLeaderAssignment();
 })();
