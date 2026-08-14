@@ -181,6 +181,13 @@ export function resolveDispatchAttendanceOperationalWindow(serviceRequest, sessi
   const expectedStartAt = persistedExpectedStartAt || scheduled?.expectedStartAt || null;
   if (!expectedStartAt) throw new Error('attendance_expected_start_required');
 
+  const persistedArrivalAt = optionalTimestamp(
+    session?.arrivalReportedAt,
+    'attendance_session_arrival_reported_at'
+  );
+  const recordingOpensAt = persistedArrivalAt && persistedArrivalAt.getTime() < expectedStartAt.getTime()
+    ? persistedArrivalAt
+    : expectedStartAt;
   const persistedExpectedEndAt = validWindowEnd(
     optionalTimestamp(session?.expectedEndAt, 'attendance_session_expected_end_at'),
     expectedStartAt
@@ -209,6 +216,7 @@ export function resolveDispatchAttendanceOperationalWindow(serviceRequest, sessi
   return {
     expectedStartAt,
     expectedEndAt,
+    recordingOpensAt,
     operationalEndAt,
     continuityClosesAt,
     serviceDateKey,
@@ -225,15 +233,15 @@ function momentInside(value, startAt, exclusiveEndAt) {
 }
 
 export function isDispatchBreakStartWithinOperationalWindow(window, value) {
-  return momentInside(value, window?.expectedStartAt, window?.operationalEndAt);
+  return momentInside(value, window?.recordingOpensAt || window?.expectedStartAt, window?.operationalEndAt);
 }
 
 export function isDispatchBreakEndWithinOperationalWindow(window, value) {
-  return momentInside(value, window?.expectedStartAt, window?.continuityClosesAt);
+  return momentInside(value, window?.recordingOpensAt || window?.expectedStartAt, window?.continuityClosesAt);
 }
 
 export function isDispatchDepartureWithinOperationalWindow(window, value) {
-  return momentInside(value, window?.expectedStartAt, window?.continuityClosesAt);
+  return momentInside(value, window?.recordingOpensAt || window?.expectedStartAt, window?.continuityClosesAt);
 }
 
 export function getDispatchArrivalWindowState(input = {}) {
