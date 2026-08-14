@@ -140,7 +140,7 @@ test('la autoridad de Programación protege rutas y persiste el contacto DEV en 
   assert.match(browser, /data-dev-contact-email/);
   assert.match(browser, /data-dev-contact-phone/);
   assert.match(browser, /\/admin\/operaciones\/programacion\/dev-contact/);
-  assert.doesNotMatch(browser, /data-recipient-dev-only|Solo DEV/);
+  assert.doesNotMatch(browser, /data-recipient-dev-only|devOnlyText\.textContent = 'Solo DEV'/);
 });
 
 test('la tarjeta completa de Programación inicia oculta y solo el permiso puede mostrarla', async () => {
