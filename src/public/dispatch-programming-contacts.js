@@ -5,7 +5,13 @@
   const programmingCard = document.getElementById('programmingCard') || document.querySelector('[aria-label="Programación del día"]');
   const formats = document.querySelector('.programming-formats');
   if (!programmingCard || !formats) return;
-  programmingCard.hidden = true;
+
+  function setProgrammingCardVisible(visible) {
+    programmingCard.hidden = !visible;
+    programmingCard.style.display = visible ? '' : 'none';
+  }
+
+  setProgrammingCardVisible(false);
   const toast = document.getElementById('asyncToast');
   const sendPdfCheckbox = document.getElementById('sendProgramPdf');
   const sendExcelCheckbox = document.getElementById('sendProgramExcel');
@@ -203,12 +209,12 @@
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo validar el acceso a Programación.');
       if (!data.allowed) return;
-      programmingCard.hidden = false;
+      setProgrammingCardVisible(true);
       await loadFormats();
       if (typeof window.loadProgrammingRecipients === 'function') window.loadProgrammingRecipients();
       if (isDev && data.isDev) setupDevRecipients();
     } catch (error) {
-      programmingCard.hidden = true;
+      setProgrammingCardVisible(false);
       if (isDev) showMessage(error.message || 'No se pudo validar el acceso a Programación.');
     }
   }
