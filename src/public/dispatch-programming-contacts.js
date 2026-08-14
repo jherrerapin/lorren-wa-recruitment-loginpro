@@ -71,16 +71,55 @@
 
   function setupDevRecipients() {
     if (!isDev || document.getElementById('programRecipients')) return;
+
+    function field(labelText, type, attribute, placeholder) {
+      const wrap = document.createElement('div');
+      const label = document.createElement('label');
+      label.textContent = labelText;
+      const input = document.createElement('input');
+      input.type = type;
+      input.maxLength = type === 'tel' ? 20 : 120;
+      input.setAttribute(attribute, 'true');
+      if (type === 'tel') input.inputMode = 'numeric';
+      input.placeholder = placeholder || (type === 'tel' ? 'Número de WhatsApp' : 'Nombre');
+      label.appendChild(input);
+      wrap.appendChild(label);
+      return { wrap, input };
+    }
+
+    const devSection = document.createElement('div');
+    devSection.className = 'programming-card';
+    devSection.setAttribute('aria-label', 'Contacto privado de DEV para programación');
+    const devHead = document.createElement('div');
+    devHead.className = 'programming-head';
+    const devHeadText = document.createElement('div');
+    const devTitle = document.createElement('h2');
+    devTitle.textContent = 'Contacto DEV para Programación';
+    const devDescription = document.createElement('p');
+    devDescription.textContent = 'Solo DEV puede ver y editar estos datos. Si configuras un WhatsApp, tu contacto aparecerá únicamente en tu lista de destinatarios del informe.';
+    devHeadText.append(devTitle, devDescription);
+    devHead.appendChild(devHeadText);
+    const devRow = document.createElement('div');
+    devRow.className = 'manager-row';
+    const devEmail = field('Correo DEV', 'email', 'data-dev-contact-email', 'correo@ejemplo.com');
+    const devPhone = field('WhatsApp DEV', 'tel', 'data-dev-contact-phone', 'Número de WhatsApp');
+    const devSave = document.createElement('button');
+    devSave.className = 'btn btn-primary';
+    devSave.type = 'button';
+    devSave.textContent = 'Guardar contacto DEV';
+    devRow.append(devEmail.wrap, devPhone.wrap, devSave);
+    devSection.append(devHead, devRow);
+
     const section = document.createElement('div');
     section.className = 'programming-card';
-    section.setAttribute('aria-label', 'Destinatarios de programación configurables por DEV');
+    section.setAttribute('aria-label', 'Destinatarios generales de programación configurables por DEV');
     const head = document.createElement('div');
     head.className = 'programming-head';
     const headText = document.createElement('div');
     const title = document.createElement('h2');
     title.textContent = 'Destinatarios de programación';
     const description = document.createElement('p');
-    description.textContent = 'Los checks PDF/Excel se usan para los envíos manuales. Cuando un destinatario pide Programación del día por WhatsApp, se le pregunta si la quiere en PDF, Excel o ambos.';
+    description.textContent = 'Estos destinatarios son generales. El contacto privado de DEV se configura aparte y nunca se expone a otros usuarios.';
     headText.append(title, description);
     head.appendChild(headText);
     const recipientsWrap = document.createElement('div');
@@ -97,22 +136,9 @@
     saveButton.textContent = 'Guardar destinatarios';
     actions.append(addButton, saveButton);
     section.append(head, recipientsWrap, actions);
-    formats.insertAdjacentElement('afterend', section);
+    formats.insertAdjacentElement('afterend', devSection);
+    devSection.insertAdjacentElement('afterend', section);
 
-    function field(labelText, type, attribute) {
-      const wrap = document.createElement('div');
-      const label = document.createElement('label');
-      label.textContent = labelText;
-      const input = document.createElement('input');
-      input.type = type;
-      input.maxLength = type === 'tel' ? 20 : 80;
-      input.setAttribute(attribute, 'true');
-      if (type === 'tel') input.inputMode = 'numeric';
-      input.placeholder = type === 'tel' ? 'Número de WhatsApp' : 'Nombre';
-      label.appendChild(input);
-      wrap.appendChild(label);
-      return { wrap, input };
-    }
     function addRecipientRow(recipient = {}) {
       const row = document.createElement('div');
       row.className = 'manager-row';
@@ -120,27 +146,6 @@
       const phone = field('Teléfono', 'tel', 'data-recipient-phone');
       name.input.value = recipient.name || '';
       phone.input.value = recipient.phone || '';
-      const controls = document.createElement('div');
-      controls.className = 'programming-actions';
-      const devOnlyLabel = document.createElement('label');
-      devOnlyLabel.style.display = 'inline-flex';
-      devOnlyLabel.style.alignItems = 'center';
-      devOnlyLabel.style.gap = '6px';
-      devOnlyLabel.style.margin = '0';
-      const devOnly = document.createElement('input');
-      devOnly.type = 'checkbox';
-      devOnly.checked = recipient.devOnly === true;
-      devOnly.setAttribute('data-recipient-dev-only', 'true');
-      devOnly.style.width = '17px';
-      devOnly.style.height = '17px';
-      devOnly.style.padding = '0';
-      devOnly.style.margin = '0';
-      devOnly.style.border = '0';
-      devOnly.style.flex = '0 0 auto';
-      devOnly.style.accentColor = 'var(--teal)';
-      const devOnlyText = document.createElement('span');
-      devOnlyText.textContent = 'Solo DEV';
-      devOnlyLabel.append(devOnly, devOnlyText);
       const remove = document.createElement('button');
       remove.className = 'btn';
       remove.type = 'button';
@@ -149,22 +154,24 @@
         row.remove();
         if (!recipientsWrap.children.length) addRecipientRow();
       });
-      controls.append(devOnlyLabel, remove);
-      row.append(name.wrap, phone.wrap, controls);
+      row.append(name.wrap, phone.wrap, remove);
       recipientsWrap.appendChild(row);
     }
+
     function collectRecipients() {
       return [...recipientsWrap.querySelectorAll('.manager-row')].map((row) => ({
         name: row.querySelector('[data-recipient-name]')?.value.trim() || '',
-        phone: row.querySelector('[data-recipient-phone]')?.value.trim() || '',
-        devOnly: Boolean(row.querySelector('[data-recipient-dev-only]')?.checked)
+        phone: row.querySelector('[data-recipient-phone]')?.value.trim() || ''
       })).filter((recipient) => recipient.name || recipient.phone);
     }
+
     async function loadRecipients() {
       try {
         const response = await fetch('/admin/operaciones/programacion/destinatarios', { cache: 'no-store' });
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudieron cargar los destinatarios.');
+        devEmail.input.value = data.devContact?.email || '';
+        devPhone.input.value = data.devContact?.phone || '';
         recipientsWrap.replaceChildren();
         const recipients = Array.isArray(data.recipients) ? data.recipients : [];
         (recipients.length ? recipients : [{}]).forEach(addRecipientRow);
@@ -174,6 +181,29 @@
         showMessage(error.message || 'No se pudieron cargar los destinatarios.');
       }
     }
+
+    async function saveDevContact() {
+      devSave.disabled = true;
+      try {
+        const response = await fetch('/admin/operaciones/programacion/dev-contact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: devEmail.input.value.trim(), phone: devPhone.input.value.trim() })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudo guardar el contacto DEV.');
+        devEmail.input.value = data.devContact?.email || '';
+        devPhone.input.value = data.devContact?.phone || '';
+        await loadRecipients();
+        if (typeof window.loadProgrammingRecipients === 'function') await window.loadProgrammingRecipients();
+        showMessage('Contacto DEV guardado.');
+      } catch (error) {
+        showMessage(error.message || 'No se pudo guardar el contacto DEV.');
+      } finally {
+        devSave.disabled = false;
+      }
+    }
+
     async function saveRecipients() {
       const recipients = collectRecipients();
       if (recipients.some((recipient) => !recipient.name || !recipient.phone)) {
@@ -190,7 +220,7 @@
         recipientsWrap.replaceChildren();
         const saved = Array.isArray(data.recipients) ? data.recipients : [];
         (saved.length ? saved : [{}]).forEach(addRecipientRow);
-        if (typeof window.loadProgrammingRecipients === 'function') window.loadProgrammingRecipients();
+        if (typeof window.loadProgrammingRecipients === 'function') await window.loadProgrammingRecipients();
         showMessage('Destinatarios guardados.');
       } catch (error) {
         showMessage(error.message || 'No se pudieron guardar los destinatarios.');
@@ -198,6 +228,8 @@
         saveButton.disabled = false;
       }
     }
+
+    devSave.addEventListener('click', saveDevContact);
     addButton.addEventListener('click', () => addRecipientRow());
     saveButton.addEventListener('click', saveRecipients);
     loadRecipients();
