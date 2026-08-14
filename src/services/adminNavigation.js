@@ -3,6 +3,7 @@ const USERS_PATH = '/admin/users';
 const OPERATIONS_PATH = '/admin/operaciones';
 const ATTENDANCE_PATH = '/admin/operaciones/asistencia';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
+const WORKER_PORTAL_ACTIVATION_PATH = '/admin/operaciones/portal-activaciones';
 const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
 const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
@@ -72,7 +73,10 @@ function operationsMenuItems(access) {
       menuLink('/admin/operaciones/asignaciones', 'Asignación de auxiliares'),
       menuLink('/admin/operaciones/personal', 'Personal operativo')
     );
-    if (access.attendance) items.push(menuLink(ATTENDANCE_PATH, 'Asistencia'));
+    if (access.attendance) {
+      items.push(menuLink(WORKER_PORTAL_ACTIVATION_PATH, 'Activar portal del auxiliar'));
+      items.push(menuLink(ATTENDANCE_PATH, 'Asistencia'));
+    }
     items.push(menuLink('/admin/operaciones/whatsapp', 'WhatsApp despacho'));
   }
   if (access.testWorkspace) items.push(menuLink(TEST_WORKSPACE_PATH, 'Entorno de pruebas'));
@@ -128,6 +132,40 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
   </nav>`;
 }
 
+function dropdownMenuHrefs(navHtml) {
+  const hrefs = new Set();
+  const panels = navHtml.matchAll(/<div\s+class=["']admin-module-menu-panel["'][^>]*>([\s\S]*?)<\/div>/gi);
+  for (const panel of panels) {
+    for (const match of panel[1].matchAll(/\bhref\s*=\s*["']([^"']+)["']/gi)) {
+      hrefs.add(match[1]);
+    }
+  }
+  return hrefs;
+}
+
+function stripDuplicateModuleButtons(html, navHtml) {
+  const menuHrefs = dropdownMenuHrefs(navHtml);
+  if (!menuHrefs.size) return html;
+  const navIndex = html.indexOf(navHtml);
+  if (navIndex < 0) return html;
+
+  const stripButtons = (fragment) => fragment.replace(
+    /<a\b([^>]*)>([\s\S]*?)<\/a>/gi,
+    (anchor, attributes) => {
+      const classValue = attributes.match(/\bclass\s*=\s*["']([^"']*)["']/i)?.[1] || '';
+      const classes = classValue.split(/\s+/).filter(Boolean);
+      if (!classes.includes('btn')) return anchor;
+      const href = attributes.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] || null;
+      return href && menuHrefs.has(href) ? '' : anchor;
+    }
+  );
+
+  const before = html.slice(0, navIndex);
+  const afterStart = navIndex + navHtml.length;
+  const after = html.slice(afterStart);
+  return `${stripButtons(before)}${navHtml}${stripButtons(after)}`;
+}
+
 function ensureNavigationStylesheet(html) {
   if (!/<\/head>/i.test(html)) return html;
   const stylesheets = [];
@@ -151,9 +189,10 @@ export function injectAdminModuleNavigation(html, req = {}) {
   const originalNav = html.match(navPattern)?.[0] || '';
   if (!originalNav) return html;
 
+  const moduleNavbar = buildAdminModuleNavbar(req, originalNav);
   let output = ensureNavigationStylesheet(html);
-  output = output.replace(navPattern, buildAdminModuleNavbar(req, originalNav));
-  return output;
+  output = output.replace(navPattern, moduleNavbar);
+  return stripDuplicateModuleButtons(output, moduleNavbar);
 }
 
 export const ADMIN_MODULE_PATHS = Object.freeze({
@@ -161,5 +200,6 @@ export const ADMIN_MODULE_PATHS = Object.freeze({
   operations: OPERATIONS_PATH,
   attendance: ATTENDANCE_PATH,
   payroll: PAYROLL_PATH,
+  workerPortalActivation: WORKER_PORTAL_ACTIVATION_PATH,
   testWorkspace: TEST_WORKSPACE_PATH
 });
