@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
-import {
-  ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
-  registerDispatchArrival
-} from './registerArrival.js';
+import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES as COVERAGE_ASSIGNMENT_STATUSES } from '../../../services/dispatchOperationalCoverage.js';
+import { registerDispatchArrival } from './registerArrival.js';
 import { loadCrewAttendancePortalContexts } from './crewAttendanceConfig.js';
 import { reviewAttendanceSession } from './adminAttendance.js';
 
@@ -70,6 +68,27 @@ function requirePrisma(prisma) {
   return prisma;
 }
 
+function canonicalArrivalInput(input, { assignmentId, workerId, idempotencyKey }) {
+  return {
+    assignmentId,
+    expectedWorkerId: workerId,
+    idempotencyKey,
+    now: input.now,
+    captureMode: ONLINE_WEB_CAPTURE_MODE,
+    clientCapturedAt: input.clientCapturedAt ?? null,
+    latitude: input.latitude,
+    longitude: input.longitude,
+    accuracyMeters: input.accuracyMeters,
+    installationIdHash: input.installationIdHash ?? null,
+    persistentStorageAvailable: true,
+    hasFreshPhoto: false,
+    evidenceStorageKey: null,
+    evidenceMimeType: null,
+    ipAddress: input.ipAddress ?? null,
+    userAgent: input.userAgent ?? null
+  };
+}
+
 async function validateDelegatedArrival(prisma, result, input, options) {
   if (!result?.recorded || !result.attendanceSession?.id) return { validated: false, pendingReview: false };
   const currentStatus = result.attendanceSession.validationStatus || result.validation?.validationStatus || null;
@@ -124,76 +143,53 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     return { applied: false };
   }
 
-  const members = await prisma.dispatchAssignment.findMany({
+  const leaderResult = await options.registerArrivalFn(prisma, canonicalArrivalInput({ ...input, now }, {
+    assignmentId: leaderAssignmentId,
+    workerId: leaderWorkerId,
+    idempotencyKey
+  }));
+
+  // Un replay de la misma acción grupal puede continuar. Una llegada histórica con otra clave
+  // devuelve recorded=false y nunca autoriza el fan-out de auxiliares.
+  if (!leaderResult.recorded || !leaderArrivalValidated(leaderResult)) {
+    return {
+      applied: true,
+      leaderResult,
+      summary: null
+    };
+  }
+
+  const members = (await prisma.dispatchAssignment.findMany({
     where: {
       serviceRequestId: leaderContext.serviceRequestId,
-      status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
+      status: { in: [...COVERAGE_ASSIGNMENT_STATUSES] }
     },
     select: { id: true, workerId: true },
     orderBy: { createdAt: 'asc' }
-  });
+  })).filter((member) => member.id !== leaderAssignmentId);
 
-  if (!members.some((member) => member.id === leaderAssignmentId && member.workerId === leaderWorkerId)) {
-    throw new Error('crew_group_arrival_leader_not_assigned');
-  }
+  const results = [{
+    assignmentId: leaderAssignmentId,
+    isLeader: true,
+    status: leaderResult.replayed ? 'REPLAYED' : 'RECORDED',
+    validationStatus: leaderResult.validation?.validationStatus
+      || leaderResult.attendanceSession?.validationStatus
+      || null
+  }];
 
-  const results = [];
-  let leaderResult = null;
-  const orderedMembers = [
-    ...members.filter((member) => member.id === leaderAssignmentId),
-    ...members.filter((member) => member.id !== leaderAssignmentId)
-  ];
-
-  for (const member of orderedMembers) {
-    const isLeader = member.id === leaderAssignmentId;
-    const memberResult = await options.registerArrivalFn(prisma, {
+  for (const member of members) {
+    const memberResult = await options.registerArrivalFn(prisma, canonicalArrivalInput({ ...input, now }, {
       assignmentId: member.id,
-      expectedWorkerId: member.workerId,
-      idempotencyKey: isLeader ? idempotencyKey : memberIdempotencyKey(idempotencyKey, member.id),
-      now,
-      captureMode: ONLINE_WEB_CAPTURE_MODE,
-      clientCapturedAt: input.clientCapturedAt ?? null,
-      latitude: input.latitude,
-      longitude: input.longitude,
-      accuracyMeters: input.accuracyMeters,
-      installationIdHash: input.installationIdHash ?? null,
-      persistentStorageAvailable: true,
-      hasFreshPhoto: false,
-      evidenceStorageKey: null,
-      evidenceMimeType: null,
-      ipAddress: input.ipAddress ?? null,
-      userAgent: input.userAgent ?? null
-    });
-
-    if (isLeader) {
-      leaderResult = memberResult;
-      // La recuperación solo entra por replay de la misma clave idempotente. Una llegada previa distinta
-      // devuelve recorded=false y nunca autoriza el fan-out aunque su sesión histórica esté validada.
-      if (!memberResult.recorded || !leaderArrivalValidated(memberResult)) {
-        return {
-          applied: true,
-          leaderResult,
-          summary: null
-        };
-      }
-    }
+      workerId: member.workerId,
+      idempotencyKey: memberIdempotencyKey(idempotencyKey, member.id)
+    }));
 
     if (duplicateArrival(memberResult)) {
-      results.push({ assignmentId: member.id, isLeader, status: 'ALREADY_RECORDED' });
+      results.push({ assignmentId: member.id, isLeader: false, status: 'ALREADY_RECORDED' });
       continue;
     }
     if (!memberResult.recorded) {
-      results.push({ assignmentId: member.id, isLeader, status: 'NOT_RECORDED' });
-      continue;
-    }
-
-    if (isLeader) {
-      results.push({
-        assignmentId: member.id,
-        isLeader: true,
-        status: memberResult.replayed ? 'REPLAYED' : 'RECORDED',
-        validationStatus: memberResult.validation?.validationStatus || null
-      });
+      results.push({ assignmentId: member.id, isLeader: false, status: 'NOT_RECORDED' });
       continue;
     }
 
@@ -223,7 +219,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     applied: true,
     leaderResult,
     summary: {
-      totalMembers: members.length,
+      totalMembers: members.length + 1,
       newlyRecordedCount,
       replayedCount,
       alreadyRecordedCount,
