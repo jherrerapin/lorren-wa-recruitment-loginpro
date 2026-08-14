@@ -266,15 +266,6 @@ export function validateAttendanceTimelineAgainstAssignment(serviceRequest, inpu
   if (arrivalAt && dispatchServiceDateKey(arrivalAt) !== serviceDateKey) {
     throw new Error('attendance_manual_arrival_date_mismatch');
   }
-  if (breakStartAt && !isDispatchBreakStartWithinOperationalWindow(effectiveOperational, breakStartAt)) {
-    throw new Error('attendance_manual_break_operational_window_invalid');
-  }
-  if (breakEndAt && !isDispatchBreakEndWithinOperationalWindow(effectiveOperational, breakEndAt)) {
-    throw new Error('attendance_manual_break_operational_window_invalid');
-  }
-  if (departureAt && !isDispatchDepartureWithinOperationalWindow(effectiveOperational, departureAt)) {
-    throw new Error('attendance_manual_departure_operational_window_invalid');
-  }
   if (arrivalAt && departureAt && departureAt.getTime() < arrivalAt.getTime()) {
     throw new Error('attendance_manual_departure_before_arrival');
   }
@@ -292,6 +283,15 @@ export function validateAttendanceTimelineAgainstAssignment(serviceRequest, inpu
     || (breakEndAt && breakEndAt.getTime() > departureAt.getTime())
   )) {
     throw new Error('attendance_manual_break_after_departure');
+  }
+  if (breakStartAt && !isDispatchBreakStartWithinOperationalWindow(effectiveOperational, breakStartAt)) {
+    throw new Error('attendance_manual_break_operational_window_invalid');
+  }
+  if (breakEndAt && !isDispatchBreakEndWithinOperationalWindow(effectiveOperational, breakEndAt)) {
+    throw new Error('attendance_manual_break_operational_window_invalid');
+  }
+  if (departureAt && !isDispatchDepartureWithinOperationalWindow(effectiveOperational, departureAt)) {
+    throw new Error('attendance_manual_departure_operational_window_invalid');
   }
 
   return {
