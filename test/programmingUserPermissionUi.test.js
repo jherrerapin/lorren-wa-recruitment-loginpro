@@ -40,15 +40,20 @@ test('el endpoint DEV enumera usuarios ADMIN sin limitarse a Operaciones o Asist
   assert.match(accessRoute, /enabled:\s*settings\.userAccess\.includes\(user\.username\)/);
 });
 
-test('un destinatario Solo DEV queda completamente fuera de perfiles no DEV', () => {
+test('el contacto DEV aparece solo en la lista DEV y los demás perfiles reciben únicamente destinatarios generales', () => {
   const recipients = [
-    { name: 'Destinatario general', phone: '573001112233', devOnly: false },
-    { name: 'Destinatario privado', phone: '573004445566', devOnly: true }
+    { name: 'Destinatario general', phone: '0000000001', devOnly: false },
+    { name: 'Duplicado del DEV', phone: '0000000002', devOnly: false },
+    { name: 'Privado legado', phone: '0000000003', devOnly: true }
   ];
+  const devContact = { email: 'dev@example.test', phone: '0000000002' };
 
-  const forDev = filterProgrammingWhatsappRecipientsForRole(recipients, 'dev');
-  const forAdmin = filterProgrammingWhatsappRecipientsForRole(recipients, 'admin');
+  const forDev = filterProgrammingWhatsappRecipientsForRole(recipients, 'dev', devContact);
+  const forAdmin = filterProgrammingWhatsappRecipientsForRole(recipients, 'admin', devContact);
 
-  assert.equal(forDev.length, 2);
-  assert.deepEqual(forAdmin, [{ name: 'Destinatario general', phone: '573001112233', devOnly: false }]);
+  assert.deepEqual(forAdmin.map((item) => item.name), ['Destinatario general']);
+  assert.deepEqual(forDev.map((item) => item.name), ['Destinatario general', 'DEV']);
+  assert.equal(forDev[1].isDevContact, true);
+  assert.equal(forDev[1].checkedByDefault, false);
+  assert.equal(forDev[1].email, 'dev@example.test');
 });
