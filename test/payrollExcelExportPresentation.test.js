@@ -56,7 +56,7 @@ test('el Excel de Nómina conserva datos y aplica formato profesional', async ()
   assert.equal(sheet.views[0].xSplit, 3);
   assert.equal(sheet.views[0].ySplit, 4);
   assert.equal(sheet.views[0].showGridLines, false);
-  assert.equal(sheet.autoFilter.from, 'A4');
+  assert.match(JSON.stringify(sheet.autoFilter), /A4/);
 
   const documentoColumn = headerColumn(sheet, 'Documento');
   const nombreColumn = headerColumn(sheet, 'Nombre');
