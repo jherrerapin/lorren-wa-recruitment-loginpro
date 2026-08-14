@@ -369,12 +369,8 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     if (userRole(req) !== 'dev') return res.json({ ok: true, allowed: access.allowed, isDev: false });
     const users = prisma?.appUser?.findMany
       ? await prisma.appUser.findMany({
-        where: {
-          isActive: true,
-          role: 'ADMIN',
-          OR: [{ canAccessDispatch: true }, { canAccessAttendance: true }]
-        },
-        select: { username: true },
+        where: { role: 'ADMIN' },
+        select: { username: true, isActive: true, canAccessDispatch: true, canAccessAttendance: true },
         orderBy: { username: 'asc' }
       })
       : [];
@@ -382,7 +378,13 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
       ok: true,
       allowed: true,
       isDev: true,
-      users: users.map((user) => ({ username: user.username, enabled: settings.userAccess.includes(user.username) }))
+      users: users.map((user) => ({
+        username: user.username,
+        enabled: settings.userAccess.includes(user.username),
+        isActive: user.isActive,
+        canAccessDispatch: user.canAccessDispatch,
+        canAccessAttendance: user.canAccessAttendance
+      }))
     });
   });
 
@@ -393,11 +395,11 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     const target = prisma?.appUser?.findUnique
       ? await prisma.appUser.findUnique({
         where: { username },
-        select: { username: true, role: true, isActive: true, canAccessDispatch: true, canAccessAttendance: true }
+        select: { username: true, role: true }
       })
       : null;
-    if (!target || !target.isActive || String(target.role || '').toUpperCase() !== 'ADMIN' || (!target.canAccessDispatch && !target.canAccessAttendance)) {
-      return res.status(400).json({ ok: false, message: 'El usuario no está habilitado para Operaciones / Despacho.' });
+    if (!target || String(target.role || '').toUpperCase() !== 'ADMIN') {
+      return res.status(400).json({ ok: false, message: 'El usuario seleccionado no existe o no es un usuario administrable.' });
     }
     const userAccess = await saveProgrammingUserAccess(prisma, { username, enabled, actor: programmingActor(req) });
     return res.json({ ok: true, username, enabled: userAccess.includes(username) });
