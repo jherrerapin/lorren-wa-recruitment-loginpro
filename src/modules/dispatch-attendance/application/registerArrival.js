@@ -7,6 +7,10 @@ import {
   calculateAttendanceDistanceMeters,
   isAttendanceInsideGeofence
 } from '../domain/attendanceDistance.js';
+import {
+  STANDARD_DISPATCH_BREAK_MINUTES,
+  STANDARD_DISPATCH_WORKDAY_MINUTES
+} from '../domain/attendanceWorkdayPolicy.js';
 
 export const ACTIVE_DISPATCH_ASSIGNMENT_STATUSES = Object.freeze([
   'ASSIGNED',
@@ -22,7 +26,11 @@ const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
 const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
 const MAX_OFFLINE_CAPTURE_AGE_MS = 72 * 60 * 60 * 1000;
 const MAX_CLIENT_CLOCK_FUTURE_SKEW_MS = 5 * 60 * 1000;
-const OPERATIONAL_DAY_MS = 24 * 60 * 60 * 1000;
+const MINUTE_MS = 60 * 1000;
+const OPERATIONAL_DAY_MS = 24 * 60 * MINUTE_MS;
+const DEFAULT_OPERATIONAL_SPAN_MS = (
+  STANDARD_DISPATCH_WORKDAY_MINUTES + STANDARD_DISPATCH_BREAK_MINUTES
+) * MINUTE_MS;
 
 function requireInputObject(input, label) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error(`${label}_invalid`);
@@ -153,6 +161,81 @@ export function buildDispatchAttendanceExpectedWindow(serviceRequest) {
   return { expectedStartAt, expectedEndAt };
 }
 
+function nextLocalMidnight(expectedStartAt) {
+  const dateKey = instantDateKeyInBogota(expectedStartAt, 'attendance_expected_start');
+  return new Date(new Date(`${dateKey}T00:00:00-05:00`).getTime() + OPERATIONAL_DAY_MS);
+}
+
+function validWindowEnd(candidate, expectedStartAt) {
+  return candidate && candidate.getTime() > expectedStartAt.getTime() ? candidate : null;
+}
+
+export function resolveDispatchAttendanceOperationalWindow(serviceRequest, session = null) {
+  const persistedExpectedStartAt = optionalTimestamp(
+    session?.expectedStartAt,
+    'attendance_session_expected_start_at'
+  );
+  const scheduled = serviceRequest?.startTime
+    ? buildDispatchAttendanceExpectedWindow(serviceRequest)
+    : null;
+  const expectedStartAt = persistedExpectedStartAt || scheduled?.expectedStartAt || null;
+  if (!expectedStartAt) throw new Error('attendance_expected_start_required');
+
+  const persistedExpectedEndAt = validWindowEnd(
+    optionalTimestamp(session?.expectedEndAt, 'attendance_session_expected_end_at'),
+    expectedStartAt
+  );
+  const scheduledExpectedEndAt = validWindowEnd(scheduled?.expectedEndAt || null, expectedStartAt);
+  const expectedEndAt = persistedExpectedEndAt || scheduledExpectedEndAt || null;
+  const derivedOperationalEnd = !expectedEndAt;
+  const operationalEndAt = expectedEndAt
+    ? new Date(expectedEndAt.getTime())
+    : new Date(expectedStartAt.getTime() + DEFAULT_OPERATIONAL_SPAN_MS);
+  const serviceDateKey = serviceRequest?.serviceDate
+    ? dateKeyInBogota(serviceRequest.serviceDate)
+    : instantDateKeyInBogota(expectedStartAt, 'attendance_expected_start');
+  const operationalEndDateKey = instantDateKeyInBogota(
+    operationalEndAt,
+    'attendance_operational_end'
+  );
+  const overnight = operationalEndDateKey !== serviceDateKey;
+  const plannedSpanMs = Math.max(MINUTE_MS, operationalEndAt.getTime() - expectedStartAt.getTime());
+  const sameClockNextDayAt = new Date(expectedStartAt.getTime() + OPERATIONAL_DAY_MS);
+  const extendedOvernightCloseAt = new Date(operationalEndAt.getTime() + plannedSpanMs);
+  const continuityClosesAt = overnight
+    ? new Date(Math.min(sameClockNextDayAt.getTime(), extendedOvernightCloseAt.getTime()))
+    : nextLocalMidnight(expectedStartAt);
+
+  return {
+    expectedStartAt,
+    expectedEndAt,
+    operationalEndAt,
+    continuityClosesAt,
+    serviceDateKey,
+    operationalEndDateKey,
+    overnight,
+    derivedOperationalEnd
+  };
+}
+
+function momentInside(value, startAt, exclusiveEndAt) {
+  const moment = optionalTimestamp(value, 'attendance_operational_mark');
+  if (!moment || !startAt || !exclusiveEndAt) return false;
+  return moment.getTime() >= startAt.getTime() && moment.getTime() < exclusiveEndAt.getTime();
+}
+
+export function isDispatchBreakStartWithinOperationalWindow(window, value) {
+  return momentInside(value, window?.expectedStartAt, window?.operationalEndAt);
+}
+
+export function isDispatchBreakEndWithinOperationalWindow(window, value) {
+  return momentInside(value, window?.expectedStartAt, window?.continuityClosesAt);
+}
+
+export function isDispatchDepartureWithinOperationalWindow(window, value) {
+  return momentInside(value, window?.expectedStartAt, window?.continuityClosesAt);
+}
+
 export function getDispatchArrivalWindowState(input = {}) {
   const now = requiredTimestamp(input.now, 'attendance_window_now');
   const expectedStartAt = requiredTimestamp(input.expectedStartAt, 'attendance_expected_start');
@@ -276,9 +359,14 @@ async function registerInsideTransaction(client, input) {
     };
   }
 
-  const expectedWindow = existingSession
-    ? { expectedStartAt: existingSession.expectedStartAt, expectedEndAt: existingSession.expectedEndAt }
-    : buildDispatchAttendanceExpectedWindow(assignment.serviceRequest);
+  const operationalWindow = resolveDispatchAttendanceOperationalWindow(
+    assignment.serviceRequest,
+    existingSession
+  );
+  const expectedWindow = {
+    expectedStartAt: operationalWindow.expectedStartAt,
+    expectedEndAt: operationalWindow.expectedEndAt
+  };
   const arrivalWindow = getDispatchArrivalWindowState({
     now: input.reportedAt,
     expectedStartAt: expectedWindow.expectedStartAt
