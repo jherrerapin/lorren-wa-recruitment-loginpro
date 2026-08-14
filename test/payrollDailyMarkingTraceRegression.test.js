@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { buildPayrollExportRows, loadPayrollReport } from '../src/modules/dispatch-payroll/application/payrollReport.js';
+import { applyPayrollWorkerSelection } from '../src/routes/dispatchPayroll.js';
 
 function sessionFixture(overrides = {}) {
   const arrivalAt = overrides.arrivalAt || '2026-08-10T13:00:00.000Z';
@@ -45,6 +46,26 @@ function reportFor(sessions) {
   return loadPayrollReport(prismaFixture(sessions), { periodType: 'CUSTOM', from: '2026-08-10', to: '2026-08-10' }, { now: new Date('2026-08-10T23:00:00.000Z') });
 }
 
+function workerRow(id, { totalMinutes, ordinaryMinutes, overtimeMinutes, workedDays = 1, exportable = true, hedo = 0 } = {}) {
+  return {
+    workerId: id,
+    fullName: `Auxiliar ${id}`,
+    documentType: 'CC',
+    documentNumber: `TEST-${id}`,
+    phone: '',
+    totalMinutes,
+    ordinaryMinutes,
+    overtimeMinutes,
+    unrecognizedOvertimeMinutes: 0,
+    workedDays,
+    deductedDays: 0,
+    netWorkedDays: workedDays,
+    exportable,
+    conceptMinutes: { HEDO: hedo },
+    novelties: exportable ? [] : [{ code: 'TEST', message: 'Novedad de prueba', blocking: true }]
+  };
+}
+
 test('muestra marcaciones por día sin alterar ordinarias y extras', async () => {
   const report = await reportFor([sessionFixture()]);
   const day = report.rows[0].daily[0];
@@ -76,12 +97,61 @@ test('explica novedades en español y no exporta el código interno', async () =
   assert.doesNotMatch(exported.Novedades, /INCOMPLETE_BREAK/);
 });
 
-test('la vista usa explicaciones y muestra la trazabilidad diaria', async () => {
-  const view = await readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8');
-  assert.match(view, /Marcaciones que sustentan el cálculo de este día/);
-  assert.match(view, /novelty\.message/);
-  assert.match(view, /Requiere revisión/);
-  assert.match(view, /Informativa/);
-  assert.doesNotMatch(view, /dayNovelty\.map\(\(item\) => item\.code\)/);
-  assert.doesNotMatch(view, /<%= row\.status %>/);
+test('selecciona varios auxiliares desde las filas reales del corte y recompone solo los totales visibles', () => {
+  const report = {
+    filters: { clientId: '', operationPointId: '', workerId: '', search: '' },
+    rows: [
+      workerRow('TEST-A', { totalMinutes: 420, ordinaryMinutes: 420, overtimeMinutes: 0, hedo: 0 }),
+      workerRow('TEST-B', { totalMinutes: 480, ordinaryMinutes: 420, overtimeMinutes: 60, hedo: 60, exportable: false }),
+      workerRow('TEST-C', { totalMinutes: 450, ordinaryMinutes: 420, overtimeMinutes: 30, hedo: 30 })
+    ],
+    workers: [{ id: 'TEST-UNRELATED', fullName: 'No debe aparecer' }],
+    totals: {}
+  };
+  const selected = applyPayrollWorkerSelection(report, ['TEST-A', 'TEST-C']);
+  assert.deepEqual(selected.workers.map((worker) => worker.id), ['TEST-A', 'TEST-B', 'TEST-C']);
+  assert.deepEqual(selected.rows.map((row) => row.workerId), ['TEST-A', 'TEST-C']);
+  assert.equal(selected.filters.workerId, 'TEST-A,TEST-C');
+  assert.equal(selected.totals.workers, 2);
+  assert.equal(selected.totals.totalMinutes, 870);
+  assert.equal(selected.totals.ordinaryMinutes, 840);
+  assert.equal(selected.totals.overtimeMinutes, 30);
+  assert.equal(selected.totals.totalHours, 14.5);
+  assert.equal(selected.totals.overtimeHours, 0.5);
+  assert.equal(selected.totals.workedDays, 2);
+  assert.equal(selected.totals.conceptMinutes.HEDO, 30);
+  assert.equal(selected.totals.workersWithNovelties, 0);
+
+  const commaSeparated = applyPayrollWorkerSelection(report, 'TEST-A,TEST-C');
+  assert.deepEqual(commaSeparated.rows.map((row) => row.workerId), ['TEST-A', 'TEST-C']);
+  const all = applyPayrollWorkerSelection(report, []);
+  assert.equal(all.rows.length, 3);
+  assert.equal(all.totals.workersWithNovelties, 1);
+});
+
+test('la vista limita el selector a auxiliares reales y compacta novedades y marcaciones sin duplicarlas en el resumen', async () => {
+  const [view, detail, css] = await Promise.all([
+    readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/partials/operacionesNominaTabla.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/public/operaciones-nomina.css', import.meta.url), 'utf8')
+  ]);
+  assert.match(view, /<label for="workerId">Auxiliares<\/label>/);
+  assert.match(view, /name="workerId" multiple/);
+  assert.match(view, /Solo aparecen auxiliares con información en este corte/);
+  assert.match(view, /partials\/operacionesNominaTabla/);
+  assert.match(view, /operaciones-nomina\.css/);
+  assert.doesNotMatch(view, /operaciones-nomina\.js/);
+
+  assert.match(detail, /Marcaciones del día/);
+  assert.match(detail, /marking-inline/);
+  assert.match(detail, /periodSource/);
+  assert.match(detail, /dayNovelties/);
+  assert.match(detail, /occurrences/);
+  assert.match(detail, /novelty\.message/);
+  assert.match(detail, /Requiere revisión:/);
+  assert.match(detail, /Informativa:/);
+  assert.doesNotMatch(detail, /novelty-summary/);
+  assert.doesNotMatch(detail, /Marcaciones que sustentan el cálculo de este día/);
+  assert.match(css, /\.novelty-line/);
+  assert.match(css, /\.marking-inline/);
 });

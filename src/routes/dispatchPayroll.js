@@ -10,7 +10,8 @@ import {
 import {
   DEFAULT_PAYROLL_POLICY,
   PAYROLL_CONCEPT_CODES,
-  formatPayrollMinutes
+  formatPayrollMinutes,
+  minutesToDecimalHours
 } from '../modules/dispatch-payroll/domain/payrollConceptEngine.js';
 import {
   resolvePayrollFeatureAccess,
@@ -21,6 +22,14 @@ function normalizeString(value, maxLength = 200) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
   return text ? text.slice(0, maxLength) : null;
+}
+
+function normalizeWorkerIds(value) {
+  const source = Array.isArray(value) ? value : [value];
+  return [...new Set(source
+    .flatMap((item) => (typeof item === 'string' ? item.split(',') : []))
+    .map((item) => normalizeString(item, 120))
+    .filter(Boolean))];
 }
 
 function actor(req) {
@@ -56,10 +65,12 @@ function noStore(res) {
 
 function safeQuery(source = {}) {
   const params = new URLSearchParams();
-  ['periodType', 'from', 'to', 'anchor', 'clientId', 'operationPointId', 'workerId', 'search', 'includeTest'].forEach((key) => {
+  ['periodType', 'from', 'to', 'anchor', 'clientId', 'operationPointId', 'search', 'includeTest'].forEach((key) => {
     const value = normalizeString(source[key], 180);
     if (value) params.set(key, value);
   });
+  const workerIds = normalizeWorkerIds(source.filterWorkerId ?? source.workerId);
+  if (workerIds.length) params.set('workerId', workerIds.join(','));
   return params;
 }
 
@@ -111,10 +122,63 @@ function reportFilename(report, extension) {
   return `nomina-${report.period.from}-${report.period.to}.${extension}`;
 }
 
+function sumRows(rows, field) {
+  return rows.reduce((sum, row) => sum + Number(row?.[field] || 0), 0);
+}
+
+export function applyPayrollWorkerSelection(report, requestedWorkerIds = []) {
+  const workerIds = normalizeWorkerIds(requestedWorkerIds);
+  const sourceRows = Array.isArray(report?.rows) ? report.rows : [];
+  const availableWorkers = sourceRows.map((row) => ({
+    id: row.workerId,
+    fullName: row.fullName,
+    documentType: row.documentType || '',
+    documentNumber: row.documentNumber || '',
+    phone: row.phone || ''
+  }));
+  const selected = new Set(workerIds);
+  const rows = selected.size ? sourceRows.filter((row) => selected.has(row.workerId)) : sourceRows;
+  const conceptMinutes = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [
+    code,
+    rows.reduce((sum, row) => sum + Number(row?.conceptMinutes?.[code] || 0), 0)
+  ]));
+  const totals = {
+    ...(report?.totals || {}),
+    workers: rows.length,
+    totalMinutes: sumRows(rows, 'totalMinutes'),
+    ordinaryMinutes: sumRows(rows, 'ordinaryMinutes'),
+    overtimeMinutes: sumRows(rows, 'overtimeMinutes'),
+    unrecognizedOvertimeMinutes: sumRows(rows, 'unrecognizedOvertimeMinutes'),
+    exportableWorkers: rows.filter((row) => row.exportable).length,
+    workersWithNovelties: rows.filter((row) => !row.exportable).length,
+    workedDays: sumRows(rows, 'workedDays'),
+    deductedDays: sumRows(rows, 'deductedDays'),
+    netWorkedDays: sumRows(rows, 'netWorkedDays'),
+    conceptMinutes
+  };
+  totals.totalHours = minutesToDecimalHours(totals.totalMinutes);
+  totals.ordinaryHours = minutesToDecimalHours(totals.ordinaryMinutes);
+  totals.overtimeHours = minutesToDecimalHours(totals.overtimeMinutes);
+  totals.unrecognizedOvertimeHours = minutesToDecimalHours(totals.unrecognizedOvertimeMinutes);
+  totals.conceptHours = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, minutesToDecimalHours(conceptMinutes[code])]));
+  return {
+    ...report,
+    rows,
+    workers: availableWorkers,
+    filters: { ...(report?.filters || {}), workerId: workerIds.join(',') },
+    totals
+  };
+}
+
 async function reportForRequest(prisma, req, source) {
-  return loadPayrollReport(prisma, sanitizedPayrollInput(req, source), {
+  const input = sanitizedPayrollInput(req, source);
+  const workerIds = normalizeWorkerIds(input.workerId);
+  delete input.workerId;
+  delete input.filterWorkerId;
+  const report = await loadPayrollReport(prisma, input, {
     allowTestData: allowTestData(req)
   });
+  return applyPayrollWorkerSelection(report, workerIds);
 }
 
 export function dispatchPayrollRouter(prisma) {
