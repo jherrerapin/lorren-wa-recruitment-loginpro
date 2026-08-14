@@ -23,7 +23,6 @@ const ATTENDANCE_MAP_RELIABILITY_SCRIPT = '/public/attendance-map-reliability.js
 const ATTENDANCE_ADMIN_RUNTIME_SCRIPT = '/public/attendance-admin-runtime.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ATTENDANCE_GEOCODING_PATH = '/admin/operaciones/asistencia/geocodificar';
-const WORKER_PORTAL_ACTIVATION_ADMIN_PATH = '/admin/operaciones/portal-activaciones';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const LEGACY_TIMING_FIELD_NAMES = Object.freeze([
   'earlyArrivalWindowMinutes',
@@ -223,16 +222,6 @@ export function filterAttendanceAdminHtml(html) {
   return injectAttendanceAdminRuntime(reliableHtml);
 }
 
-export function filterOperationsPersonalAttendanceHtml(html, { allowed = false } = {}) {
-  if (typeof html !== 'string' || !allowed || html.includes(`href="${WORKER_PORTAL_ACTIVATION_ADMIN_PATH}"`)) {
-    return html;
-  }
-  const returnAction = '<a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>';
-  if (!html.includes(returnAction)) return html;
-  const activationAction = `<a class="btn btn-success" href="${WORKER_PORTAL_ACTIVATION_ADMIN_PATH}">Activar Portal del Auxiliar</a>`;
-  return html.replace(returnAction, `${activationAction}\n        ${returnAction}`);
-}
-
 function installAttendanceRenderGate(req, res, next) {
   const originalRender = res.render.bind(res);
   res.render = (view, locals, callback) => {
@@ -245,8 +234,7 @@ function installAttendanceRenderGate(req, res, next) {
 
     const isPointConfigView = view === 'operacionesClienteOperaciones';
     const isAttendanceAdminView = view === 'operacionesAsistencia';
-    const isOperationsPersonalView = view === 'operacionesPersonal';
-    if (!isPointConfigView && !isAttendanceAdminView && !isOperationsPersonalView) {
+    if (!isPointConfigView && !isAttendanceAdminView) {
       return originalRender(view, renderLocals, renderCallback);
     }
 
@@ -255,18 +243,9 @@ function installAttendanceRenderGate(req, res, next) {
         if (typeof renderCallback === 'function') return renderCallback(error);
         return next(error);
       }
-      let output;
-      if (isPointConfigView) {
-        output = filterAttendanceFeatureHtml(html, {
-          allowed: Boolean(req.canAccessAttendanceFeature)
-        });
-      } else if (isAttendanceAdminView) {
-        output = filterAttendanceAdminHtml(html);
-      } else {
-        output = filterOperationsPersonalAttendanceHtml(html, {
-          allowed: Boolean(req.canAccessAttendanceFeature)
-        });
-      }
+      const output = isPointConfigView
+        ? filterAttendanceFeatureHtml(html, { allowed: Boolean(req.canAccessAttendanceFeature) })
+        : filterAttendanceAdminHtml(html);
       if (typeof renderCallback === 'function') return renderCallback(null, output);
       return res.send(output);
     });
