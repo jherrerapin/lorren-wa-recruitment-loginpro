@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260811-worker-portal-biometric-v9';
+const BIOMETRIC_ASSET_RELEASE = '20260814-worker-portal-biometric-v10';
 const WORKER_PORTAL_USER_AGENT = String(window.navigator.userAgent || '');
 const LOAD_WORKER_PORTAL_HANDOFF = /Android/i.test(WORKER_PORTAL_USER_AGENT);
 
@@ -27,6 +27,8 @@ if ('serviceWorker' in navigator) {
 (() => {
   const PORTAL_PATH_PATTERN = /^\/operaciones\/portal\/?$/;
   const CONTEXT_PATH = '/operaciones/portal/cuadrillas/proximidad/contexto';
+  const CREW_IDEMPOTENCY_PREFIX = 'lorren-crew-arrival:';
+  const CREW_FORCE_MAJEURE_PREFIX = 'lorren-crew-force-majeure:';
   if (!PORTAL_PATH_PATTERN.test(window.location.pathname)) return;
 
   let contextReady = false;
@@ -71,9 +73,177 @@ if ('serviceWorker' in navigator) {
     return { serviceUuid, operationCharacteristicUuid };
   }
 
+  function isCrewGroupArrival(context, button) {
+    return button?.dataset?.markType === 'ARRIVAL'
+      && context?.mode === 'CREW'
+      && context?.isCrewLeader === true
+      && context?.crewAvailable === true;
+  }
+
+  function crewStorageKey(assignmentId) {
+    return `${CREW_IDEMPOTENCY_PREFIX}${String(assignmentId || '').trim()}`;
+  }
+
+  function crewForceMajeureStorageKey(assignmentId) {
+    return `${CREW_FORCE_MAJEURE_PREFIX}${String(assignmentId || '').trim()}`;
+  }
+
+  function storedCrewIdempotencyKey(assignmentId) {
+    return window.sessionStorage.getItem(crewStorageKey(assignmentId)) || '';
+  }
+
+  function storedCrewForceMajeure(assignmentId) {
+    const value = window.sessionStorage.getItem(crewForceMajeureStorageKey(assignmentId));
+    if (value === 'true') return true;
+    if (value === 'false') return false;
+    return null;
+  }
+
+  function newCrewIdempotencyKey() {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    return `crew_${Date.now()}_${Math.random().toString(36).slice(2, 18)}`;
+  }
+
+  function crewIdempotencyKey(assignmentId) {
+    const current = storedCrewIdempotencyKey(assignmentId);
+    if (current) return current;
+    const created = newCrewIdempotencyKey();
+    window.sessionStorage.setItem(crewStorageKey(assignmentId), created);
+    return created;
+  }
+
+  function crewForceMajeureValue(assignmentId, requested) {
+    const stored = storedCrewForceMajeure(assignmentId);
+    if (stored !== null) return stored;
+    const value = requested === true;
+    window.sessionStorage.setItem(crewForceMajeureStorageKey(assignmentId), value ? 'true' : 'false');
+    return value;
+  }
+
+  function clearCrewAttempt(assignmentId) {
+    window.sessionStorage.removeItem(crewStorageKey(assignmentId));
+    window.sessionStorage.removeItem(crewForceMajeureStorageKey(assignmentId));
+  }
+
+  function forceMajeureControl(button) {
+    return button?.closest('.action-grid')?.querySelector('[data-crew-force-majeure]') || null;
+  }
+
+  function ensureForceMajeureControl(button) {
+    const grid = button?.closest('.action-grid');
+    if (!grid) return null;
+    let wrap = grid.querySelector('[data-crew-force-majeure-wrap]');
+    if (!wrap) {
+      wrap = document.createElement('label');
+      wrap.dataset.crewForceMajeureWrap = 'true';
+      wrap.style.cssText = 'display:flex;gap:10px;align-items:flex-start;padding:11px 12px;border:1px solid #d9c98d;border-radius:11px;background:#fff9e9;color:#68490c;font-size:13px;line-height:1.35;font-weight:700;';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.crewForceMajeure = 'true';
+      input.style.cssText = 'width:20px;height:20px;margin:0;flex:0 0 auto;';
+      const copy = document.createElement('span');
+      copy.textContent = 'Fuerza mayor: uno o más auxiliares están sin celular en este momento.';
+      wrap.append(input, copy);
+      grid.append(wrap);
+    }
+    const input = wrap.querySelector('[data-crew-force-majeure]');
+    const stored = storedCrewForceMajeure(button?.dataset?.assignmentId);
+    if (input && stored !== null) input.checked = stored;
+    wrap.hidden = !navigator.onLine;
+    return input;
+  }
+
+  function assignmentCard(assignmentId) {
+    return [...document.querySelectorAll('[data-assignment-card]')]
+      .find((card) => String(card.dataset.assignmentCard || '') === String(assignmentId)) || null;
+  }
+
+  function serverDisabledButton(button) {
+    if (!button) return true;
+    if (button.hasAttribute('data-server-disabled') || button.hasAttribute('data-offline-disabled')) return true;
+    const biometricFlowLoaded = Boolean(document.documentElement.dataset.lorrenBiometricFlow);
+    return !biometricFlowLoaded && button.disabled;
+  }
+
+  function ensureCrewGroupButton(context) {
+    const card = assignmentCard(context.assignmentId);
+    if (!card || card.classList.contains('completed')) return null;
+    const grid = card.querySelector('.action-grid');
+    if (!grid) return null;
+
+    let button = grid.querySelector(`.mark-button[data-assignment-id="${context.assignmentId}"][data-mark-type="ARRIVAL"]`);
+    if (!button && storedCrewIdempotencyKey(context.assignmentId)) {
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mark-button';
+      button.dataset.assignmentId = context.assignmentId;
+      button.dataset.markType = 'ARRIVAL';
+      button.dataset.crewGroupInjected = 'true';
+      grid.prepend(button);
+    }
+    if (!button || serverDisabledButton(button)) return null;
+
+    button.dataset.crewGroupArrival = 'true';
+    button.textContent = button.dataset.crewGroupInjected === 'true'
+      ? 'Completar llegada de la cuadrilla'
+      : 'Marcar llegada de toda la cuadrilla';
+    ensureForceMajeureControl(button);
+    if (navigator.onLine && button.dataset.crewBusy !== 'true') button.disabled = false;
+    return button;
+  }
+
+  function offerCrewWithoutFaceAccess() {
+    const groupButtons = [...document.querySelectorAll('[data-crew-group-arrival="true"]')]
+      .filter((button) => !button.hasAttribute('data-server-disabled'));
+    const dialog = document.getElementById('enrollment-dialog');
+    const actions = dialog?.querySelector('.dialog-actions');
+    if (!dialog || !actions) return;
+
+    let accessButton = document.getElementById('crew-without-face-access');
+    if (!groupButtons.length) {
+      if (accessButton) accessButton.hidden = true;
+      return;
+    }
+    if (!accessButton) {
+      accessButton = document.createElement('button');
+      accessButton.type = 'button';
+      accessButton.id = 'crew-without-face-access';
+      accessButton.className = 'secondary-button';
+      accessButton.textContent = 'Marcar cuadrilla sin rostro';
+      accessButton.addEventListener('click', () => {
+        if (typeof dialog.close === 'function') dialog.close();
+        else dialog.removeAttribute('open');
+        decorateCrewGroupArrivals();
+        document.querySelector('[data-crew-group-arrival="true"]')?.focus({ preventScroll: true });
+      });
+      actions.append(accessButton);
+    }
+    accessButton.hidden = false;
+  }
+
+  function decorateCrewGroupArrivals() {
+    contextsByAssignment.forEach((context) => {
+      if (context.mode !== 'CREW' || context.isCrewLeader !== true || context.crewAvailable !== true) return;
+      ensureCrewGroupButton(context);
+    });
+    offerCrewWithoutFaceAccess();
+  }
+
+  function clearCrewGroupOnlineUi() {
+    document.querySelectorAll('[data-crew-group-arrival="true"]').forEach((button) => {
+      const wrap = button.closest('.action-grid')?.querySelector('[data-crew-force-majeure-wrap]');
+      if (button.dataset.crewGroupInjected === 'true') button.remove();
+      else button.textContent = 'Registrar llegada';
+      if (wrap) wrap.hidden = true;
+    });
+    const accessButton = document.getElementById('crew-without-face-access');
+    if (accessButton) accessButton.hidden = true;
+  }
+
   async function loadCrewProximityContexts() {
     if (!navigator.onLine) {
       contextReady = false;
+      clearCrewGroupOnlineUi();
       return false;
     }
     if (contextLoadPromise) return contextLoadPromise;
@@ -108,6 +278,7 @@ if ('serviceWorker' in navigator) {
         });
         contextsByAssignment = nextContexts;
         contextReady = true;
+        decorateCrewGroupArrivals();
         return true;
       })
       .catch(() => {
@@ -150,7 +321,7 @@ if ('serviceWorker' in navigator) {
       if (observedOperationPointId !== context.operationPointId) {
         throw crewContextError('crew_bluetooth_wrong_operation');
       }
-      return true;
+      return observedOperationPointId;
     } finally {
       try {
         if (device.gatt.connected) device.gatt.disconnect();
@@ -174,6 +345,104 @@ if ('serviceWorker' in navigator) {
       return 'No fue posible preparar la validación Bluetooth de esta asignación. Actualiza el portal e intenta nuevamente.';
     }
     return 'No fue posible leer el dispositivo Bluetooth de la operación. Acércate e intenta nuevamente.';
+  }
+
+  function requestCrewLocation() {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(crewContextError('crew_location_unsupported'));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition((position) => {
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracyMeters: position.coords.accuracy,
+          clientCapturedAt: new Date(position.timestamp || Date.now()).toISOString()
+        });
+      }, (error) => {
+        const code = error?.code === 1 ? 'crew_location_permission_denied' : 'crew_location_unavailable';
+        reject(crewContextError(code));
+      }, {
+        enableHighAccuracy: true,
+        timeout: 20_000,
+        maximumAge: 0
+      });
+    });
+  }
+
+  function crewGroupPublicError(error) {
+    const code = String(error?.crewBluetoothCode || error?.code || error?.message || 'crew_group_failed');
+    const messages = {
+      crew_location_unsupported: 'Este teléfono no permite obtener la ubicación.',
+      crew_location_permission_denied: 'Activa el permiso de ubicación para marcar la cuadrilla.',
+      crew_location_unavailable: 'No fue posible obtener una ubicación válida. Intenta nuevamente.',
+      outside_operation_range: 'El responsable debe estar dentro del rango de la operación.',
+      operation_geofence_required: 'La operación no tiene una geocerca válida configurada.',
+      location_accuracy_insufficient: 'La precisión del GPS no es suficiente. Intenta nuevamente al aire libre.',
+      crew_group_not_available: 'La llegada grupal ya no está disponible para esta asignación.',
+      crew_group_online_required: 'La llegada grupal necesita conexión.',
+      portal_session_required: 'Tu sesión del portal venció.',
+      assignment_not_available: 'La asignación ya no está disponible para marcar.',
+      arrival_already_registered: 'El responsable ya tenía una llegada previa distinta. No se marcó al resto de la cuadrilla.'
+    };
+    return messages[code] || 'No fue posible registrar la llegada de la cuadrilla.';
+  }
+
+  async function submitCrewGroupArrival(button, context, observedOperationPointId) {
+    try {
+      setCrewBluetoothStatus('Bluetooth verificado. Obteniendo la ubicación del responsable…', 'warning');
+      const location = await requestCrewLocation();
+      const form = new FormData();
+      form.set('idempotencyKey', crewIdempotencyKey(context.assignmentId));
+      form.set('latitude', String(location.latitude));
+      form.set('longitude', String(location.longitude));
+      form.set('accuracyMeters', String(location.accuracyMeters));
+      form.set('clientCapturedAt', location.clientCapturedAt);
+      form.set('captureMode', 'ONLINE_WEB');
+
+      const forceMajeure = crewForceMajeureValue(
+        context.assignmentId,
+        forceMajeureControl(button)?.checked === true
+      );
+      setCrewBluetoothStatus('Ubicación válida. Registrando la llegada de toda la cuadrilla…', 'warning');
+      const response = await fetch(
+        `/operaciones/portal/asignaciones/${encodeURIComponent(context.assignmentId)}/llegada`,
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'X-Requested-With': 'worker-portal',
+            'X-Lorren-Crew-Group': 'true',
+            'X-Lorren-Crew-Operation-Point-Id': observedOperationPointId,
+            'X-Lorren-Crew-Force-Majeure': forceMajeure ? 'true' : 'false'
+          },
+          body: form
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) {
+        if (['arrival_already_registered', 'crew_group_not_available'].includes(payload.error)) {
+          clearCrewAttempt(context.assignmentId);
+        }
+        const error = new Error(payload.error || 'crew_group_failed');
+        error.code = payload.error;
+        throw error;
+      }
+      const retryNeeded = payload.requiresReview === true
+        || Number(payload.failedCount || 0) > 0
+        || Number(payload.reviewPendingCount || 0) > 0;
+      if (!retryNeeded) clearCrewAttempt(context.assignmentId);
+      const message = payload.crewGroup !== true && payload.requiresReview === true
+        ? 'La llegada del responsable quedó pendiente de revisión. No se marcó al resto de la cuadrilla.'
+        : (payload.message || 'Llegada de cuadrilla registrada.');
+      setCrewBluetoothStatus(message, retryNeeded ? 'warning' : 'ok');
+      window.setTimeout(() => window.location.reload(), 1200);
+    } catch (error) {
+      delete button.dataset.crewBusy;
+      button.disabled = false;
+      setCrewBluetoothStatus(crewGroupPublicError(error), 'danger');
+    }
   }
 
   document.addEventListener('click', (event) => {
@@ -208,26 +477,52 @@ if ('serviceWorker' in navigator) {
     setCrewBluetoothStatus('Selecciona el dispositivo Bluetooth de esta operación para continuar.', 'warning');
 
     // requestDevice se invoca desde el click original para conservar la activación del usuario.
+    const groupArrival = isCrewGroupArrival(context, button);
+    if (groupArrival) button.dataset.crewBusy = 'true';
     const verification = verifyCrewBluetooth(context);
     button.disabled = true;
     verification
-      .then(() => {
+      .then((observedOperationPointId) => {
+        if (groupArrival) {
+          setCrewBluetoothStatus('Dispositivo Bluetooth verificado. La llegada grupal no requiere reconocimiento facial.', 'ok');
+          return submitCrewGroupArrival(button, context, observedOperationPointId);
+        }
         setCrewBluetoothStatus('Dispositivo Bluetooth de la operación verificado. Continuando con ubicación y rostro.', 'ok');
         bypassOnce.add(button);
         button.disabled = false;
         button.click();
+        return null;
       })
       .catch((error) => {
+        delete button.dataset.crewBusy;
         button.disabled = false;
         setCrewBluetoothStatus(publicBluetoothError(error), 'danger');
       });
   }, { capture: true });
+
+  const crewButtonObserver = new MutationObserver((mutations) => {
+    if (!navigator.onLine) return;
+    mutations.forEach((mutation) => {
+      const button = mutation.target;
+      if (!(button instanceof HTMLButtonElement) || button.dataset.crewGroupArrival !== 'true') return;
+      if (button.hasAttribute('data-server-disabled') || button.hasAttribute('data-offline-disabled')) return;
+      if (button.dataset.crewBusy === 'true') return;
+      if (button.disabled) button.disabled = false;
+    });
+    offerCrewWithoutFaceAccess();
+  });
+  crewButtonObserver.observe(document.body, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['disabled', 'open']
+  });
 
   window.addEventListener('online', () => loadCrewProximityContexts());
   window.addEventListener('offline', () => {
     contextReady = false;
     protocol = null;
     contextsByAssignment = new Map();
+    clearCrewGroupOnlineUi();
   });
   window.addEventListener('pageshow', () => loadCrewProximityContexts());
   loadCrewProximityContexts();
