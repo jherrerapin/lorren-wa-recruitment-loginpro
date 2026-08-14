@@ -166,7 +166,11 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       serviceRequestId: leaderContext.serviceRequestId,
       status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
     },
-    select: { id: true, workerId: true },
+    select: {
+      id: true,
+      workerId: true,
+      attendanceSession: { select: { arrivalReportedAt: true } }
+    },
     orderBy: { createdAt: 'asc' }
   });
 
@@ -178,6 +182,12 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
   const selectedMembers = presenceValidated
     ? members.filter((member) => selectedWorkerSet.has(member.workerId))
     : members;
+  const previouslyRecordedOutsideSelection = presenceValidated
+    ? members.filter((member) => (
+        !selectedWorkerSet.has(member.workerId)
+        && Boolean(member.attendanceSession?.arrivalReportedAt)
+      )).length
+    : 0;
   const results = [];
   let leaderResult = null;
   const orderedMembers = [
@@ -289,6 +299,14 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
   const failedCount = results.filter((item) => item.status === 'NOT_RECORDED').length;
   const reviewPendingCount = results.filter((item) => item.pendingReview === true).length;
   const delegatedCount = results.filter((item) => item.isLeader === false && ['RECORDED', 'REPLAYED'].includes(item.status)).length;
+  const processedCount = previouslyRecordedOutsideSelection
+    + newlyRecordedCount
+    + replayedCount
+    + alreadyRecordedCount;
+  const notDetectedCount = Math.max(
+    0,
+    members.length - selectedMembers.length - previouslyRecordedOutsideSelection
+  );
 
   return {
     applied: true,
@@ -296,7 +314,9 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     summary: {
       totalMembers: members.length,
       eligibleMembers: selectedMembers.length,
-      notDetectedCount: Math.max(0, members.length - selectedMembers.length),
+      previouslyRecordedCount: previouslyRecordedOutsideSelection,
+      processedCount,
+      notDetectedCount,
       newlyRecordedCount,
       replayedCount,
       alreadyRecordedCount,
