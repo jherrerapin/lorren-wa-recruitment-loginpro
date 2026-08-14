@@ -1,6 +1,8 @@
 const DEFAULT_GRAPH_VERSION = 'v23.0';
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_DUPLICATE_WINDOW_MS = 120000;
+const DEFAULT_TEMPLATE_LANGUAGE = 'es';
+const DEFAULT_PROGRAMMING_TEMPLATE_NAME = 'dispatch_programming_document';
 
 export const ACTIVE_LINK_STATUSES = ['PENDING', 'SENT', 'DELIVERED', 'READ', 'DELIVERY_UNKNOWN', 'NOVELTY_REPORTED', 'CONFIRMED_REPLY_PENDING'];
 export const INBOUND_LINK_STATUSES = ['PENDING', 'SENT', 'DELIVERED', 'READ', 'DELIVERY_UNKNOWN', 'NOVELTY_REPORTED'];
@@ -94,8 +96,10 @@ export function getDispatchWhatsappCloudConfig(scope = 'operational') {
     appSecret: envValue(envName(prefix, 'APP_SECRET')),
     assignmentTemplateName: envValue(envName(prefix, 'ASSIGNMENT_TEMPLATE_NAME')),
     windowCheckTemplateName: envValue(envName(prefix, 'WINDOW_CHECK_TEMPLATE_NAME')),
-    programmingTemplateName: envValue(envName(prefix, 'PROGRAMMING_TEMPLATE_NAME')),
-    templateLanguage: envValue(envName(prefix, 'TEMPLATE_LANGUAGE')),
+    programmingTemplateName: envValue(envName(prefix, 'PROGRAMMING_TEMPLATE_NAME'))
+      || (scope === 'operational' ? DEFAULT_PROGRAMMING_TEMPLATE_NAME : ''),
+    templateLanguage: envValue(envName(prefix, 'TEMPLATE_LANGUAGE'))
+      || (scope === 'operational' ? DEFAULT_TEMPLATE_LANGUAGE : ''),
     timeoutMs: positiveNumber(envValue(envName(prefix, 'TIMEOUT_MS')), DEFAULT_TIMEOUT_MS, 1000),
     duplicateSendWindowMs: positiveNumber(envValue(envName(prefix, 'DUPLICATE_SEND_WINDOW_MS')), DEFAULT_DUPLICATE_WINDOW_MS, 0),
     webhookPath: '/webhook/dispatch'

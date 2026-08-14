@@ -1,29 +1,82 @@
 (() => {
   if (window.location.pathname !== '/admin/operaciones') return;
-
   const script = document.currentScript;
   const isDev = script?.dataset?.dev === 'true';
   const formats = document.querySelector('.programming-formats');
-  if (!formats || !isDev || document.getElementById('programRecipients')) return;
-
+  if (!formats) return;
   const toast = document.getElementById('asyncToast');
+  const sendPdfCheckbox = document.getElementById('sendProgramPdf');
+  const sendExcelCheckbox = document.getElementById('sendProgramExcel');
+  let applyingFormats = false;
+
+  function showMessage(message) {
+    if (!toast) return;
+    toast.textContent = message;
+    toast.classList.add('show');
+    window.setTimeout(() => toast.classList.remove('show'), 3000);
+  }
+  function currentFormats() {
+    const selected = [];
+    if (sendPdfCheckbox?.checked) selected.push('pdf');
+    if (sendExcelCheckbox?.checked) selected.push('excel');
+    return selected;
+  }
+  function applyFormats(savedFormats) {
+    const selected = new Set(Array.isArray(savedFormats) && savedFormats.length ? savedFormats : ['pdf']);
+    applyingFormats = true;
+    if (sendPdfCheckbox) sendPdfCheckbox.checked = selected.has('pdf');
+    if (sendExcelCheckbox) sendExcelCheckbox.checked = selected.has('excel');
+    sendPdfCheckbox?.dispatchEvent(new Event('change'));
+    applyingFormats = false;
+  }
+  async function loadFormats() {
+    try {
+      const response = await fetch('/admin/operaciones/programacion/formatos', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudieron cargar los formatos.');
+      applyFormats(data.formats);
+    } catch (error) {
+      showMessage(error.message || 'No se pudieron cargar los formatos guardados.');
+    }
+  }
+  async function saveFormats(changedCheckbox) {
+    if (applyingFormats) return;
+    const selected = currentFormats();
+    if (!selected.length) {
+      if (changedCheckbox) changedCheckbox.checked = true;
+      showMessage('Selecciona PDF, Excel o ambos.');
+      return;
+    }
+    try {
+      const response = await fetch('/admin/operaciones/programacion/formatos', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ formats: selected })
+      });
+      const data = await response.json();
+      if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudieron guardar los formatos.');
+      applyFormats(data.formats);
+    } catch (error) {
+      showMessage(error.message || 'No se pudieron guardar los formatos.');
+    }
+  }
+  sendPdfCheckbox?.addEventListener('change', () => saveFormats(sendPdfCheckbox));
+  sendExcelCheckbox?.addEventListener('change', () => saveFormats(sendExcelCheckbox));
+  loadFormats();
+
+  if (!isDev || document.getElementById('programRecipients')) return;
   const section = document.createElement('div');
   section.className = 'programming-card';
   section.setAttribute('aria-label', 'Destinatarios de programación configurables por DEV');
-
   const head = document.createElement('div');
   head.className = 'programming-head';
   const headText = document.createElement('div');
   const title = document.createElement('h2');
   title.textContent = 'Destinatarios de programación';
   const description = document.createElement('p');
-  description.textContent = 'Estos números reciben los reportes. Cuando escriben al WhatsApp operativo pueden consultar Programación del día o Resumen del día dentro de la ventana de 24 horas.';
+  description.textContent = 'Estos números reciben los reportes. Cuando escriben al WhatsApp operativo, Programación del día respeta el formato guardado: PDF, Excel o ambos.';
   headText.append(title, description);
   head.appendChild(headText);
-
   const recipientsWrap = document.createElement('div');
   recipientsWrap.id = 'programRecipients';
-
   const actions = document.createElement('div');
   actions.className = 'programming-actions';
   const addButton = document.createElement('button');
@@ -37,13 +90,6 @@
   actions.append(addButton, saveButton);
   section.append(head, recipientsWrap, actions);
   formats.insertAdjacentElement('afterend', section);
-
-  function showMessage(message) {
-    if (!toast) return;
-    toast.textContent = message;
-    toast.classList.add('show');
-    window.setTimeout(() => toast.classList.remove('show'), 3000);
-  }
 
   function field(labelText, type, attribute) {
     const wrap = document.createElement('div');
@@ -59,7 +105,6 @@
     wrap.appendChild(label);
     return { wrap, input };
   }
-
   function addRecipientRow(recipient = {}) {
     const row = document.createElement('div');
     row.className = 'manager-row';
@@ -78,16 +123,12 @@
     row.append(name.wrap, phone.wrap, remove);
     recipientsWrap.appendChild(row);
   }
-
   function collectRecipients() {
-    return [...recipientsWrap.querySelectorAll('.manager-row')]
-      .map((row) => ({
-        name: row.querySelector('[data-recipient-name]')?.value.trim() || '',
-        phone: row.querySelector('[data-recipient-phone]')?.value.trim() || ''
-      }))
-      .filter((recipient) => recipient.name || recipient.phone);
+    return [...recipientsWrap.querySelectorAll('.manager-row')].map((row) => ({
+      name: row.querySelector('[data-recipient-name]')?.value.trim() || '',
+      phone: row.querySelector('[data-recipient-phone]')?.value.trim() || ''
+    })).filter((recipient) => recipient.name || recipient.phone);
   }
-
   async function loadRecipients() {
     try {
       const response = await fetch('/admin/operaciones/programacion/destinatarios', { cache: 'no-store' });
@@ -102,7 +143,6 @@
       showMessage(error.message || 'No se pudieron cargar los destinatarios.');
     }
   }
-
   async function saveRecipients() {
     const recipients = collectRecipients();
     if (recipients.some((recipient) => !recipient.name || !recipient.phone)) {
@@ -112,9 +152,7 @@
     saveButton.disabled = true;
     try {
       const response = await fetch('/admin/operaciones/programacion/destinatarios', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recipients })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ recipients })
       });
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.message || 'No se pudieron guardar los destinatarios.');
@@ -128,7 +166,6 @@
       saveButton.disabled = false;
     }
   }
-
   addButton.addEventListener('click', () => addRecipientRow());
   saveButton.addEventListener('click', saveRecipients);
   loadRecipients();

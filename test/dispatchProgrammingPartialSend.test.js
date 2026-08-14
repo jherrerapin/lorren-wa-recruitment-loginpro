@@ -59,10 +59,55 @@ test('el endpoint conserva incompletas y permite PDF o Excel', async () => {
   assert.doesNotMatch(route, /if \(!summary\.isComplete\)/);
   assert.match(route, /normalizeProgrammingIncludePending\(req\.body\?\.includePending, false\)/);
   assert.match(route, /router\.get\('\/programacion\.xlsx'/);
-  assert.match(route, /normalizeProgrammingFormats\(req\.body\?\.formats, \['pdf'\]\)/);
+  assert.match(route, /normalizeProgrammingFormats\(req\.body\?\.formats, settings\.formats\)/);
   assert.match(route, /formats\.includes\('pdf'\)/);
   assert.match(route, /formats\.includes\('excel'\)/);
   assert.match(route, /selectProgrammingRequests\(loaded\.requests, \{ includePending \}\)/);
+});
+
+test('PDF y Excel se persisten como configuración y sobreviven a una recarga', async () => {
+  const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
+  const browser = await readFile(new URL('../src/public/dispatch-programming-contacts.js', import.meta.url), 'utf8');
+  assert.match(route, /metadata: \{ contacts: normalizedRecipients, formats: normalizedFormats \}/);
+  assert.match(route, /router\.get\('\/programacion\/formatos'/);
+  assert.match(route, /router\.post\('\/programacion\/formatos'/);
+  assert.match(route, /saveProgrammingWhatsappFormats\(prisma/);
+  assert.match(browser, /fetch\('\/admin\/operaciones\/programacion\/formatos', \{ cache: 'no-store' \}\)/);
+  assert.match(browser, /JSON\.stringify\(\{ formats: selected \}\)/);
+  assert.match(browser, /let applyingFormats = false/);
+  assert.match(browser, /if \(applyingFormats\) return/);
+});
+
+test('Programación del día inbound respeta PDF, Excel o ambos guardados', async () => {
+  const webhook = await readFile(new URL('../src/routes/dispatchWhatsappWebhook.js', import.meta.url), 'utf8');
+  const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
+  assert.match(webhook, /loadProgrammingWhatsappSettings\(prisma\)/);
+  assert.match(webhook, /sendProgrammingContactDocuments\(prisma, contact, settings\.formats\)/);
+  assert.match(route, /export async function sendProgrammingContactDocuments/);
+  assert.match(route, /formats\.includes\('pdf'\)/);
+  assert.match(route, /formats\.includes\('excel'\)/);
+});
+
+test('el envío manual usa sesión abierta antes de exigir plantilla', async () => {
+  const route = await readFile(new URL('../src/routes/dispatchProgrammingNotifications.js', import.meta.url), 'utf8');
+  assert.match(route, /getDispatchWhatsappContactWindowStatus/);
+  assert.match(route, /windowStatus\.isOpen[\s\S]*sendDispatchWhatsappDocumentMessage[\s\S]*sendDispatchWhatsappMediaMessage/);
+  assert.match(route, /deliveryMode: windowStatus\.isOpen \? 'session' : 'template'/);
+});
+
+test('programación tiene defaults canónicos de plantilla y lenguaje', async () => {
+  const config = await readFile(new URL('../src/services/dispatchWhatsappCloudConfig.js', import.meta.url), 'utf8');
+  assert.match(config, /DEFAULT_PROGRAMMING_TEMPLATE_NAME = 'dispatch_programming_document'/);
+  assert.match(config, /DEFAULT_TEMPLATE_LANGUAGE = 'es'/);
+  assert.match(config, /programmingTemplateName:[\s\S]*DEFAULT_PROGRAMMING_TEMPLATE_NAME/);
+  assert.match(config, /templateLanguage:[\s\S]*DEFAULT_TEMPLATE_LANGUAGE/);
+});
+
+test('normalización conserva exactamente PDF y Excel cuando ambos se eligen', async () => {
+  const { normalizeProgrammingFormats } = await import('../src/routes/dispatchProgrammingNotifications.js');
+  assert.deepEqual(normalizeProgrammingFormats(['pdf', 'excel']), ['pdf', 'excel']);
+  assert.deepEqual(normalizeProgrammingFormats(['excel']), ['excel']);
+  assert.deepEqual(normalizeProgrammingFormats([], ['pdf']), ['pdf']);
 });
 
 test('los indicadores cargan y conservan el rango seleccionado', async () => {
