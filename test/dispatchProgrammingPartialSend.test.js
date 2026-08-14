@@ -117,13 +117,45 @@ test('PDF y Excel se persisten como configuración y sobreviven a una recarga', 
 });
 
 test('Programación pide Hoy o Mañana antes de preguntar el formato', async () => {
-  const client = await readFile(new URL('../src/services/dispatchWhatsappCloudClient.js', import.meta.url), 'utf8');
-  assert.match(client, /title: 'Programación'/);
-  assert.match(client, /¿Qué día deseas consultar\?/);
-  assert.match(client, /dispatch_report:programming_date_today', title: 'Hoy'/);
-  assert.match(client, /dispatch_report:programming_date_tomorrow', title: 'Mañana'/);
-  const dateButtons = client.match(/dispatch_report:programming_date_(?:today|tomorrow)'/g) || [];
-  assert.equal(dateButtons.length, 2);
+  const {
+    buildDispatchProgrammingDateMenuPayload,
+    buildDispatchReportMenuPayload
+  } = await import('../src/services/dispatchWhatsappCloudClient.js');
+  const reportMenu = buildDispatchReportMenuPayload({ phone: '0000000000', name: 'Contacto' });
+  const programmingButton = reportMenu.interactive.action.buttons.find((button) => button.reply.title === 'Programación');
+  assert.equal(programmingButton?.reply.id, 'dispatch_report:programming_today');
+  const dateMenu = buildDispatchProgrammingDateMenuPayload({ phone: '0000000000' });
+  assert.deepEqual(
+    dateMenu.interactive.action.buttons.map((button) => [button.reply.id, button.reply.title]),
+    [
+      ['dispatch_report:programming_date_today', 'Hoy'],
+      ['dispatch_report:programming_date_tomorrow', 'Mañana']
+    ]
+  );
+});
+
+test('Resumen del día pregunta Hoy o Mañana antes de responder', async () => {
+  const {
+    buildDispatchReportMenuPayload,
+    buildDispatchSummaryDateMenuPayload
+  } = await import('../src/services/dispatchWhatsappCloudClient.js');
+  const reportMenu = buildDispatchReportMenuPayload({ phone: '0000000000', name: 'Contacto' });
+  const summaryButton = reportMenu.interactive.action.buttons.find((button) => button.reply.title === 'Resumen del día');
+  assert.equal(summaryButton?.reply.id, 'dispatch_report:summary');
+  const dateMenu = buildDispatchSummaryDateMenuPayload({ phone: '0000000000' });
+  assert.deepEqual(
+    dateMenu.interactive.action.buttons.map((button) => [button.reply.id, button.reply.title]),
+    [
+      ['dispatch_report:summary_date_today', 'Hoy'],
+      ['dispatch_report:summary_date_tomorrow', 'Mañana']
+    ]
+  );
+  const webhook = await readFile(new URL('../src/routes/dispatchWhatsappWebhook.js', import.meta.url), 'utf8');
+  assert.match(webhook, /dispatch_report:summary'\) return \{ type: 'SUMMARY_DATE' \}/);
+  assert.match(webhook, /dispatch_report:summary_date_today'\) return \{ type: 'SUMMARY', dateChoice: 'today' \}/);
+  assert.match(webhook, /dispatch_report:summary_date_tomorrow'\) return \{ type: 'SUMMARY', dateChoice: 'tomorrow' \}/);
+  assert.match(webhook, /dispatch_report:summary_today'\) return \{ type: 'SUMMARY', dateChoice: 'today' \}/);
+  assert.match(webhook, /sendProgrammingSummary\(prisma, contact, selectedDate\)/);
 });
 
 test('cada fecha ofrece exactamente PDF, Excel y Ambos', async () => {
