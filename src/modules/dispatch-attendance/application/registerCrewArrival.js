@@ -209,13 +209,18 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     if (isLeader) {
       leaderResult = memberResult;
       if (!memberResult.recorded) {
-        return {
-          applied: true,
-          leaderResult,
-          summary: null
-        };
-      }
-      if (!arrivalValidated(memberResult)) {
+        // En el flujo legacy una llegada previa distinta sigue bloqueando el fan-out. En el
+        // flujo de presencia, la sesión/dispositivo/geocerca del encargado se revalidaron
+        // para este nuevo intento, por lo que una llegada ya registrada permite completar
+        // exclusivamente a los integrantes detectados que todavía falten.
+        if (!presenceValidated || !duplicateArrival(memberResult)) {
+          return {
+            applied: true,
+            leaderResult,
+            summary: null
+          };
+        }
+      } else if (!arrivalValidated(memberResult)) {
         if (!presenceValidated) {
           return {
             applied: true,
