@@ -133,6 +133,11 @@ function testFixture({ attendanceEnabled = true } = {}) {
         return where.id === service.id
           ? { ...service, assignments: service.assignments.map((item) => assignmentRecord(item)) }
           : null;
+      },
+      async update({ where, data }) {
+        if (where.id !== service.id) throw new Error('TEST-service-not-found');
+        Object.assign(service, data);
+        return { ...service };
       }
     },
     dispatchAssignment: {
@@ -267,7 +272,7 @@ test('crea al encargado dentro de la petición sin aumentar la cobertura requeri
   assert.equal(contexts[0].proximityRequired, true);
 });
 
-test('si un auxiliar pasa a encargado deja de contar como cupo y al volver a Individual recupera su estado', async () => {
+test('si un auxiliar pasa a encargado deja de contar como cupo, recalcula la petición y al volver a Individual recupera su estado', async () => {
   const { prisma, operation, service } = testFixture();
   await enableCrew(prisma, operation.id);
   await saveCrewAttendanceServiceConfiguration(prisma, {
@@ -278,6 +283,7 @@ test('si un auxiliar pasa a encargado deja de contar como cupo y al volver a Ind
   });
   assert.equal(service.assignments.find((item) => item.workerId === 'TEST-WORKER-A').status, CREW_LEADER_ASSIGNMENT_STATUS);
   assert.equal(deriveDispatchRequestOperationalState(service).activeCount, 1);
+  assert.equal(service.status, 'ASSIGNMENT_PARTIAL');
   await saveCrewAttendanceServiceConfiguration(prisma, {
     serviceRequestId: service.id,
     mode: CREW_ATTENDANCE_MODE.INDIVIDUAL,
@@ -285,6 +291,7 @@ test('si un auxiliar pasa a encargado deja de contar como cupo y al volver a Ind
   });
   assert.equal(service.assignments.find((item) => item.workerId === 'TEST-WORKER-A').status, 'ASSIGNED');
   assert.equal(deriveDispatchRequestOperationalState(service).activeCount, 2);
+  assert.equal(service.status, 'PENDING_CONFIRMATION');
 });
 
 test('cambiar encargado deja una sola asignación CREW_LEADER activa y conserva historial anterior', async () => {
