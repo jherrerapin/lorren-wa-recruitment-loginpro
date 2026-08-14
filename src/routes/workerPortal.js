@@ -10,6 +10,11 @@ import {
   isAttendanceInsideGeofence
 } from '../modules/dispatch-attendance/domain/attendanceDistance.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../modules/dispatch-attendance/application/registerArrival.js';
+import { registerCrewArrivalForLeader } from '../modules/dispatch-attendance/application/registerCrewArrival.js';
+import {
+  issueCrewPresenceCredential,
+  verifyCrewPresenceBundle
+} from '../modules/dispatch-attendance/application/crewPresenceCredential.js';
 import {
   CREW_BLUETOOTH_OPERATION_CHARACTERISTIC_UUID,
   CREW_BLUETOOTH_SERVICE_UUID,
@@ -163,6 +168,27 @@ function biometricPublicError(error) {
   return [400, /^[A-Za-z0-9_]{1,100}$/.test(code) ? code : 'worker_biometric_error'];
 }
 
+function crewPresencePublicError(error) {
+  const code = typeof error?.message === 'string' && /^[A-Za-z0-9_]{1,100}$/.test(error.message)
+    ? error.message
+    : 'crew_presence_error';
+  if (
+    code === 'crew_presence_secret_required'
+    || code.endsWith('_contract_invalid')
+  ) return [503, 'crew_presence_temporarily_unavailable'];
+  if (code === 'attendance_offline_capture_expired') return [409, 'offline_capture_expired'];
+  if (code === 'attendance_offline_capture_future_invalid') return [409, 'offline_capture_future_invalid'];
+  if (
+    code === 'crew_presence_leader_not_available'
+    || code === 'crew_presence_leader_not_assigned'
+    || code === 'crew_presence_leader_device_inactive'
+    || code === 'crew_presence_service_request_mismatch'
+    || code === 'crew_presence_attempt_mismatch'
+    || code === 'crew_group_arrival_leader_presence_required'
+  ) return [409, code];
+  return [400, code];
+}
+
 export function workerPortalRouter(prisma, options = {}) {
   const repositoryFactory = options.repositoryFactory || (() => createPrismaWorkerPortalSessionRepository(prisma));
   const resolveSessionFn = options.resolveSessionFn || resolveWorkerPortalSession;
@@ -179,6 +205,11 @@ export function workerPortalRouter(prisma, options = {}) {
     || ((input, attemptOptions) => assertWorkerBiometricAttemptAllowed(prisma, input, attemptOptions));
   const loadCrewPortalContextsFn = options.loadCrewPortalContextsFn
     || ((input) => loadCrewAttendancePortalContexts(prisma, input));
+  const issueCrewPresenceCredentialFn = options.issueCrewPresenceCredentialFn || issueCrewPresenceCredential;
+  const verifyCrewPresenceBundleFn = options.verifyCrewPresenceBundleFn
+    || ((input, verifyOptions) => verifyCrewPresenceBundle(prisma, input, verifyOptions));
+  const registerCrewPresenceArrivalFn = options.registerCrewPresenceArrivalFn
+    || ((input) => registerCrewArrivalForLeader(prisma, input));
   const loadBiometricAssignmentFn = options.loadBiometricAssignmentFn || (async (workerId, assignmentId) => (
     prisma.dispatchAssignment.findFirst({
       where: {
@@ -438,6 +469,139 @@ export function workerPortalRouter(prisma, options = {}) {
         'crew_proximity_temporarily_unavailable',
         'No fue posible preparar la validación Bluetooth de la cuadrilla.'
       );
+    }
+  });
+
+  router.post('/cuadrillas/presencia/credencial', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      const publicKey = normalizedString(req.body?.publicKey, 4096);
+      if (!publicKey) return strictError(res, 400, 'crew_presence_public_key_required', 'No fue posible preparar este teléfono para asistencia.');
+      const issued = issueCrewPresenceCredentialFn({
+        workerId: portalSession.workerId,
+        deviceId: portalSession.deviceId,
+        publicKey,
+        now
+      }, {
+        env: options.env || process.env,
+        secret: options.crewPresenceSecret,
+        ttlMs: options.crewPresenceCredentialTtlMs
+      });
+      return res.status(201).json({
+        ok: true,
+        credential: issued.credential,
+        expiresAt: issued.expiresAt,
+        keyHash: issued.keyHash
+      });
+    } catch (error) {
+      const [status, code] = crewPresencePublicError(error);
+      if (status >= 500) console.error('[WORKER_PORTAL_CREW_PRESENCE_CREDENTIAL_FAILED]', { code });
+      return strictError(res, status, code, 'No fue posible preparar este teléfono para asistencia.');
+    }
+  });
+
+  router.post('/cuadrillas/presencia/sincronizar', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+
+      const assignmentId = normalizedString(req.body?.assignmentId, 160);
+      const serviceRequestId = normalizedString(req.body?.serviceRequestId, 160);
+      const idempotencyKey = normalizedString(req.body?.idempotencyKey, 100);
+      const clientCapturedAt = new Date(req.body?.clientCapturedAt);
+      if (!assignmentId || !serviceRequestId || !idempotencyKey || Number.isNaN(clientCapturedAt.getTime())) {
+        return strictError(res, 400, 'crew_presence_sync_invalid', 'La comprobación de cuadrilla no es válida.');
+      }
+
+      const assignment = await loadBiometricAssignmentFn(portalSession.workerId, assignmentId, now);
+      if (
+        !assignment
+        || assignment.serviceRequest?.id !== serviceRequestId
+        || assignment.serviceRequest?.operationPoint?.attendanceEnabled !== true
+      ) {
+        return strictError(res, 409, 'assignment_not_available', 'La cuadrilla ya no está disponible para marcar llegada.');
+      }
+      const location = requireStrictAttendanceLocation(res, assignment.serviceRequest.operationPoint, req.body);
+      if (!location) return;
+
+      const verified = await verifyCrewPresenceBundleFn({
+        leaderWorkerId: portalSession.workerId,
+        leaderDeviceId: portalSession.deviceId,
+        assignmentId,
+        serviceRequestId,
+        idempotencyKey,
+        clientCapturedAt,
+        proofBundle: req.body?.proofBundle,
+        now
+      }, {
+        env: options.env || process.env,
+        secret: options.crewPresenceSecret,
+        loadCrewContextsFn: (_prisma, input) => loadCrewPortalContextsFn(input)
+      });
+
+      const result = await registerCrewPresenceArrivalFn({
+        leaderWorkerId: portalSession.workerId,
+        assignmentId,
+        idempotencyKey,
+        now,
+        captureMode: OFFLINE_WEB_CAPTURE_MODE,
+        clientCapturedAt,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracyMeters: location.accuracyMeters,
+        installationIdHash: verified.leaderInstallationIdHash,
+        presenceValidated: true,
+        validatedWorkerIds: verified.validatedWorkerIds,
+        forceMajeure: false,
+        ipAddress: normalizedString(req.ip, 120),
+        userAgent: normalizedString(req.get?.('user-agent'), 500)
+      });
+
+      if (!result?.applied) {
+        return strictError(res, 409, 'crew_presence_group_not_available', 'La marcación por cuadrilla ya no está disponible.');
+      }
+      if (!result.summary) {
+        return strictError(res, 409, 'crew_presence_leader_arrival_conflict', 'La llegada del encargado no permitió completar esta marcación grupal.');
+      }
+
+      const summary = result.summary;
+      const processedCount = summary.newlyRecordedCount + summary.replayedCount + summary.alreadyRecordedCount;
+      const notDetectedCount = Math.max(summary.notDetectedCount, verified.notDetectedCount);
+      let message = `${processedCount} de ${summary.totalMembers} integrante${summary.totalMembers === 1 ? '' : 's'} quedaron procesados en este intento.`;
+      if (notDetectedCount > 0) {
+        message += ` ${notDetectedCount} no fue${notDetectedCount === 1 ? '' : 'ron'} detectado${notDetectedCount === 1 ? '' : 's'} y no se marcó${notDetectedCount === 1 ? '' : 'aron'} automáticamente.`;
+      }
+      if (summary.failedCount > 0 || summary.reviewPendingCount > 0) {
+        message += ' Una o más marcaciones requieren revisión.';
+      }
+
+      return res.status(200).json({
+        ok: true,
+        crewGroup: true,
+        presenceValidated: true,
+        totalMembers: summary.totalMembers,
+        detectedMembers: summary.eligibleMembers,
+        processedCount,
+        newlyRecordedCount: summary.newlyRecordedCount,
+        replayedCount: summary.replayedCount,
+        alreadyRecordedCount: summary.alreadyRecordedCount,
+        failedCount: summary.failedCount,
+        reviewPendingCount: summary.reviewPendingCount,
+        notDetectedCount,
+        verifiedProofCount: verified.verifiedProofCount,
+        rejectedProofCount: verified.rejectedProofCount,
+        requiresReview: summary.failedCount > 0 || summary.reviewPendingCount > 0,
+        message
+      });
+    } catch (error) {
+      const [status, code] = crewPresencePublicError(error);
+      if (status >= 500) console.error('[WORKER_PORTAL_CREW_PRESENCE_SYNC_FAILED]', { code });
+      return strictError(res, status, code, 'No fue posible sincronizar la llegada de la cuadrilla.');
     }
   });
 
