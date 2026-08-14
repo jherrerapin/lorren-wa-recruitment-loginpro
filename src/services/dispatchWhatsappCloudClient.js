@@ -86,16 +86,17 @@ export function buildDispatchReportMenuPayload({ phone, name }) {
       action: {
         buttons: [
           { type: 'reply', reply: { id: 'dispatch_report:programming_today', title: 'Programación' } },
-          { type: 'reply', reply: { id: 'dispatch_report:summary_today', title: 'Resumen del día' } }
+          { type: 'reply', reply: { id: 'dispatch_report:summary', title: 'Resumen del día' } }
         ]
       }
     }
   };
 }
 
-export function buildDispatchProgrammingDateMenuPayload({ phone }) {
+function buildDispatchDateMenuPayload({ phone, reportType }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
   if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para responder por WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  const prefix = reportType === 'summary' ? 'summary' : 'programming';
   return {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
@@ -106,12 +107,20 @@ export function buildDispatchProgrammingDateMenuPayload({ phone }) {
       body: { text: '¿Qué día deseas consultar?' },
       action: {
         buttons: [
-          { type: 'reply', reply: { id: 'dispatch_report:programming_date_today', title: 'Hoy' } },
-          { type: 'reply', reply: { id: 'dispatch_report:programming_date_tomorrow', title: 'Mañana' } }
+          { type: 'reply', reply: { id: `dispatch_report:${prefix}_date_today`, title: 'Hoy' } },
+          { type: 'reply', reply: { id: `dispatch_report:${prefix}_date_tomorrow`, title: 'Mañana' } }
         ]
       }
     }
   };
+}
+
+export function buildDispatchProgrammingDateMenuPayload({ phone }) {
+  return buildDispatchDateMenuPayload({ phone, reportType: 'programming' });
+}
+
+export function buildDispatchSummaryDateMenuPayload({ phone }) {
+  return buildDispatchDateMenuPayload({ phone, reportType: 'summary' });
 }
 
 export function buildDispatchProgrammingFormatMenuPayload({ phone, dateChoice = 'today' }) {
@@ -311,10 +320,10 @@ export async function sendDispatchWhatsappReportMenu({ scope = 'operational', ph
   }
 }
 
-export async function sendDispatchWhatsappProgrammingDateMenu({ scope = 'operational', phone, axiosClient = axios } = {}) {
+async function sendDispatchWhatsappDateMenu({ scope = 'operational', phone, payloadBuilder, axiosClient = axios } = {}) {
   const config = ensureDispatchWhatsappConfigured(scope);
   try {
-    const response = await postGraph(config, buildDispatchProgrammingDateMenuPayload({ phone }), axiosClient);
+    const response = await postGraph(config, payloadBuilder({ phone }), axiosClient);
     const providerMessageId = providerMessageIdFromResponse(response);
     if (!providerMessageId) throw buildDispatchWhatsappError('Meta no devolvió el identificador del selector de fecha.', 502, 'dispatch_whatsapp_provider_message_missing');
     const now = new Date().toISOString();
@@ -326,6 +335,14 @@ export async function sendDispatchWhatsappProgrammingDateMenu({ scope = 'operati
     if (error?.statusCode) throw error;
     throw buildDispatchWhatsappError(message, 502, 'dispatch_whatsapp_provider_error');
   }
+}
+
+export function sendDispatchWhatsappProgrammingDateMenu(options = {}) {
+  return sendDispatchWhatsappDateMenu({ ...options, payloadBuilder: buildDispatchProgrammingDateMenuPayload });
+}
+
+export function sendDispatchWhatsappSummaryDateMenu(options = {}) {
+  return sendDispatchWhatsappDateMenu({ ...options, payloadBuilder: buildDispatchSummaryDateMenuPayload });
 }
 
 export async function sendDispatchWhatsappProgrammingFormatMenu({ scope = 'operational', phone, dateChoice = 'today', axiosClient = axios } = {}) {
