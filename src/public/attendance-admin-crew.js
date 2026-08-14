@@ -22,7 +22,7 @@
     style.textContent = `
       .crew-operation-panel{margin-top:16px;padding-top:16px;border-top:1px solid #dfe6ec;display:grid;gap:12px}
       .crew-operation-title{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}
-      .crew-operation-title h4{margin:0;color:var(--navy);font-size:15px}.crew-operation-title p{margin:4px 0 0;color:var(--muted);font-size:12px;line-height:1.45;max-width:720px}
+      .crew-operation-title h4{margin:0;color:var(--navy);font-size:15px}.crew-operation-title p{margin:4px 0 0;color:var(--muted);font-size:12px;line-height:1.45;max-width:760px}
       .crew-operation-status{min-height:18px;font-size:12px;font-weight:800;color:#166534}.crew-operation-status.is-error{color:#b91c1c}
       .crew-operation-capability{display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc}
       .crew-operation-capability input{width:18px;height:18px;margin-top:1px;accent-color:var(--teal);flex:0 0 auto}.crew-operation-capability strong{display:block;color:#243342;font-size:13px}.crew-operation-capability small{display:block;margin-top:3px;color:var(--muted);font-size:11px;line-height:1.4}
@@ -30,6 +30,7 @@
       .crew-operation-service{padding:12px;border:1px solid #dfe6ec;border-radius:12px;background:#fff;display:grid;gap:10px}
       .crew-operation-service-grid{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(180px,.8fr);gap:9px}.crew-operation-service-grid .field{gap:4px}
       .crew-operation-summary{padding:9px 10px;border:1px solid #dbeafe;border-radius:9px;background:#f8fbff;color:#334155;font-size:11px;line-height:1.45}
+      .crew-operation-info{padding:9px 10px;border:1px solid #99f6e4;border-radius:9px;background:#f0fdfa;color:#115e59;font-size:11px;line-height:1.45}
       .crew-operation-warning{padding:9px 10px;border:1px solid #f2d085;border-radius:9px;background:#fff8e7;color:#6b4700;font-size:11px;line-height:1.4}
       .crew-operation-empty{padding:12px;border:1px dashed #cbd5e1;border-radius:10px;color:var(--muted);font-size:12px;text-align:center}
       .crew-operation-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.crew-operation-actions .btn{width:auto}
@@ -98,7 +99,7 @@
     const copy = element('div');
     copy.append(
       element('h4', '', 'Marcación por cuadrilla'),
-      element('p', '', 'Esta configuración pertenece a esta operación. Habilita cuadrillas aquí y define por turno si la marcación será Individual o Cuadrilla.')
+      element('p', '', 'Aquí habilitas la capacidad de la operación y defines si cada turno será Individual o Cuadrilla. El encargado se marca después en la vista de Asignaciones y es una de las personas incluidas en el total requerido.')
     );
     heading.append(copy);
 
@@ -168,6 +169,7 @@
       try {
         await requestJson(`/admin/operaciones/asistencia/cuadrillas/operaciones/${encodeURIComponent(operation.id)}`, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
           body: new URLSearchParams({ allowed: String(desired) })
         });
         setStatus(panel, desired
@@ -185,6 +187,11 @@
   function serviceOptionLabel(service) {
     const time = service.startTime ? ` · ${service.startTime}` : '';
     return `${service.serviceDate || 'Sin fecha'}${time} · ${service.operationPointName || 'Operación'}`;
+  }
+
+  function leaderName(service) {
+    if (!service?.crewLeaderWorkerId) return null;
+    return service.assignments?.find((assignment) => assignment.workerId === service.crewLeaderWorkerId)?.fullName || null;
   }
 
   function renderServiceEditor(panel, operation, services, selectedServiceId, reload) {
@@ -237,26 +244,12 @@
     modeField.appendChild(modeSelect);
     grid.append(serviceField, modeField);
 
+    const currentLeaderName = leaderName(requested);
     const summary = element('div', 'crew-operation-summary');
-    summary.textContent = `Requeridos: ${requested.requiredWorkers} · Asignados activos: ${requested.assignments.length} · ${requested.crewAvailable ? 'Cuadrilla disponible' : 'Cuadrilla no disponible'}.`;
+    summary.textContent = `Personas requeridas: ${requested.requiredWorkers} · Asignadas activas: ${requested.assignments.length} · Encargado: ${currentLeaderName || 'pendiente en Asignaciones'}.`;
 
-    const leaderField = element('div', 'field');
-    leaderField.appendChild(element('label', '', 'Responsable de la cuadrilla'));
-    const leaderSelect = document.createElement('select');
-    const emptyOption = document.createElement('option');
-    emptyOption.value = '';
-    emptyOption.textContent = requested.assignments.length
-      ? 'Selecciona un auxiliar asignado'
-      : 'Pendiente hasta asignar auxiliares';
-    leaderSelect.appendChild(emptyOption);
-    requested.assignments.forEach((assignment) => {
-      const option = document.createElement('option');
-      option.value = assignment.workerId;
-      option.textContent = assignment.fullName;
-      option.selected = requested.crewLeaderWorkerId === assignment.workerId;
-      leaderSelect.appendChild(option);
-    });
-    leaderField.appendChild(leaderSelect);
+    const info = element('div', 'crew-operation-info');
+    info.textContent = 'El encargado no es una persona adicional: debe ser una de las personas ya asignadas al turno. Selecciónalo con el check “Encargado de cuadrilla” en Operaciones → Asignaciones.';
 
     const warning = element('div', 'crew-operation-warning');
     warning.hidden = true;
@@ -267,7 +260,6 @@
 
     function syncControls() {
       const crew = modeSelect.value === MODE_CREW;
-      leaderField.hidden = !crew;
       warning.hidden = true;
       warning.textContent = '';
       let blocked = false;
@@ -279,14 +271,8 @@
         warning.textContent = 'Activa “Permitir marcación por cuadrilla” en esta misma operación.';
         warning.hidden = false;
         blocked = true;
-      } else if (crew && requested.assignments.length > 0 && !leaderSelect.value) {
-        warning.textContent = requested.crewLeaderWorkerId && !requested.leaderValid
-          ? 'El responsable guardado ya no tiene una asignación activa. Selecciona otro auxiliar.'
-          : 'Selecciona el responsable entre los auxiliares asignados a este turno.';
-        warning.hidden = false;
-        blocked = true;
-      } else if (crew && requested.assignments.length === 0) {
-        warning.textContent = 'Puedes preparar este turno como Cuadrilla. Cuando asignes auxiliares, vuelve aquí para definir el responsable antes de marcar.';
+      } else if (crew && requested.assignments.length > 0 && !currentLeaderName) {
+        warning.textContent = 'Puedes guardar el modo Cuadrilla ahora. Después marca al encargado desde la misma vista de Asignaciones.';
         warning.hidden = false;
       }
       saveButton.disabled = blocked;
@@ -296,20 +282,25 @@
       renderServiceEditor(panel, operation, services, serviceSelect.value, reload);
     });
     modeSelect.addEventListener('change', syncControls);
-    leaderSelect.addEventListener('change', syncControls);
     saveButton.addEventListener('click', async () => {
       saveButton.disabled = true;
       setStatus(panel, 'Guardando modalidad del turno…');
+      const keepLeaderId = modeSelect.value === MODE_CREW && requested.leaderValid
+        ? (requested.crewLeaderWorkerId || '')
+        : '';
       try {
         await requestJson(`/admin/operaciones/asistencia/cuadrillas/servicios/${encodeURIComponent(requested.id)}`, {
           method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
           body: new URLSearchParams({
             mode: modeSelect.value,
-            crewLeaderWorkerId: modeSelect.value === MODE_CREW ? leaderSelect.value : ''
+            crewLeaderWorkerId: keepLeaderId
           })
         });
         setStatus(panel, modeSelect.value === MODE_CREW
-          ? 'Turno configurado para marcación por cuadrilla.'
+          ? (keepLeaderId
+              ? 'Turno configurado para Cuadrilla; conserva el encargado seleccionado en Asignaciones.'
+              : 'Turno configurado para Cuadrilla. Ahora selecciona el encargado desde Asignaciones.')
           : 'Turno configurado para marcación individual.');
         await reload(requested.id);
       } catch (error) {
@@ -318,7 +309,7 @@
       }
     });
 
-    area.append(grid, summary, leaderField, warning, actions);
+    area.append(grid, summary, info, warning, actions);
     syncControls();
   }
 
