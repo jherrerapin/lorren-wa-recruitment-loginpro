@@ -71,10 +71,13 @@ test('la app Android expone su versión y solo ofrece actualización si el servi
 });
 
 
-test('la actualización reutiliza el mismo CTA que el handoff ya transfiere a Chrome', () => {
+test('la actualización reutiliza el mismo CTA y reconoce explícitamente el WebView nativo antes de pasarlo a Chrome', () => {
   assert.match(installSource, /id: 'open-worker-portal-install'/);
   assert.match(handoffSource, /'open-worker-portal-install'/);
-  assert.match(handoffSource, /isAndroidInAppBrowser/);
+  assert.match(handoffSource, /function isNativeAndroidApp\(\)/);
+  assert.match(handoffSource, /window\.LorrenAndroidPresence/);
+  assert.match(handoffSource, /function shouldTransferInstallToChrome\(\)/);
+  assert.match(handoffSource, /isNativeAndroidApp\(\) \|\| isAndroidInAppBrowser\(\)/);
   assert.match(handoffSource, /window\.location\.href = chromeIntentUrl\(handoffToken\)/);
 });
 
