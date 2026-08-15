@@ -17,6 +17,22 @@ import {
 } from './dispatchWhatsappCloudClient.js';
 import { getDispatchWhatsappContactWindowStatus } from './dispatchWhatsappAdminAlerts.js';
 
+function numericProviderIdentifier(value) {
+  const text = String(value ?? '').trim();
+  return /^\d+$/.test(text) ? text.slice(0, 20) : '';
+}
+
+export function dispatchWhatsappProviderFailureCode(error) {
+  const metaError = error?.response?.data?.error;
+  const code = numericProviderIdentifier(metaError?.code);
+  const subcode = numericProviderIdentifier(metaError?.error_subcode);
+  return [
+    'dispatch_whatsapp_provider_error',
+    code ? `meta_${code}` : '',
+    subcode ? `sub_${subcode}` : ''
+  ].filter(Boolean).join('_');
+}
+
 function confirmationExpiresAt(serviceDate) {
   const minimum = Date.now() + (36 * 60 * 60 * 1000);
   const key = dispatchServiceDateKey(serviceDate);
@@ -158,7 +174,8 @@ export async function sendDispatchWhatsappMessage({
     const message = error?.code?.startsWith?.('dispatch_') ? error.message : dispatchWhatsappProviderErrorMessage(error);
     setDispatchWhatsappRuntimeState(scope, { lastError: message });
     if (error?.statusCode) throw error;
-    throw buildDispatchWhatsappError(message, 502, 'dispatch_whatsapp_provider_error');
+    console.warn('[dispatch-wa-cloud] Rechazo del proveedor al enviar asignación:', message);
+    throw buildDispatchWhatsappError(message, 502, dispatchWhatsappProviderFailureCode(error));
   }
 }
 
