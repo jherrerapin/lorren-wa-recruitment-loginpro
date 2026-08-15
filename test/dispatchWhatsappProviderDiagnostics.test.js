@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { dispatchWhatsappProviderFailureCode } from '../src/services/dispatchWhatsappAssignmentService.js';
+import {
+  dispatchWhatsappProviderFailureCode,
+  sanitizeDispatchWhatsappProviderDiagnostic
+} from '../src/services/dispatchWhatsappAssignmentService.js';
 
 test('conserva código y subcódigo Meta sin incluir datos del destinatario', () => {
   const error = {
@@ -29,11 +32,21 @@ test('mantiene el código genérico cuando el proveedor no entrega identidad num
   );
 });
 
-test('el warning de proveedor usa solo el mensaje técnico ya sanitizado', () => {
+test('el diagnóstico visible en Railway elimina identificadores largos y secretos', () => {
+  const diagnostic = sanitizeDispatchWhatsappProviderDiagnostic(
+    'Meta rechazó la operación: recipient=987654321098765 access_token=secret-test-value'
+  );
+  assert.match(diagnostic, /recipient=\[redacted\]/);
+  assert.match(diagnostic, /access_token=\[redacted\]/);
+  assert.doesNotMatch(diagnostic, /987654321098765/);
+  assert.doesNotMatch(diagnostic, /secret-test-value/);
+});
+
+test('el warning de proveedor usa solo el diagnóstico redacted', () => {
   const source = fs.readFileSync('src/services/dispatchWhatsappAssignmentService.js', 'utf8');
   assert.match(
     source,
-    /console\.warn\('\[dispatch-wa-cloud\] Rechazo del proveedor al enviar asignación:', message\)/
+    /console\.warn\('\[dispatch-wa-cloud\] Rechazo del proveedor al enviar asignación:', diagnostic\)/
   );
   assert.doesNotMatch(
     source,
