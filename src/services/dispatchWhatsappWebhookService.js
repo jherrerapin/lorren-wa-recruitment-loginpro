@@ -54,6 +54,10 @@ function inboundPayload(message = {}) {
     .find((value) => typeof value === 'string' && value.trim()) || '';
 }
 
+function inboundContextMessageId(message = {}) {
+  return String(message?.context?.id || '').trim();
+}
+
 function assignmentActionFromInboundPayload(message = {}) {
   const match = inboundPayload(message).trim().match(/^dispatch_(confirm|novelty|decline):([A-Za-z0-9_-]+)$/);
   if (!match) return null;
@@ -85,30 +89,92 @@ function inboundAuditBody(message = {}) {
   return `[${type || 'MENSAJE'}]`;
 }
 
-async function findConfirmationTarget({ scope, message, prismaClient }) {
+function candidateMatchesScopeAndAssignment({ link, definition, scope, phone, receivedAt, allowSuperseded = false }) {
+  if (!link?.assignment) return false;
+  const allowedAssignmentStatuses = [...definition.pendingAssignmentStatuses, definition.confirmedAssignmentStatus];
+  if (!allowedAssignmentStatuses.includes(link.assignment.status)) return false;
+  if (definition.requestSource && link.assignment.serviceRequest?.source !== definition.requestSource) return false;
+  if (scope === 'operational' && link.assignment.serviceRequest?.source === 'DEV_TEST') return false;
+  if (normalizeDispatchWhatsappPhone(link.assignment.worker?.phone) !== phone) return false;
+
+  const createdAt = new Date(link.createdAt || Number.NaN);
+  if (Number.isNaN(createdAt.getTime()) || createdAt.getTime() > receivedAt.getTime()) return false;
+  if (INBOUND_LINK_STATUSES.includes(link.status)) {
+    const expiresAt = new Date(link.expiresAt || Number.NaN);
+    return !Number.isNaN(expiresAt.getTime()) && expiresAt.getTime() > receivedAt.getTime();
+  }
+  return allowSuperseded && link.status === 'EXPIRED';
+}
+
+async function loadConfirmationCandidates(prismaClient, where) {
+  return prismaClient.dispatchWhatsappConfirmation.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    include: { assignment: { include: { worker: true, serviceRequest: true } } }
+  });
+}
+
+async function findFirstValidCandidate({ prismaClient, where, definition, scope, phone, receivedAt, allowSuperseded = false }) {
+  const candidates = await loadConfirmationCandidates(prismaClient, where);
+  const link = candidates.find((candidate) => candidateMatchesScopeAndAssignment({
+    link: candidate,
+    definition,
+    scope,
+    phone,
+    receivedAt,
+    allowSuperseded
+  }));
+  return link ? { link, assignment: link.assignment, phone } : null;
+}
+
+async function findConfirmationTarget({ scope, action, message, receivedAt, prismaClient }) {
   const definition = dispatchWhatsappScopeDefinition(scope);
   const phone = normalizeDispatchWhatsappPhone(message.from);
   if (!phone) return null;
-  const where = {
-    phone,
-    status: { in: INBOUND_LINK_STATUSES },
-    expiresAt: { gt: new Date() }
-  };
   const assignmentId = assignmentIdFromInboundPayload(message);
-  if (assignmentId) where.assignmentId = assignmentId;
+  const contextMessageId = inboundContextMessageId(message);
+  const allowSuperseded = action === 'CONFIRM';
 
-  const link = await prismaClient.dispatchWhatsappConfirmation.findFirst({
-    where,
-    orderBy: { createdAt: 'desc' },
-    include: { assignment: { include: { worker: true, serviceRequest: true } } }
+  if (contextMessageId) {
+    const exactContextTarget = await findFirstValidCandidate({
+      prismaClient,
+      where: { phone, providerMessageId: contextMessageId, createdAt: { lte: receivedAt } },
+      definition,
+      scope,
+      phone,
+      receivedAt,
+      allowSuperseded
+    });
+    if (exactContextTarget) return exactContextTarget;
+  }
+
+  if (assignmentId) {
+    return findFirstValidCandidate({
+      prismaClient,
+      where: { phone, assignmentId, createdAt: { lte: receivedAt } },
+      definition,
+      scope,
+      phone,
+      receivedAt,
+      allowSuperseded
+    });
+  }
+
+  return findFirstValidCandidate({
+    prismaClient,
+    where: {
+      phone,
+      status: { in: INBOUND_LINK_STATUSES },
+      createdAt: { lte: receivedAt },
+      expiresAt: { gt: receivedAt }
+    },
+    definition,
+    scope,
+    phone,
+    receivedAt,
+    allowSuperseded: false
   });
-  if (!link?.assignment) return null;
-  const allowed = [...definition.pendingAssignmentStatuses, definition.confirmedAssignmentStatus];
-  if (!allowed.includes(link.assignment.status)) return null;
-  if (definition.requestSource && link.assignment.serviceRequest?.source !== definition.requestSource) return null;
-  if (scope === 'operational' && link.assignment.serviceRequest?.source === 'DEV_TEST') return null;
-  if (normalizeDispatchWhatsappPhone(link.assignment.worker?.phone) !== phone) return null;
-  return { link, assignment: link.assignment, phone };
 }
 
 export async function processDispatchWhatsappInboundMessage({
@@ -133,7 +199,13 @@ export async function processDispatchWhatsappInboundMessage({
   const inferredAction = buttonAction?.action
     || (isAutomaticNoveltyReply(inbound) ? 'NOVELTY' : isAutomaticConfirmationReply(inbound) ? 'CONFIRM' : null);
   if (!inferredAction) return { handled: false, reason: 'not_assignment_response' };
-  const target = await findConfirmationTarget({ scope, message, prismaClient });
+  const target = await findConfirmationTarget({
+    scope,
+    action: inferredAction,
+    message,
+    receivedAt,
+    prismaClient
+  });
   if (!target) return { handled: false, reason: 'no_pending_assignment' };
   const confirmationMessageId = String(message.id || '').trim();
   if (!confirmationMessageId) return { handled: false, reason: 'missing_message_id' };
@@ -167,6 +239,7 @@ export async function processDispatchWhatsappInboundMessage({
   const claim = await claimDispatchAssignmentConfirmation({
     scope,
     assignment: target.assignment,
+    confirmationLinkId: target.link.id,
     confirmationMessageId,
     confirmationReceivedAt: receivedAt,
     prismaClient

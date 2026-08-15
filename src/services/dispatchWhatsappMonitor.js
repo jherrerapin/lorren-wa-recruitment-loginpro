@@ -22,6 +22,10 @@ function normalizePhone(value) {
   return digits.length === 10 ? `57${digits}` : digits;
 }
 
+export function normalizeDispatchWhatsappMonitorPhone(value) {
+  return normalizePhone(value);
+}
+
 function phoneIssue(value) {
   const digits = phoneDigits(value);
   if (!digits) return 'MISSING';
@@ -235,68 +239,67 @@ function hasInboundNear(messages, value, toleranceMs = 5000) {
   });
 }
 
-function legacyMessagesForAssignment({ assignment, links = [], window = {}, persistedMessages = [] }) {
-  const messages = [...persistedMessages];
-  for (const link of links) {
-    if (link.providerMessageId && !messages.some((message) => sameEvidenceId(message, link.providerMessageId))) {
-      messages.push({
-        id: `legacy-out:${link.id}`,
-        direction: 'OUTBOUND',
-        body: `${buildDispatchAssignmentMessageBody(assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
-        messageType: 'INTERACTIVE',
-        at: isoDate(link.createdAt),
-        source: 'RECONSTRUIDO_ASIGNACION',
-        messageId: null,
-        providerMessageId: link.providerMessageId,
-        persisted: false,
-        reconstructed: true
-      });
-    }
-    if (link.confirmationMessageId && link.confirmationReceivedAt
-      && !messages.some((message) => sameEvidenceId(message, link.confirmationMessageId))) {
-      messages.push({
-        id: `legacy-in:${link.id}`,
-        direction: 'INBOUND',
-        body: legacyDirectionLabel(link.status),
-        messageType: 'INTERACTIVE',
-        at: isoDate(link.confirmationReceivedAt),
-        source: 'RECONSTRUIDO_RESPUESTA',
-        messageId: link.confirmationMessageId,
-        providerMessageId: null,
-        persisted: false,
-        reconstructed: true
-      });
-    }
-    const hasAuditedThanks = messages.some((message) => (
-      message.direction === 'OUTBOUND'
-      && message.body === 'Gracias.'
-      && validDate(message.at)
-      && validDate(link.confirmationReceivedAt)
-      && validDate(message.at).getTime() >= validDate(link.confirmationReceivedAt).getTime()
-    ));
-    if (link.status === 'CONFIRMED' && link.confirmationReceivedAt && !hasAuditedThanks) {
-      messages.push({
-        id: `legacy-thanks:${link.id}`,
-        direction: 'OUTBOUND',
-        body: 'Gracias.',
-        messageType: 'TEXT',
-        at: isoDate(link.updatedAt || link.confirmationReceivedAt),
-        source: 'RECONSTRUIDO_AUTO_REPLY',
-        messageId: null,
-        providerMessageId: null,
-        persisted: false,
-        reconstructed: true
-      });
-    }
-  }
-
-  if (window.lastInboundAt && !hasInboundNear(messages, window.lastInboundAt)) {
+function addLegacyLinkMessages(messages, link, assignment) {
+  if (link.providerMessageId && assignment && !messages.some((message) => sameEvidenceId(message, link.providerMessageId))) {
     messages.push({
-      id: `legacy-window:${assignment.id}:${window.lastInboundAt}`,
+      id: `legacy-out:${link.id}`,
+      direction: 'OUTBOUND',
+      body: `${buildDispatchAssignmentMessageBody(assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
+      messageType: 'INTERACTIVE',
+      at: isoDate(link.createdAt),
+      source: 'RECONSTRUIDO_ASIGNACION',
+      messageId: null,
+      providerMessageId: link.providerMessageId,
+      persisted: false,
+      reconstructed: true
+    });
+  }
+  if (link.confirmationMessageId && link.confirmationReceivedAt
+    && !messages.some((message) => sameEvidenceId(message, link.confirmationMessageId))) {
+    messages.push({
+      id: `legacy-in:${link.id}`,
+      direction: 'INBOUND',
+      body: legacyDirectionLabel(link.status),
+      messageType: 'INTERACTIVE',
+      at: isoDate(link.confirmationReceivedAt),
+      source: 'RECONSTRUIDO_RESPUESTA',
+      messageId: link.confirmationMessageId,
+      providerMessageId: null,
+      persisted: false,
+      reconstructed: true
+    });
+  }
+  const hasAuditedThanks = messages.some((message) => (
+    message.direction === 'OUTBOUND'
+    && message.body === 'Gracias.'
+    && validDate(message.at)
+    && validDate(link.confirmationReceivedAt)
+    && validDate(message.at).getTime() >= validDate(link.confirmationReceivedAt).getTime()
+  ));
+  if (link.status === 'CONFIRMED' && link.confirmationReceivedAt && !hasAuditedThanks) {
+    messages.push({
+      id: `legacy-thanks:${link.id}`,
+      direction: 'OUTBOUND',
+      body: 'Gracias.',
+      messageType: 'TEXT',
+      at: isoDate(link.updatedAt || link.confirmationReceivedAt),
+      source: 'RECONSTRUIDO_AUTO_REPLY',
+      messageId: null,
+      providerMessageId: null,
+      persisted: false,
+      reconstructed: true
+    });
+  }
+}
+
+function finalizeMessageHistory(messages, { lastInboundAt, evidenceId = 'phone' } = {}) {
+  if (lastInboundAt && !hasInboundNear(messages, lastInboundAt)) {
+    messages.push({
+      id: `legacy-window:${evidenceId}:${lastInboundAt}`,
       direction: 'INBOUND',
       body: 'Mensaje recibido. El contenido exacto no se almacenaba todavía en el monitor de Despacho.',
       messageType: 'UNKNOWN',
-      at: window.lastInboundAt,
+      at: lastInboundAt,
       source: 'EVIDENCIA_VENTANA',
       messageId: null,
       providerMessageId: null,
@@ -304,11 +307,87 @@ function legacyMessagesForAssignment({ assignment, links = [], window = {}, pers
       reconstructed: true
     });
   }
-
   return messages
     .filter((message) => message.at)
     .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime())
     .slice(-MESSAGE_HISTORY_LIMIT);
+}
+
+function legacyMessagesForAssignment({ assignment, links = [], window = {}, persistedMessages = [] }) {
+  const messages = [...persistedMessages];
+  for (const link of links) addLegacyLinkMessages(messages, link, assignment);
+  return finalizeMessageHistory(messages, { lastInboundAt: window.lastInboundAt, evidenceId: assignment.id });
+}
+
+export async function loadDispatchWhatsappPhoneConversation({ prismaClient, phone, now = new Date() } = {}) {
+  if (!prismaClient) throw new Error('prismaClient es requerido');
+  const normalizedPhone = normalizePhone(phone);
+  if (!normalizedPhone) {
+    return {
+      phone: '',
+      phoneIssue: 'MISSING',
+      hasEvidence: false,
+      workerNames: [],
+      messageHistory: [],
+      messageCount: 0,
+      ...windowSnapshot(null, now)
+    };
+  }
+
+  const [windowRow, persistedByPhone, rawLinks] = await Promise.all([
+    prismaClient.dispatchWhatsappContactWindow?.findUnique
+      ? prismaClient.dispatchWhatsappContactWindow.findUnique({
+          where: { scope_phone: { scope: 'operational', phone: normalizedPhone } }
+        })
+      : null,
+    loadPersistedMessagesByPhone(prismaClient, [normalizedPhone]),
+    prismaClient.dispatchWhatsappConfirmation?.findMany
+      ? prismaClient.dispatchWhatsappConfirmation.findMany({
+          where: { phone: normalizedPhone },
+          include: { assignment: { include: { worker: true, serviceRequest: true } } },
+          orderBy: { createdAt: 'asc' },
+          take: 100
+        })
+      : []
+  ]);
+  const links = (rawLinks || []).filter((link) => link.assignment?.serviceRequest?.source !== 'DEV_TEST');
+  const contactInbound = validDate(windowRow?.lastInboundAt);
+  const confirmationInbound = latestDate(...links.map((link) => link.confirmationReceivedAt));
+  const effectiveInbound = latestDate(contactInbound, confirmationInbound);
+  const evidenceSource = effectiveInbound
+    ? (confirmationInbound && (!contactInbound || confirmationInbound.getTime() > contactInbound.getTime())
+        ? 'CONFIRMATION_EVIDENCE'
+        : 'CONTACT_WINDOW')
+    : null;
+  if (evidenceSource === 'CONFIRMATION_EVIDENCE') {
+    await healContactWindowFromEvidence({
+      prismaClient,
+      phone: normalizedPhone,
+      currentLastInboundAt: contactInbound,
+      evidenceLastInboundAt: confirmationInbound
+    });
+  }
+  const window = windowSnapshot(effectiveInbound, now, evidenceSource);
+  const messages = [...(persistedByPhone.get(normalizedPhone) || [])];
+  for (const link of links) addLegacyLinkMessages(messages, link, link.assignment);
+  const messageHistory = finalizeMessageHistory(messages, {
+    lastInboundAt: window.lastInboundAt,
+    evidenceId: normalizedPhone
+  });
+  const workerNames = [...new Set(links
+    .map((link) => text(link.assignment?.worker?.fullName))
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'es'));
+
+  return {
+    phone: normalizedPhone,
+    phoneIssue: phoneIssue(normalizedPhone),
+    hasEvidence: Boolean(messageHistory.length || window.lastInboundAt || links.length),
+    workerNames,
+    messageHistory,
+    messageCount: messageHistory.length,
+    ...window
+  };
 }
 
 export function tomorrowIsoDateCO(now = new Date()) {

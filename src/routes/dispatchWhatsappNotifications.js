@@ -4,6 +4,7 @@ import {
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappCloudService.js';
 import {
+  loadDispatchWhatsappPhoneConversation,
   loadDispatchWhatsappTomorrowAssignmentMonitor,
   loadDispatchWhatsappWindowStatusForAssignments,
   recordDispatchWhatsappMessageAudit
@@ -274,14 +275,18 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
 
   router.get('/monitor', requireDevMonitor, async (req, res, next) => {
     try {
-      const [monitor, status] = await Promise.all([
+      const phoneQuery = normalizeString(req.query?.phone) || '';
+      const [monitor, status, phoneLookup] = await Promise.all([
         loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma }),
-        getDispatchWhatsappStatusView({ scope: 'operational' })
+        getDispatchWhatsappStatusView({ scope: 'operational' }),
+        phoneQuery ? loadDispatchWhatsappPhoneConversation({ prismaClient: prisma, phone: phoneQuery }) : null
       ]);
       return res.render('operacionesWhatsappMonitor', {
         pageTitle: 'Ventanas 24 h de asignados de mañana · WhatsApp Despacho · DEV',
         role: role(req),
         monitor,
+        phoneQuery,
+        phoneLookup,
         windowCheckTemplateName: status.windowCheckTemplateName || null,
         windowCheckMessage: DISPATCH_WINDOW_CHECK_MESSAGE,
         windowCheckButton: DISPATCH_WINDOW_CHECK_BUTTON,
@@ -294,10 +299,14 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
     }
   });
 
-  router.get('/monitor/datos', requireDevMonitor, async (_req, res, next) => {
+  router.get('/monitor/datos', requireDevMonitor, async (req, res, next) => {
     try {
-      const monitor = await loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma });
-      return res.json({ ok: true, ...monitor });
+      const phoneQuery = normalizeString(req.query?.phone) || '';
+      const [monitor, phoneLookup] = await Promise.all([
+        loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClient: prisma }),
+        phoneQuery ? loadDispatchWhatsappPhoneConversation({ prismaClient: prisma, phone: phoneQuery }) : null
+      ]);
+      return res.json({ ok: true, ...monitor, phoneQuery, phoneLookup });
     } catch (error) {
       return next(error);
     }
