@@ -14,7 +14,7 @@ test('monitor DEV muestra conversaciones recientes aparte de asignados sin exigi
   assert.match(monitorView, /currentPhoneQuery = phone/);
   assert.match(monitorView, /Contacto → Lórren/);
   assert.match(monitorView, /Lórren → contacto/);
-  assert.match(monitorView, /phoneSearchCard" hidden aria-hidden="true"/);
+  assert.match(monitorView, /id="phoneSearchCard" hidden aria-hidden="true"/);
   assert.match(monitorView, /no necesitas copiar ni buscar el número/);
 });
 
