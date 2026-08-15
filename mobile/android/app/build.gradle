@@ -1,0 +1,49 @@
+plugins {
+    id 'com.android.application'
+}
+
+def portalBaseUrl = providers.gradleProperty('lorrenPortalBaseUrl')
+    .orElse('https://example.invalid')
+    .get()
+if (!portalBaseUrl.startsWith('https://')) {
+    throw new GradleException('lorrenPortalBaseUrl must use https://')
+}
+def escapedPortalBaseUrl = portalBaseUrl.replace('\\', '\\\\').replace('"', '\\"')
+
+android {
+    namespace 'com.loginpro.lorren.portal'
+    compileSdk 37
+
+    defaultConfig {
+        applicationId 'com.loginpro.lorren.portal'
+        minSdk 26
+        targetSdk 36
+        versionCode 1
+        versionName '0.1.0'
+        buildConfigField 'String', 'PORTAL_BASE_URL', '"' + escapedPortalBaseUrl + '"'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        debug {
+            minifyEnabled false
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+dependencies {
+    implementation 'com.google.android.gms:play-services-nearby:19.3.0'
+}
