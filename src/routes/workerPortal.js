@@ -184,6 +184,9 @@ function crewPresencePublicError(error) {
     || code === 'crew_presence_leader_device_inactive'
     || code === 'crew_presence_service_request_mismatch'
     || code === 'crew_presence_attempt_mismatch'
+    || code === 'crew_presence_native_location_required'
+    || code === 'crew_presence_native_location_time_mismatch'
+    || code === 'crew_presence_mock_location_detected'
     || code === 'crew_group_arrival_leader_presence_required'
   ) return [409, code];
   return [400, code];
@@ -526,8 +529,6 @@ export function workerPortalRouter(prisma, options = {}) {
       ) {
         return strictError(res, 409, 'assignment_not_available', 'La cuadrilla ya no está disponible para marcar llegada.');
       }
-      const location = requireStrictAttendanceLocation(res, assignment.serviceRequest.operationPoint, req.body);
-      if (!location) return;
 
       const verified = await verifyCrewPresenceBundleFn({
         leaderWorkerId: portalSession.workerId,
@@ -543,6 +544,12 @@ export function workerPortalRouter(prisma, options = {}) {
         secret: options.crewPresenceSecret,
         loadCrewContextsFn: (_prisma, input) => loadCrewPortalContextsFn(input)
       });
+      const location = requireStrictAttendanceLocation(
+        res,
+        assignment.serviceRequest.operationPoint,
+        verified.leaderLocation
+      );
+      if (!location) return;
 
       const result = await registerCrewPresenceArrivalFn({
         leaderWorkerId: portalSession.workerId,
@@ -550,7 +557,7 @@ export function workerPortalRouter(prisma, options = {}) {
         idempotencyKey,
         now,
         captureMode: OFFLINE_WEB_CAPTURE_MODE,
-        clientCapturedAt,
+        clientCapturedAt: verified.clientCapturedAt,
         latitude: location.latitude,
         longitude: location.longitude,
         accuracyMeters: location.accuracyMeters,
