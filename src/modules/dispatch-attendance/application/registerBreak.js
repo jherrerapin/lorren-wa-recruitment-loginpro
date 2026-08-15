@@ -1,8 +1,4 @@
 import {
-  calculateAttendanceDistanceMeters,
-  isAttendanceInsideGeofence
-} from '../domain/attendanceDistance.js';
-import {
   ATTENDANCE_RISK_FLAG,
   ATTENDANCE_VALIDATION_STATUS
 } from '../domain/attendanceValidationPolicy.js';
@@ -11,6 +7,10 @@ import {
   isDispatchBreakStartWithinOperationalWindow,
   resolveDispatchAttendanceOperationalWindow
 } from './registerArrival.js';
+import {
+  assertAttendanceOperationGeofence,
+  resolveAttendanceOperationGeofence
+} from './attendanceGeofenceResolver.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = new Set(['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED']);
 const BREAK_MARK_TYPES = new Set(['BREAK_START', 'BREAK_END']);
@@ -46,12 +46,6 @@ function numberValue(value, label, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number) || number < min || number > max) throw new Error(`${label}_invalid`);
   return number;
-}
-
-function finitePointNumber(value) {
-  if (value === undefined || value === null || value === '' || typeof value === 'boolean') return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
 }
 
 function normalizeCaptureMode(value) {
@@ -117,32 +111,6 @@ function requirePrisma(prisma) {
       throw new Error(`attendance_break_${modelName}_contract_invalid`);
     }
   }
-}
-
-function requireGeofence(point, input) {
-  const latitude = finitePointNumber(point?.attendanceLatitude);
-  const longitude = finitePointNumber(point?.attendanceLongitude);
-  const radiusMeters = finitePointNumber(point?.geofenceRadiusMeters);
-  if (latitude === null || longitude === null || radiusMeters === null || radiusMeters <= 0) {
-    throw new Error('attendance_operation_geofence_required');
-  }
-  if (input.latitude === null || input.longitude === null) {
-    throw new Error('attendance_location_required');
-  }
-
-  const maxAccuracyMeters = finitePointNumber(point?.maxLocationAccuracyMeters) ?? 100;
-  if (input.accuracyMeters === null || input.accuracyMeters > maxAccuracyMeters) {
-    throw new Error('attendance_location_accuracy_insufficient');
-  }
-
-  const distanceMeters = calculateAttendanceDistanceMeters(
-    { latitude, longitude },
-    { latitude: input.latitude, longitude: input.longitude }
-  );
-  if (isAttendanceInsideGeofence(distanceMeters, radiusMeters) !== true) {
-    throw new Error('attendance_outside_operation_range');
-  }
-  return { distanceMeters, insideGeofence: true };
 }
 
 function replayResult(mark) {
@@ -275,7 +243,9 @@ async function insideTransaction(client, input) {
   }
 
   const point = assignment.serviceRequest.operationPoint;
-  const geofence = requireGeofence(point, input);
+  const geofence = assertAttendanceOperationGeofence(
+    await resolveAttendanceOperationGeofence(client, point, input)
+  );
   const workerDevice = input.installationIdHash
     ? await client.dispatchWorkerDevice.findFirst({
         where: {
@@ -292,6 +262,7 @@ async function insideTransaction(client, input) {
     data: {
       attendanceSessionId: session.id,
       workerDeviceId: workerDevice?.id ?? null,
+      capturedOperationPointId: geofence.operationPointId,
       markType: input.markType,
       idempotencyKey: input.idempotencyKey,
       serverReceivedAt: input.now,

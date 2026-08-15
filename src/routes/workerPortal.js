@@ -5,10 +5,7 @@ import { createWorkerPortalSessionHandoffRouter } from './workerPortalSessionHan
 import { resolveWorkerPortalSession } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
 import { createPrismaWorkerPortalSessionRepository } from '../modules/dispatch-attendance/infrastructure/prismaWorkerPortalSessionRepository.js';
 import { WORKER_PORTAL_SESSION_COOKIE_NAME } from '../modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
-import {
-  calculateAttendanceDistanceMeters,
-  isAttendanceInsideGeofence
-} from '../modules/dispatch-attendance/domain/attendanceDistance.js';
+import { resolveAttendanceOperationGeofence } from '../modules/dispatch-attendance/application/attendanceGeofenceResolver.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../modules/dispatch-attendance/application/registerArrival.js';
 import { registerCrewArrivalForLeader } from '../modules/dispatch-attendance/application/registerCrewArrival.js';
 import {
@@ -73,7 +70,7 @@ function strictError(res, status, error, message) {
   return res.status(status).json({ ok: false, error, message });
 }
 
-function requireStrictAttendanceLocation(res, point, input = {}) {
+async function requireStrictAttendanceLocation(prisma, res, point, input = {}, options = {}) {
   const latitude = finiteNumber(input.latitude, { min: -90, max: 90 });
   const longitude = finiteNumber(input.longitude, { min: -180, max: 180 });
   const accuracyMeters = finiteNumber(input.accuracyMeters, { min: 0, max: 100_000 });
@@ -82,30 +79,47 @@ function requireStrictAttendanceLocation(res, point, input = {}) {
     return null;
   }
 
-  const pointLatitude = finiteNumber(point?.attendanceLatitude, { min: -90, max: 90 });
-  const pointLongitude = finiteNumber(point?.attendanceLongitude, { min: -180, max: 180 });
-  const radiusMeters = finiteNumber(point?.geofenceRadiusMeters, { min: 1, max: 100_000 });
-  if (pointLatitude === null || pointLongitude === null || radiusMeters === null) {
-    strictError(res, 409, 'operation_geofence_required', 'La operación no tiene una geocerca válida configurada.');
-    return null;
-  }
-
-  const maxAccuracyMeters = finiteNumber(point?.maxLocationAccuracyMeters, { min: 1, max: 100_000 }) ?? 100;
-  if (accuracyMeters > maxAccuracyMeters) {
-    strictError(res, 409, 'location_accuracy_insufficient', 'La precisión del GPS no es suficiente. Intenta nuevamente al aire libre.');
-    return null;
-  }
-
-  const distanceMeters = calculateAttendanceDistanceMeters(
-    { latitude: pointLatitude, longitude: pointLongitude },
-    { latitude, longitude }
+  const resolved = await resolveAttendanceOperationGeofence(
+    prisma,
+    point,
+    { latitude, longitude, accuracyMeters },
+    options
   );
-  if (isAttendanceInsideGeofence(distanceMeters, radiusMeters) !== true) {
-    strictError(res, 409, 'outside_operation_range', 'Debes estar dentro del rango de la operación para marcar asistencia.');
+  if (resolved.accepted !== true) {
+    const publicError = {
+      attendance_operation_geofence_required: [
+        409,
+        'operation_geofence_required',
+        'La operación no tiene una geocerca válida configurada.'
+      ],
+      attendance_location_accuracy_insufficient: [
+        409,
+        'location_accuracy_insufficient',
+        'La precisión del GPS no es suficiente. Intenta nuevamente al aire libre.'
+      ],
+      attendance_outside_operation_range: [
+        409,
+        'outside_operation_range',
+        'Debes estar dentro del rango de una operación registrada para marcar asistencia.'
+      ],
+      attendance_location_required: [
+        400,
+        'mark_request_invalid',
+        'No fue posible validar la ubicación.'
+      ]
+    }[resolved.errorCode] || [409, 'outside_operation_range', 'No fue posible validar una operación registrada para esta marcación.'];
+    strictError(res, publicError[0], publicError[1], publicError[2]);
     return null;
   }
 
-  return { latitude, longitude, accuracyMeters, distanceMeters };
+  return {
+    latitude,
+    longitude,
+    accuracyMeters,
+    distanceMeters: resolved.distanceMeters,
+    operationPointId: resolved.operationPointId,
+    crossOperation: resolved.crossOperation === true
+  };
 }
 
 function setBiometricRetryAfter(res, error) {
@@ -349,12 +363,17 @@ export function workerPortalRouter(prisma, options = {}) {
         return strictError(res, 409, 'assignment_not_available', 'La operación no está disponible para marcar asistencia.');
       }
 
-      const location = requireStrictAttendanceLocation(res, assignment.serviceRequest.operationPoint, req.body);
-      if (!location) return;
-
       const requestedCrewGroup = markType === 'ARRIVAL'
         && captureMode === ONLINE_WEB_CAPTURE_MODE
         && req.get?.('x-lorren-crew-group') === 'true';
+      const location = await requireStrictAttendanceLocation(
+        prisma,
+        res,
+        assignment.serviceRequest.operationPoint,
+        req.body,
+        { allowCrossOperation: !requestedCrewGroup }
+      );
+      if (!location) return;
 
       if (requestedCrewGroup) {
         const contexts = await loadCrewPortalContextsFn({ workerId: portalSession.workerId });
@@ -413,6 +432,8 @@ export function workerPortalRouter(prisma, options = {}) {
         workerId: portalSession.workerId,
         markType,
         captureMode,
+        operationPointId: location.operationPointId,
+        crossOperation: location.crossOperation,
         distanceMeters: location.distanceMeters,
         insideGeofence: true,
         requiresReview: captureMode === OFFLINE_WEB_CAPTURE_MODE
@@ -544,10 +565,12 @@ export function workerPortalRouter(prisma, options = {}) {
         secret: options.crewPresenceSecret,
         loadCrewContextsFn: (_prisma, input) => loadCrewPortalContextsFn(input)
       });
-      const location = requireStrictAttendanceLocation(
+      const location = await requireStrictAttendanceLocation(
+        prisma,
         res,
         assignment.serviceRequest.operationPoint,
-        verified.leaderLocation
+        verified.leaderLocation,
+        { allowCrossOperation: false }
       );
       if (!location) return;
 
@@ -684,7 +707,8 @@ export function workerPortalRouter(prisma, options = {}) {
       if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
       const context = await requireBiometricAssignment(req, res, portalSession, now);
       if (!context) return;
-      const location = requireStrictAttendanceLocation(
+      const location = await requireStrictAttendanceLocation(
+        prisma,
         res,
         context.assignment.serviceRequest.operationPoint,
         req.body

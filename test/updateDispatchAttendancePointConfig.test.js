@@ -21,6 +21,7 @@ function basePoint(overrides = {}) {
     attendanceTimezone: 'America/Bogota',
     attendancePhotoPolicy: 'RISK_ONLY',
     manualAttendanceAllowed: true,
+    crossOperationAttendanceAllowed: false,
     ...overrides
   };
 }
@@ -53,6 +54,7 @@ function validInput(overrides = {}) {
     attendanceTimezone: 'America/Bogota',
     attendancePhotoPolicy: 'RISK_ONLY',
     manualAttendanceAllowed: true,
+    crossOperationAttendanceAllowed: true,
     ...overrides
   };
 }
@@ -70,6 +72,7 @@ test('activa un punto con ubicación completa y aplica estándares protegidos', 
   const prisma = createPrisma();
   const result = await updateDispatchAttendancePointConfig(prisma, validInput());
   assert.equal(result.attendanceEnabled, true);
+  assert.equal(result.crossOperationAttendanceAllowed, true);
   assert.equal(result.geofenceRadiusMeters, DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS);
   assert.equal(result.maxLocationAccuracyMeters, DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS);
   assert.deepEqual(Object.keys(prisma.writes[0].data).sort(), [
@@ -78,6 +81,7 @@ test('activa un punto con ubicación completa y aplica estándares protegidos', 
     'attendanceLongitude',
     'attendancePhotoPolicy',
     'attendanceTimezone',
+    'crossOperationAttendanceAllowed',
     'geofenceRadiusMeters',
     'manualAttendanceAllowed',
     'maxLocationAccuracyMeters'
@@ -121,6 +125,7 @@ test('ignora radio y precisión enviados por el cliente y fuerza 100/50', async 
 test('rechaza booleanos ambiguos', async () => {
   await rejectsWithoutWrite(validInput({ attendanceEnabled: 'yes' }), 'attendance_enabled_invalid');
   await rejectsWithoutWrite(validInput({ manualAttendanceAllowed: {} }), 'manual_attendance_allowed_invalid');
+  await rejectsWithoutWrite(validInput({ crossOperationAttendanceAllowed: 'yes' }), 'cross_operation_attendance_allowed_invalid');
 });
 
 test('acepta booleanos explícitos típicos de formulario', async () => {
@@ -132,10 +137,29 @@ test('acepta booleanos explícitos típicos de formulario', async () => {
   }));
   const result = await updateDispatchAttendancePointConfig(prisma, validInput({
     attendanceEnabled: 'on',
-    manualAttendanceAllowed: '0'
+    manualAttendanceAllowed: '0',
+    crossOperationAttendanceAllowed: '1'
   }));
   assert.equal(result.attendanceEnabled, true);
   assert.equal(result.manualAttendanceAllowed, false);
+  assert.equal(result.crossOperationAttendanceAllowed, true);
+});
+
+test('conserva el permiso entre operaciones cuando el campo se omite', async () => {
+  const point = basePoint({
+    crossOperationAttendanceAllowed: true,
+    attendanceLatitude: 4.7,
+    attendanceLongitude: -74.1,
+    geofenceRadiusMeters: 100,
+    maxLocationAccuracyMeters: 50
+  });
+  const prisma = createPrisma(point);
+  const result = await updateDispatchAttendancePointConfig(prisma, {
+    clientId: point.clientId,
+    operationPointId: point.id,
+    attendanceEnabled: false
+  });
+  assert.equal(result.crossOperationAttendanceAllowed, true);
 });
 
 test('rechaza una política de fotografía o zona horaria no soportada', async () => {

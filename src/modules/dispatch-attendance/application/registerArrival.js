@@ -4,13 +4,10 @@ import {
   evaluateArrivalValidation
 } from '../domain/attendanceValidationPolicy.js';
 import {
-  calculateAttendanceDistanceMeters,
-  isAttendanceInsideGeofence
-} from '../domain/attendanceDistance.js';
-import {
   STANDARD_DISPATCH_BREAK_MINUTES,
   STANDARD_DISPATCH_WORKDAY_MINUTES
 } from '../domain/attendanceWorkdayPolicy.js';
+import { resolveAttendanceOperationGeofence } from './attendanceGeofenceResolver.js';
 
 export const ACTIVE_DISPATCH_ASSIGNMENT_STATUSES = Object.freeze([
   'ASSIGNED',
@@ -94,12 +91,6 @@ function requirePrismaContract(client) {
     }
   }
   return client;
-}
-
-function finiteDatabaseNumber(value) {
-  if (value === null || value === undefined) return null;
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
 }
 
 function instantDateKeyInBogota(value, label) {
@@ -328,24 +319,6 @@ async function resolveDeviceSignals(client, { workerId, installationIdHash, now 
   };
 }
 
-function geofenceSignals(operationPoint, input) {
-  const pointLatitude = finiteDatabaseNumber(operationPoint?.attendanceLatitude);
-  const pointLongitude = finiteDatabaseNumber(operationPoint?.attendanceLongitude);
-  const radiusMeters = finiteDatabaseNumber(operationPoint?.geofenceRadiusMeters);
-  const hasConfiguredGeofence = pointLatitude !== null
-    && pointLongitude !== null
-    && radiusMeters !== null
-    && radiusMeters > 0;
-  const distanceToPointMeters = calculateAttendanceDistanceMeters(
-    { latitude: pointLatitude, longitude: pointLongitude },
-    { latitude: input.latitude, longitude: input.longitude }
-  );
-  const withinGeofence = hasConfiguredGeofence
-    ? isAttendanceInsideGeofence(distanceToPointMeters, radiusMeters)
-    : null;
-  return { hasConfiguredGeofence, distanceToPointMeters, withinGeofence };
-}
-
 async function registerInsideTransaction(client, input) {
   const replay = await findIdempotentReplay(client, input.idempotencyKey);
   if (replay) return replayResult(replay);
@@ -395,16 +368,16 @@ async function registerInsideTransaction(client, input) {
     installationIdHash: input.installationIdHash,
     now: input.now
   });
-  const geofence = geofenceSignals(operationPoint, input);
+  const geofence = await resolveAttendanceOperationGeofence(client, operationPoint, input);
   const validation = evaluateArrivalValidation({
     assignmentActive,
     attendanceEnabled,
     duplicateMark,
     arrivalWindowOpen: arrivalWindow.open,
-    hasConfiguredGeofence: geofence.hasConfiguredGeofence,
-    withinGeofence: geofence.withinGeofence,
+    hasConfiguredGeofence: geofence.configured,
+    withinGeofence: geofence.insideGeofence,
     accuracyMeters: input.accuracyMeters,
-    maxAccuracyMeters: finiteDatabaseNumber(operationPoint?.maxLocationAccuracyMeters) ?? 100,
+    maxAccuracyMeters: geofence.maxAccuracyMeters,
     authorizedDevice: deviceSignals.authorizedDevice,
     sharedDeviceSignal: deviceSignals.sharedDeviceSignal,
     persistentStorageAvailable: input.persistentStorageAvailable,
@@ -440,6 +413,7 @@ async function registerInsideTransaction(client, input) {
     data: {
       attendanceSessionId: attendanceSession.id,
       workerDeviceId: deviceSignals.workerDevice?.id ?? null,
+      capturedOperationPointId: geofence.operationPointId,
       markType: 'ARRIVAL',
       idempotencyKey: input.idempotencyKey,
       serverReceivedAt: input.now,
@@ -447,8 +421,8 @@ async function registerInsideTransaction(client, input) {
       latitude: input.latitude,
       longitude: input.longitude,
       accuracyMeters: input.accuracyMeters,
-      distanceToPointMeters: geofence.distanceToPointMeters,
-      insideGeofence: geofence.withinGeofence,
+      distanceToPointMeters: geofence.distanceMeters,
+      insideGeofence: geofence.insideGeofence,
       installationIdHash: input.installationIdHash,
       ipAddress: input.ipAddress,
       userAgent: input.userAgent,

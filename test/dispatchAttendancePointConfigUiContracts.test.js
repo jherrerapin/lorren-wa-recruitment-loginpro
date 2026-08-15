@@ -59,6 +59,7 @@ test('Leaflet, búsqueda serializada y geolocalización respetan el contrato', (
 test('el formulario conserva booleanos explícitos y elimina las ventanas temporales desde la plantilla', () => {
   assert.match(renderedView, /attendanceEnabledFallback/);
   assert.match(renderedView, /manualAttendanceAllowedFallback/);
+  assert.match(renderedView, /crossOperationAttendanceAllowedFallback/);
   assert.doesNotMatch(sourceView, /name="earlyArrivalWindowMinutes"/);
   assert.doesNotMatch(sourceView, /name="lateToleranceMinutes"/);
   assert.doesNotMatch(sourceView, /name="absenceGraceMinutes"/);
@@ -78,6 +79,9 @@ test('el render autorizado conserva completa la configuración de asistencia por
   assert.match(renderedView, /name="attendanceEnabled"/);
   assert.match(renderedView, /name="attendancePhotoPolicy"/);
   assert.match(renderedView, /name="manualAttendanceAllowed"/);
+  assert.match(renderedView, /name="crossOperationAttendanceAllowed"/);
+  assert.match(renderedView, /auxiliares asignados a esta operación marquen desde otras operaciones registradas/);
+  assert.match(renderedView, /no habilita marcación desde ubicaciones libres/);
   assert.match(renderedView, /class="attendance-map"/);
   assert.match(renderedView, /Guardar asistencia|Guardar y habilitar asistencia/);
 });
