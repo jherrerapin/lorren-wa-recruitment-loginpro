@@ -2,12 +2,15 @@
 
 (() => {
   const DB_NAME = 'lorren-worker-portal-v1';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   const QUEUE_STORE = 'arrivalQueue';
   const RECEIPT_STORE = 'arrivalReceipts';
+  const CREW_QUEUE_STORE = 'crewPresenceQueue';
+  const CREW_RECEIPT_STORE = 'crewPresenceReceipts';
   const SYNC_TAG = 'lorren-worker-arrivals';
   const MAX_SELFIE_BYTES = 3 * 1024 * 1024;
   const MAX_QUEUE_AGE_MS = 72 * 60 * 60 * 1000;
+  const MAX_CREW_PROOF_BYTES = 480 * 1024;
   const MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
   const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
@@ -40,22 +43,36 @@
     return { ...record, markType: normalizeMarkType(record?.markType) };
   }
 
+  function ensureStore(database, storeName, configure) {
+    if (database.objectStoreNames.contains(storeName)) return;
+    const store = database.createObjectStore(storeName, { keyPath: 'idempotencyKey' });
+    configure(store);
+  }
+
   function openDatabase() {
     if (!('indexedDB' in window)) return Promise.reject(new Error('indexeddb_unavailable'));
     return new Promise((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION);
       request.addEventListener('upgradeneeded', () => {
         const database = request.result;
-        if (!database.objectStoreNames.contains(QUEUE_STORE)) {
-          const queue = database.createObjectStore(QUEUE_STORE, { keyPath: 'idempotencyKey' });
+        ensureStore(database, QUEUE_STORE, (queue) => {
           queue.createIndex('assignmentId', 'assignmentId', { unique: false });
           queue.createIndex('queuedAt', 'queuedAt', { unique: false });
-        }
-        if (!database.objectStoreNames.contains(RECEIPT_STORE)) {
-          const receipts = database.createObjectStore(RECEIPT_STORE, { keyPath: 'idempotencyKey' });
+        });
+        ensureStore(database, RECEIPT_STORE, (receipts) => {
           receipts.createIndex('assignmentId', 'assignmentId', { unique: false });
           receipts.createIndex('completedAt', 'completedAt', { unique: false });
-        }
+        });
+        ensureStore(database, CREW_QUEUE_STORE, (queue) => {
+          queue.createIndex('assignmentId', 'assignmentId', { unique: false });
+          queue.createIndex('serviceRequestId', 'serviceRequestId', { unique: false });
+          queue.createIndex('queuedAt', 'queuedAt', { unique: false });
+        });
+        ensureStore(database, CREW_RECEIPT_STORE, (receipts) => {
+          receipts.createIndex('assignmentId', 'assignmentId', { unique: false });
+          receipts.createIndex('serviceRequestId', 'serviceRequestId', { unique: false });
+          receipts.createIndex('completedAt', 'completedAt', { unique: false });
+        });
       });
       request.addEventListener('success', () => resolve(request.result), { once: true });
       request.addEventListener('error', () => reject(request.error || new Error('indexeddb_open_failed')), { once: true });
@@ -69,7 +86,7 @@
       const transaction = database.transaction(storeName, 'readonly');
       const records = await requestPromise(transaction.objectStore(storeName).getAll());
       await transactionDone(transaction);
-      return (Array.isArray(records) ? records : []).map(normalizeRecord);
+      return Array.isArray(records) ? records : [];
     } finally {
       database.close();
     }
@@ -99,11 +116,21 @@
 
   async function cleanupExpiredData() {
     const now = Date.now();
-    const [queue, receipts] = await Promise.all([readAll(QUEUE_STORE), readAll(RECEIPT_STORE)]);
+    const [queue, receipts, crewQueue, crewReceipts] = await Promise.all([
+      readAll(QUEUE_STORE),
+      readAll(RECEIPT_STORE),
+      readAll(CREW_QUEUE_STORE),
+      readAll(CREW_RECEIPT_STORE)
+    ]);
     const operations = [];
     for (const record of queue) {
       if (now - new Date(record.queuedAt || 0).getTime() > MAX_QUEUE_AGE_MS) {
         operations.push(deleteRecord(QUEUE_STORE, record.idempotencyKey));
+      }
+    }
+    for (const record of crewQueue) {
+      if (now - new Date(record.queuedAt || 0).getTime() > MAX_QUEUE_AGE_MS) {
+        operations.push(deleteRecord(CREW_QUEUE_STORE, record.idempotencyKey));
       }
     }
     for (const record of receipts) {
@@ -111,7 +138,20 @@
         operations.push(deleteRecord(RECEIPT_STORE, record.idempotencyKey));
       }
     }
+    for (const record of crewReceipts) {
+      if (now - new Date(record.completedAt || 0).getTime() > 30 * 24 * 60 * 60 * 1000) {
+        operations.push(deleteRecord(CREW_RECEIPT_STORE, record.idempotencyKey));
+      }
+    }
     await Promise.all(operations);
+  }
+
+  function validateLocationPayload(payload, prefix) {
+    for (const [field, min, max] of [['latitude', -90, 90], ['longitude', -180, 180], ['accuracyMeters', 0, 100000]]) {
+      const value = Number(payload[field]);
+      if (!Number.isFinite(value) || value < min || value > max) throw new Error(`${prefix}_${field}_invalid`);
+    }
+    if (Number.isNaN(new Date(payload.clientCapturedAt).getTime())) throw new Error(`${prefix}_captured_at_invalid`);
   }
 
   function validatePayload(payload) {
@@ -122,11 +162,7 @@
     if (!String(payload.assignmentId || '').trim()) throw new Error('offline_mark_assignment_invalid');
     const markType = String(payload.markType || '').trim().toUpperCase();
     if (!MARK_TYPES.has(markType)) throw new Error('offline_mark_type_invalid');
-    for (const [field, min, max] of [['latitude', -90, 90], ['longitude', -180, 180], ['accuracyMeters', 0, 100000]]) {
-      const value = Number(payload[field]);
-      if (!Number.isFinite(value) || value < min || value > max) throw new Error(`offline_mark_${field}_invalid`);
-    }
-    if (Number.isNaN(new Date(payload.clientCapturedAt).getTime())) throw new Error('offline_mark_captured_at_invalid');
+    validateLocationPayload(payload, 'offline_mark');
     if (payload.selfie) {
       if (!(payload.selfie instanceof Blob) || !ALLOWED_IMAGE_TYPES.has(payload.selfie.type) || payload.selfie.size > MAX_SELFIE_BYTES) {
         throw new Error('offline_mark_selfie_invalid');
@@ -134,6 +170,33 @@
       if (payload.photoConsent !== true) throw new Error('offline_mark_photo_consent_required');
     }
     return markType;
+  }
+
+  function validateCrewPresencePayload(payload) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('offline_crew_presence_payload_invalid');
+    }
+    const idempotencyKey = String(payload.idempotencyKey || '').trim();
+    const assignmentId = String(payload.assignmentId || '').trim();
+    const serviceRequestId = String(payload.serviceRequestId || '').trim();
+    if (!/^[A-Za-z0-9_-]{16,100}$/.test(idempotencyKey)) {
+      throw new Error('offline_crew_presence_idempotency_invalid');
+    }
+    if (!assignmentId || !serviceRequestId) throw new Error('offline_crew_presence_assignment_invalid');
+    validateLocationPayload(payload, 'offline_crew_presence');
+    if (!payload.proofBundle || typeof payload.proofBundle !== 'object' || Array.isArray(payload.proofBundle)) {
+      throw new Error('offline_crew_presence_proof_invalid');
+    }
+    if (
+      String(payload.proofBundle.attemptId || '').trim() !== idempotencyKey
+      || String(payload.proofBundle.serviceRequestId || '').trim() !== serviceRequestId
+    ) {
+      throw new Error('offline_crew_presence_proof_context_invalid');
+    }
+    const serialized = JSON.stringify(payload.proofBundle);
+    if (!serialized || new TextEncoder().encode(serialized).byteLength > MAX_CREW_PROOF_BYTES) {
+      throw new Error('offline_crew_presence_proof_too_large');
+    }
   }
 
   async function requestPersistentStorage() {
@@ -217,11 +280,51 @@
     return record;
   }
 
+  async function queueCrewPresence(payload) {
+    validateCrewPresencePayload(payload);
+    const now = new Date().toISOString();
+    const record = {
+      idempotencyKey: String(payload.idempotencyKey).trim(),
+      assignmentId: String(payload.assignmentId).trim(),
+      serviceRequestId: String(payload.serviceRequestId).trim(),
+      latitude: Number(payload.latitude),
+      longitude: Number(payload.longitude),
+      accuracyMeters: Number(payload.accuracyMeters),
+      clientCapturedAt: new Date(payload.clientCapturedAt).toISOString(),
+      proofBundle: JSON.parse(JSON.stringify(payload.proofBundle)),
+      captureMode: 'OFFLINE_CREW_PRESENCE',
+      persistentStorageAvailable: await requestPersistentStorage(),
+      queuedAt: now,
+      updatedAt: now,
+      attempts: 0,
+      state: 'PENDING',
+      lastError: null
+    };
+    await putRecord(CREW_QUEUE_STORE, record);
+    await registerBackgroundSync();
+    await emitState({
+      event: {
+        type: 'CREW_PRESENCE_QUEUED',
+        assignmentId: record.assignmentId,
+        serviceRequestId: record.serviceRequestId
+      }
+    });
+    return record;
+  }
+
   async function getState() {
-    const [queue, receipts] = await Promise.all([readAll(QUEUE_STORE), readAll(RECEIPT_STORE)]);
+    const [rawQueue, receipts, crewQueue, crewReceipts] = await Promise.all([
+      readAll(QUEUE_STORE),
+      readAll(RECEIPT_STORE),
+      readAll(CREW_QUEUE_STORE),
+      readAll(CREW_RECEIPT_STORE)
+    ]);
+    const queue = rawQueue.map(normalizeRecord);
     return {
       queue: queue.sort((left, right) => String(left.queuedAt).localeCompare(String(right.queuedAt))),
-      receipts: receipts.sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt)))
+      receipts: receipts.sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt))),
+      crewQueue: crewQueue.sort((left, right) => String(left.queuedAt).localeCompare(String(right.queuedAt))),
+      crewReceipts: crewReceipts.sort((left, right) => String(right.completedAt).localeCompare(String(left.completedAt)))
     };
   }
 
@@ -230,7 +333,15 @@
     try {
       stateListener({ ...(await getState()), online: navigator.onLine, ...extra });
     } catch (error) {
-      stateListener({ queue: [], receipts: [], online: navigator.onLine, error: error?.message || 'offline_state_failed', ...extra });
+      stateListener({
+        queue: [],
+        receipts: [],
+        crewQueue: [],
+        crewReceipts: [],
+        online: navigator.onLine,
+        error: error?.message || 'offline_state_failed',
+        ...extra
+      });
     }
   }
 
@@ -252,7 +363,10 @@
   function handleServiceWorkerMessage(event) {
     const message = event?.data;
     if (!message || typeof message !== 'object') return;
-    if (message.type === 'ARRIVAL_SYNC_RETRY' && Number(message.retryAfterMs) > 0) {
+    if (
+      ['ARRIVAL_SYNC_RETRY', 'CREW_PRESENCE_SYNC_RETRY'].includes(message.type)
+      && Number(message.retryAfterMs) > 0
+    ) {
       scheduleFallbackRetry(message.retryAfterMs);
     }
     if ([
@@ -260,6 +374,10 @@
       'ARRIVAL_SYNCED',
       'ARRIVAL_SYNC_REJECTED',
       'ARRIVAL_SYNC_RETRY',
+      'CREW_PRESENCE_QUEUE_UPDATED',
+      'CREW_PRESENCE_SYNCED',
+      'CREW_PRESENCE_SYNC_REJECTED',
+      'CREW_PRESENCE_SYNC_RETRY',
       'PORTAL_CACHED'
     ].includes(message.type)) {
       emitState({ event: message });
@@ -293,6 +411,7 @@
     queueBreakStart: (payload) => queueMark({ ...payload, markType: 'BREAK_START' }),
     queueBreakEnd: (payload) => queueMark({ ...payload, markType: 'BREAK_END' }),
     queueDeparture: (payload) => queueMark({ ...payload, markType: 'DEPARTURE' }),
+    queueCrewPresence,
     getState,
     syncNow
   });
