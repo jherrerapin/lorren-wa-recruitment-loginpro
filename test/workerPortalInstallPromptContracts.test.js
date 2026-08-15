@@ -8,6 +8,7 @@ const installSource = fs.readFileSync(new URL('../src/public/worker-portal-insta
 const handoffSource = fs.readFileSync(new URL('../src/public/worker-portal-session-handoff.js', import.meta.url), 'utf8');
 const handoffRouteSource = fs.readFileSync(new URL('../src/routes/workerPortalSessionHandoff.js', import.meta.url), 'utf8');
 const androidBuildSource = fs.readFileSync(new URL('../mobile/android/app/build.gradle', import.meta.url), 'utf8');
+const presenceBridgeSource = fs.readFileSync(new URL('../mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
@@ -58,10 +59,23 @@ test('Android usa el APK privado autenticado y no el instalador PWA', () => {
 });
 
 
-test('la app Android ya instalada no recibe otra oferta de instalación', () => {
-  assert.match(installSource, /function isNativeAndroidApp\(\)/);
-  assert.match(installSource, /window\.LorrenAndroidPresence/);
-  assert.match(installSource, /if \(isNativeAndroidApp\(\)\) \{[\s\S]*removeInstallUi\(\)/);
+test('la app Android expone su versión y solo ofrece actualización si el servidor tiene versionCode mayor', () => {
+  assert.match(presenceBridgeSource, /"appVersionCode", BuildConfig\.VERSION_CODE/);
+  assert.match(presenceBridgeSource, /"appVersionName", BuildConfig\.VERSION_NAME/);
+  assert.match(installSource, /function checkNativeUpdate\(\)/);
+  assert.match(installSource, /metadata\.versionCode > installedVersionCode/);
+  assert.match(installSource, /Actualización de Lórren disponible/);
+  assert.match(installSource, /Actualizar Lórren/);
+  assert.match(installSource, /if \(isNativeAndroidApp\(\)\) \{[\s\S]*checkNativeUpdate\(\)/);
+  assert.doesNotMatch(installSource, /update-worker-portal-v2|android-updater-final/i);
+});
+
+
+test('la actualización reutiliza el mismo CTA que el handoff ya transfiere a Chrome', () => {
+  assert.match(installSource, /id: 'open-worker-portal-install'/);
+  assert.match(handoffSource, /'open-worker-portal-install'/);
+  assert.match(handoffSource, /isAndroidInAppBrowser/);
+  assert.match(handoffSource, /window\.location\.href = chromeIntentUrl\(handoffToken\)/);
 });
 
 
