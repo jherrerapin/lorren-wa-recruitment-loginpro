@@ -24,7 +24,7 @@
     .template-panel{display:grid;grid-template-columns:minmax(320px,1fr) minmax(280px,.75fr);gap:10px;margin-bottom:12px}
     .template-card,.note,.phone-search-card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow-sm);font-size:12px;line-height:1.45}
     .template-card h2,.phone-search-card h2{margin:0 0 7px;color:var(--navy);font-size:14px}.template-preview{white-space:pre-line;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;color:#334155}.template-buttons{display:flex;gap:6px;margin-top:8px}.template-buttons span{border-radius:8px;padding:5px 8px;background:#eef2ff;color:#3730a3;font-size:10px;font-weight:900}.note{background:#eff6ff;border-color:#bfdbfe;color:#1e40af;box-shadow:none}.note code{font-size:10px}
-    .phone-search-card{margin-bottom:12px}.phone-search-form{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.phone-search-field{display:grid;gap:4px;min-width:min(420px,100%);flex:1}.phone-search-field label{font-size:10px;font-weight:900;color:var(--muted);text-transform:uppercase}.phone-search-field input{width:100%;border:1px solid var(--border);border-radius:10px;padding:9px 10px;font:inherit}.phone-search-help{margin:7px 0 0;color:var(--muted);font-size:10px}.phone-lookup{margin-top:10px;border-top:1px solid #e2e8f0;padding-top:10px}.phone-lookup[hidden]{display:none}.phone-lookup-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}.phone-lookup-head strong{color:var(--navy)}.phone-lookup-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:10px;color:var(--muted)}.phone-lookup-panel{max-height:440px;overflow:auto;border:1px solid #dbe4ee;border-radius:12px;background:#f8fafc;padding:10px;overflow-anchor:none}
+    .phone-search-card{margin-bottom:12px}.phone-search-card[hidden]{display:none!important}.phone-search-form{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.phone-search-field{display:grid;gap:4px;min-width:min(420px,100%);flex:1}.phone-search-field label{font-size:10px;font-weight:900;color:var(--muted);text-transform:uppercase}.phone-search-field input{width:100%;border:1px solid var(--border);border-radius:10px;padding:9px 10px;font:inherit}.phone-search-help{margin:7px 0 0;color:var(--muted);font-size:10px}.phone-lookup{margin-top:10px;border-top:1px solid #e2e8f0;padding-top:10px}.phone-lookup[hidden]{display:none}.phone-lookup-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}.phone-lookup-head strong{color:var(--navy)}.phone-lookup-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:10px;color:var(--muted)}.phone-lookup-panel{max-height:440px;overflow:auto;border:1px solid #dbe4ee;border-radius:12px;background:#f8fafc;padding:10px;overflow-anchor:none}
     .bulk-result{margin-bottom:12px;border-radius:12px;padding:10px 12px;font-size:11px;font-weight:800;display:none}.bulk-result.show{display:block}.bulk-result.ok{background:#dcfce7;color:#166534}.bulk-result.warn{background:#fef3c7;color:#92400e}
     .table-wrap{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:auto;box-shadow:var(--shadow-sm);overflow-anchor:none}
     table{width:100%;border-collapse:collapse;min-width:1320px}th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle;text-align:left;font-size:11px}th{position:sticky;top:0;background:#f8fafc;color:var(--muted);font-size:10px;text-transform:uppercase;z-index:1}
@@ -33,10 +33,10 @@
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px}.muted{color:var(--muted)}.live{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:11px;font-weight:900}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}.evidence{font-size:9px;color:var(--muted);margin-top:2px}.phone-warning{font-size:9px;color:#92400e;font-weight:800;margin-top:2px}
     .row-action{padding:5px 8px;font-size:10px;min-height:0}.row-action[disabled]{opacity:.45;cursor:not-allowed}.chat-toggle{white-space:nowrap}
     .chat-row[hidden]{display:none}.chat-row td{padding:0 12px 12px;background:#f8fafc}.chat-panel{border:1px solid #dbe4ee;border-radius:12px;background:#fff;padding:10px;max-height:360px;overflow:auto;overflow-anchor:none}.chat-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px;color:#475569;font-size:10px}.chat-feed{display:flex;flex-direction:column;gap:7px}.chat-message{max-width:min(760px,88%);border-radius:11px;padding:8px 10px;border:1px solid #e2e8f0}.chat-in{align-self:flex-start;background:#eff6ff;border-color:#bfdbfe}.chat-out{align-self:flex-end;background:#ecfdf5;border-color:#bbf7d0}.chat-meta{display:flex;gap:8px;align-items:center;font-size:9px;color:#64748b;margin-bottom:3px}.chat-meta strong{color:#334155}.chat-body{white-space:pre-wrap;word-break:break-word;color:#1f2937;font-size:11px;line-height:1.4}.chat-reconstructed{display:inline-flex;border-radius:999px;background:#fef3c7;color:#92400e;padding:1px 6px;font-size:8px;font-weight:900}.chat-empty{font-size:10px;color:#64748b;padding:4px}.chat-note{font-size:9px;color:#64748b;margin-top:8px}
-    .unmatched-panel{margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;padding:12px 14px}.unmatched-panel h2{font-size:13px;margin:0 0 4px;color:#9a3412}.unmatched-panel p{font-size:11px;color:#9a3412;margin:0 0 8px}.unmatched-list{display:flex;flex-wrap:wrap;gap:7px}.unmatched-item{background:#fff;border:1px solid #fed7aa;border-radius:9px;padding:6px 8px;font-size:10px;color:#7c2d12}
+    .unmatched-panel{margin-top:12px;background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow-sm);overflow-anchor:none}.unmatched-panel h2{font-size:14px;margin:0 0 4px;color:var(--navy)}.unmatched-panel p{font-size:11px;color:var(--muted);margin:0 0 10px}.unmatched-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:8px}.unmatched-item{appearance:none;background:#f8fafc;border:1px solid #dbe4ee;border-radius:10px;padding:9px 10px;font:inherit;text-align:left;font-size:10px;color:#334155;cursor:pointer}.unmatched-item:hover{border-color:#94a3b8}.unmatched-item.conversation-active{background:#eefcf8;border-color:#0d7a6b}.unmatched-item strong{display:block;color:var(--navy);font-size:11px;margin-bottom:3px}.unmatched-item span{display:block;color:var(--muted)}.conversation-close{margin-top:8px}.conversation-section-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap}
     .message-dialog{border:0;border-radius:16px;padding:0;width:min(620px,calc(100vw - 24px));box-shadow:0 24px 70px rgba(15,23,42,.3)}.message-dialog::backdrop{background:rgba(15,23,42,.45)}.message-dialog form{padding:18px;display:grid;gap:12px}.message-dialog h3{margin:0;color:var(--navy)}.message-dialog textarea{width:100%;min-height:125px;border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;resize:vertical}.dialog-actions{display:flex;justify-content:flex-end;gap:8px}
     @media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr)}}
-    @media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}.chat-message{max-width:96%}.phone-search-field{min-width:100%}}
+    @media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}.chat-message{max-width:96%}.phone-search-field{min-width:100%}.unmatched-list{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
@@ -70,10 +70,10 @@
       <article class="metric"><span>Ya abrieron ventana</span><strong id="metricOpen"><%= summary.open || 0 %></strong></article>
       <article class="metric"><span>Faltan por abrir</span><strong id="metricMissing"><%= summary.missingWindow || 0 %></strong></article>
       <article class="metric"><span>Revisar teléfono</span><strong id="metricReview"><%= summary.phoneReview || 0 %></strong></article>
-      <article class="metric"><span>Inbound sin coincidir</span><strong id="metricUnmatched"><%= summary.unmatchedInbound || 0 %></strong></article>
+      <article class="metric"><span>Otras conversaciones</span><strong id="metricUnmatched"><%= summary.unmatchedInbound || 0 %></strong></article>
     </section>
 
-    <section class="phone-search-card" id="phoneSearchCard">
+    <section class="phone-search-card" id="phoneSearchCard" hidden aria-hidden="true">
       <h2>Consultar cualquier número de WhatsApp Despacho</h2>
       <form class="phone-search-form" id="phoneSearchForm">
         <div class="phone-search-field">
@@ -127,10 +127,14 @@
     </div>
 
     <section class="unmatched-panel" id="unmatchedPanel" <%= unmatchedInbound.length ? '' : 'hidden' %>>
-      <h2>Inbound recientes que no coinciden con los teléfonos de los asignados</h2>
-      <p>Si un auxiliar asegura que ya escribió pero sigue cerrado, revisa aquí. También puedes copiar ese número en el buscador superior para abrir su conversación aunque no esté asignado.</p>
+      <div class="conversation-section-head">
+        <div>
+          <h2>Conversaciones de Despacho</h2>
+          <p>Aquí aparecen automáticamente los inbound recientes que no coinciden con los asignados de mañana. Abre cualquier conversación directamente; no necesitas copiar ni buscar el número.</p>
+        </div>
+      </div>
       <div class="unmatched-list" id="unmatchedList">
-        <% unmatchedInbound.forEach((item) => { %><div class="unmatched-item"><strong><%= item.workerName ? `${item.workerName} · ${item.phone}` : item.phone %></strong> · <span data-date="<%= item.lastInboundAt %>"><%= item.lastInboundAt %></span></div><% }) %>
+        <% unmatchedInbound.forEach((item) => { %><button class="unmatched-item conversation-item" type="button" data-conversation-phone="<%= item.phone %>"><strong><%= item.workerName ? `${item.workerName} · ${item.phone}` : item.phone %></strong><span>Último inbound: <span data-date="<%= item.lastInboundAt %>"><%= item.lastInboundAt %></span></span></button><% }) %>
       </div>
     </section>
   </main>
@@ -160,13 +164,21 @@
     const unmatchedPanel = document.getElementById('unmatchedPanel');
     const unmatchedList = document.getElementById('unmatchedList');
     const tableWrap = document.getElementById('monitorTableWrap');
+    const phoneSearchCard = document.getElementById('phoneSearchCard');
     const phoneSearchForm = document.getElementById('phoneSearchForm');
     const phoneSearchInput = document.getElementById('phoneSearchInput');
     const clearPhoneSearch = document.getElementById('clearPhoneSearch');
     const phoneLookupResult = document.getElementById('phoneLookupResult');
     const openChats = new Set();
-    let currentPhoneQuery = phoneSearchInput.value.trim();
+    let currentPhoneQuery = '';
     let refreshBusy = false;
+
+    phoneSearchCard.hidden = true;
+    phoneSearchInput.value = '';
+    clearPhoneSearch.textContent = 'Cerrar conversación';
+    clearPhoneSearch.classList.add('conversation-close');
+    unmatchedPanel.appendChild(phoneLookupResult);
+    unmatchedPanel.appendChild(clearPhoneSearch);
 
     function escapeHtml(value) {
       return String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
@@ -193,14 +205,14 @@
       if (item.possibleInboundPhone) value += `<div class="phone-warning">Posible inbound: ${escapeHtml(item.possibleInboundPhone)}</div>`;
       return value;
     }
-    function chatMessagesHtml(item) {
+    function chatMessagesHtml(item, inboundLabel = 'Auxiliar → Lórren', outboundLabel = 'Lórren → auxiliar') {
       const history = Array.isArray(item?.messageHistory) ? item.messageHistory : [];
       if (!history.length) return '<div class="chat-empty">No hay mensajes persistidos o reconstruibles para este número.</div>';
       return history.map((message) => {
         const inbound = message.direction === 'INBOUND';
         const reconstruction = message.reconstructed ? '<span class="chat-reconstructed">RECONSTRUIDO</span>' : '';
         return `<div class="chat-message ${inbound ? 'chat-in' : 'chat-out'}">
-          <div class="chat-meta"><strong>${inbound ? 'Auxiliar → Lórren' : 'Lórren → auxiliar'}</strong><span>${escapeHtml(formatBogota(message.at))}</span>${reconstruction}</div>
+          <div class="chat-meta"><strong>${escapeHtml(inbound ? inboundLabel : outboundLabel)}</strong><span>${escapeHtml(formatBogota(message.at))}</span>${reconstruction}</div>
           <div class="chat-body">${escapeHtml(message.body || '(mensaje sin texto)')}</div>
         </div>`;
       }).join('');
@@ -251,25 +263,41 @@
         };
       });
     }
+    function bindConversationButtons() {
+      document.querySelectorAll('[data-conversation-phone]').forEach((button) => {
+        button.onclick = async () => {
+          const phone = String(button.dataset.conversationPhone || '').trim();
+          if (!phone) return;
+          currentPhoneQuery = phone;
+          await refreshMonitor({ preservePosition: true });
+        };
+      });
+    }
     function renderUnmatched(items) {
       const list = Array.isArray(items) ? items : [];
-      unmatchedPanel.hidden = list.length === 0;
+      unmatchedPanel.hidden = list.length === 0 && !currentPhoneQuery;
       unmatchedList.innerHTML = list.map((item) => {
         const identity = item.workerName ? `${escapeHtml(item.workerName)} · ${escapeHtml(item.phone || '—')}` : escapeHtml(item.phone || '—');
-        return `<div class="unmatched-item"><strong>${identity}</strong> · ${escapeHtml(formatBogota(item.lastInboundAt))}</div>`;
+        const active = currentPhoneQuery && String(item.phone || '') === currentPhoneQuery ? ' conversation-active' : '';
+        return `<button class="unmatched-item conversation-item${active}" type="button" data-conversation-phone="${escapeHtml(item.phone || '')}"><strong>${identity}</strong><span>Último inbound: ${escapeHtml(formatBogota(item.lastInboundAt))}</span></button>`;
       }).join('');
+      bindConversationButtons();
     }
     function renderPhoneLookup(lookup) {
       if (!currentPhoneQuery) {
         phoneLookupResult.hidden = true;
         phoneLookupResult.innerHTML = '';
         clearPhoneSearch.hidden = true;
+        document.querySelectorAll('[data-conversation-phone]').forEach((button) => button.classList.remove('conversation-active'));
         return;
       }
       clearPhoneSearch.hidden = false;
       phoneLookupResult.hidden = false;
+      document.querySelectorAll('[data-conversation-phone]').forEach((button) => {
+        button.classList.toggle('conversation-active', button.dataset.conversationPhone === currentPhoneQuery);
+      });
       if (!lookup?.phone) {
-        phoneLookupResult.innerHTML = '<div class="chat-empty">Escribe un número válido para consultar.</div>';
+        phoneLookupResult.innerHTML = '<div class="chat-empty">No hay evidencia persistida para esta conversación.</div>';
         return;
       }
       const names = Array.isArray(lookup.workerNames) && lookup.workerNames.length
@@ -282,7 +310,7 @@
         <strong>${escapeHtml(lookup.phone)}${names}</strong>
         <div class="phone-lookup-meta">${windowHtml(lookup)}<span>${escapeHtml(evidence)}</span>${lookup.lastInboundAt ? `<span>Último inbound: ${escapeHtml(formatBogota(lookup.lastInboundAt))}</span>` : ''}</div>
       </div>
-      <div class="phone-lookup-panel"><div class="chat-feed">${chatMessagesHtml(lookup)}</div></div>`;
+      <div class="phone-lookup-panel"><div class="chat-feed">${chatMessagesHtml(lookup, 'Contacto → Lórren', 'Lórren → contacto')}</div></div>`;
     }
     function captureViewState() {
       const chats = {};
@@ -415,18 +443,11 @@
     async function searchPhone(event) {
       event.preventDefault();
       currentPhoneQuery = phoneSearchInput.value.trim();
-      const url = new URL(window.location.href);
-      if (currentPhoneQuery) url.searchParams.set('phone', currentPhoneQuery);
-      else url.searchParams.delete('phone');
-      history.replaceState(null, '', url.toString());
       await refreshMonitor({ preservePosition: true });
     }
     async function clearPhoneLookup() {
       currentPhoneQuery = '';
       phoneSearchInput.value = '';
-      const url = new URL(window.location.href);
-      url.searchParams.delete('phone');
-      history.replaceState(null, '', url.toString());
       await refreshMonitor({ preservePosition: true });
     }
 
@@ -439,8 +460,8 @@
     document.getElementById('generatedAt').textContent = <%- JSON.stringify(data.generatedAt || '') %> ? formatBogota(<%- JSON.stringify(data.generatedAt || '') %>) : '—';
     bindManualButtons();
     bindChatButtons();
+    bindConversationButtons();
     renderPhoneLookup(null);
-    if (currentPhoneQuery) refreshMonitor({ preservePosition: true });
     window.setInterval(() => refreshMonitor({ preservePosition: true }), 5000);
   </script>
 </body>
