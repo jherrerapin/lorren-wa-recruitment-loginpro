@@ -92,10 +92,6 @@ export async function sendDispatchWhatsappMessage({
     scope, phone: validated.phone, prismaClient
   });
   await ensureNoRecentConfirmationSend(prismaClient, validated.assignment.id, config.duplicateSendWindowMs);
-  await prismaClient.dispatchWhatsappConfirmation.updateMany({
-    where: { assignmentId: validated.assignment.id, status: { in: ACTIVE_LINK_STATUSES } },
-    data: { status: 'EXPIRED' }
-  });
 
   const link = await prismaClient.dispatchWhatsappConfirmation.create({
     data: {
@@ -132,9 +128,19 @@ export async function sendDispatchWhatsappMessage({
         'dispatch_whatsapp_window_closed'
       );
     }
-    const transaction = [prismaClient.dispatchWhatsappConfirmation.update({
-      where: { id: link.id }, data: { providerMessageId, status: 'SENT' }
-    })];
+    const transaction = [
+      prismaClient.dispatchWhatsappConfirmation.updateMany({
+        where: {
+          assignmentId: validated.assignment.id,
+          id: { not: link.id },
+          status: { in: ACTIVE_LINK_STATUSES }
+        },
+        data: { status: 'EXPIRED' }
+      }),
+      prismaClient.dispatchWhatsappConfirmation.update({
+        where: { id: link.id }, data: { providerMessageId, status: 'SENT' }
+      })
+    ];
     if (scope === 'operational') {
       transaction.push(prismaClient.dispatchAssignment.updateMany({
         where: { id: validated.assignment.id, status: 'ASSIGNED' }, data: { status: 'CONFIRMATION_PENDING' }
@@ -157,9 +163,15 @@ export async function sendDispatchWhatsappMessage({
 }
 
 export async function claimDispatchAssignmentConfirmation({
-  scope = 'operational', assignment, confirmationMessageId = '', confirmationReceivedAt = null, prismaClient = prisma
+  scope = 'operational',
+  assignment,
+  confirmationLinkId = null,
+  confirmationMessageId = '',
+  confirmationReceivedAt = null,
+  prismaClient = prisma
 } = {}) {
   const definition = dispatchWhatsappScopeDefinition(scope);
+  const evidenceLinkId = String(confirmationLinkId || '').trim();
   const evidenceMessageId = String(confirmationMessageId || '').trim();
   const evidenceReceivedAt = confirmationReceivedAt instanceof Date
     ? confirmationReceivedAt
@@ -174,6 +186,35 @@ export async function claimDispatchAssignmentConfirmation({
     });
     if (duplicate) return { assignmentConfirmed: false, shouldReply: false, duplicate: true };
 
+    const currentBefore = await tx.dispatchAssignment.findUnique({
+      where: { id: assignment.id }, select: { status: true }
+    });
+    const allowedBefore = [...definition.pendingAssignmentStatuses, definition.confirmedAssignmentStatus];
+    if (!allowedBefore.includes(currentBefore?.status)) {
+      return { assignmentConfirmed: false, shouldReply: false, duplicate: false };
+    }
+
+    const evidence = await tx.dispatchWhatsappConfirmation.updateMany({
+      where: evidenceLinkId
+        ? {
+            id: evidenceLinkId,
+            assignmentId: assignment.id,
+            status: { in: [...INBOUND_LINK_STATUSES, 'EXPIRED'] }
+          }
+        : { assignmentId: assignment.id, status: { in: INBOUND_LINK_STATUSES } },
+      data: {
+        status: 'CONFIRMED_REPLY_PENDING',
+        confirmationMessageId: evidenceMessageId,
+        confirmationReceivedAt: evidenceReceivedAt
+      }
+    });
+    if (!evidence.count) {
+      const duplicateAfterRace = await tx.dispatchWhatsappConfirmation.findFirst({
+        where: { confirmationMessageId: evidenceMessageId }, select: { id: true }
+      });
+      return { assignmentConfirmed: false, shouldReply: false, duplicate: Boolean(duplicateAfterRace) };
+    }
+
     const updated = await tx.dispatchAssignment.updateMany({
       where: { id: assignment.id, status: { in: definition.pendingAssignmentStatuses } },
       data: { status: definition.confirmedAssignmentStatus }
@@ -182,20 +223,14 @@ export async function claimDispatchAssignmentConfirmation({
       ? { status: definition.confirmedAssignmentStatus }
       : await tx.dispatchAssignment.findUnique({ where: { id: assignment.id }, select: { status: true } });
     if (current?.status !== definition.confirmedAssignmentStatus) {
-      return { assignmentConfirmed: false, shouldReply: false, duplicate: false };
+      const conflict = new Error('La asignación cambió de estado mientras se procesaba la confirmación de WhatsApp.');
+      conflict.code = 'dispatch_whatsapp_confirmation_state_conflict';
+      throw conflict;
     }
 
-    const evidence = await tx.dispatchWhatsappConfirmation.updateMany({
-      where: { assignmentId: assignment.id, status: { in: INBOUND_LINK_STATUSES } },
-      data: {
-        status: 'CONFIRMED_REPLY_PENDING',
-        confirmationMessageId: evidenceMessageId,
-        confirmationReceivedAt: evidenceReceivedAt
-      }
-    });
     return {
       assignmentConfirmed: Boolean(updated.count),
-      shouldReply: evidence.count > 0,
+      shouldReply: true,
       duplicate: false
     };
   });
