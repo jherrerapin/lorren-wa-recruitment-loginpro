@@ -378,7 +378,7 @@ model AttachmentAnalysis {
   candidateId         String
   candidate           Candidate                @relation(fields: [candidateId], references: [id], onDelete: Cascade)
   originalName        String?
-  mimeType            String?
+  mimeType             String?
   classification      AttachmentClassification @default(OTHER)
   extractedText       String?
   summary             String?
@@ -572,32 +572,33 @@ model DispatchClientService {
 }
 
 model DispatchOperationPoint {
-  id                          String                   @id @default(cuid())
-  clientId                    String
-  client                      DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  name                        String
-  cityName                    String?
-  address                     String?
-  contactName                 String?
-  contactPhone                String?
-  publicToken                 String                   @unique
-  isActive                    Boolean                  @default(true)
-  notes                       String?
-  createdByUsername           String?
-  createdAt                   DateTime                 @default(now())
-  updatedAt                   DateTime                 @updatedAt
-  attendanceEnabled           Boolean                  @default(false)
-  attendanceLatitude          Decimal?                 @db.Decimal(10, 7)
-  attendanceLongitude         Decimal?                 @db.Decimal(10, 7)
-  geofenceRadiusMeters        Int?
-  maxLocationAccuracyMeters   Int?
-  earlyArrivalWindowMinutes   Int                      @default(60)
-  lateToleranceMinutes        Int                      @default(10)
-  absenceGraceMinutes         Int                      @default(15)
-  attendanceTimezone          String                   @default("America/Bogota")
-  attendancePhotoPolicy       String                   @default("RISK_ONLY")
-  manualAttendanceAllowed     Boolean                  @default(true)
-  serviceRequests             DispatchServiceRequest[]
+  id                              String                   @id @default(cuid())
+  clientId                        String
+  client                          DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  name                            String
+  cityName                        String?
+  address                         String?
+  contactName                     String?
+  contactPhone                    String?
+  publicToken                     String                   @unique
+  isActive                        Boolean                  @default(true)
+  notes                           String?
+  createdByUsername               String?
+  createdAt                       DateTime                 @default(now())
+  updatedAt                       DateTime                 @updatedAt
+  attendanceEnabled               Boolean                  @default(false)
+  attendanceLatitude              Decimal?                 @db.Decimal(10, 7)
+  attendanceLongitude             Decimal?                 @db.Decimal(10, 7)
+  geofenceRadiusMeters            Int?
+  maxLocationAccuracyMeters       Int?
+  earlyArrivalWindowMinutes       Int                      @default(60)
+  lateToleranceMinutes            Int                      @default(10)
+  absenceGraceMinutes             Int                      @default(15)
+  attendanceTimezone              String                   @default("America/Bogota")
+  attendancePhotoPolicy           String                   @default("RISK_ONLY")
+  manualAttendanceAllowed         Boolean                  @default(true)
+  crossOperationAttendanceAllowed Boolean                  @default(false)
+  serviceRequests                 DispatchServiceRequest[]
 
   @@index([clientId])
   @@index([cityName])
@@ -850,32 +851,34 @@ model DispatchAttendanceSession {
 }
 
 model DispatchAttendanceMark {
-  id                    String                    @id @default(cuid())
-  attendanceSessionId   String
-  attendanceSession     DispatchAttendanceSession @relation(fields: [attendanceSessionId], references: [id], onDelete: Restrict)
-  workerDeviceId        String?
-  workerDevice          DispatchWorkerDevice?     @relation(fields: [workerDeviceId], references: [id], onDelete: SetNull)
-  markType              String
-  idempotencyKey        String                    @unique
-  serverReceivedAt      DateTime                  @default(now())
-  clientCapturedAt      DateTime?
-  latitude              Decimal?                  @db.Decimal(10, 7)
-  longitude             Decimal?                  @db.Decimal(10, 7)
-  accuracyMeters        Decimal?                  @db.Decimal(10, 2)
-  distanceToPointMeters Decimal?                  @db.Decimal(12, 2)
-  insideGeofence        Boolean?
-  installationIdHash    String?
-  ipAddress             String?
-  userAgent             String?
-  evidenceStorageKey    String?
-  evidenceMimeType      String?
-  decision              String                    @default("PENDING")
-  riskScore             Int                       @default(0)
-  riskFlags             Json?
-  createdAt             DateTime                  @default(now())
+  id                       String                    @id @default(cuid())
+  attendanceSessionId      String
+  attendanceSession        DispatchAttendanceSession @relation(fields: [attendanceSessionId], references: [id], onDelete: Restrict)
+  workerDeviceId           String?
+  workerDevice             DispatchWorkerDevice?     @relation(fields: [workerDeviceId], references: [id], onDelete: SetNull)
+  capturedOperationPointId String?
+  markType                 String
+  idempotencyKey           String                    @unique
+  serverReceivedAt         DateTime                  @default(now())
+  clientCapturedAt         DateTime?
+  latitude                 Decimal?                  @db.Decimal(10, 7)
+  longitude                Decimal?                  @db.Decimal(10, 7)
+  accuracyMeters           Decimal?                  @db.Decimal(10, 2)
+  distanceToPointMeters    Decimal?                  @db.Decimal(12, 2)
+  insideGeofence           Boolean?
+  installationIdHash       String?
+  ipAddress                String?
+  userAgent                String?
+  evidenceStorageKey       String?
+  evidenceMimeType         String?
+  decision                 String                    @default("PENDING")
+  riskScore                Int                       @default(0)
+  riskFlags                Json?
+  createdAt                DateTime                  @default(now())
 
   @@index([attendanceSessionId, markType, serverReceivedAt])
   @@index([workerDeviceId, serverReceivedAt])
+  @@index([capturedOperationPointId, serverReceivedAt])
   @@index([decision, serverReceivedAt])
 }
 
@@ -893,7 +896,7 @@ model DispatchAttendanceReview {
   actorUsername            String
   actorRole                String?
   metadata                 Json?
-  createdAt                DateTime                  @default(now())
+  createdAt                 DateTime                  @default(now())
 
   @@index([attendanceSessionId, createdAt])
   @@index([actorUsername, createdAt])

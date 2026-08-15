@@ -71,6 +71,11 @@ function normalizedConfig(existing, input) {
     'manual_attendance_allowed',
     existing.manualAttendanceAllowed
   );
+  const crossOperationAttendanceAllowed = parseExplicitBoolean(
+    input.crossOperationAttendanceAllowed,
+    'cross_operation_attendance_allowed',
+    existing.crossOperationAttendanceAllowed
+  );
   const attendanceLatitude = parseOptionalFiniteNumber(
     input.attendanceLatitude,
     'attendance_latitude',
@@ -115,7 +120,8 @@ function normalizedConfig(existing, input) {
       : existing.maxLocationAccuracyMeters,
     attendanceTimezone,
     attendancePhotoPolicy,
-    manualAttendanceAllowed
+    manualAttendanceAllowed,
+    crossOperationAttendanceAllowed
   };
 }
 
@@ -138,7 +144,8 @@ export async function updateDispatchAttendancePointConfig(prisma, input = {}) {
       maxLocationAccuracyMeters: true,
       attendanceTimezone: true,
       attendancePhotoPolicy: true,
-      manualAttendanceAllowed: true
+      manualAttendanceAllowed: true,
+      crossOperationAttendanceAllowed: true
     }
   });
   if (!existing) throw new Error('attendance_operation_point_not_found');
@@ -158,6 +165,7 @@ export async function updateDispatchAttendancePointConfig(prisma, input = {}) {
       attendanceTimezone: true,
       attendancePhotoPolicy: true,
       manualAttendanceAllowed: true,
+      crossOperationAttendanceAllowed: true,
       updatedAt: true
     }
   });

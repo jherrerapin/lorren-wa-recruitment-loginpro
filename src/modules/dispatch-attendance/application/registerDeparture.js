@@ -3,16 +3,16 @@ import {
   ATTENDANCE_VALIDATION_STATUS,
   evaluateArrivalValidation
 } from '../domain/attendanceValidationPolicy.js';
-import {
-  calculateAttendanceDistanceMeters,
-  isAttendanceInsideGeofence
-} from '../domain/attendanceDistance.js';
 import { calculateDispatchWorkedTime } from '../domain/attendanceWorkdayPolicy.js';
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
   isDispatchDepartureWithinOperationalWindow,
   resolveDispatchAttendanceOperationalWindow
 } from './registerArrival.js';
+import {
+  assertAttendanceOperationGeofence,
+  resolveAttendanceOperationGeofence
+} from './attendanceGeofenceResolver.js';
 
 const ACTIVE_ASSIGNMENT_STATUS_SET = new Set(ACTIVE_DISPATCH_ASSIGNMENT_STATUSES);
 const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
@@ -139,22 +139,6 @@ async function deviceSignals(client, input) {
   return { authorizedDevice: Boolean(workerDevice), sharedDeviceSignal: sharedCount > 0, workerDevice };
 }
 
-function geofenceSignals(point, input) {
-  const pointLat = Number(point?.attendanceLatitude);
-  const pointLng = Number(point?.attendanceLongitude);
-  const radius = Number(point?.geofenceRadiusMeters);
-  const configured = Number.isFinite(pointLat) && Number.isFinite(pointLng) && Number.isFinite(radius) && radius > 0;
-  const distance = calculateAttendanceDistanceMeters(
-    { latitude: pointLat, longitude: pointLng },
-    { latitude: input.latitude, longitude: input.longitude }
-  );
-  return {
-    configured,
-    distance,
-    inside: configured ? isAttendanceInsideGeofence(distance, radius) : null
-  };
-}
-
 function mergeFlags(...values) {
   return [...new Set(values.flatMap((value) => Array.isArray(value) ? value : []))];
 }
@@ -252,7 +236,9 @@ async function insideTransaction(client, input) {
 
   const point = assignment.serviceRequest.operationPoint;
   const device = await deviceSignals(client, { ...input, workerId: assignment.workerId });
-  const geofence = geofenceSignals(point, input);
+  const geofence = assertAttendanceOperationGeofence(
+    await resolveAttendanceOperationGeofence(client, point, input)
+  );
   const syncDelayMinutes = Math.max(0, Math.floor((input.now.getTime() - input.reportedAt.getTime()) / 60_000));
   const departureValidation = evaluateArrivalValidation({
     assignmentActive: true,
@@ -260,9 +246,9 @@ async function insideTransaction(client, input) {
     duplicateMark: false,
     arrivalWindowOpen: true,
     hasConfiguredGeofence: geofence.configured,
-    withinGeofence: geofence.inside,
+    withinGeofence: geofence.insideGeofence,
     accuracyMeters: input.accuracyMeters,
-    maxAccuracyMeters: Number(point?.maxLocationAccuracyMeters) || 100,
+    maxAccuracyMeters: geofence.maxAccuracyMeters,
     authorizedDevice: device.authorizedDevice,
     sharedDeviceSignal: device.sharedDeviceSignal,
     persistentStorageAvailable: input.persistentStorageAvailable,
@@ -300,6 +286,7 @@ async function insideTransaction(client, input) {
     data: {
       attendanceSessionId: session.id,
       workerDeviceId: device.workerDevice?.id ?? null,
+      capturedOperationPointId: geofence.operationPointId,
       markType: 'DEPARTURE',
       idempotencyKey: input.idempotencyKey,
       serverReceivedAt: input.now,
@@ -307,8 +294,8 @@ async function insideTransaction(client, input) {
       latitude: input.latitude,
       longitude: input.longitude,
       accuracyMeters: input.accuracyMeters,
-      distanceToPointMeters: geofence.distance,
-      insideGeofence: geofence.inside,
+      distanceToPointMeters: geofence.distanceMeters,
+      insideGeofence: geofence.insideGeofence,
       installationIdHash: input.installationIdHash,
       ipAddress: input.ipAddress,
       userAgent: input.userAgent,
