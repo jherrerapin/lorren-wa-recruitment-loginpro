@@ -49,6 +49,8 @@ final class PresenceBridge {
         JSONObject result = new JSONObject();
         try {
             result.put("androidNative", true);
+            result.put("appVersionCode", BuildConfig.VERSION_CODE);
+            result.put("appVersionName", BuildConfig.VERSION_NAME);
             result.put("offlineNearby", true);
             result.put("nativeAttendanceLocation", true);
             result.put("mockLocationSignal", true);

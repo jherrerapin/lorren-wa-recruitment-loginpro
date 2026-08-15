@@ -11,7 +11,15 @@
   const CREDENTIAL_META_KEY = 'lorren-native-presence-credential-meta-v1';
   const PANEL_ID = 'lorren-native-presence-panel';
   const DEFAULT_SCAN_MS = 12_000;
+  const AUTO_RETRY_DELAY_MS = 1_500;
   const CREDENTIAL_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
+  const TRANSIENT_SCAN_ERRORS = new Set([
+    'connection_failed',
+    'connection_request_failed',
+    'connection_accept_failed',
+    'payload_transfer_failed',
+    'payload_send_failed'
+  ]);
 
   let contexts = [];
   let selectedServiceRequestId = '';
@@ -20,6 +28,10 @@
   let scanPendingCount = 0;
   let activeAttempt = null;
   let retryNotDetectedCount = 0;
+  let hasCompletedLeaderScan = false;
+  let scanTransientFailureCount = 0;
+  let autoRetryRemaining = 1;
+  let autoRetryTimer = null;
   let provisioningPromise = null;
 
   function parseBridgeResult(value) {
@@ -254,29 +266,6 @@
       : `crew_${Date.now()}_${randomToken(12)}`;
   }
 
-  function requestLocation() {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error('location_unsupported'));
-        return;
-      }
-      navigator.geolocation.getCurrentPosition((position) => {
-        resolve({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracyMeters: position.coords.accuracy,
-          clientCapturedAt: new Date(position.timestamp || Date.now()).toISOString()
-        });
-      }, (error) => {
-        reject(new Error(error?.code === 1 ? 'location_permission_denied' : 'location_unavailable'));
-      }, {
-        enableHighAccuracy: true,
-        timeout: 20_000,
-        maximumAge: 0
-      });
-    });
-  }
-
   function publicNativeError(code) {
     const messages = {
       permissions_required: 'Android necesita permiso para buscar teléfonos cercanos. Autoriza el permiso y pulsa nuevamente.',
@@ -293,9 +282,9 @@
       proof_sign_failed: 'Este teléfono no pudo firmar su respuesta de presencia.',
       native_script_unavailable: 'La capa local de la aplicación no pudo cargarse.',
       native_bridge_failed: 'La aplicación no pudo comunicarse con Android.',
-      location_unsupported: 'Este teléfono no permite obtener la ubicación del encargado.',
-      location_permission_denied: 'Activa el permiso de ubicación para comprobar la cuadrilla.',
-      location_unavailable: 'No fue posible obtener una ubicación válida. Intenta nuevamente al aire libre.',
+      native_location_unavailable: 'Android no pudo obtener una ubicación válida del encargado.',
+      native_location_proof_failed: 'Android no pudo firmar la ubicación del encargado.',
+      mock_location_detected: 'Android detectó una ubicación simulada. La marcación de cuadrilla no puede continuar.',
       offline_queue_unavailable: 'La cola segura sin conexión no está disponible. Cierra y vuelve a abrir Lórren.'
     };
     return messages[code] || 'La comprobación local tuvo un inconveniente. Puedes volver a intentarlo.';
@@ -304,6 +293,21 @@
   function serviceLabel(context, index) {
     const suffix = context?.isCrewLeader ? ' · encargado' : '';
     return `Cuadrilla ${index + 1}${suffix}`;
+  }
+
+  function retryActionNode() {
+    return document.querySelector(`#${PANEL_ID} [data-native-presence-leader-scan]`);
+  }
+
+  function markRetryAvailable() {
+    hasCompletedLeaderScan = true;
+    const action = retryActionNode();
+    if (action) action.textContent = 'Reintentar no detectados';
+  }
+
+  function clearAutoRetry() {
+    if (autoRetryTimer !== null) window.clearTimeout(autoRetryTimer);
+    autoRetryTimer = null;
   }
 
   function renderPanel() {
@@ -351,6 +355,8 @@
       stopNativeModes();
       selectedServiceRequestId = select.value;
       retryNotDetectedCount = 0;
+      hasCompletedLeaderScan = false;
+      autoRetryRemaining = 1;
       renderPanel();
     });
     field.append(label, select);
@@ -360,9 +366,11 @@
     const action = element('button', 'native-presence-btn');
     action.type = 'button';
     if (context?.isCrewLeader) {
-      action.textContent = retryNotDetectedCount > 0 ? 'Reintentar no detectados' : 'Marcar llegada de toda la cuadrilla';
+      action.textContent = retryNotDetectedCount > 0 || hasCompletedLeaderScan
+        ? 'Reintentar no detectados'
+        : 'Marcar llegada de toda la cuadrilla';
       action.dataset.nativePresenceLeaderScan = 'true';
-      action.addEventListener('click', startLeaderScan);
+      action.addEventListener('click', () => startLeaderScan(false));
     } else {
       action.textContent = 'Quedar listo para asistencia';
       action.dataset.nativePresenceReady = 'true';
@@ -436,21 +444,15 @@
     setStatus('Preparando este teléfono para que el encargado pueda encontrarlo…', 'warning');
   }
 
-  async function startLeaderScan() {
+  async function startLeaderScan(automaticRetry = false) {
     const context = currentContext();
     if (!context?.isCrewLeader || activeMode === 'LEADER') return;
+    clearAutoRetry();
+    if (!automaticRetry) autoRetryRemaining = 1;
+    scanTransientFailureCount = 0;
     scanVerifiedCount = 0;
     scanPendingCount = 0;
     updateCount();
-    setStatus('Confirmando la ubicación del encargado…', 'warning');
-
-    let location;
-    try {
-      location = await requestLocation();
-    } catch (error) {
-      setStatus(publicNativeError(error?.message), 'error');
-      return;
-    }
 
     const attemptId = newAttemptId();
     const payload = {
@@ -463,8 +465,7 @@
     activeAttempt = {
       idempotencyKey: attemptId,
       assignmentId: context.assignmentId,
-      serviceRequestId: context.serviceRequestId,
-      ...location
+      serviceRequestId: context.serviceRequestId
     };
     const result = bridgeCall('startCrewScan', JSON.stringify(payload));
     if (!result?.ok) {
@@ -474,14 +475,44 @@
     }
     activeMode = 'LEADER';
     showStop();
-    setStatus('Buscando los teléfonos Lórren de esta cuadrilla…', 'warning');
+    setStatus(
+      automaticRetry
+        ? 'Reintentando conexiones transitorias con un challenge nuevo…'
+        : 'Buscando teléfonos cercanos y verificando la ubicación Android del encargado…',
+      'warning'
+    );
   }
 
   function stopNativeModes() {
+    clearAutoRetry();
     bridgeCall('stopReady');
     bridgeCall('stopCrewScan');
     activeMode = 'IDLE';
     activeAttempt = null;
+  }
+
+  function nativeLocationFromBundle(proofBundle) {
+    const proof = proofBundle?.leaderLocationProof;
+    if (!proof || typeof proof !== 'object' || Array.isArray(proof)) {
+      throw new Error('native_location_unavailable');
+    }
+    if (proof.isMock === true) throw new Error('mock_location_detected');
+    const latitude = Number(proof.latitude);
+    const longitude = Number(proof.longitude);
+    const accuracyMeters = Number(proof.accuracyMeters);
+    const capturedAtMs = Number(proof.capturedAt);
+    if (
+      !Number.isFinite(latitude) || latitude < -90 || latitude > 90
+      || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
+      || !Number.isFinite(accuracyMeters) || accuracyMeters < 0 || accuracyMeters > 100_000
+      || !Number.isFinite(capturedAtMs) || capturedAtMs <= 0
+    ) throw new Error('native_location_unavailable');
+    return {
+      latitude,
+      longitude,
+      accuracyMeters,
+      clientCapturedAt: new Date(capturedAtMs).toISOString()
+    };
   }
 
   async function queueCompletedAttempt() {
@@ -496,9 +527,10 @@
     ) {
       throw new Error('crew_proof_bundle_invalid');
     }
+    const nativeLocation = nativeLocationFromBundle(proofBundle);
     const offline = window.LorrenWorkerPortalOffline;
     if (typeof offline?.queueCrewPresence !== 'function') throw new Error('offline_queue_unavailable');
-    const queued = await offline.queueCrewPresence({ ...attempt, proofBundle });
+    const queued = await offline.queueCrewPresence({ ...attempt, ...nativeLocation, proofBundle });
     if (navigator.onLine && typeof offline.syncNow === 'function') offline.syncNow().catch(() => {});
     return { queued, proofCount: proofBundle.proofs.length };
   }
@@ -546,15 +578,29 @@
       scanPendingCount = 0;
       updateCount();
       activeMode = 'IDLE';
+      markRetryAvailable();
+      const transientFailures = scanTransientFailureCount;
       const stop = document.querySelector(`#${PANEL_ID} [data-native-presence-stop]`);
       if (stop) stop.hidden = true;
       queueCompletedAttempt()
         .then(({ proofCount }) => {
+          activeAttempt = null;
+          if (transientFailures > 0 && autoRetryRemaining > 0) {
+            autoRetryRemaining -= 1;
+            setStatus(
+              `Comprobación guardada: encargado + ${proofCount} auxiliar${proofCount === 1 ? '' : 'es'}. Hubo una conexión transitoria; Lórren hará un reintento automático con un challenge nuevo.`,
+              'warning'
+            );
+            autoRetryTimer = window.setTimeout(() => {
+              autoRetryTimer = null;
+              startLeaderScan(true);
+            }, AUTO_RETRY_DELAY_MS);
+            return;
+          }
           setStatus(
-            `Comprobación guardada: encargado + ${proofCount} teléfono${proofCount === 1 ? '' : 's'} auxiliar${proofCount === 1 ? '' : 'es'} detectado${proofCount === 1 ? '' : 's'}. Los no detectados no se marcarán. ${navigator.onLine ? 'Lórren está sincronizando.' : 'Se sincronizará cuando vuelva Internet.'}`,
+            `Comprobación guardada: encargado + ${proofCount} teléfono${proofCount === 1 ? '' : 's'} auxiliar${proofCount === 1 ? '' : 'es'} detectado${proofCount === 1 ? '' : 's'}. Los no detectados no se marcarán. Puedes pulsar “Reintentar no detectados” aun sin Internet. ${navigator.onLine ? 'Lórren está sincronizando.' : 'Se sincronizará cuando vuelva Internet.'}`,
             navigator.onLine ? '' : 'warning'
           );
-          activeAttempt = null;
         })
         .catch((error) => {
           setStatus(publicNativeError(error?.message), 'error');
@@ -566,7 +612,9 @@
       return;
     }
     if (type === 'error') {
-      setStatus(publicNativeError(String(detail.code || 'native_error')), 'error');
+      const code = String(detail.code || 'native_error');
+      if (activeMode === 'LEADER' && TRANSIENT_SCAN_ERRORS.has(code)) scanTransientFailureCount += 1;
+      setStatus(publicNativeError(code), TRANSIENT_SCAN_ERRORS.has(code) ? 'warning' : 'error');
     }
   }
 
@@ -579,10 +627,7 @@
       const total = Number(payload.totalMembers || 0);
       const processed = Number(payload.processedCount || 0);
       setStatus(payload.message || `${processed} de ${total} integrantes fueron procesados.`, payload.requiresReview ? 'warning' : '');
-      if (retryNotDetectedCount > 0) {
-        const action = document.querySelector(`#${PANEL_ID} [data-native-presence-leader-scan]`);
-        if (action) action.textContent = 'Reintentar no detectados';
-      }
+      if (retryNotDetectedCount > 0) markRetryAvailable();
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {

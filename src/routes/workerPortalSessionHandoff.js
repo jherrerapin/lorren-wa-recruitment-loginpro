@@ -1,5 +1,7 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
+import { stat } from 'node:fs/promises';
+import { isAbsolute } from 'node:path';
 import {
   createCipheriv,
   createDecipheriv,
@@ -31,6 +33,8 @@ const MAX_HANDOFF_TTL_MS = 10 * 60 * 1000;
 const MAX_HANDOFF_TOKEN_LENGTH = 2_048;
 const WORKER_PORTAL_REQUEST_HEADER = 'worker-portal';
 const CONTINUE_PATH = '/operaciones/portal?instalarPortal=1';
+const ANDROID_APP_METADATA_PATH = '/operaciones/portal/sesion-transferencia/android-app';
+const ANDROID_APP_DOWNLOAD_PATH = `${ANDROID_APP_METADATA_PATH}/apk`;
 
 function validDate(value, label) {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
@@ -85,6 +89,18 @@ function resolveHandoffSecret(options = {}) {
     throw new Error('worker_portal_handoff_secret_required');
   }
   return normalized;
+}
+
+function resolveAndroidDistribution(options = {}) {
+  const env = options.env || process.env;
+  const apkPath = normalizedText(options.androidApkPath ?? env.ATTENDANCE_ANDROID_APK_PATH, 2_048);
+  const versionName = normalizedText(options.androidVersionName ?? env.ATTENDANCE_ANDROID_APP_VERSION_NAME, 80);
+  const versionCode = Number(options.androidVersionCode ?? env.ATTENDANCE_ANDROID_APP_VERSION_CODE);
+  if (!apkPath || !isAbsolute(apkPath) || !versionName || !/^\d+(?:\.\d+){1,3}(?:[-+][A-Za-z0-9._-]+)?$/.test(versionName)) {
+    return null;
+  }
+  if (!Number.isInteger(versionCode) || versionCode <= 0 || versionCode > 2_100_000_000) return null;
+  return { apkPath, versionName, versionCode };
 }
 
 function deriveHandoffKey(secret) {
@@ -257,6 +273,7 @@ export function createWorkerPortalSessionHandoffRouter(prisma, options = {}) {
   const nowFn = options.nowFn || (() => new Date());
   const randomBytesFn = options.randomBytesFn || randomBytes;
   const ttlMs = normalizeHandoffTtl(options.ttlMs);
+  const androidDistribution = resolveAndroidDistribution(options);
   let repository = options.repository || null;
 
   function getRepository() {
@@ -265,7 +282,62 @@ export function createWorkerPortalSessionHandoffRouter(prisma, options = {}) {
     return repository;
   }
 
+  async function resolveActiveSession(req, now) {
+    const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
+    if (!rawSessionToken) return null;
+    return resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
+  }
+
   router.use(cookieParser());
+
+  router.get('/android-app', async (req, res) => {
+    applyWorkerPortalSecurityHeaders(res);
+    try {
+      const now = validDate(nowFn(), 'worker_portal_android_app_now');
+      const session = await resolveActiveSession(req, now);
+      if (!session) return res.status(401).json({ ok: false, error: 'portal_session_required' });
+      if (!androidDistribution) {
+        return res.status(503).json({ ok: false, error: 'android_app_unavailable' });
+      }
+      const info = await stat(androidDistribution.apkPath);
+      if (!info.isFile()) return res.status(503).json({ ok: false, error: 'android_app_unavailable' });
+      return res.status(200).json({
+        ok: true,
+        available: true,
+        versionCode: androidDistribution.versionCode,
+        versionName: androidDistribution.versionName,
+        downloadUrl: ANDROID_APP_DOWNLOAD_PATH
+      });
+    } catch (error) {
+      const code = safeErrorCode(error);
+      if (code !== 'ENOENT') console.error('[WORKER_PORTAL_ANDROID_APP_METADATA_FAILED]', { code });
+      return res.status(503).json({ ok: false, error: 'android_app_unavailable' });
+    }
+  });
+
+  router.get('/android-app/apk', async (req, res) => {
+    applyWorkerPortalSecurityHeaders(res);
+    try {
+      const now = validDate(nowFn(), 'worker_portal_android_app_now');
+      const session = await resolveActiveSession(req, now);
+      if (!session) return res.status(401).json({ ok: false, error: 'portal_session_required' });
+      if (!androidDistribution) {
+        return res.status(503).json({ ok: false, error: 'android_app_unavailable' });
+      }
+      const info = await stat(androidDistribution.apkPath);
+      if (!info.isFile()) return res.status(503).json({ ok: false, error: 'android_app_unavailable' });
+      const filename = `lorren-portal-${androidDistribution.versionName}.apk`;
+      res.set('Content-Type', 'application/vnd.android.package-archive');
+      res.set('Content-Disposition', `attachment; filename="${filename}"`);
+      res.set('Content-Length', String(info.size));
+      return res.sendFile(androidDistribution.apkPath);
+    } catch (error) {
+      const code = safeErrorCode(error);
+      if (code !== 'ENOENT') console.error('[WORKER_PORTAL_ANDROID_APP_DOWNLOAD_FAILED]', { code });
+      return res.status(503).json({ ok: false, error: 'android_app_unavailable' });
+    }
+  });
+
   router.post('/crear', express.json({ limit: '4kb', strict: true }), async (req, res) => {
     applyWorkerPortalSecurityHeaders(res);
     if (req.get?.('x-requested-with') !== WORKER_PORTAL_REQUEST_HEADER) {

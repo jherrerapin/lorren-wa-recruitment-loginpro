@@ -6,6 +6,9 @@ const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js'
 const bootstrapSource = fs.readFileSync(new URL('../src/public/worker-biometric-core.js', import.meta.url), 'utf8');
 const installSource = fs.readFileSync(new URL('../src/public/worker-portal-install.js', import.meta.url), 'utf8');
 const handoffSource = fs.readFileSync(new URL('../src/public/worker-portal-session-handoff.js', import.meta.url), 'utf8');
+const handoffRouteSource = fs.readFileSync(new URL('../src/routes/workerPortalSessionHandoff.js', import.meta.url), 'utf8');
+const androidBuildSource = fs.readFileSync(new URL('../mobile/android/app/build.gradle', import.meta.url), 'utf8');
+const presenceBridgeSource = fs.readFileSync(new URL('../mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
@@ -25,12 +28,13 @@ test('el cargador incluye instalación, sesión y actualización sin duplicar el
 });
 
 
-test('el portal muestra un acceso de descarga aunque el rostro ya estuviera registrado', () => {
+test('el portal conserva un único CTA de descarga aunque el rostro ya estuviera registrado', () => {
   assert.match(installSource, /portal-install-cta/);
   assert.match(installSource, /open-worker-portal-install/);
   assert.match(installSource, /Descargar app/);
   assert.match(installSource, /buildPersistentCta\(\)/);
   assert.match(installSource, /insertAdjacentElement\('afterend', cta\)/);
+  assert.doesNotMatch(installSource, /portal-install-cta-v2|android-install-cta-final/i);
 });
 
 
@@ -43,52 +47,101 @@ test('la oferta automática sigue apareciendo después de confirmar el registro 
 });
 
 
-test('Android usa el diálogo nativo iniciado por el usuario cuando está disponible', () => {
-  assert.match(installSource, /beforeinstallprompt/);
-  assert.match(installSource, /event\.preventDefault\(\)/);
-  assert.match(installSource, /promptEvent\.prompt\(\)/);
-  assert.match(installSource, /promptEvent\.userChoice/);
-  assert.match(installSource, /Descargar app/);
+test('Android usa el APK privado autenticado y no el instalador PWA', () => {
+  assert.match(installSource, /sesion-transferencia\/android-app/);
+  assert.match(installSource, /APK privado/);
+  assert.match(installSource, /downloadUrl\.startsWith\('\/operaciones\/portal\/'\)/);
+  assert.match(installSource, /window\.location\.href = downloadUrl/);
+  assert.match(installSource, /open-worker-portal-native/);
+  assert.match(installSource, /Ya la instalé · abrir Lórren/);
+  assert.match(installSource, /beforeinstallprompt[\s\S]*if \(isAndroid\(\)\) return/);
+  assert.doesNotMatch(installSource, /No se descarga un APK/);
 });
 
 
-test('Android renueva la sesión antes de abrir el instalador', () => {
+test('la app Android expone su versión y solo ofrece actualización si el servidor tiene versionCode mayor', () => {
+  assert.match(presenceBridgeSource, /"appVersionCode", BuildConfig\.VERSION_CODE/);
+  assert.match(presenceBridgeSource, /"appVersionName", BuildConfig\.VERSION_NAME/);
+  assert.match(installSource, /function checkNativeUpdate\(\)/);
+  assert.match(installSource, /metadata\.versionCode > installedVersionCode/);
+  assert.match(installSource, /Actualización de Lórren disponible/);
+  assert.match(installSource, /Actualizar Lórren/);
+  assert.match(installSource, /if \(isNativeAndroidApp\(\)\) \{[\s\S]*checkNativeUpdate\(\)/);
+  assert.doesNotMatch(installSource, /update-worker-portal-v2|android-updater-final/i);
+});
+
+
+test('la actualización reutiliza el mismo CTA y reconoce explícitamente el WebView nativo antes de pasarlo a Chrome', () => {
+  assert.match(installSource, /id: 'open-worker-portal-install'/);
+  assert.match(handoffSource, /'open-worker-portal-install'/);
+  assert.match(handoffSource, /function isNativeAndroidApp\(\)/);
+  assert.match(handoffSource, /window\.LorrenAndroidPresence/);
+  assert.match(handoffSource, /function shouldTransferInstallToChrome\(\)/);
+  assert.match(handoffSource, /isNativeAndroidApp\(\) \|\| isAndroidInAppBrowser\(\)/);
+  assert.match(handoffSource, /window\.location\.href = chromeIntentUrl\(handoffToken\)/);
+});
+
+
+test('el APK se sirve solo desde sesión activa y sin revelar la ruta del servidor', () => {
+  assert.match(handoffRouteSource, /ATTENDANCE_ANDROID_APK_PATH/);
+  assert.match(handoffRouteSource, /ATTENDANCE_ANDROID_APP_VERSION_NAME/);
+  assert.match(handoffRouteSource, /ATTENDANCE_ANDROID_APP_VERSION_CODE/);
+  assert.match(handoffRouteSource, /resolveActiveSession/);
+  assert.match(handoffRouteSource, /portal_session_required/);
+  assert.match(handoffRouteSource, /stat\(androidDistribution\.apkPath\)/);
+  assert.match(handoffRouteSource, /application\/vnd\.android\.package-archive/);
+  assert.match(handoffRouteSource, /res\.sendFile\(androidDistribution\.apkPath\)/);
+  assert.match(handoffRouteSource, /downloadUrl: ANDROID_APP_DOWNLOAD_PATH/);
+  assert.doesNotMatch(handoffRouteSource, /downloadUrl:\s*androidDistribution\.apkPath/);
+});
+
+
+test('Android transfiere la sesión a la app mediante el deep link ya declarado', () => {
   assert.match(handoffSource, /sesion-transferencia\/crear/);
-  assert.match(handoffSource, /sesion-transferencia\/continuar/);
   assert.match(handoffSource, /X-Requested-With/);
   assert.match(handoffSource, /credentials: 'include'/);
+  assert.match(handoffSource, /open-worker-portal-native/);
+  assert.match(handoffSource, /lorren:\/\/portal\/transferencia\?transferencia=/);
+  assert.match(handoffSource, /encodeURIComponent\(handoffToken\)/);
+  assert.match(handoffSource, /window\.location\.href = nativeDeepLink\(handoffToken\)/);
   assert.match(handoffSource, /stopImmediatePropagation/);
-  assert.match(handoffSource, /handoffAlreadyCompleted/);
-  assert.match(handoffSource, /Preparando aplicación/);
-  assert.match(handoffSource, /window\.location\.href = continueUrl\(handoffToken\)\.toString\(\)/);
 });
 
 
-test('el navegador interno transfiere esa sesión a Chrome', () => {
+test('el navegador interno primero rota la sesión hacia Chrome para descargar', () => {
   assert.match(handoffSource, /isAndroidInAppBrowser/);
+  assert.match(handoffSource, /sesion-transferencia\/continuar/);
   assert.match(handoffSource, /package=com\.android\.chrome/);
   assert.match(handoffSource, /Abrir en Chrome y descargar/);
   assert.match(handoffSource, /window\.location\.href = chromeIntentUrl\(handoffToken\)/);
 });
 
 
-test('el observador de transferencia solo procesa controles nuevos y no se realimenta', () => {
+test('el observador de handoff solo procesa controles de instalación relevantes', () => {
   assert.match(handoffSource, /function mutationAddsInstallButton\(mutation\)/);
   assert.match(handoffSource, /mutations\.some\(mutationAddsInstallButton\)/);
-  assert.match(handoffSource, /button\.textContent !== 'Abrir en Chrome y descargar'/);
-  assert.match(handoffSource, /button\.dataset\.installAction !== 'session-handoff'/);
+  assert.match(handoffSource, /NATIVE_OPEN_BUTTON_ID/);
   assert.doesNotMatch(handoffSource, /new MutationObserver\(prepareInstallButtons\)/);
 });
 
 
-test('iPhone conserva la instalación guiada por Safari', () => {
+test('versionCode y versionName Android son configurables sin versionar llaves de firma', () => {
+  assert.match(androidBuildSource, /gradleProperty\('lorrenVersionCode'\)/);
+  assert.match(androidBuildSource, /gradleProperty\('lorrenVersionName'\)/);
+  assert.match(androidBuildSource, /versionCode lorrenVersionCode/);
+  assert.match(androidBuildSource, /versionName lorrenVersionName/);
+  assert.doesNotMatch(androidBuildSource, /storePassword|keyPassword|\.jks|\.keystore|signingConfig\s*\{/i);
+});
+
+
+test('iPhone conserva la instalación PWA guiada por Safari', () => {
   assert.match(installSource, /iPad\|iPhone\|iPod/);
   assert.match(installSource, /Agregar a pantalla de inicio/);
   assert.match(installSource, /Apple no permite iniciar esta instalación desde un botón/);
 });
 
 
-test('la instalación no se ofrece dentro de la app ya instalada', () => {
+test('la PWA no se ofrece dentro de una instalación standalone', () => {
   assert.match(installSource, /display-mode: standalone/);
   assert.match(installSource, /navigator\.standalone/);
   assert.match(installSource, /appinstalled/);
@@ -96,9 +149,8 @@ test('la instalación no se ofrece dentro de la app ya instalada', () => {
 });
 
 
-test('el service worker elimina cachés anteriores y actualiza todos los módulos vigentes', () => {
-  assert.match(serviceWorkerSource, /lorren-worker-portal-shell-v11/);
-  assert.doesNotMatch(serviceWorkerSource, /CACHE_NAME = 'lorren-worker-portal-shell-v10'/);
+test('el service worker usa la versión de shell vigente de Fase B y actualiza los módulos activos', () => {
+  assert.match(serviceWorkerSource, /lorren-worker-portal-shell-v15/);
   assert.match(serviceWorkerSource, /NETWORK_FIRST_ASSETS/);
   for (const path of [
     '/public/worker-biometric.js',
@@ -118,13 +170,13 @@ test('el service worker elimina cachés anteriores y actualiza todos los módulo
 });
 
 
-test('la ruta admite el portal con o sin barra final', () => {
+test('la ruta visual admite el portal con o sin barra final', () => {
   assert.match(installSource, /window\.location\.pathname\.replace\(\/\\\/\+\$\//);
   assert.match(installSource, /normalizedPath !== '\/operaciones\/portal'/);
 });
 
 
-test('el manifiesto mantiene el portal como PWA independiente', () => {
+test('el manifiesto conserva PWA para plataformas no Android', () => {
   assert.equal(manifest.id, '/operaciones/portal');
   assert.equal(manifest.start_url, '/operaciones/portal');
   assert.equal(manifest.scope, '/operaciones/portal');
