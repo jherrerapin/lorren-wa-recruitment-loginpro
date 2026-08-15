@@ -517,7 +517,7 @@ test('cola grupal reutiliza el mismo IndexedDB/service worker, prueba ubicación
   assert.match(nativePresence, /queueCrewPresence/);
   assert.match(nativePresence, /Marcar llegada de toda la cuadrilla/);
   assert.match(nativePresence, /Reintentar no detectados/);
-  assert.match(presenceBridge, /Location\.isMock\(\)/);
+  assert.match(presenceBridge, /location\.isMock\(\)/);
   assert.match(presenceBridge, /isFromMockProvider\(\)/);
   assert.match(presenceBridge, /leaderLocationProof/);
   assert.match(presenceBridge, /"attendanceWriter", false/);
