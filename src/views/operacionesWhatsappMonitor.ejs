@@ -6,6 +6,8 @@
   const configuredTemplate = typeof windowCheckTemplateName === 'string' && windowCheckTemplateName ? windowCheckTemplateName : null;
   const checkMessage = typeof windowCheckMessage === 'string' && windowCheckMessage ? windowCheckMessage : '';
   const checkButton = typeof windowCheckButton === 'string' && windowCheckButton ? windowCheckButton : 'CONFIRMAR CANAL';
+  const initialPhoneQuery = typeof phoneQuery === 'string' ? phoneQuery : '';
+  const initialPhoneLookup = phoneLookup || null;
 %>
 <!DOCTYPE html>
 <html lang="es">
@@ -21,20 +23,21 @@
     .metric{background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px;box-shadow:var(--shadow-sm)}
     .metric span{display:block;color:var(--muted);font-size:11px;font-weight:850;text-transform:uppercase}.metric strong{display:block;color:var(--navy);font-size:24px;margin-top:3px}
     .template-panel{display:grid;grid-template-columns:minmax(320px,1fr) minmax(280px,.75fr);gap:10px;margin-bottom:12px}
-    .template-card,.note{background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow-sm);font-size:12px;line-height:1.45}
-    .template-card h2{margin:0 0 7px;color:var(--navy);font-size:14px}.template-preview{white-space:pre-line;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;color:#334155}.template-buttons{display:flex;gap:6px;margin-top:8px}.template-buttons span{border-radius:8px;padding:5px 8px;background:#eef2ff;color:#3730a3;font-size:10px;font-weight:900}.note{background:#eff6ff;border-color:#bfdbfe;color:#1e40af;box-shadow:none}.note code{font-size:10px}
+    .template-card,.note,.phone-search-card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px 14px;box-shadow:var(--shadow-sm);font-size:12px;line-height:1.45}
+    .template-card h2,.phone-search-card h2{margin:0 0 7px;color:var(--navy);font-size:14px}.template-preview{white-space:pre-line;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:10px;color:#334155}.template-buttons{display:flex;gap:6px;margin-top:8px}.template-buttons span{border-radius:8px;padding:5px 8px;background:#eef2ff;color:#3730a3;font-size:10px;font-weight:900}.note{background:#eff6ff;border-color:#bfdbfe;color:#1e40af;box-shadow:none}.note code{font-size:10px}
+    .phone-search-card{margin-bottom:12px}.phone-search-form{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.phone-search-field{display:grid;gap:4px;min-width:min(420px,100%);flex:1}.phone-search-field label{font-size:10px;font-weight:900;color:var(--muted);text-transform:uppercase}.phone-search-field input{width:100%;border:1px solid var(--border);border-radius:10px;padding:9px 10px;font:inherit}.phone-search-help{margin:7px 0 0;color:var(--muted);font-size:10px}.phone-lookup{margin-top:10px;border-top:1px solid #e2e8f0;padding-top:10px}.phone-lookup[hidden]{display:none}.phone-lookup-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}.phone-lookup-head strong{color:var(--navy)}.phone-lookup-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:10px;color:var(--muted)}.phone-lookup-panel{max-height:440px;overflow:auto;border:1px solid #dbe4ee;border-radius:12px;background:#f8fafc;padding:10px;overflow-anchor:none}
     .bulk-result{margin-bottom:12px;border-radius:12px;padding:10px 12px;font-size:11px;font-weight:800;display:none}.bulk-result.show{display:block}.bulk-result.ok{background:#dcfce7;color:#166534}.bulk-result.warn{background:#fef3c7;color:#92400e}
-    .table-wrap{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:auto;box-shadow:var(--shadow-sm)}
+    .table-wrap{background:#fff;border:1px solid var(--border);border-radius:14px;overflow:auto;box-shadow:var(--shadow-sm);overflow-anchor:none}
     table{width:100%;border-collapse:collapse;min-width:1320px}th,td{padding:9px 10px;border-bottom:1px solid #edf2f7;vertical-align:middle;text-align:left;font-size:11px}th{position:sticky;top:0;background:#f8fafc;color:var(--muted);font-size:10px;text-transform:uppercase;z-index:1}
     .pill{display:inline-flex;border-radius:999px;padding:4px 8px;font-size:9px;font-weight:900;white-space:nowrap}.open{background:#dcfce7;color:#166534}.closed{background:#fee2e2;color:#991b1b}.review{background:#fef3c7;color:#92400e}.confirmed{background:#dcfce7;color:#166534}.pending{background:#fef3c7;color:#92400e}
     .window-check{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#16a34a;color:#fff;font-size:11px;font-weight:900;margin-right:5px;vertical-align:middle}.window-off{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#e2e8f0;color:#64748b;font-size:10px;font-weight:900;margin-right:5px;vertical-align:middle}.window-review{display:inline-flex;width:18px;height:18px;border-radius:50%;align-items:center;justify-content:center;background:#f59e0b;color:#fff;font-size:10px;font-weight:900;margin-right:5px;vertical-align:middle}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10px}.muted{color:var(--muted)}.live{display:inline-flex;align-items:center;gap:6px;color:var(--green);font-size:11px;font-weight:900}.dot{width:8px;height:8px;border-radius:50%;background:currentColor}.evidence{font-size:9px;color:var(--muted);margin-top:2px}.phone-warning{font-size:9px;color:#92400e;font-weight:800;margin-top:2px}
     .row-action{padding:5px 8px;font-size:10px;min-height:0}.row-action[disabled]{opacity:.45;cursor:not-allowed}.chat-toggle{white-space:nowrap}
-    .chat-row[hidden]{display:none}.chat-row td{padding:0 12px 12px;background:#f8fafc}.chat-panel{border:1px solid #dbe4ee;border-radius:12px;background:#fff;padding:10px;max-height:360px;overflow:auto}.chat-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px;color:#475569;font-size:10px}.chat-feed{display:flex;flex-direction:column;gap:7px}.chat-message{max-width:min(760px,88%);border-radius:11px;padding:8px 10px;border:1px solid #e2e8f0}.chat-in{align-self:flex-start;background:#eff6ff;border-color:#bfdbfe}.chat-out{align-self:flex-end;background:#ecfdf5;border-color:#bbf7d0}.chat-meta{display:flex;gap:8px;align-items:center;font-size:9px;color:#64748b;margin-bottom:3px}.chat-meta strong{color:#334155}.chat-body{white-space:pre-wrap;word-break:break-word;color:#1f2937;font-size:11px;line-height:1.4}.chat-reconstructed{display:inline-flex;border-radius:999px;background:#fef3c7;color:#92400e;padding:1px 6px;font-size:8px;font-weight:900}.chat-empty{font-size:10px;color:#64748b;padding:4px}.chat-note{font-size:9px;color:#64748b;margin-top:8px}
+    .chat-row[hidden]{display:none}.chat-row td{padding:0 12px 12px;background:#f8fafc}.chat-panel{border:1px solid #dbe4ee;border-radius:12px;background:#fff;padding:10px;max-height:360px;overflow:auto;overflow-anchor:none}.chat-head{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:8px;color:#475569;font-size:10px}.chat-feed{display:flex;flex-direction:column;gap:7px}.chat-message{max-width:min(760px,88%);border-radius:11px;padding:8px 10px;border:1px solid #e2e8f0}.chat-in{align-self:flex-start;background:#eff6ff;border-color:#bfdbfe}.chat-out{align-self:flex-end;background:#ecfdf5;border-color:#bbf7d0}.chat-meta{display:flex;gap:8px;align-items:center;font-size:9px;color:#64748b;margin-bottom:3px}.chat-meta strong{color:#334155}.chat-body{white-space:pre-wrap;word-break:break-word;color:#1f2937;font-size:11px;line-height:1.4}.chat-reconstructed{display:inline-flex;border-radius:999px;background:#fef3c7;color:#92400e;padding:1px 6px;font-size:8px;font-weight:900}.chat-empty{font-size:10px;color:#64748b;padding:4px}.chat-note{font-size:9px;color:#64748b;margin-top:8px}
     .unmatched-panel{margin-top:12px;background:#fff7ed;border:1px solid #fed7aa;border-radius:14px;padding:12px 14px}.unmatched-panel h2{font-size:13px;margin:0 0 4px;color:#9a3412}.unmatched-panel p{font-size:11px;color:#9a3412;margin:0 0 8px}.unmatched-list{display:flex;flex-wrap:wrap;gap:7px}.unmatched-item{background:#fff;border:1px solid #fed7aa;border-radius:9px;padding:6px 8px;font-size:10px;color:#7c2d12}
     .message-dialog{border:0;border-radius:16px;padding:0;width:min(620px,calc(100vw - 24px));box-shadow:0 24px 70px rgba(15,23,42,.3)}.message-dialog::backdrop{background:rgba(15,23,42,.45)}.message-dialog form{padding:18px;display:grid;gap:12px}.message-dialog h3{margin:0;color:var(--navy)}.message-dialog textarea{width:100%;min-height:125px;border:1px solid var(--border);border-radius:10px;padding:10px;font:inherit;resize:vertical}.dialog-actions{display:flex;justify-content:flex-end;gap:8px}
     @media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr)}}
-    @media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}.chat-message{max-width:96%}}
+    @media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}.template-panel{grid-template-columns:1fr}.chat-message{max-width:96%}.phone-search-field{min-width:100%}}
   </style>
 </head>
 <body>
@@ -71,6 +74,20 @@
       <article class="metric"><span>Inbound sin coincidir</span><strong id="metricUnmatched"><%= summary.unmatchedInbound || 0 %></strong></article>
     </section>
 
+    <section class="phone-search-card" id="phoneSearchCard">
+      <h2>Consultar cualquier número de WhatsApp Despacho</h2>
+      <form class="phone-search-form" id="phoneSearchForm">
+        <div class="phone-search-field">
+          <label for="phoneSearchInput">Número</label>
+          <input id="phoneSearchInput" name="phone" inputmode="tel" autocomplete="off" value="<%= initialPhoneQuery %>" placeholder="3001234567 o 573001234567" />
+        </div>
+        <button class="btn btn-primary" type="submit">Ver conversación</button>
+        <button class="btn" type="button" id="clearPhoneSearch" <%= initialPhoneQuery ? '' : 'hidden' %>>Limpiar</button>
+      </form>
+      <p class="phone-search-help">Consulta solo la auditoría de la línea oficial de Despacho, su ventana de 24 horas y evidencia reconstruible de asignaciones. No consulta conversaciones del bot de Reclutamiento y no habilita envío arbitrario.</p>
+      <div class="phone-lookup" id="phoneLookupResult" hidden></div>
+    </section>
+
     <section class="template-panel">
       <article class="template-card">
         <h2>Mensaje para abrir/verificar la ventana</h2>
@@ -85,7 +102,7 @@
 
     <div class="bulk-result" id="bulkResult"></div>
 
-    <div class="table-wrap">
+    <div class="table-wrap" id="monitorTableWrap">
       <table>
         <thead>
           <tr><th>Auxiliar</th><th>Teléfono</th><th>Operación</th><th>Asignación</th><th>Ventana 24 h</th><th>Último mensaje recibido</th><th>Vence</th><th>Mensajes</th><th>Acción DEV</th></tr>
@@ -112,7 +129,7 @@
 
     <section class="unmatched-panel" id="unmatchedPanel" <%= unmatchedInbound.length ? '' : 'hidden' %>>
       <h2>Inbound recientes que no coinciden con los teléfonos de los asignados</h2>
-      <p>Si un auxiliar asegura que ya escribió pero sigue cerrado, revisa aquí. Si aparece su número, el problema es de coincidencia con el teléfono guardado en Personal, no de falta de respuesta.</p>
+      <p>Si un auxiliar asegura que ya escribió pero sigue cerrado, revisa aquí. También puedes copiar ese número en el buscador superior para abrir su conversación aunque no esté asignado.</p>
       <div class="unmatched-list" id="unmatchedList">
         <% unmatchedInbound.forEach((item) => { %><div class="unmatched-item"><strong><%= item.workerName ? `${item.workerName} · ${item.phone}` : item.phone %></strong> · <span data-date="<%= item.lastInboundAt %>"><%= item.lastInboundAt %></span></div><% }) %>
       </div>
@@ -143,7 +160,13 @@
     const manualMessageText = document.getElementById('manualMessageText');
     const unmatchedPanel = document.getElementById('unmatchedPanel');
     const unmatchedList = document.getElementById('unmatchedList');
+    const tableWrap = document.getElementById('monitorTableWrap');
+    const phoneSearchForm = document.getElementById('phoneSearchForm');
+    const phoneSearchInput = document.getElementById('phoneSearchInput');
+    const clearPhoneSearch = document.getElementById('clearPhoneSearch');
+    const phoneLookupResult = document.getElementById('phoneLookupResult');
     const openChats = new Set();
+    let currentPhoneQuery = <%- JSON.stringify(initialPhoneQuery) %>;
     let refreshBusy = false;
 
     function escapeHtml(value) {
@@ -172,8 +195,8 @@
       return value;
     }
     function chatMessagesHtml(item) {
-      const history = Array.isArray(item.messageHistory) ? item.messageHistory : [];
-      if (!history.length) return '<div class="chat-empty">Todavía no hay mensajes persistidos o reconstruibles para este auxiliar.</div>';
+      const history = Array.isArray(item?.messageHistory) ? item.messageHistory : [];
+      if (!history.length) return '<div class="chat-empty">No hay mensajes persistidos o reconstruibles para este número.</div>';
       return history.map((message) => {
         const inbound = message.direction === 'INBOUND';
         const reconstruction = message.reconstructed ? '<span class="chat-reconstructed">RECONSTRUIDO</span>' : '';
@@ -237,9 +260,78 @@
         return `<div class="unmatched-item"><strong>${identity}</strong> · ${escapeHtml(formatBogota(item.lastInboundAt))}</div>`;
       }).join('');
     }
-    function render(data) {
+    function renderPhoneLookup(lookup) {
+      if (!currentPhoneQuery) {
+        phoneLookupResult.hidden = true;
+        phoneLookupResult.innerHTML = '';
+        clearPhoneSearch.hidden = true;
+        return;
+      }
+      clearPhoneSearch.hidden = false;
+      phoneLookupResult.hidden = false;
+      if (!lookup?.phone) {
+        phoneLookupResult.innerHTML = '<div class="chat-empty">Escribe un número válido para consultar.</div>';
+        return;
+      }
+      const names = Array.isArray(lookup.workerNames) && lookup.workerNames.length
+        ? ` · ${escapeHtml(lookup.workerNames.join(' / '))}`
+        : '';
+      const evidence = lookup.hasEvidence
+        ? `${Number(lookup.messageCount || 0)} registros disponibles`
+        : 'Sin evidencia persistida en WhatsApp Despacho';
+      phoneLookupResult.innerHTML = `<div class="phone-lookup-head">
+        <strong>${escapeHtml(lookup.phone)}${names}</strong>
+        <div class="phone-lookup-meta">${windowHtml(lookup)}<span>${escapeHtml(evidence)}</span>${lookup.lastInboundAt ? `<span>Último inbound: ${escapeHtml(formatBogota(lookup.lastInboundAt))}</span>` : ''}</div>
+      </div>
+      <div class="phone-lookup-panel"><div class="chat-feed">${chatMessagesHtml(lookup)}</div></div>`;
+    }
+    function captureViewState() {
+      const chats = {};
+      document.querySelectorAll('[data-chat-row]').forEach((row) => {
+        if (row.hidden) return;
+        const panel = row.querySelector('.chat-panel');
+        if (!panel) return;
+        chats[row.dataset.chatRow || ''] = { top: panel.scrollTop, left: panel.scrollLeft };
+      });
+      const lookupPanel = phoneLookupResult.querySelector('.phone-lookup-panel');
+      return {
+        pageY: window.scrollY || 0,
+        pageX: window.scrollX || 0,
+        tableTop: tableWrap?.scrollTop || 0,
+        tableLeft: tableWrap?.scrollLeft || 0,
+        lookupTop: lookupPanel?.scrollTop || 0,
+        lookupLeft: lookupPanel?.scrollLeft || 0,
+        chats
+      };
+    }
+    function restoreViewState(state) {
+      if (!state) return;
+      requestAnimationFrame(() => {
+        if (tableWrap) {
+          tableWrap.scrollTop = state.tableTop;
+          tableWrap.scrollLeft = state.tableLeft;
+        }
+        Object.entries(state.chats || {}).forEach(([assignmentId, scroll]) => {
+          const row = document.querySelector(`[data-chat-row="${CSS.escape(assignmentId)}"]`);
+          const panel = row?.querySelector('.chat-panel');
+          if (panel) {
+            panel.scrollTop = scroll.top;
+            panel.scrollLeft = scroll.left;
+          }
+        });
+        const lookupPanel = phoneLookupResult.querySelector('.phone-lookup-panel');
+        if (lookupPanel) {
+          lookupPanel.scrollTop = state.lookupTop;
+          lookupPanel.scrollLeft = state.lookupLeft;
+        }
+        window.scrollTo(state.pageX, state.pageY);
+      });
+    }
+    function render(data, preservePosition = true) {
+      const viewState = preservePosition ? captureViewState() : null;
       renderItems(data.items);
       renderUnmatched(data.unmatchedInbound);
+      renderPhoneLookup(data.phoneLookup || null);
       const current = data.summary || {};
       document.getElementById('metricTotal').textContent = current.total || 0;
       document.getElementById('metricOpen').textContent = current.open || 0;
@@ -249,22 +341,35 @@
       document.getElementById('dateKey').textContent = data.dateKey || '—';
       document.getElementById('generatedAt').textContent = data.generatedAt ? formatBogota(data.generatedAt) : '—';
       bulkButton.disabled = !(current.missingWindow > 0);
+      restoreViewState(viewState);
     }
-    async function refreshMonitor() {
-      if (refreshBusy) return;
+    function monitorDataUrl() {
+      const url = new URL(dataEndpoint, window.location.origin);
+      if (currentPhoneQuery) url.searchParams.set('phone', currentPhoneQuery);
+      return url.toString();
+    }
+    async function refreshMonitor({ preservePosition = true } = {}) {
+      if (refreshBusy) return null;
       refreshBusy = true;
       try {
-        const response = await fetch(dataEndpoint,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});
+        const response = await fetch(monitorDataUrl(),{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        render(await response.json());
+        const data = await response.json();
+        render(data, preservePosition);
         liveState.style.color = '';
         liveState.textContent = `● En vivo · ${new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',hour:'numeric',minute:'2-digit',second:'2-digit'}).format(new Date())}`;
+        return data;
       } catch (_error) {
         liveState.style.color = '#b91c1c';
         liveState.textContent = '● Sin actualizar';
+        return null;
       } finally {
         refreshBusy = false;
       }
+    }
+    function showNotice(message, ok = false) {
+      bulkResult.className = `bulk-result show ${ok ? 'ok' : 'warn'}`;
+      bulkResult.textContent = message;
     }
     function bindManualButtons() {
       document.querySelectorAll('.manual-message-button').forEach((button) => {
@@ -280,16 +385,13 @@
     async function sendBulk() {
       if (bulkButton.disabled) return;
       bulkButton.disabled = true;
-      bulkResult.className = 'bulk-result show warn';
-      bulkResult.textContent = 'Enviando verificación a quienes todavía no tienen una ventana confirmada...';
+      showNotice('Enviando verificación a quienes todavía no tienen una ventana confirmada...');
       try {
         const response = await fetch(bulkEndpoint,{method:'POST',credentials:'same-origin',headers:{Accept:'application/json'}});
         const result = await response.json();
-        bulkResult.className = `bulk-result show ${result.failed ? 'warn' : 'ok'}`;
-        bulkResult.textContent = `Intentados: ${result.attempted || 0} · enviados: ${result.sent || 0} · fallidos: ${result.failed || 0} · ya abiertos omitidos: ${result.alreadyOpen || 0}.`;
+        showNotice(`Intentados: ${result.attempted || 0} · enviados: ${result.sent || 0} · fallidos: ${result.failed || 0} · ya abiertos omitidos: ${result.alreadyOpen || 0}.`, !result.failed);
       } catch (_error) {
-        bulkResult.className = 'bulk-result show warn';
-        bulkResult.textContent = 'No fue posible ejecutar el envío de verificación.';
+        showNotice('No fue posible ejecutar el envío de verificación.');
       }
       await refreshMonitor();
     }
@@ -301,23 +403,45 @@
       const response = await fetch(manualEndpoint,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json',Accept:'application/json'},body:JSON.stringify({assignmentId,message})});
       const result = await response.json();
       if (!response.ok) {
-        window.alert(result.message || 'Meta no permitió enviar el mensaje.');
+        showNotice(result.message || 'Meta no permitió enviar el mensaje.');
         await refreshMonitor();
         return;
       }
-      window.alert(result.monitorStateWasOpen ? 'Meta aceptó el envío con la ventana marcada como abierta.' : 'Meta aceptó el intento aunque el monitor la mostraba cerrada. Revisa el monitor y la coincidencia del número.');
+      showNotice(result.monitorStateWasOpen
+        ? 'Meta aceptó el envío con la ventana marcada como abierta.'
+        : 'Meta aceptó el intento aunque el monitor la mostraba cerrada. Revisa el monitor y la coincidencia del número.', true);
       manualDialog.close();
       await refreshMonitor();
+    }
+    async function searchPhone(event) {
+      event.preventDefault();
+      currentPhoneQuery = phoneSearchInput.value.trim();
+      const url = new URL(window.location.href);
+      if (currentPhoneQuery) url.searchParams.set('phone', currentPhoneQuery);
+      else url.searchParams.delete('phone');
+      history.replaceState(null, '', url.toString());
+      await refreshMonitor({ preservePosition: true });
+    }
+    async function clearPhoneLookup() {
+      currentPhoneQuery = '';
+      phoneSearchInput.value = '';
+      const url = new URL(window.location.href);
+      url.searchParams.delete('phone');
+      history.replaceState(null, '', url.toString());
+      await refreshMonitor({ preservePosition: true });
     }
 
     bulkButton?.addEventListener('click', sendBulk);
     manualForm?.addEventListener('submit', sendManual);
+    phoneSearchForm?.addEventListener('submit', searchPhone);
+    clearPhoneSearch?.addEventListener('click', clearPhoneLookup);
     document.getElementById('cancelManualMessage')?.addEventListener('click', () => manualDialog.close());
     document.querySelectorAll('[data-date]').forEach((cell) => { const value = cell.dataset.date; if (value) cell.textContent = formatBogota(value); });
     document.getElementById('generatedAt').textContent = <%- JSON.stringify(data.generatedAt || '') %> ? formatBogota(<%- JSON.stringify(data.generatedAt || '') %>) : '—';
     bindManualButtons();
     bindChatButtons();
-    window.setInterval(refreshMonitor, 5000);
+    renderPhoneLookup(<%- JSON.stringify(initialPhoneLookup) %>);
+    window.setInterval(() => refreshMonitor({ preservePosition: true }), 5000);
   </script>
 </body>
 </html>
