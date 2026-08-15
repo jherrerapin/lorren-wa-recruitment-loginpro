@@ -165,7 +165,7 @@
     const clearPhoneSearch = document.getElementById('clearPhoneSearch');
     const phoneLookupResult = document.getElementById('phoneLookupResult');
     const openChats = new Set();
-    let currentPhoneQuery = <%- JSON.stringify(initialPhoneQuery) %>;
+    let currentPhoneQuery = phoneSearchInput.value.trim();
     let refreshBusy = false;
 
     function escapeHtml(value) {
