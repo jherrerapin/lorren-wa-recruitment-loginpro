@@ -9,6 +9,7 @@
     'open-worker-portal-install',
     'install-worker-portal'
   ]);
+  const NATIVE_OPEN_BUTTON_ID = 'open-worker-portal-native';
 
   let handoffInProgress = false;
 
@@ -29,11 +30,13 @@
     return new URL(window.location.href).searchParams.get(INSTALL_QUERY_PARAM) === '1';
   }
 
-  function installButtonFromEvent(event) {
+  function buttonFromEvent(event) {
     const element = event.target instanceof Element
       ? event.target.closest('button')
       : null;
-    return element && INSTALL_BUTTON_IDS.has(element.id) ? element : null;
+    if (!element) return null;
+    if (element.id === NATIVE_OPEN_BUTTON_ID) return element;
+    return INSTALL_BUTTON_IDS.has(element.id) ? element : null;
   }
 
   function statusElement() {
@@ -49,26 +52,29 @@
   }
 
   function prepareInstallButtons() {
-    if (!isAndroid() || handoffAlreadyCompleted()) return;
-    const inAppBrowser = isAndroidInAppBrowser();
-    for (const id of INSTALL_BUTTON_IDS) {
-      const button = document.getElementById(id);
-      if (!button) continue;
-      if (button.disabled) button.disabled = false;
-      if (inAppBrowser && button.textContent !== 'Abrir en Chrome y descargar') {
-        button.textContent = 'Abrir en Chrome y descargar';
-      }
-      if (button.dataset.installAction !== 'session-handoff') {
-        button.dataset.installAction = 'session-handoff';
+    if (!isAndroid()) return;
+    if (isAndroidInAppBrowser() && !handoffAlreadyCompleted()) {
+      for (const id of INSTALL_BUTTON_IDS) {
+        const button = document.getElementById(id);
+        if (!button) continue;
+        button.disabled = false;
+        if (button.textContent !== 'Abrir en Chrome y descargar') {
+          button.textContent = 'Abrir en Chrome y descargar';
+        }
+        button.dataset.installAction = 'session-handoff-chrome';
       }
     }
+    const nativeButton = document.getElementById(NATIVE_OPEN_BUTTON_ID);
+    if (nativeButton) nativeButton.dataset.installAction = 'session-handoff-native';
   }
 
   function mutationAddsInstallButton(mutation) {
     return [...mutation.addedNodes].some((node) => {
       if (!(node instanceof Element)) return false;
-      if (INSTALL_BUTTON_IDS.has(node.id)) return true;
-      return [...node.querySelectorAll('button')].some((button) => INSTALL_BUTTON_IDS.has(button.id));
+      if (INSTALL_BUTTON_IDS.has(node.id) || node.id === NATIVE_OPEN_BUTTON_ID) return true;
+      return [...node.querySelectorAll('button')].some((button) => (
+        INSTALL_BUTTON_IDS.has(button.id) || button.id === NATIVE_OPEN_BUTTON_ID
+      ));
     });
   }
 
@@ -102,10 +108,30 @@
     return `intent://${target.host}${target.pathname}${target.search}#Intent;scheme=${scheme};package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(target.toString())};end`;
   }
 
+  function nativeDeepLink(handoffToken) {
+    return `lorren://portal/transferencia?transferencia=${encodeURIComponent(handoffToken)}`;
+  }
+
+  function restoreButton(button, originalText) {
+    handoffInProgress = false;
+    if (!button?.isConnected) return;
+    button.disabled = false;
+    button.textContent = originalText || (button.id === NATIVE_OPEN_BUTTON_ID
+      ? 'Ya la instalé · abrir Lórren'
+      : 'Descargar app');
+  }
+
   async function handleInstallClick(event) {
-    if (!isAndroid() || handoffAlreadyCompleted()) return;
-    const button = installButtonFromEvent(event);
+    if (!isAndroid()) return;
+    const button = buttonFromEvent(event);
     if (!button) return;
+
+    const opensNative = button.id === NATIVE_OPEN_BUTTON_ID;
+    const transfersToChrome = !opensNative
+      && isAndroidInAppBrowser()
+      && !handoffAlreadyCompleted()
+      && INSTALL_BUTTON_IDS.has(button.id);
+    if (!opensNative && !transfersToChrome) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -116,30 +142,35 @@
     const originalText = button.textContent;
     button.disabled = true;
     button.textContent = 'Preparando aplicación…';
-    setStatus('Asegurando que la aplicación conserve tu sesión activa.');
+    setStatus(opensNative
+      ? 'Transfiriendo tu sesión de forma temporal a la app Lórren.'
+      : 'Asegurando que Chrome conserve tu sesión para descargar la app.');
 
     try {
       const handoffToken = await createSessionHandoff();
-      if (isAndroidInAppBrowser()) {
-        button.textContent = 'Abriendo Chrome…';
-        setStatus('Chrome abrirá el portal con tu sesión activa.');
-        window.location.href = chromeIntentUrl(handoffToken);
+      if (opensNative) {
+        button.textContent = 'Abriendo Lórren…';
+        setStatus('Android abrirá Lórren y el servidor rotará la sesión al entrar.');
+        window.location.href = nativeDeepLink(handoffToken);
+        window.setTimeout(() => {
+          if (document.visibilityState === 'visible') {
+            restoreButton(button, originalText);
+            setStatus('Si Lórren no se abrió, comprueba que el APK haya terminado de instalarse.', true);
+          }
+        }, 2_500);
         return;
       }
-      button.textContent = 'Continuando…';
-      setStatus('La descarga continuará con la sesión preparada.');
-      window.location.href = continueUrl(handoffToken).toString();
+
+      button.textContent = 'Abriendo Chrome…';
+      setStatus('Chrome abrirá el Portal con una sesión rotada y continuará la descarga privada.');
+      window.location.href = chromeIntentUrl(handoffToken);
     } catch {
-      handoffInProgress = false;
-      button.disabled = false;
-      button.textContent = originalText || (isAndroidInAppBrowser()
-        ? 'Abrir en Chrome y descargar'
-        : 'Descargar app');
+      restoreButton(button, originalText);
       setStatus('No fue posible preparar la sesión de la aplicación. Recarga el portal e intenta nuevamente.', true);
     }
   }
 
-  if (!isAndroid() || handoffAlreadyCompleted()) return;
+  if (!isAndroid()) return;
 
   document.addEventListener('click', handleInstallClick, true);
   const observer = new MutationObserver((mutations) => {
