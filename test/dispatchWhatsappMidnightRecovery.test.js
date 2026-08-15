@@ -2,18 +2,35 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runDispatchUserAutomationScheduler } from '../src/services/dispatchWhatsappAdminAlerts.js';
 
-function buildPrisma({ config, assignmentsByMode, attempted = new Set(), runEvents = [] }) {
+function matchesEntityId(condition, entityId) {
+  if (typeof condition === 'string') return condition === entityId;
+  if (Array.isArray(condition?.in)) return condition.in.includes(entityId);
+  return true;
+}
+
+function buildPrisma({ config, assignmentsByMode, confirmations = [], runEvents = [] }) {
   return {
     devAuditEvent: {
-      findMany: async () => [config],
+      findMany: async ({ where = {} }) => {
+        if (where.entityType === 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG') return [config];
+        if (where.entityType !== 'DISPATCH_WHATSAPP_AUTOMATION_RUN') return [];
+        return runEvents
+          .filter((event) => (
+            event.entityType === where.entityType
+            && (!where.action || event.action === where.action)
+            && matchesEntityId(where.entityId, event.entityId)
+          ))
+          .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+      },
       findFirst: async ({ where }) => runEvents.find((event) => (
         event.entityType === where.entityType
         && event.entityId === where.entityId
         && event.action === where.action
       )) || null,
       create: async ({ data }) => {
-        runEvents.push({ ...data, id: `run-${runEvents.length + 1}`, createdAt: new Date() });
-        return data;
+        const row = { ...data, id: `run-${runEvents.length + 1}`, createdAt: data.createdAt || new Date() };
+        runEvents.push(row);
+        return row;
       }
     },
     appUser: {
@@ -25,14 +42,15 @@ function buildPrisma({ config, assignmentsByMode, attempted = new Set(), runEven
       }]
     },
     dispatchAssignment: {
-      findMany: async ({ where }) => (
-        where.status.in.length === 1 && where.status.in[0] === 'ASSIGNED'
-          ? assignmentsByMode.assigned
-          : assignmentsByMode.pending
-      )
+      findMany: async () => [...assignmentsByMode.assigned, ...assignmentsByMode.pending]
     },
     dispatchWhatsappConfirmation: {
-      findMany: async () => [...attempted].map((assignmentId) => ({ assignmentId }))
+      findMany: async ({ where = {} } = {}) => confirmations.filter((row) => {
+        const ids = where.assignmentId?.in;
+        if (Array.isArray(ids) && !ids.includes(row.assignmentId)) return false;
+        const gte = where.createdAt?.gte ? new Date(where.createdAt.gte).getTime() : null;
+        return !gte || new Date(row.createdAt).getTime() >= gte;
+      })
     }
   };
 }
@@ -56,7 +74,6 @@ function assignment({ id, status = 'ASSIGNED', startTime = '08:00', createdAt = 
 }
 
 test('recupera D→D+1 después de medianoche y omite turnos que ya iniciaron', async () => {
-  const attempted = new Set();
   const runEvents = [];
   const assignmentSends = [];
   const adminSends = [];
@@ -64,6 +81,10 @@ test('recupera D→D+1 después de medianoche y omite turnos que ya iniciaron', 
   const started = assignment({ id: 'started', startTime: '00:05' });
   const pendingFuture = assignment({ id: 'pending-future', status: 'CONFIRMATION_PENDING', startTime: '08:00' });
   const pendingStarted = assignment({ id: 'pending-started', status: 'CONFIRMATION_PENDING', startTime: '00:05' });
+  const confirmations = [
+    { assignmentId: 'pending-future', status: 'SENT', createdAt: new Date('2026-08-12T23:00:00.000Z') },
+    { assignmentId: 'pending-started', status: 'SENT', createdAt: new Date('2026-08-12T23:00:00.000Z') }
+  ];
   const config = {
     id: 'config-recovery',
     entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG',
@@ -75,12 +96,12 @@ test('recupera D→D+1 después de medianoche y omite turnos que ya iniciaron', 
   const prismaClient = buildPrisma({
     config,
     assignmentsByMode: { assigned: [future, started], pending: [pendingFuture, pendingStarted] },
-    attempted,
+    confirmations,
     runEvents
   });
   const sendAssignmentMessage = async ({ context }) => {
     assignmentSends.push(context.assignmentId);
-    attempted.add(context.assignmentId);
+    confirmations.push({ assignmentId: context.assignmentId, status: 'SENT', createdAt: new Date('2026-08-13T05:15:00.000Z') });
     return { providerMessageId: 'wamid-recovery' };
   };
   const sendAdminMessage = async ({ text }) => {
@@ -108,6 +129,7 @@ test('recupera D→D+1 después de medianoche y omite turnos que ya iniciaron', 
 
 test('23:59 en Colombia conserva la tanda normal para D+1', async () => {
   const sends = [];
+  const confirmations = [];
   const tomorrow = assignment({ id: 'tomorrow', startTime: '08:00', createdAt: '2026-08-13T20:00:00.000Z' });
   tomorrow.serviceRequest.serviceDate = new Date('2026-08-14T05:00:00.000Z');
   const config = {
@@ -120,10 +142,12 @@ test('23:59 en Colombia conserva la tanda normal para D+1', async () => {
   };
   const prismaClient = buildPrisma({
     config,
-    assignmentsByMode: { assigned: [tomorrow], pending: [] }
+    assignmentsByMode: { assigned: [tomorrow], pending: [] },
+    confirmations
   });
   const sendAssignmentMessage = async ({ context }) => {
     sends.push(context.assignmentId);
+    confirmations.push({ assignmentId: context.assignmentId, status: 'SENT', createdAt: new Date('2026-08-14T04:59:00.000Z') });
     return { providerMessageId: 'wamid-normal' };
   };
   const now = new Date('2026-08-14T04:59:00.000Z'); // 23:59 Colombia del 13/08.
