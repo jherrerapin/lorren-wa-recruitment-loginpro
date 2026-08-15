@@ -12,6 +12,7 @@ const CREDENTIAL_VERSION = 'cp1';
 const CREDENTIAL_AUDIENCE = 'lorren-crew-presence';
 const CREDENTIAL_HMAC_CONTEXT = 'lorren-crew-presence-credential-v1';
 const PROOF_CONTEXT = 'lorren-presence-v1';
+const NATIVE_LOCATION_CONTEXT = 'lorren-native-location-v1';
 const DEFAULT_CREDENTIAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_CREDENTIAL_TTL_MS = 15 * 60 * 1000;
 const MAX_CREDENTIAL_TTL_MS = 14 * 24 * 60 * 60 * 1000;
@@ -178,6 +179,26 @@ export function buildCrewPresenceCanonicalProof(input = {}) {
   return `${PROOF_CONTEXT}\n${attemptId}\n${serviceRequestId}\n${challenge}\n${Math.trunc(respondedAt)}`;
 }
 
+function parseLocationNumber(value, label, min, max) {
+  const text = requireString(value, label, 40);
+  if (!/^-?\d+(?:\.\d+)?$/.test(text)) throw new Error(`${label}_invalid`);
+  const number = Number(text);
+  if (!Number.isFinite(number) || number < min || number > max) throw new Error(`${label}_invalid`);
+  return { text, number };
+}
+
+export function buildCrewNativeLocationCanonicalProof(input = {}) {
+  const attemptId = requireString(input.attemptId, 'crew_presence_attempt_id', 160);
+  const serviceRequestId = requireString(input.serviceRequestId, 'crew_presence_service_request_id', 160);
+  const latitude = parseLocationNumber(input.latitude, 'crew_presence_location_latitude', -90, 90).text;
+  const longitude = parseLocationNumber(input.longitude, 'crew_presence_location_longitude', -180, 180).text;
+  const accuracyMeters = parseLocationNumber(input.accuracyMeters, 'crew_presence_location_accuracy', 0, 100_000).text;
+  const capturedAt = Number(input.capturedAt);
+  if (!Number.isFinite(capturedAt) || capturedAt <= 0) throw new Error('crew_presence_location_captured_at_invalid');
+  if (typeof input.isMock !== 'boolean') throw new Error('crew_presence_location_mock_signal_invalid');
+  return `${NATIVE_LOCATION_CONTEXT}\n${attemptId}\n${serviceRequestId}\n${latitude}\n${longitude}\n${accuracyMeters}\n${Math.trunc(capturedAt)}\n${input.isMock ? '1' : '0'}`;
+}
+
 function requirePrisma(prisma) {
   if (!prisma?.dispatchAssignment || typeof prisma.dispatchAssignment.findMany !== 'function') {
     throw new Error('crew_presence_assignment_contract_invalid');
@@ -211,6 +232,64 @@ function verifyProofSignatureValue(proof, credentialPayload) {
   }
 }
 
+function verifyNativeLocationSignatureValue(proof, credentialPayload) {
+  const { encoded, publicKey } = parsePresencePublicKey(proof.publicKey);
+  if (publicKeyHash(encoded) !== credentialPayload.keyHash) return false;
+  const canonical = buildCrewNativeLocationCanonicalProof(proof);
+  const signature = decodeBase64(proof.signature, 'crew_presence_location_signature', MAX_SIGNATURE_BYTES);
+  try {
+    return verifySignature('sha256', Buffer.from(canonical, 'utf8'), publicKey, signature);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeLeaderLocationProof(rawProof, expected, options) {
+  if (!rawProof || typeof rawProof !== 'object' || Array.isArray(rawProof)) {
+    throw new Error('crew_presence_native_location_required');
+  }
+  if (rawProof.version !== 1) throw new Error('crew_presence_native_location_invalid');
+  const latitude = parseLocationNumber(rawProof.latitude, 'crew_presence_location_latitude', -90, 90);
+  const longitude = parseLocationNumber(rawProof.longitude, 'crew_presence_location_longitude', -180, 180);
+  const accuracy = parseLocationNumber(rawProof.accuracyMeters, 'crew_presence_location_accuracy', 0, 100_000);
+  const proof = {
+    attemptId: requireString(rawProof.attemptId, 'crew_presence_attempt_id', 160),
+    serviceRequestId: requireString(rawProof.serviceRequestId, 'crew_presence_service_request_id', 160),
+    latitude: latitude.text,
+    longitude: longitude.text,
+    accuracyMeters: accuracy.text,
+    capturedAt: Number(rawProof.capturedAt),
+    isMock: rawProof.isMock,
+    publicKey: requireString(rawProof.publicKey, 'crew_presence_public_key', 4096),
+    signature: requireString(rawProof.signature, 'crew_presence_location_signature', 1024),
+    credential: requireString(rawProof.credential, 'crew_presence_credential', 4096)
+  };
+  if (
+    proof.attemptId !== expected.attemptId
+    || proof.serviceRequestId !== expected.serviceRequestId
+    || !Number.isFinite(proof.capturedAt)
+    || proof.capturedAt <= 0
+    || typeof proof.isMock !== 'boolean'
+  ) throw new Error('crew_presence_native_location_invalid');
+
+  const capturedAt = new Date(proof.capturedAt);
+  const credential = readCrewPresenceCredential({ credential: proof.credential, at: capturedAt }, options);
+  if (
+    credential.workerId !== expected.leaderWorkerId
+    || credential.deviceId !== expected.leaderDeviceId
+    || !verifyNativeLocationSignatureValue(proof, credential)
+  ) throw new Error('crew_presence_native_location_identity_invalid');
+  if (proof.isMock) throw new Error('crew_presence_mock_location_detected');
+
+  return {
+    latitude: latitude.number,
+    longitude: longitude.number,
+    accuracyMeters: accuracy.number,
+    capturedAt,
+    credential
+  };
+}
+
 function normalizeProofBundle(input, expected = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('crew_presence_bundle_invalid');
@@ -228,7 +307,14 @@ function normalizeProofBundle(input, expected = {}) {
   }
   const proofs = Array.isArray(input.proofs) ? input.proofs : [];
   if (proofs.length > MAX_PROOF_COUNT) throw new Error('crew_presence_proof_count_invalid');
-  return { attemptId, serviceRequestId, challenge, challengeSentAt, proofs };
+  return {
+    attemptId,
+    serviceRequestId,
+    challenge,
+    challengeSentAt,
+    proofs,
+    leaderLocationProof: input.leaderLocationProof
+  };
 }
 
 export async function verifyCrewPresenceBundle(prisma, input = {}, options = {}) {
@@ -239,11 +325,21 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
   const serviceRequestId = requireString(input.serviceRequestId, 'crew_presence_service_request_id', 160);
   const idempotencyKey = requireString(input.idempotencyKey, 'crew_presence_idempotency_key', 160);
   const now = requireDate(input.now ?? new Date(), 'crew_presence_now');
-  const capturedAt = requireDate(input.clientCapturedAt, 'crew_presence_captured_at');
+  const queuedCapturedAt = requireDate(input.clientCapturedAt, 'crew_presence_captured_at');
   const bundle = normalizeProofBundle(input.proofBundle, {
     attemptId: idempotencyKey,
     serviceRequestId
   });
+  const leaderLocation = normalizeLeaderLocationProof(bundle.leaderLocationProof, {
+    attemptId: idempotencyKey,
+    serviceRequestId,
+    leaderWorkerId,
+    leaderDeviceId
+  }, options);
+  const capturedAt = leaderLocation.capturedAt;
+  if (Math.abs(capturedAt.getTime() - queuedCapturedAt.getTime()) > MAX_PROOF_CLOCK_DELTA_MS) {
+    throw new Error('crew_presence_native_location_time_mismatch');
+  }
   if (Math.abs(bundle.challengeSentAt - capturedAt.getTime()) > MAX_PROOF_CLOCK_DELTA_MS) {
     throw new Error('crew_presence_challenge_time_invalid');
   }
@@ -381,6 +477,13 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
     verifiedProofCount: Math.max(0, validatedWorkerIds.length - 1),
     rejectedProofCount,
     notDetectedCount,
-    leaderInstallationIdHash: leaderDevice.installationIdHash || null
+    leaderInstallationIdHash: leaderDevice.installationIdHash || null,
+    clientCapturedAt: capturedAt,
+    leaderLocation: {
+      latitude: leaderLocation.latitude,
+      longitude: leaderLocation.longitude,
+      accuracyMeters: leaderLocation.accuracyMeters,
+      clientCapturedAt: capturedAt.toISOString()
+    }
   };
 }
