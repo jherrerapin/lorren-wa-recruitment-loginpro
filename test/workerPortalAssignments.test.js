@@ -159,13 +159,15 @@ test('conserva la fecha operativa de registros históricos y modernos sin despla
   }
 });
 
-test('el encabezado de Mi jornada presenta nombre y documento obtenidos en servidor', async () => {
+test('el encabezado presenta el nombre del auxiliar una sola vez y conserva el documento', async () => {
   const view = await readFile(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
   const activeHeader = view.match(/<% } else if \(mode === 'active'\) \{ %>[\s\S]*?<\/header>/)?.[0] || '';
 
   assert.match(activeHeader, /const portalWorkerIdentity = portalAssignments\.workerIdentity \|\| null/);
-  assert.match(activeHeader, /<h1>Mi jornada<\/h1>/);
-  assert.match(activeHeader, /portalWorkerIdentity\.fullName/);
+  assert.match(activeHeader, /<h1><%= portalWorkerIdentity \? portalWorkerIdentity\.fullName : 'Portal del Auxiliar' %><\/h1>/);
+  assert.equal((activeHeader.match(/portalWorkerIdentity\.fullName/g) || []).length, 1);
+  assert.doesNotMatch(activeHeader, /<h1>Mi jornada<\/h1>/);
+  assert.doesNotMatch(activeHeader, /<strong><%= portalWorkerIdentity\.fullName %><\/strong>/);
   assert.match(activeHeader, /Documento: <%= portalWorkerIdentity\.documentNumber \|\| 'No registrado' %>/);
 });
 

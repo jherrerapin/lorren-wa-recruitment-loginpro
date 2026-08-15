@@ -193,8 +193,8 @@
       <header class="portal-header">
         <div>
           <p class="brand">Lórren · Portal del Auxiliar</p>
-          <h1>Mi jornada</h1>
-          <% if (portalWorkerIdentity) { %><p><strong><%= portalWorkerIdentity.fullName %></strong><br/>Documento: <%= portalWorkerIdentity.documentNumber || 'No registrado' %></p><% } %>
+          <h1><%= portalWorkerIdentity ? portalWorkerIdentity.fullName : 'Portal del Auxiliar' %></h1>
+          <% if (portalWorkerIdentity) { %><p>Documento: <%= portalWorkerIdentity.documentNumber || 'No registrado' %></p><% } %>
         </div>
         <span class="session-chip">Dispositivo verificado</span>
       </header>
