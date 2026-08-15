@@ -2,8 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
+  loadDispatchWhatsappPhoneConversation,
   loadDispatchWhatsappTomorrowAssignmentMonitor,
   loadDispatchWhatsappWindowStatusForAssignments,
+  normalizeDispatchWhatsappMonitorPhone,
   recordDispatchWhatsappMessageAudit,
   tomorrowIsoDateCO
 } from '../src/services/dispatchWhatsappMonitor.js';
@@ -214,6 +216,84 @@ test('auditoría de mensajes de Despacho es idempotente por id externo y no usa 
   assert.equal('message' in prismaClient, false);
 });
 
+test('consulta DEV por teléfono normaliza local/57 y muestra conversación aunque no exista asignación activa', async () => {
+  const normalized = '573004445566';
+  const prismaClient = {
+    dispatchWhatsappContactWindow: {
+      findUnique: async ({ where }) => {
+        assert.deepEqual(where, { scope_phone: { scope: 'operational', phone: normalized } });
+        return { scope: 'operational', phone: normalized, lastInboundAt: new Date('2026-08-13T00:20:00.000Z') };
+      },
+      upsert: async () => null
+    },
+    dispatchWhatsappConfirmation: {
+      findMany: async ({ where }) => {
+        assert.deepEqual(where, { phone: normalized });
+        return [];
+      }
+    },
+    devAuditEvent: {
+      findMany: async ({ where }) => {
+        assert.equal(where.entityType, 'DISPATCH_WHATSAPP_MESSAGE');
+        assert.deepEqual(where.entityLabel.in, [normalized]);
+        return [
+          {
+            id: 'audit-free-in', entityId: 'dispatch-wa:inbound:TEST-IN-1', entityLabel: normalized,
+            action: 'DISPATCH_WHATSAPP_INBOUND', actorSource: 'WEBHOOK_INBOUND',
+            metadata: {
+              direction: 'INBOUND', body: 'Mensaje de prueba sin asignación', messageType: 'TEXT',
+              messageId: 'TEST-IN-1', source: 'WEBHOOK_INBOUND', occurredAt: '2026-08-13T00:20:00.000Z'
+            },
+            createdAt: new Date('2026-08-13T00:20:00.000Z')
+          },
+          {
+            id: 'audit-free-out', entityId: 'dispatch-wa:outbound:TEST-OUT-1', entityLabel: normalized,
+            action: 'DISPATCH_WHATSAPP_OUTBOUND', actorSource: 'TEST_SOURCE',
+            metadata: {
+              direction: 'OUTBOUND', body: 'Respuesta de prueba', messageType: 'TEXT',
+              providerMessageId: 'TEST-OUT-1', source: 'TEST_SOURCE', occurredAt: '2026-08-13T00:22:00.000Z'
+            },
+            createdAt: new Date('2026-08-13T00:22:00.000Z')
+          }
+        ];
+      }
+    }
+  };
+
+  assert.equal(normalizeDispatchWhatsappMonitorPhone('300 444 5566'), normalized);
+  assert.equal(normalizeDispatchWhatsappMonitorPhone(normalized), normalized);
+  const lookup = await loadDispatchWhatsappPhoneConversation({
+    prismaClient,
+    phone: '300 444 5566',
+    now: NOW
+  });
+  assert.equal(lookup.phone, normalized);
+  assert.equal(lookup.isOpen, true);
+  assert.equal(lookup.hasEvidence, true);
+  assert.equal(lookup.messageCount, 2);
+  assert.ok(lookup.messageHistory.some((message) => message.body === 'Mensaje de prueba sin asignación'));
+  assert.ok(lookup.messageHistory.some((message) => message.body === 'Respuesta de prueba' && message.direction === 'OUTBOUND'));
+  assert.equal('dispatchAssignment' in prismaClient, false);
+  assert.equal('message' in prismaClient, false);
+});
+
+test('consulta DEV por teléfono sin evidencia devuelve estado vacío y no error', async () => {
+  const prismaClient = {
+    dispatchWhatsappContactWindow: { findUnique: async () => null, upsert: async () => null },
+    dispatchWhatsappConfirmation: { findMany: async () => [] },
+    devAuditEvent: { findMany: async () => [] }
+  };
+  const lookup = await loadDispatchWhatsappPhoneConversation({
+    prismaClient,
+    phone: '3005556677',
+    now: NOW
+  });
+  assert.equal(lookup.phone, '573005556677');
+  assert.equal(lookup.hasEvidence, false);
+  assert.equal(lookup.isOpen, false);
+  assert.deepEqual(lookup.messageHistory, []);
+});
+
 test('monitor detecta posible desajuste entre teléfono guardado e inbound real sin inventar ventana abierta', async () => {
   const malformedAssignment = {
     ...assignmentFixture()[0],
@@ -268,7 +348,7 @@ test('monitor de WhatsApp Despacho sigue siendo exclusivamente DEV', () => {
   assert.equal(canAccessDispatchWhatsappMonitor({ session: { userRole: 'admin', username: 'operaciones-despacho' } }), false);
 });
 
-test('UI conserva separación del bot, refresh vivo, conversación por auxiliar y prueba de envío', () => {
+test('UI conserva separación del bot, búsqueda libre y posición de lectura durante refresh vivo', () => {
   const statusView = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const monitorView = fs.readFileSync(new URL('../src/views/operacionesWhatsappMonitor.ejs', import.meta.url), 'utf8');
   const assignmentRoute = fs.readFileSync(new URL('../src/routes/dispatchAssignmentConfirmations.js', import.meta.url), 'utf8');
@@ -280,14 +360,26 @@ test('UI conserva separación del bot, refresh vivo, conversación por auxiliar 
   assert.match(monitorView, /Conversación WhatsApp Despacho/);
   assert.match(monitorView, /data-chat-toggle/);
   assert.match(monitorView, /no se mezclan mensajes del bot de Reclutamiento/);
-  assert.match(monitorView, /window\.setInterval\(refreshMonitor, 5000\)/);
+  assert.match(monitorView, /Consultar cualquier número de WhatsApp Despacho/);
+  assert.match(monitorView, /id="phoneSearchForm"/);
+  assert.match(monitorView, /currentPhoneQuery/);
+  assert.match(monitorView, /captureViewState/);
+  assert.match(monitorView, /restoreViewState/);
+  assert.match(monitorView, /tableWrap\.scrollTop/);
+  assert.match(monitorView, /panel\.scrollTop/);
+  assert.match(monitorView, /window\.scrollTo\(state\.pageX, state\.pageY\)/);
+  assert.match(monitorView, /window\.setInterval\(\(\) => refreshMonitor/);
   assert.match(monitorView, /Inbound recientes que no coinciden/);
   assert.match(monitorView, /item\.workerName \? `\$\{item\.workerName\} · \$\{item\.phone\}` : item\.phone/);
   assert.match(monitorView, /const identity = item\.workerName/);
   assert.match(monitorView, /Probar envío/);
   assert.match(monitorView, /Meta será quien acepte o rechace/);
+  assert.doesNotMatch(monitorView, /window\.alert\s*\(/);
+  assert.doesNotMatch(monitorView, /\balert\s*\(/);
   assert.match(assignmentRoute, /assignment-wa-window-check/);
   assert.match(assignmentRoute, /ventanas-asignaciones/);
+  assert.match(whatsappRoute, /loadDispatchWhatsappPhoneConversation/);
+  assert.match(whatsappRoute, /phoneQuery/);
   assert.match(whatsappRoute, /recordDispatchWhatsappMessageAudit/);
   assert.match(webhookService, /recordDispatchWhatsappMessageAudit/);
   assert.doesNotMatch(whatsappRoute, /if \(!item\.isOpen\)/);
