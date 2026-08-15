@@ -35,8 +35,14 @@ function deviceId(index) {
   return `TEST-DEVICE-${String(index).padStart(2, '0')}`;
 }
 
-function member(index) {
-  return { id: assignmentId(index), workerId: workerId(index) };
+function member(index, arrived = false) {
+  return {
+    id: assignmentId(index),
+    workerId: workerId(index),
+    attendanceSession: arrived
+      ? { arrivalReportedAt: new Date(CAPTURED_AT.getTime() - 60_000) }
+      : null
+  };
 }
 
 function generatePresenceKey() {
@@ -138,8 +144,9 @@ test('credencial alterada o vencida es rechazada', () => {
     now: CAPTURED_AT
   }, { secret: SECRET, ttlMs: 15 * 60 * 1000 });
 
-  const last = issued.credential.at(-1);
-  const tampered = `${issued.credential.slice(0, -1)}${last === 'A' ? 'B' : 'A'}`;
+  const [version, payload, signature] = issued.credential.split('.');
+  const alteredFirst = signature[0] === 'A' ? 'B' : 'A';
+  const tampered = `${version}.${payload}.${alteredFirst}${signature.slice(1)}`;
   assert.throws(
     () => readCrewPresenceCredential({ credential: tampered, at: CAPTURED_AT }, { secret: SECRET }),
     /crew_presence_credential_invalid/
@@ -223,6 +230,42 @@ test('firma inválida, trabajador ajeno y dispositivo no activo nunca entran al 
   assert.equal(verified.rejectedProofCount, 3);
 });
 
+test('reintento de proof no vuelve a contar como ausentes a quienes ya tenían llegada', async () => {
+  const members = Array.from({ length: 10 }, (_, index) => member(index + 1, index >= 1 && index <= 8));
+  const proof = createProof(10, {
+    attemptId: 'TEST-CREW-ATTEMPT-0002',
+    challenge: 'TEST-CHALLENGE-000000000000000000000000000002',
+    respondedAt: CAPTURED_AT.getTime() + 5 * 60 * 1000
+  });
+  const devices = [activeDevice(1), activeDevice(10)];
+  const prisma = createVerifyPrisma({ members, devices });
+  const retryCapturedAt = new Date(CAPTURED_AT.getTime() + 5 * 60 * 1000);
+
+  const verified = await verifyCrewPresenceBundle(prisma, {
+    leaderWorkerId: LEADER_WORKER_ID,
+    leaderDeviceId: LEADER_DEVICE_ID,
+    assignmentId: LEADER_ASSIGNMENT_ID,
+    serviceRequestId: SERVICE_ID,
+    idempotencyKey: 'TEST-CREW-ATTEMPT-0002',
+    clientCapturedAt: retryCapturedAt,
+    proofBundle: {
+      version: 1,
+      attemptId: 'TEST-CREW-ATTEMPT-0002',
+      serviceRequestId: SERVICE_ID,
+      challenge: 'TEST-CHALLENGE-000000000000000000000000000002',
+      challengeSentAt: retryCapturedAt.getTime(),
+      proofs: [proof]
+    },
+    now: SERVER_NOW
+  }, {
+    secret: SECRET,
+    loadCrewContextsFn: async () => leaderContext()
+  });
+
+  assert.deepEqual(verified.validatedWorkerIds, [LEADER_WORKER_ID, workerId(10)]);
+  assert.equal(verified.notDetectedCount, 0);
+});
+
 function recordedResult(id, { replayed = false } = {}) {
   return {
     recorded: true,
@@ -283,11 +326,12 @@ test('fan-out verificable llama al escritor canónico solo para los 9 detectados
   assert.equal(result.summary.totalMembers, 10);
   assert.equal(result.summary.eligibleMembers, 9);
   assert.equal(result.summary.notDetectedCount, 1);
+  assert.equal(result.summary.processedCount, 9);
   assert.equal(result.summary.newlyRecordedCount, 9);
 });
 
-test('reintento después de llegada previa del encargado continúa y no duplica a quien ya estaba marcado', async () => {
-  const members = Array.from({ length: 10 }, (_, index) => member(index + 1));
+test('reintento completa al décimo y conserva los ocho ya registrados fuera del nuevo scan', async () => {
+  const members = Array.from({ length: 10 }, (_, index) => member(index + 1, index >= 1 && index <= 8));
   const calls = [];
   const prisma = {
     dispatchAssignment: { findMany: async () => members }
@@ -318,8 +362,11 @@ test('reintento después de llegada previa del encargado continúa y no duplica 
   });
 
   assert.deepEqual(calls.map((call) => call.assignmentId), [LEADER_ASSIGNMENT_ID, assignmentId(10)]);
-  assert.equal(result.summary.alreadyRecordedCount, 1);
+  assert.equal(result.summary.previouslyRecordedCount, 8);
+  assert.equal(result.summary.alreadyRecordedCount, 9);
   assert.equal(result.summary.newlyRecordedCount, 1);
+  assert.equal(result.summary.processedCount, 10);
+  assert.equal(result.summary.notDetectedCount, 0);
   assert.equal(result.summary.failedCount, 0);
 });
 
@@ -340,6 +387,8 @@ test('cola grupal reutiliza el mismo IndexedDB/service worker y no crea otro esc
     assert.match(source, /lorren-worker-arrivals/);
   }
   assert.match(serviceWorker, /\/cuadrillas\/presencia\/sincronizar/);
+  assert.match(serviceWorker, /CREW_PRESENCE_SYNCED/);
+  assert.match(serviceWorker, /syncAll/);
   assert.match(serviceWorker, /X-Requested-With': 'worker-portal'/);
   assert.doesNotMatch(serviceWorker, /punctualityStatus,\s*\n/);
   assert.match(nativePresence, /queueCrewPresence/);
