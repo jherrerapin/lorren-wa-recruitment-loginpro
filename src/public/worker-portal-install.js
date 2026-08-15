@@ -36,8 +36,18 @@
     return isAndroid() && /WhatsApp|FBAN|FBAV|Instagram|Line\/|wv\)/i.test(userAgent());
   }
 
+  function nativeCapabilities() {
+    if (!isAndroid() || !window.LorrenAndroidPresence) return null;
+    try {
+      const parsed = JSON.parse(window.LorrenAndroidPresence.getCapabilities());
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
   function isNativeAndroidApp() {
-    return Boolean(isAndroid() && window.LorrenAndroidPresence);
+    return nativeCapabilities()?.androidNative === true;
   }
 
   function isStandalone() {
@@ -94,6 +104,32 @@
     if (dialog?.open && typeof dialog.close === 'function') dialog.close();
   }
 
+  function insertCta(cta) {
+    const connectivity = document.getElementById('portal-connectivity');
+    const header = document.querySelector('.portal-header');
+    if (connectivity?.parentNode) connectivity.insertAdjacentElement('afterend', cta);
+    else if (header?.parentNode) header.insertAdjacentElement('afterend', cta);
+    else document.querySelector('main')?.prepend(cta);
+  }
+
+  function buildCta({ title, copy, buttonText, ariaLabel = 'Descargar Portal del Auxiliar', onClick }) {
+    document.getElementById('portal-install-cta')?.remove();
+    installStyles();
+    const cta = createElement('section', { id: 'portal-install-cta', 'aria-label': ariaLabel });
+    const icon = createElement('div', { className: 'portal-install-cta-icon', 'aria-hidden': 'true' }, 'L');
+    const text = createElement('div', { className: 'portal-install-cta-copy' });
+    text.append(createElement('strong', {}, title), createElement('span', {}, copy));
+    const button = createElement('button', {
+      type: 'button',
+      className: 'portal-install-cta-button',
+      id: 'open-worker-portal-install'
+    }, buttonText);
+    if (typeof onClick === 'function') button.addEventListener('click', onClick);
+    cta.append(icon, text, button);
+    insertCta(cta);
+    return cta;
+  }
+
   function setStatus(dialog, message, tone = '') {
     const status = dialog?.querySelector('#portal-install-status');
     if (!status) return;
@@ -107,85 +143,25 @@
       removeInstallUi();
       return null;
     }
-    const existing = document.getElementById('portal-install-cta');
-    if (existing) return existing;
-
-    installStyles();
-    const cta = createElement('section', {
-      id: 'portal-install-cta',
-      'aria-label': 'Descargar Portal del Auxiliar'
-    });
-    const icon = createElement('div', { className: 'portal-install-cta-icon', 'aria-hidden': 'true' }, 'L');
-    const copy = createElement('div', { className: 'portal-install-cta-copy' });
-    copy.append(
-      createElement('strong', {}, isAndroid() ? 'Instala la app Android de Lórren' : 'Descarga el Portal del Auxiliar'),
-      createElement('span', {}, isAndroid()
+    if (document.getElementById('portal-install-cta')) return document.getElementById('portal-install-cta');
+    return buildCta({
+      title: isAndroid() ? 'Instala la app Android de Lórren' : 'Descarga el Portal del Auxiliar',
+      copy: isAndroid()
         ? 'APK privado para abrir el Portal y usar la presencia de cuadrilla sin Internet.'
-        : 'Instálalo como aplicación para abrirlo rápido y conservar las marcaciones offline.')
-    );
-    const button = createElement('button', {
-      type: 'button',
-      className: 'portal-install-cta-button',
-      id: 'open-worker-portal-install'
-    }, isAndroidInAppBrowser() ? 'Abrir en Chrome y descargar' : 'Descargar app');
-    button.addEventListener('click', () => showInstallDialog());
-    cta.append(icon, copy, button);
-
-    const connectivity = document.getElementById('portal-connectivity');
-    const header = document.querySelector('.portal-header');
-    if (connectivity?.parentNode) connectivity.insertAdjacentElement('afterend', cta);
-    else if (header?.parentNode) header.insertAdjacentElement('afterend', cta);
-    else document.querySelector('main')?.prepend(cta);
-    return cta;
-  }
-
-  function buildDialog() {
-    const existing = document.getElementById('portal-install-dialog');
-    if (existing) return existing;
-
-    installStyles();
-    const dialog = createElement('dialog', {
-      id: 'portal-install-dialog',
-      'aria-labelledby': 'portal-install-title',
-      'aria-describedby': 'portal-install-copy'
+        : 'Instálalo como aplicación para abrirlo rápido y conservar las marcaciones offline.',
+      buttonText: isAndroidInAppBrowser() ? 'Abrir en Chrome y descargar' : 'Descargar app',
+      onClick: () => showInstallDialog()
     });
-    const body = createElement('div', { className: 'portal-install-body' });
-    const icon = createElement('div', { className: 'portal-install-icon', 'aria-hidden': 'true' }, 'L');
-    const brand = createElement('p', { className: 'portal-install-brand' }, 'Lórren · Portal del Auxiliar');
-    const title = createElement('h2', { className: 'portal-install-title', id: 'portal-install-title' });
-    const copy = createElement('p', { className: 'portal-install-copy', id: 'portal-install-copy' });
-    const benefits = createElement('ul', { className: 'portal-install-benefits' });
-    const instructions = createElement('div', { className: 'portal-install-instructions', id: 'portal-install-instructions', hidden: true });
-    const status = createElement('div', { className: 'portal-install-status', id: 'portal-install-status', role: 'status', 'aria-live': 'polite', hidden: true });
-    const actions = createElement('div', { className: 'portal-install-actions' });
-    const installButton = createElement('button', { type: 'button', className: 'portal-install-primary', id: 'install-worker-portal' }, 'Descargar app');
-    const nativeButton = createElement('button', { type: 'button', className: 'portal-install-secondary', id: 'open-worker-portal-native', hidden: true }, 'Ya la instalé · abrir Lórren');
-    const closeButton = createElement('button', { type: 'button', className: 'portal-install-secondary', id: 'dismiss-worker-portal-install' }, 'Ahora no');
+  }
 
-    actions.append(installButton, nativeButton, closeButton);
-    body.append(icon, brand, title, copy, benefits, instructions, status, actions);
-    dialog.append(body);
-    document.body.append(dialog);
-
-    closeButton.addEventListener('click', () => closeDialog(dialog));
-    dialog.addEventListener('cancel', (event) => {
-      event.preventDefault();
-      closeDialog(dialog);
+  function buildNativeUpdateCta(metadata, capabilities) {
+    const installedName = String(capabilities?.appVersionName || '').trim() || `#${capabilities.appVersionCode}`;
+    return buildCta({
+      ariaLabel: 'Actualizar aplicación Android de Lórren',
+      title: 'Actualización de Lórren disponible',
+      copy: `Tienes ${installedName}. La versión ${metadata.versionName} está lista para instalar.`,
+      buttonText: 'Actualizar Lórren'
     });
-    installButton.addEventListener('click', () => handlePrimaryInstall(dialog));
-    return dialog;
-  }
-
-  function showDialog(dialog) {
-    if (dialog.open) return;
-    if (typeof dialog.showModal === 'function') dialog.showModal();
-    else dialog.setAttribute('open', '');
-  }
-
-  function closeDialog(dialog) {
-    if (!dialog?.open) return;
-    if (typeof dialog.close === 'function') dialog.close();
-    else dialog.removeAttribute('open');
   }
 
   async function loadAndroidMetadata() {
@@ -214,6 +190,68 @@
     return androidMetadataPromise;
   }
 
+  async function checkNativeUpdate() {
+    const capabilities = nativeCapabilities();
+    const installedVersionCode = Number(capabilities?.appVersionCode);
+    if (!Number.isInteger(installedVersionCode) || installedVersionCode <= 0) {
+      removeInstallUi();
+      return;
+    }
+    try {
+      const metadata = await loadAndroidMetadata();
+      if (metadata.versionCode > installedVersionCode) buildNativeUpdateCta(metadata, capabilities);
+      else removeInstallUi();
+    } catch (_error) {
+      removeInstallUi();
+    }
+  }
+
+  function buildDialog() {
+    const existing = document.getElementById('portal-install-dialog');
+    if (existing) return existing;
+    installStyles();
+    const dialog = createElement('dialog', {
+      id: 'portal-install-dialog',
+      'aria-labelledby': 'portal-install-title',
+      'aria-describedby': 'portal-install-copy'
+    });
+    const body = createElement('div', { className: 'portal-install-body' });
+    const icon = createElement('div', { className: 'portal-install-icon', 'aria-hidden': 'true' }, 'L');
+    const brand = createElement('p', { className: 'portal-install-brand' }, 'Lórren · Portal del Auxiliar');
+    const title = createElement('h2', { className: 'portal-install-title', id: 'portal-install-title' });
+    const copy = createElement('p', { className: 'portal-install-copy', id: 'portal-install-copy' });
+    const benefits = createElement('ul', { className: 'portal-install-benefits' });
+    const instructions = createElement('div', { className: 'portal-install-instructions', id: 'portal-install-instructions', hidden: true });
+    const status = createElement('div', { className: 'portal-install-status', id: 'portal-install-status', role: 'status', 'aria-live': 'polite', hidden: true });
+    const actions = createElement('div', { className: 'portal-install-actions' });
+    const installButton = createElement('button', { type: 'button', className: 'portal-install-primary', id: 'install-worker-portal' }, 'Descargar app');
+    const nativeButton = createElement('button', { type: 'button', className: 'portal-install-secondary', id: 'open-worker-portal-native', hidden: true }, 'Ya la instalé · abrir Lórren');
+    const closeButton = createElement('button', { type: 'button', className: 'portal-install-secondary', id: 'dismiss-worker-portal-install' }, 'Ahora no');
+    actions.append(installButton, nativeButton, closeButton);
+    body.append(icon, brand, title, copy, benefits, instructions, status, actions);
+    dialog.append(body);
+    document.body.append(dialog);
+    closeButton.addEventListener('click', () => closeDialog(dialog));
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      closeDialog(dialog);
+    });
+    installButton.addEventListener('click', () => handlePrimaryInstall(dialog));
+    return dialog;
+  }
+
+  function showDialog(dialog) {
+    if (dialog.open) return;
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else dialog.setAttribute('open', '');
+  }
+
+  function closeDialog(dialog) {
+    if (!dialog?.open) return;
+    if (typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+
   async function renderAndroidDialog(dialog) {
     const title = dialog.querySelector('#portal-install-title');
     const copy = dialog.querySelector('#portal-install-copy');
@@ -222,7 +260,6 @@
     const installButton = dialog.querySelector('#install-worker-portal');
     const nativeButton = dialog.querySelector('#open-worker-portal-native');
     if (!title || !copy || !benefits || !instructions || !installButton || !nativeButton) return;
-
     title.textContent = 'Instala Lórren en este teléfono';
     copy.textContent = 'Android descargará el APK privado de Lórren desde tu sesión activa. No necesitas Play Store.';
     benefits.replaceChildren(
@@ -233,14 +270,12 @@
     instructions.hidden = false;
     instructions.innerHTML = '<strong>Instalación privada:</strong><ol><li>Descarga el APK.</li><li>Android puede pedir permiso para instalar apps desde este navegador.</li><li>Cuando termine, vuelve aquí y pulsa “Ya la instalé · abrir Lórren”.</li></ol>';
     nativeButton.hidden = false;
-
     if (isAndroidInAppBrowser()) {
       installButton.disabled = false;
       installButton.textContent = 'Abrir en Chrome y descargar';
       setStatus(dialog, 'Primero transferiremos tu sesión a Chrome para mantener la descarga privada.');
       return;
     }
-
     installButton.disabled = true;
     installButton.textContent = 'Preparando APK…';
     setStatus(dialog, 'Comprobando la versión privada disponible.');
@@ -306,10 +341,7 @@
   }
 
   function showInstallDialog() {
-    if (isNativeAndroidApp() || isStandalone() || installedThisSession) {
-      removeInstallUi();
-      return;
-    }
+    if (isNativeAndroidApp() || isStandalone() || installedThisSession) return;
     const dialog = buildDialog();
     showDialog(dialog);
     if (isAndroid()) renderAndroidDialog(dialog);
@@ -320,7 +352,6 @@
   async function handlePrimaryInstall(dialog) {
     const installButton = dialog.querySelector('#install-worker-portal');
     if (!installButton || installButton.disabled) return;
-
     if (isAndroid()) {
       if (isAndroidInAppBrowser()) return;
       const downloadUrl = String(installButton.dataset.downloadUrl || '');
@@ -338,7 +369,6 @@
       }, 2_000);
       return;
     }
-
     if (!deferredInstallPrompt) return;
     const promptEvent = deferredInstallPrompt;
     deferredInstallPrompt = null;
@@ -424,7 +454,8 @@
   });
 
   if (isNativeAndroidApp()) {
-    removeInstallUi();
+    installStyles();
+    checkNativeUpdate();
     return;
   }
 
