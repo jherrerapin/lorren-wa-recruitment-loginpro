@@ -149,6 +149,7 @@ test('el service worker usa la versión de shell vigente de Fase B y actualiza l
   assert.doesNotMatch(serviceWorkerSource, /worker-portal-offline-v2\.js/);
   assert.match(serviceWorkerSource, /networkFirstStatic/);
   assert.match(serviceWorkerSource, /fetch\(request, \{ cache: 'no-store' \}\)/);
+  assert.match(serviceWorkerSource, /PORTAL_SHELL_UPDATED/);
 });
 
 
@@ -165,4 +166,6 @@ test('el manifiesto conserva PWA para plataformas no Android', () => {
   assert.equal(manifest.display, 'standalone');
   assert.equal(manifest.prefer_related_applications, false);
   assert.ok(Array.isArray(manifest.icons));
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '192x192'));
+  assert.ok(manifest.icons.some((icon) => icon.sizes === '512x512'));
 });
