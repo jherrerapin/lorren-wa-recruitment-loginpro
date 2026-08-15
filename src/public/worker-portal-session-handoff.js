@@ -21,9 +21,17 @@
     return /Android/i.test(userAgent());
   }
 
+  function isNativeAndroidApp() {
+    return isAndroid() && Boolean(window.LorrenAndroidPresence);
+  }
+
   function isAndroidInAppBrowser() {
     return isAndroid()
       && /WhatsApp|FBAN|FBAV|Instagram|Line\/|wv\)/i.test(userAgent());
+  }
+
+  function shouldTransferInstallToChrome() {
+    return (isNativeAndroidApp() || isAndroidInAppBrowser()) && !handoffAlreadyCompleted();
   }
 
   function handoffAlreadyCompleted() {
@@ -53,12 +61,12 @@
 
   function prepareInstallButtons() {
     if (!isAndroid()) return;
-    if (isAndroidInAppBrowser() && !handoffAlreadyCompleted()) {
+    if (shouldTransferInstallToChrome()) {
       for (const id of INSTALL_BUTTON_IDS) {
         const button = document.getElementById(id);
         if (!button) continue;
         button.disabled = false;
-        if (button.textContent !== 'Abrir en Chrome y descargar') {
+        if (!isNativeAndroidApp() && button.textContent !== 'Abrir en Chrome y descargar') {
           button.textContent = 'Abrir en Chrome y descargar';
         }
         button.dataset.installAction = 'session-handoff-chrome';
@@ -128,8 +136,7 @@
 
     const opensNative = button.id === NATIVE_OPEN_BUTTON_ID;
     const transfersToChrome = !opensNative
-      && isAndroidInAppBrowser()
-      && !handoffAlreadyCompleted()
+      && shouldTransferInstallToChrome()
       && INSTALL_BUTTON_IDS.has(button.id);
     if (!opensNative && !transfersToChrome) return;
 
