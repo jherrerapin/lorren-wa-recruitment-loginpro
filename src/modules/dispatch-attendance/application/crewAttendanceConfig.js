@@ -125,14 +125,39 @@ function latestMetadataByEntity(events = []) {
   return map;
 }
 
+function eventTimeMs(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  const time = date.getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
+function latestMetadataForEntityAt(events = [], entityId, at) {
+  const targetTime = eventTimeMs(at);
+  if (!entityId || targetTime === null) return {};
+  let selected = null;
+  let selectedTime = Number.NEGATIVE_INFINITY;
+  for (const event of events) {
+    if (event?.entityId !== entityId) continue;
+    const createdAt = eventTimeMs(event.createdAt);
+    if (createdAt === null || createdAt > targetTime || createdAt <= selectedTime) continue;
+    selected = event;
+    selectedTime = createdAt;
+  }
+  return eventMetadata(selected);
+}
+
 function operationAllowedFromMetadata(metadata) {
   return metadata?.allowed === true;
 }
 
-function serviceConfigFromMetadata(metadata) {
-  const mode = CREW_ATTENDANCE_MODES.has(String(metadata?.mode || '').toUpperCase())
-    ? String(metadata.mode).toUpperCase()
-    : CREW_ATTENDANCE_MODE.INDIVIDUAL;
+function explicitServiceMode(metadata) {
+  const candidate = String(metadata?.mode || '').toUpperCase();
+  return CREW_ATTENDANCE_MODES.has(candidate) ? candidate : null;
+}
+
+function serviceConfigFromMetadata(metadata, fallbackMode = CREW_ATTENDANCE_MODE.INDIVIDUAL) {
+  const mode = explicitServiceMode(metadata)
+    || (CREW_ATTENDANCE_MODES.has(fallbackMode) ? fallbackMode : CREW_ATTENDANCE_MODE.INDIVIDUAL);
   return {
     mode,
     crewLeaderWorkerId: mode === CREW_ATTENDANCE_MODE.CREW
@@ -141,12 +166,52 @@ function serviceConfigFromMetadata(metadata) {
   };
 }
 
+function inheritedCrewEligibility(operationEvents, service, serviceMetadata) {
+  const enabledAtCreation = operationAllowedFromMetadata(
+    latestMetadataForEntityAt(operationEvents, service?.operationPointId, service?.createdAt)
+  );
+  const legacyCrewConfig = explicitServiceMode(serviceMetadata) === CREW_ATTENDANCE_MODE.CREW;
+  return {
+    crewEnabledAtCreation: enabledAtCreation,
+    crewEligible: enabledAtCreation || legacyCrewConfig,
+    eligibilitySource: enabledAtCreation
+      ? 'OPERATION_AT_CREATION'
+      : (legacyCrewConfig ? 'LEGACY_SERVICE_CONFIG' : null)
+  };
+}
+
+function effectiveServiceConfig(metadata, eligibility) {
+  if (eligibility?.crewEnabledAtCreation === true) {
+    return {
+      mode: CREW_ATTENDANCE_MODE.CREW,
+      crewLeaderWorkerId: normalizeString(metadata?.crewLeaderWorkerId, 160)
+    };
+  }
+  return serviceConfigFromMetadata(
+    metadata,
+    eligibility?.crewEligible ? CREW_ATTENDANCE_MODE.CREW : CREW_ATTENDANCE_MODE.INDIVIDUAL
+  );
+}
+
 async function latestConfigEvent(prisma, entityType, entityId) {
   return prisma.devAuditEvent.findFirst({
     where: {
       entityType,
       entityId,
       action: CREW_ATTENDANCE_CONFIG_ACTION
+    },
+    orderBy: { createdAt: 'desc' }
+  });
+}
+
+async function operationConfigEventAt(prisma, operationPointId, at) {
+  if (!operationPointId || eventTimeMs(at) === null) return null;
+  return prisma.devAuditEvent.findFirst({
+    where: {
+      entityType: CREW_ATTENDANCE_OPERATION_ENTITY_TYPE,
+      entityId: operationPointId,
+      action: CREW_ATTENDANCE_CONFIG_ACTION,
+      createdAt: { lte: at }
     },
     orderBy: { createdAt: 'desc' }
   });
@@ -207,6 +272,7 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
         endTime: true,
         status: true,
         requiredWorkers: true,
+        createdAt: true,
         operationPoint: {
           select: { id: true, isActive: true, attendanceEnabled: true }
         },
@@ -224,7 +290,10 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
     })
   ]);
 
-  const operationIds = operations.map((operation) => operation.id);
+  const operationIds = [...new Set([
+    ...operations.map((operation) => operation.id),
+    ...services.map((service) => service.operationPointId).filter(Boolean)
+  ])];
   const serviceIds = services.map((service) => service.id);
   const [operationEvents, serviceEvents] = await Promise.all([
     operationIds.length
@@ -273,10 +342,18 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
     ));
 
   const serviceRows = services.map((service) => {
-    const configuration = serviceConfigFromMetadata(serviceConfig.get(service.id));
+    const metadata = serviceConfig.get(service.id);
+    const eligibility = inheritedCrewEligibility(operationEvents, service, metadata);
+    const configuration = effectiveServiceConfig(metadata, eligibility);
     const operation = operationById.get(service.operationPointId) || service.operationPoint || null;
     const crewAttendanceAllowed = operationAllowedFromMetadata(operationConfig.get(service.operationPointId));
-    const crewAvailable = Boolean(operation?.isActive !== false && operation?.attendanceEnabled === true && crewAttendanceAllowed);
+    const crewAvailable = Boolean(
+      eligibility.crewEligible
+      && configuration.mode === CREW_ATTENDANCE_MODE.CREW
+      && operation?.isActive !== false
+      && operation?.attendanceEnabled === true
+      && crewAttendanceAllowed
+    );
     const assignments = (service.assignments || []).map((assignment) => ({
       workerId: assignment.workerId,
       fullName: assignment.worker?.fullName || 'Auxiliar sin nombre',
@@ -295,10 +372,14 @@ export async function loadCrewAttendanceConfiguration(prisma, input = {}, option
       endTime: service.endTime || '',
       status: service.status,
       requiredWorkers: service.requiredWorkers,
+      createdAt: service.createdAt,
       mode: configuration.mode,
       crewLeaderWorkerId: configuration.crewLeaderWorkerId,
       assignments,
       crewAttendanceAllowed,
+      crewEnabledAtCreation: eligibility.crewEnabledAtCreation,
+      crewEligible: eligibility.crewEligible,
+      crewEligibilitySource: eligibility.eligibilitySource,
       crewAvailable,
       leaderValid,
       configurationReady: configuration.mode === CREW_ATTENDANCE_MODE.INDIVIDUAL
@@ -324,6 +405,7 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
         select: {
           id: true,
           operationPointId: true,
+          createdAt: true,
           operationPoint: {
             select: { id: true, isActive: true, attendanceEnabled: true }
           }
@@ -362,10 +444,14 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
   return assignments.map((assignment) => {
     const service = assignment.serviceRequest || null;
     const operationPointId = service?.operationPointId || null;
-    const configuration = serviceConfigFromMetadata(serviceConfig.get(service?.id));
+    const metadata = serviceConfig.get(service?.id);
+    const eligibility = inheritedCrewEligibility(operationEvents, service, metadata);
+    const configuration = effectiveServiceConfig(metadata, eligibility);
     const crewAllowed = operationAllowedFromMetadata(operationConfig.get(operationPointId));
     const crewAvailable = Boolean(
-      operationPointId
+      eligibility.crewEligible
+      && configuration.mode === CREW_ATTENDANCE_MODE.CREW
+      && operationPointId
       && service?.operationPoint?.isActive !== false
       && service?.operationPoint?.attendanceEnabled === true
       && crewAllowed
@@ -377,6 +463,8 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
       serviceRequestId: service?.id || null,
       operationPointId,
       mode: configuration.mode,
+      crewEnabledAtCreation: eligibility.crewEnabledAtCreation,
+      crewEligible: eligibility.crewEligible,
       isCrewLeader,
       crewAvailable,
       proximityRequired: Boolean(isCrewLeader && crewAvailable)
@@ -429,6 +517,7 @@ export async function saveCrewAttendanceServiceConfiguration(prisma, input = {})
       operationPointId: true,
       serviceDate: true,
       startTime: true,
+      createdAt: true,
       operationPoint: { select: { id: true, isActive: true, attendanceEnabled: true } },
       assignments: {
         where: { status: { in: ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } },
@@ -437,6 +526,16 @@ export async function saveCrewAttendanceServiceConfiguration(prisma, input = {})
     }
   });
   if (!service) throw new Error('crew_attendance_service_not_found');
+
+  const previous = await latestConfigEvent(prisma, CREW_ATTENDANCE_SERVICE_ENTITY_TYPE, service.id);
+  const previousConfig = serviceConfigFromMetadata(eventMetadata(previous));
+  const operationAtCreation = await operationConfigEventAt(prisma, service.operationPointId, service.createdAt);
+  const inheritedCrew = operationAllowedFromMetadata(eventMetadata(operationAtCreation));
+  const legacyCrewEligible = previousConfig.mode === CREW_ATTENDANCE_MODE.CREW && Boolean(previous);
+
+  if (inheritedCrew && mode !== CREW_ATTENDANCE_MODE.CREW) {
+    throw new Error('crew_attendance_service_mode_inherited');
+  }
 
   let crewLeaderWorkerId = null;
   if (mode === CREW_ATTENDANCE_MODE.CREW) {
@@ -447,18 +546,16 @@ export async function saveCrewAttendanceServiceConfiguration(prisma, input = {})
     if (!operationAllowedFromMetadata(eventMetadata(operationEvent))) {
       throw new Error('crew_attendance_operation_not_allowed');
     }
-    const activeWorkerIds = new Set((service.assignments || []).map((assignment) => assignment.workerId));
-    if (activeWorkerIds.size > 0 && !requestedLeaderWorkerId) {
-      throw new Error('crew_attendance_leader_required');
+    if (!inheritedCrew && !legacyCrewEligible) {
+      throw new Error('crew_attendance_service_not_crew_eligible');
     }
+    const activeWorkerIds = new Set((service.assignments || []).map((assignment) => assignment.workerId));
     if (requestedLeaderWorkerId && !activeWorkerIds.has(requestedLeaderWorkerId)) {
       throw new Error('crew_attendance_leader_not_assigned');
     }
     crewLeaderWorkerId = requestedLeaderWorkerId;
   }
 
-  const previous = await latestConfigEvent(prisma, CREW_ATTENDANCE_SERVICE_ENTITY_TYPE, service.id);
-  const previousConfig = serviceConfigFromMetadata(eventMetadata(previous));
   if (previous
     && previousConfig.mode === mode
     && previousConfig.crewLeaderWorkerId === crewLeaderWorkerId) {
@@ -487,11 +584,12 @@ export function crewAttendanceConfigErrorMessage(error) {
     crew_attendance_operation_inactive: 'La operación está inactiva.',
     crew_attendance_requires_attendance_enabled: 'Primero habilita Asistencia para esta operación.',
     crew_attendance_service_not_found: 'El servicio ya no existe.',
-    crew_attendance_mode_invalid: 'Selecciona modalidad Individual o Cuadrilla.',
+    crew_attendance_mode_invalid: 'La modalidad de marcación no es válida.',
     crew_attendance_operation_unavailable: 'La operación no está disponible para marcación por cuadrilla.',
     crew_attendance_operation_not_allowed: 'La operación no tiene habilitada la marcación por cuadrilla.',
-    crew_attendance_leader_required: 'Selecciona el responsable de la cuadrilla entre los auxiliares asignados.',
-    crew_attendance_leader_not_assigned: 'El responsable debe tener una asignación activa en este mismo servicio.'
+    crew_attendance_service_not_crew_eligible: 'Esta solicitud se creó antes de habilitar la marcación por cuadrilla en la operación.',
+    crew_attendance_service_mode_inherited: 'Esta solicitud heredó marcación por cuadrilla desde la operación y no puede cambiarse a Individual.',
+    crew_attendance_leader_not_assigned: 'El encargado debe tener una asignación activa en este mismo servicio.'
   };
   if (messages[code]) return messages[code];
   if (code.endsWith('_invalid') || code.endsWith('_required')) return 'Revisa la configuración de cuadrilla e intenta nuevamente.';
