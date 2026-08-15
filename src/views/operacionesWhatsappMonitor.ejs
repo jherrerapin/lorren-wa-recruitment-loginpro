@@ -7,7 +7,6 @@
   const checkMessage = typeof windowCheckMessage === 'string' && windowCheckMessage ? windowCheckMessage : '';
   const checkButton = typeof windowCheckButton === 'string' && windowCheckButton ? windowCheckButton : 'CONFIRMAR CANAL';
   const initialPhoneQuery = typeof phoneQuery === 'string' ? phoneQuery : '';
-  const initialPhoneLookup = phoneLookup || null;
 %>
 <!DOCTYPE html>
 <html lang="es">
@@ -440,7 +439,8 @@
     document.getElementById('generatedAt').textContent = <%- JSON.stringify(data.generatedAt || '') %> ? formatBogota(<%- JSON.stringify(data.generatedAt || '') %>) : '—';
     bindManualButtons();
     bindChatButtons();
-    renderPhoneLookup(<%- JSON.stringify(initialPhoneLookup) %>);
+    renderPhoneLookup(null);
+    if (currentPhoneQuery) refreshMonitor({ preservePosition: true });
     window.setInterval(() => refreshMonitor({ preservePosition: true }), 5000);
   </script>
 </body>
