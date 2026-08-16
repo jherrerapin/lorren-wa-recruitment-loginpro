@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   analyzePayrollAttendanceImport,
   buildPayrollAttendanceImportPreview,
@@ -246,4 +247,12 @@ test('horas administrativas legacy sin marcas detalladas también pueden sustitu
   assert.equal(analysis.summary.ready, 1);
   assert.equal(analysis.summary.replacements, 1);
   assert.equal(analysis.rows[0].replaceMode, 'ADMINISTRATIVE');
+});
+
+test('la vista muestra y confirma cuántas jornadas administrativas se reemplazarán', async () => {
+  const view = await readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8');
+
+  assert.match(view, /metric\('A reemplazar',values\.replacements\|\|0\)/);
+  assert.match(view, /Se reemplazarán \${replacements} jornada\(s\) administrativa\(s\)/);
+  assert.match(view, /replacedWorkdays/);
 });
