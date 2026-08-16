@@ -77,6 +77,16 @@ function isSundayDateKey(dateKey) {
   return new Date(`${validKey}T00:00:00.000Z`).getUTCDay() === 0;
 }
 
+export function resolveWorkerRestDatePolicy(value) {
+  const restDate = validDateKey(value);
+  if (!restDate) {
+    return { valid: false, restDate: null, isSunday: false, isHoliday: false, isNaturalRestDay: false };
+  }
+  const isSunday = isSundayDateKey(restDate);
+  const isHoliday = holidayDateKey(restDate);
+  return { valid: true, restDate, isSunday, isHoliday, isNaturalRestDay: isSunday || isHoliday };
+}
+
 function workerRestKey(workerId, restDate) {
   return `${workerId}|${restDate}`;
 }
@@ -297,11 +307,12 @@ async function inSerializableTransaction(prisma, callback) {
 
 export async function saveWorkerRestAssignment(prisma, input = {}) {
   const workerId = normalizeString(input.workerId, 120);
-  const restDate = validDateKey(input.restDate);
+  const datePolicy = resolveWorkerRestDatePolicy(input.restDate);
+  const restDate = datePolicy.restDate;
   const requestedReason = normalizeString(input.reason, 40)?.toUpperCase();
   const requestedOriginSundayDate = validDateKey(input.originSundayDate);
   const allowAssignedRest = input.allowAssignedRest === true;
-  if (!workerId || !restDate || isSundayDateKey(restDate) || holidayDateKey(restDate)) throw new Error('worker_rest_invalid');
+  if (!workerId || !datePolicy.valid) throw new Error('worker_rest_invalid');
 
   return inSerializableTransaction(prisma, async (tx) => {
     const worker = await tx.dispatchWorker.findUnique({
@@ -310,7 +321,7 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     });
     if (!worker) throw new Error('worker_rest_worker_not_found');
 
-    const requiresJustification = worker.contractType === 'DIRECTO';
+    const requiresJustification = worker.contractType === 'DIRECTO' && !datePolicy.isNaturalRestDay;
     if (requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
     const reason = requiresJustification ? requestedReason : null;
     const originSundayDate = reason === WORKER_REST_REASONS.REMUNERADO ? requestedOriginSundayDate : null;

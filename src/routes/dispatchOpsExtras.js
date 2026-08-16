@@ -11,6 +11,7 @@ import {
   cancelWorkerRestAssignment,
   findWorkerRestAssignmentConflicts,
   loadWorkerRestAssignments,
+  resolveWorkerRestDatePolicy,
   saveWorkerRestAssignment
 } from '../modules/dispatch-payroll/application/payrollReport.js';
 import {
@@ -81,7 +82,7 @@ function redirectToAssignment(serviceRequestId, message, dateKey = null) { const
 function assignmentActor(req) { return { actorUsername: normalizeString(req.session?.username || req.username), actorRole: normalizeString(req.session?.userRole || req.userRole), ipAddress: normalizeString(req.ip), userAgent: normalizeString(req.get?.('user-agent')) }; }
 function workerRestErrorMessage(error) {
   const messages = {
-    worker_rest_invalid: 'Selecciona auxiliar, fecha y motivo de descanso válidos.',
+    worker_rest_invalid: 'Selecciona auxiliar y fecha válidos; en días hábiles los Directos también requieren motivo.',
     worker_rest_worker_not_found: 'El auxiliar ya no existe.',
     worker_rest_direct_contract_required: 'Los descansos solo se pueden asignar a auxiliares con contrato Directo.',
     worker_rest_date_already_assigned: 'El auxiliar ya tiene un descanso activo en esa fecha.',
@@ -335,16 +336,21 @@ export function dispatchOpsExtrasRouter(prisma) {
   router.post('/asignaciones/descansos', requireOps, async (req, res) => {
     const serviceRequestId = normalizeString(req.body.serviceRequestId);
     const restDate = normalizeString(req.body.restDate);
+    const checkOnly = normalizeString(req.body.checkOnly);
+    if (checkOnly === 'rest-date-policy') {
+      return res.json({ ok: true, datePolicy: resolveWorkerRestDatePolicy(restDate) });
+    }
+
     const workerIds = [...new Set(String(req.body.workerId || '').split(',').map((value) => normalizeString(value)).filter(Boolean))];
-    const checkOnly = normalizeString(req.body.checkOnly) === 'rest-conflicts';
+    const checkConflictsOnly = checkOnly === 'rest-conflicts';
     const allowAssignedRest = String(req.body.allowAssignedRest || '').toLowerCase() === 'true';
     if (!workerIds.length) {
-      if (checkOnly) return res.status(400).json({ ok: false, error: 'worker_rest_worker_required', conflicts: [] });
+      if (checkConflictsOnly) return res.status(400).json({ ok: false, error: 'worker_rest_worker_required', conflicts: [] });
       return res.redirect(redirectToAssignment(serviceRequestId, 'Selecciona al menos un auxiliar para descanso.', restDate));
     }
 
     const conflicts = await findWorkerRestAssignmentConflicts(prisma, { workerIds, restDate });
-    if (checkOnly) return res.json({ ok: true, conflicts });
+    if (checkConflictsOnly) return res.json({ ok: true, conflicts });
     if (conflicts.length && !allowAssignedRest) {
       const names = conflicts.map((conflict) => conflict.workerName).join(', ');
       return res.redirect(redirectToAssignment(
