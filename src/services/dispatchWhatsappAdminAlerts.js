@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
-import { buildDispatchServiceDateWhere, dispatchServiceDateKey, todayIsoDateCO } from './dispatchDate.js';
+import { buildDispatchServiceDateWhere, dispatchServiceDateKey } from './dispatchDate.js';
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
   CONFIRMED_DISPATCH_ASSIGNMENT_STATUS,
@@ -88,7 +88,7 @@ export function buildDispatchNoveltyAdminAlertText(assignment) {
 }
 
 export function buildDispatchWindowExpiryReminderText() {
-  return '⏰ Tu ventana de WhatsApp con Despacho vence en aproximadamente 25 minutos. Si quieres mantenerla abierta, responde este mensaje; puede ser incluso con un punto (.).';
+  return '⏰ Tu ventana personal de WhatsApp para recibir alertas de Despacho vence en aproximadamente 25 minutos. Para mantenerla abierta, responde este mensaje; puede ser incluso con un punto (.).';
 }
 
 export function buildDispatchAllConfirmedAdminAlertText({ serviceDate, confirmedCount } = {}) {
@@ -182,11 +182,6 @@ async function markDispatchWhatsappNotification(prismaClient, claim, { sent, err
   } finally {
     activeNotificationClaims.delete(claim.key);
   }
-}
-
-function eligibleServiceDate(assignment) {
-  const key = dispatchServiceDateKey(assignment?.serviceRequest?.serviceDate);
-  return Boolean(key && key >= todayIsoDateCO());
 }
 
 export function normalizeDispatchAutomationTime(value) {
@@ -506,25 +501,24 @@ export async function runDispatchWhatsappWindowReminderDispatcher(prismaClient =
   const nowMs = now.getTime();
   const openAfter = new Date(nowMs - DISPATCH_WHATSAPP_WINDOW_MS);
   const reminderDueBefore = new Date(nowMs - (DISPATCH_WHATSAPP_WINDOW_MS - DISPATCH_WINDOW_REMINDER_LEAD_MS));
-  const windows = await prismaClient.dispatchWhatsappContactWindow.findMany({
-    where: { lastInboundAt: { gt: openAfter, lte: reminderDueBefore } },
-    orderBy: { lastInboundAt: 'asc' },
-    take: 100
-  });
+  const [windows, users] = await Promise.all([
+    prismaClient.dispatchWhatsappContactWindow.findMany({
+      where: { scope: 'operational', lastInboundAt: { gt: openAfter, lte: reminderDueBefore } },
+      orderBy: { lastInboundAt: 'asc' },
+      take: 100
+    }),
+    prismaClient.appUser.findMany({
+      where: { isActive: true, dispatchAlertPhone: { not: null } },
+      select: { dispatchAlertPhone: true }
+    })
+  ]);
+  const coordinatorPhones = new Set(users.map((user) => normalizeDispatchWhatsappPhone(user.dispatchAlertPhone)).filter(Boolean));
   let sent = 0;
   let failed = 0;
   for (const window of windows) {
-    const links = await prismaClient.dispatchWhatsappConfirmation.findMany({
-      where: {
-        phone: window.phone,
-        status: { in: [...ACTIVE_LINK_STATUSES, 'CONFIRMED'] },
-        createdAt: { gte: new Date(nowMs - (7 * 24 * 60 * 60 * 1000)) }
-      },
-      orderBy: { createdAt: 'desc' },
-      include: { assignment: { include: { worker: true, serviceRequest: true } } }
-    });
-    if (!links.some((item) => eligibleServiceDate(item.assignment) && isOperationalDispatchWorker(item.assignment?.worker))) continue;
-    const key = notificationKey(WINDOW_EXPIRY_NOTIFICATION, [window.scope, window.phone, new Date(window.lastInboundAt).toISOString()]);
+    const phone = normalizeDispatchWhatsappPhone(window.phone);
+    if (!phone || !coordinatorPhones.has(phone)) continue;
+    const key = notificationKey(WINDOW_EXPIRY_NOTIFICATION, [window.scope, phone, new Date(window.lastInboundAt).toISOString()]);
     const claim = await claimDispatchWhatsappNotification(prismaClient, {
       notificationType: WINDOW_EXPIRY_NOTIFICATION,
       key,
@@ -534,8 +528,8 @@ export async function runDispatchWhatsappWindowReminderDispatcher(prismaClient =
     if (!claim.claimed) continue;
     try {
       await sendDispatchWhatsappTextMessage({
-        scope: window.scope,
-        phone: window.phone,
+        scope: 'operational',
+        phone,
         text: buildDispatchWindowExpiryReminderText(),
         axiosClient
       });
@@ -544,7 +538,7 @@ export async function runDispatchWhatsappWindowReminderDispatcher(prismaClient =
     } catch (error) {
       await markDispatchWhatsappNotification(prismaClient, claim, { sent: false, error }).catch(() => {});
       failed += 1;
-      console.warn(`[dispatch-wa-cloud] Falló recordatorio de ventana al auxiliar: ${error?.message || error}`);
+      console.warn(`[dispatch-wa-cloud] Falló recordatorio de ventana personal del coordinador: ${error?.message || error}`);
     }
   }
   await runDispatchUserAutomationScheduler(prismaClient, { now, axiosClient }).catch((error) =>
