@@ -408,6 +408,16 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
           createdAt: true,
           operationPoint: {
             select: { id: true, isActive: true, attendanceEnabled: true }
+          },
+          assignments: {
+            where: { status: { in: ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } },
+            select: {
+              id: true,
+              workerId: true,
+              worker: { select: { fullName: true } },
+              attendanceSession: { select: { arrivalReportedAt: true } }
+            },
+            orderBy: { createdAt: 'asc' }
           }
         }
       }
@@ -458,6 +468,15 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
     );
     const isCrewLeader = configuration.mode === CREW_ATTENDANCE_MODE.CREW
       && configuration.crewLeaderWorkerId === workerId;
+    const members = isCrewLeader && crewAvailable
+      ? (service?.assignments || []).map((member) => ({
+          assignmentId: member.id,
+          workerId: member.workerId,
+          displayName: member.worker?.fullName || 'Auxiliar',
+          arrivalReported: Boolean(member.attendanceSession?.arrivalReportedAt),
+          isLeader: member.workerId === workerId
+        }))
+      : [];
     return {
       assignmentId: assignment.id,
       serviceRequestId: service?.id || null,
@@ -467,7 +486,8 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
       crewEligible: eligibility.crewEligible,
       isCrewLeader,
       crewAvailable,
-      proximityRequired: Boolean(isCrewLeader && crewAvailable)
+      proximityRequired: Boolean(isCrewLeader && crewAvailable),
+      members
     };
   });
 }
