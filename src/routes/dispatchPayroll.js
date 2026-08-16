@@ -37,10 +37,6 @@ const PAYROLL_EXCEL_COLORS = Object.freeze({
   border: 'FFE1E4E8',
   stripe: 'FFF8FAFC',
   muted: 'FF64748B',
-  green: 'FF166534',
-  greenSoft: 'FFDCFCE7',
-  amber: 'FF92400E',
-  amberSoft: 'FFFEF3C7',
   white: 'FFFFFFFF'
 });
 
@@ -56,8 +52,7 @@ const PAYROLL_EXCEL_COLUMN_WIDTHS = Object.freeze({
   Descansos: 32,
   HorasOrdinarias: 16,
   TotalTrabajado: 16,
-  HorasExtraTotal: 16,
-  Estado: 16
+  HorasExtraTotal: 16
 });
 
 function normalizeString(value, maxLength = 200) {
@@ -179,7 +174,7 @@ function sumRows(rows, field) {
 
 function payrollExcelHeaders(rows) {
   return rows.length
-    ? Object.keys(rows[0]).filter((header) => header !== 'Novedades')
+    ? Object.keys(rows[0]).filter((header) => header !== 'Novedades' && header !== 'Estado')
     : ['Documento', 'Nombre', 'FechaInicial', 'FechaFinal', ...PAYROLL_CONCEPT_CODES];
 }
 
@@ -243,9 +238,8 @@ export function buildPayrollExcelWorkbook(report) {
   });
   headerRow.height = 32;
 
-  const statusIndex = headers.indexOf('Estado') + 1;
   const wrapHeaders = new Set(['Nombre', 'Descansos']);
-  const centeredHeaders = new Set(['TipoDocumento', 'FechaInicial', 'FechaFinal', 'DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos', 'Estado']);
+  const centeredHeaders = new Set(['TipoDocumento', 'FechaInicial', 'FechaFinal', 'DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos']);
 
   rows.forEach((sourceRow, rowIndex) => {
     const row = sheet.addRow(Object.fromEntries(headers.map((header) => [header, sourceRow[header] ?? ''])));
@@ -269,15 +263,6 @@ export function buildPayrollExcelWorkbook(report) {
       if (isPayrollHourHeader(header)) cell.numFmt = '0.0';
       if (['DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos'].includes(header)) cell.numFmt = '0.##';
     });
-    if (statusIndex > 0) {
-      const statusCell = row.getCell(statusIndex);
-      const hasNovelties = statusCell.value === 'Con novedades';
-      statusCell.font = { bold: true, color: { argb: hasNovelties ? PAYROLL_EXCEL_COLORS.amber : PAYROLL_EXCEL_COLORS.green } };
-      statusCell.fill = {
-        type: 'pattern', pattern: 'solid',
-        fgColor: { argb: hasNovelties ? PAYROLL_EXCEL_COLORS.amberSoft : PAYROLL_EXCEL_COLORS.greenSoft }
-      };
-    }
   });
 
   sheet.views = [{ state: 'frozen', xSplit: 3, ySplit: PAYROLL_EXCEL_HEADER_ROW, topLeftCell: 'D5', activeCell: 'D5', showGridLines: false }];
