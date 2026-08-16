@@ -562,6 +562,44 @@ function resolveOvernightWorkdayMarks(workday, assignment) {
   return { ...workday, marks };
 }
 
+function workdayObservedSpan(workday) {
+  const moments = (Array.isArray(workday?.marks) ? workday.marks : [])
+    .map((mark) => importLocalToDate(mark.localDateTime))
+    .filter(Boolean);
+  if (!moments.length) return null;
+  const timestamps = moments.map((moment) => moment.getTime());
+  return {
+    startAt: new Date(Math.min(...timestamps)),
+    endAt: new Date(Math.max(...timestamps))
+  };
+}
+
+function workdayOverlapsExpectedSchedule(workday, validation) {
+  const span = workdayObservedSpan(workday);
+  const expectedStartAt = validation?.expected?.expectedStartAt || null;
+  const expectedEndAt = validation?.expected?.expectedEndAt
+    || validation?.operational?.operationalEndAt
+    || null;
+  if (!span || !expectedStartAt || !expectedEndAt) return false;
+  return span.startAt.getTime() < expectedEndAt.getTime()
+    && span.endAt.getTime() >= expectedStartAt.getTime();
+}
+
+function compatibleAssignmentCandidate(workday, assignment) {
+  const resolvedWorkday = resolveOvernightWorkdayMarks(workday, assignment);
+  try {
+    const validation = validateAttendanceTimelineAgainstAssignment(
+      assignment.serviceRequest,
+      candidateTimeline(resolvedWorkday),
+      assignment.attendanceSession || null
+    );
+    if (!workdayOverlapsExpectedSchedule(resolvedWorkday, validation)) return null;
+    return { assignment, resolvedWorkday, validation };
+  } catch {
+    return null;
+  }
+}
+
 function existingMarkSignatures(session) {
   return (Array.isArray(session?.marks) ? session.marks : [])
     .map((mark) => {
@@ -720,16 +758,39 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
       const narrowed = candidates.filter((assignment) => assignmentOperationKey(assignment).includes(operationKey));
       if (narrowed.length) candidates = narrowed;
     }
-    if (candidates.length !== 1) {
+    if (!candidates.length) {
       return {
         ...workday,
         displayIdentity: worker.fullName,
         workerId: worker.id,
         status: 'UNRESOLVED',
-        message: candidates.length ? 'Hay varias asignaciones posibles para esa fecha.' : 'No existe una asignación activa para esa fecha.'
+        message: 'No existe una asignación activa para esa fecha.'
       };
     }
-    const assignment = candidates[0];
+
+    let assignment = candidates[0];
+    let resolvedWorkday = null;
+    let timelineValidation = null;
+    if (candidates.length > 1) {
+      const compatible = candidates
+        .map((candidateAssignment) => compatibleAssignmentCandidate(workday, candidateAssignment))
+        .filter(Boolean);
+      if (compatible.length !== 1) {
+        return {
+          ...workday,
+          displayIdentity: worker.fullName,
+          workerId: worker.id,
+          status: 'UNRESOLVED',
+          message: compatible.length
+            ? 'Hay varias asignaciones posibles para esa fecha.'
+            : 'Hay varias asignaciones en esa fecha, pero ninguna admite de forma segura las horas detectadas.'
+        };
+      }
+      assignment = compatible[0].assignment;
+      resolvedWorkday = compatible[0].resolvedWorkday;
+      timelineValidation = compatible[0].validation;
+    }
+
     if (assignment.serviceRequest?.operationPoint?.manualAttendanceAllowed !== true) {
       return {
         ...workday,
@@ -741,22 +802,24 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
       };
     }
 
-    const resolvedWorkday = resolveOvernightWorkdayMarks(workday, assignment);
-    try {
-      validateAttendanceTimelineAgainstAssignment(
-        assignment.serviceRequest,
-        candidateTimeline(resolvedWorkday),
-        assignment.attendanceSession || null
-      );
-    } catch {
-      return {
-        ...resolvedWorkday,
-        displayIdentity: worker.fullName,
-        workerId: worker.id,
-        assignmentId: assignment.id,
-        status: 'UNRESOLVED',
-        message: 'Las horas detectadas no caben de forma segura en la ventana operacional de esta asignación.'
-      };
+    if (!resolvedWorkday) resolvedWorkday = resolveOvernightWorkdayMarks(workday, assignment);
+    if (!timelineValidation) {
+      try {
+        timelineValidation = validateAttendanceTimelineAgainstAssignment(
+          assignment.serviceRequest,
+          candidateTimeline(resolvedWorkday),
+          assignment.attendanceSession || null
+        );
+      } catch {
+        return {
+          ...resolvedWorkday,
+          displayIdentity: worker.fullName,
+          workerId: worker.id,
+          assignmentId: assignment.id,
+          status: 'UNRESOLVED',
+          message: 'Las horas detectadas no caben de forma segura en la ventana operacional de esta asignación.'
+        };
+      }
     }
 
     const existing = existingMarkSignatures(assignment.attendanceSession);
