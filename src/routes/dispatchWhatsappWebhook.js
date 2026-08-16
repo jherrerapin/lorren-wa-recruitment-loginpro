@@ -162,6 +162,10 @@ export function buildProgrammingSummaryText(report = {}) {
   const requests = Array.isArray(report.requests) ? report.requests : [];
   const summary = report.summary || {};
   const workerAbsences = Array.isArray(report.workerAbsences) ? report.workerAbsences : [];
+  const incapacitatedCount = workerAbsences.filter((absence) => (
+    ['INCAPACIDAD_EPS', 'INCAPACIDAD_ARL'].includes(String(absence?.reason || '').trim().toUpperCase())
+  )).length;
+  const restingCount = workerAbsences.length - incapacitatedCount;
   const confirmedWorkers = requests.reduce((sum, request) => sum + confirmedOperationalAssignments(request).length, 0);
   const pendingRequests = requests.filter((request) => PENDING_PROGRAMMING_STATUSES.has(deriveDispatchRequestOperationalState(request).status)).length;
   const lines = [
@@ -172,14 +176,9 @@ export function buildProgrammingSummaryText(report = {}) {
     `Auxiliares requeridos: ${Number(summary.requiredWorkers || 0)}`,
     `Asignados: ${Number(summary.assignedWorkers || 0)}`,
     `Confirmados: ${confirmedWorkers}`,
-    `Descansos/incapacidades: ${workerAbsences.length}`
+    `Descansando: ${restingCount}`
   ];
-  if (workerAbsences.length) {
-    lines.push('', '*Novedades de descanso:*');
-    workerAbsences.forEach((absence) => {
-      lines.push(`• ${absence.workerName || 'Auxiliar'} — ${absence.reasonLabel || 'Descanso'}`);
-    });
-  }
+  if (incapacitatedCount > 0) lines.push(`Incapacitados: ${incapacitatedCount}`);
   return lines.join('\n');
 }
 
