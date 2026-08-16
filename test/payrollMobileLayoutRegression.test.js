@@ -69,3 +69,12 @@ test('Auxiliares no hereda el margen superior global de details', async () => {
   assert.match(css, /details\{margin-top:6px\}/);
   assert.match(view, /\.worker-picker\{position:relative;margin-top:0\}/);
 });
+
+test('el preview no presenta jornadas ya persistidas como filas duplicadas del Excel', async () => {
+  const view = await readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8');
+
+  assert.match(view, /metric\('Ya registradas',values\.duplicates\|\|0\)/);
+  assert.doesNotMatch(view, /metric\('Duplicadas',values\.duplicates\|\|0\)/);
+  assert.match(view, /DUPLICATE:'Ya registrada'/);
+  assert.match(view, /Las jornadas ya registradas y los casos sin conciliar no se tocarán\./);
+});
