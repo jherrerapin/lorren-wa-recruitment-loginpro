@@ -13,25 +13,31 @@ function csvFile(text, name = 'marcaciones.csv') {
 }
 
 function assignment({
+  id = 'TEST-ASSIGNMENT-1249',
+  requestId = null,
+  pointId = null,
   session = null,
   serviceDate = '2027-01-20',
   startTime = '08:00',
-  endTime = '17:00'
+  endTime = '17:00',
+  operationPointName = 'Operación Prueba'
 } = {}) {
+  const serviceRequestId = requestId || (id === 'TEST-ASSIGNMENT-1249' ? 'TEST-REQUEST-1249' : `${id}-REQUEST`);
+  const operationPointId = pointId || (id === 'TEST-ASSIGNMENT-1249' ? 'TEST-POINT-1249' : `${id}-POINT`);
   return {
-    id: 'TEST-ASSIGNMENT-1249',
+    id,
     workerId: 'TEST-WORKER-1249',
     status: 'CONFIRMED',
     serviceRequest: {
-      id: 'TEST-REQUEST-1249',
+      id: serviceRequestId,
       serviceDate: new Date(`${serviceDate}T00:00:00.000Z`),
       startTime,
       endTime,
-      operationPointName: 'Operación Prueba',
+      operationPointName,
       clientName: 'Cliente Prueba',
       operationPoint: {
-        id: 'TEST-POINT-1249',
-        name: 'Operación Prueba',
+        id: operationPointId,
+        name: operationPointName,
         manualAttendanceAllowed: true,
         earlyArrivalWindowMinutes: 60
       }
@@ -59,9 +65,13 @@ function eventMatches(event, where = {}) {
   return true;
 }
 
-function prismaFixture({ currentAssignment, auditEvents = [] }) {
+function prismaFixture({ currentAssignment, currentAssignments = null, auditEvents = [] }) {
+  const assignments = Array.isArray(currentAssignments)
+    ? currentAssignments.filter(Boolean)
+    : [currentAssignment].filter(Boolean);
   const state = {
-    assignment: currentAssignment,
+    assignment: assignments[0] || null,
+    assignments,
     auditEvents: [...auditEvents],
     cleared: 0
   };
@@ -70,10 +80,13 @@ function prismaFixture({ currentAssignment, auditEvents = [] }) {
       async findMany() { return [worker()]; }
     },
     dispatchAssignment: {
-      async findMany() { return [state.assignment]; }
+      async findMany() { return state.assignments; }
     },
     dispatchAttendanceSession: {
-      async findUnique() { return state.assignment.attendanceSession; }
+      async findUnique({ where } = {}) {
+        const matched = state.assignments.find((item) => item.attendanceSession?.id === where?.id);
+        return matched?.attendanceSession || state.assignment?.attendanceSession || null;
+      }
     },
     devAuditEvent: {
       async findMany({ where = {}, orderBy, take } = {}) {
@@ -154,6 +167,91 @@ test('resuelve X+1 solo cuando la asignación real es nocturna', async () => {
     '2027-01-20T02:00:00',
     '2027-01-20T06:00:00'
   ]);
+});
+
+test('desempata varias asignaciones del mismo día cuando solo una ventana programada coincide', async () => {
+  const file = csvFile([
+    'Documento;Fecha;Entrada 1;Salida 1;Entrada 2;Salida 2',
+    'TEST-1001;20/01/2027;06:34;10:00;11:00;14:51'
+  ].join('\n'));
+  const parsed = await parsePayrollAttendanceImportFile(file);
+  const { prisma } = prismaFixture({
+    currentAssignments: [
+      assignment({ id: 'TEST-ASSIGNMENT-DAY', startTime: '06:00', endTime: '15:00' }),
+      assignment({ id: 'TEST-ASSIGNMENT-NIGHT', startTime: '18:00', endTime: '02:00' })
+    ]
+  });
+
+  const analysis = await analyzePayrollAttendanceImport(prisma, parsed);
+
+  assert.equal(analysis.summary.ready, 1);
+  assert.equal(analysis.summary.unresolved, 0);
+  assert.equal(analysis.rows[0].assignmentId, 'TEST-ASSIGNMENT-DAY');
+});
+
+test('desempata una jornada nocturna y conserva X+1 al elegir la única ventana compatible', async () => {
+  const file = csvFile([
+    'Documento;Fecha;Entrada 1;Salida 1;Entrada 2;Salida 2',
+    'TEST-1001;20/01/2027;21:25;01:00;02:00;06:00'
+  ].join('\n'));
+  const parsed = await parsePayrollAttendanceImportFile(file);
+  const { prisma } = prismaFixture({
+    currentAssignments: [
+      assignment({ id: 'TEST-ASSIGNMENT-DAY', startTime: '08:00', endTime: '17:00' }),
+      assignment({ id: 'TEST-ASSIGNMENT-NIGHT', startTime: '21:00', endTime: '06:00' })
+    ]
+  });
+
+  const analysis = await analyzePayrollAttendanceImport(prisma, parsed);
+
+  assert.equal(analysis.summary.ready, 1);
+  assert.equal(analysis.rows[0].assignmentId, 'TEST-ASSIGNMENT-NIGHT');
+  assert.deepEqual(analysis.rows[0].marks.map((mark) => mark.localDateTime), [
+    '2027-01-20T21:25:00',
+    '2027-01-21T01:00:00',
+    '2027-01-21T02:00:00',
+    '2027-01-21T06:00:00'
+  ]);
+});
+
+test('mantiene la ambigüedad cuando dos asignaciones siguen siendo compatibles con las horas', async () => {
+  const file = csvFile([
+    'Documento;Fecha;Entrada;Salida',
+    'TEST-1001;20/01/2027;10:00;14:00'
+  ].join('\n'));
+  const parsed = await parsePayrollAttendanceImportFile(file);
+  const { prisma } = prismaFixture({
+    currentAssignments: [
+      assignment({ id: 'TEST-ASSIGNMENT-EARLY', startTime: '06:00', endTime: '15:00' }),
+      assignment({ id: 'TEST-ASSIGNMENT-LATE', startTime: '08:00', endTime: '17:00' })
+    ]
+  });
+
+  const analysis = await analyzePayrollAttendanceImport(prisma, parsed);
+
+  assert.equal(analysis.summary.ready, 0);
+  assert.equal(analysis.summary.unresolved, 1);
+  assert.match(analysis.rows[0].message, /varias asignaciones posibles/i);
+});
+
+test('explica cuando ninguna de varias asignaciones admite las horas del archivo', async () => {
+  const file = csvFile([
+    'Documento;Fecha;Entrada;Salida',
+    'TEST-1001;20/01/2027;12:00;14:00'
+  ].join('\n'));
+  const parsed = await parsePayrollAttendanceImportFile(file);
+  const { prisma } = prismaFixture({
+    currentAssignments: [
+      assignment({ id: 'TEST-ASSIGNMENT-MORNING', startTime: '06:00', endTime: '09:00' }),
+      assignment({ id: 'TEST-ASSIGNMENT-EVENING', startTime: '18:00', endTime: '22:00' })
+    ]
+  });
+
+  const analysis = await analyzePayrollAttendanceImport(prisma, parsed);
+
+  assert.equal(analysis.summary.ready, 0);
+  assert.equal(analysis.summary.unresolved, 1);
+  assert.match(analysis.rows[0].message, /ninguna admite.*horas/i);
 });
 
 test('una segunda importación reemplaza solo una jornada creada por GeoVictoria que sigue intacta', async () => {
