@@ -169,6 +169,50 @@ test('resuelve X+1 solo cuando la asignación real es nocturna', async () => {
   ]);
 });
 
+test('una marcación manual incoherente no se confunde con asignaciones múltiples', async () => {
+  const file = csvFile([
+    'Documento;Fecha;Entrada 1;Salida 1;Entrada 2;Salida 2',
+    'TEST-1001;20/01/2027;07:27;10:00;11:00;10:56'
+  ].join('\n'));
+  const parsed = await parsePayrollAttendanceImportFile(file);
+  const { prisma } = prismaFixture({
+    currentAssignment: assignment({ startTime: '07:00', endTime: '17:00' })
+  });
+
+  const analysis = await analyzePayrollAttendanceImport(prisma, parsed);
+
+  assert.equal(analysis.summary.ready, 0);
+  assert.equal(analysis.summary.unresolved, 1);
+  assert.match(analysis.rows[0].message, /horas detectadas no caben/i);
+  assert.doesNotMatch(analysis.rows[0].message, /filas duplicadas|asignaciones activas/i);
+});
+
+test('DUPLICATE significa jornada ya persistida, no una fila repetida del archivo', async () => {
+  const file = csvFile([
+    'Documento;Fecha;Entrada;Salida',
+    'TEST-1001;20/01/2027;08:00;17:00'
+  ].join('\n'));
+  const parsed = await parsePayrollAttendanceImportFile(file);
+  const session = {
+    id: 'TEST-SESSION-EXACT',
+    arrivalReportedAt: new Date('2027-01-20T13:00:00.000Z'),
+    departureReportedAt: new Date('2027-01-20T22:00:00.000Z'),
+    marks: [
+      { id: 'TEST-EXACT-ARRIVAL', markType: 'ARRIVAL', clientCapturedAt: new Date('2027-01-20T13:00:00.000Z') },
+      { id: 'TEST-EXACT-DEPARTURE', markType: 'DEPARTURE', clientCapturedAt: new Date('2027-01-20T22:00:00.000Z') }
+    ],
+    reviews: []
+  };
+  const { prisma } = prismaFixture({ currentAssignment: assignment({ session }) });
+
+  const analysis = await analyzePayrollAttendanceImport(prisma, parsed);
+
+  assert.equal(parsed.workdays.length, 1);
+  assert.equal(analysis.summary.duplicates, 1);
+  assert.equal(analysis.rows[0].status, 'DUPLICATE');
+  assert.match(analysis.rows[0].message, /ya contiene exactamente estas marcaciones/i);
+});
+
 test('desempata varias asignaciones del mismo día cuando solo una ventana programada coincide', async () => {
   const file = csvFile([
     'Documento;Fecha;Entrada 1;Salida 1;Entrada 2;Salida 2',
@@ -231,7 +275,7 @@ test('mantiene la ambigüedad cuando dos asignaciones siguen siendo compatibles 
 
   assert.equal(analysis.summary.ready, 0);
   assert.equal(analysis.summary.unresolved, 1);
-  assert.match(analysis.rows[0].message, /varias asignaciones posibles/i);
+  assert.match(analysis.rows[0].message, /asignaciones activas.*no son filas duplicadas.*más de una coincide/i);
 });
 
 test('explica cuando ninguna de varias asignaciones admite las horas del archivo', async () => {
@@ -251,7 +295,7 @@ test('explica cuando ninguna de varias asignaciones admite las horas del archivo
 
   assert.equal(analysis.summary.ready, 0);
   assert.equal(analysis.summary.unresolved, 1);
-  assert.match(analysis.rows[0].message, /ninguna admite.*horas/i);
+  assert.match(analysis.rows[0].message, /asignaciones activas.*no son filas duplicadas.*ninguna coincide/i);
 });
 
 test('una segunda importación reemplaza solo una jornada creada por GeoVictoria que sigue intacta', async () => {
