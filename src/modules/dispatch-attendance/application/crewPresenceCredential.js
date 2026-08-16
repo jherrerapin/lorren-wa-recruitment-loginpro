@@ -17,6 +17,8 @@ const DEFAULT_CREDENTIAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_CREDENTIAL_TTL_MS = 15 * 60 * 1000;
 const MAX_CREDENTIAL_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_PROOF_COUNT = 200;
+const MAX_PHONE_EXCEPTION_COUNT = 200;
+const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
 const MAX_PROOF_CLOCK_DELTA_MS = 10 * 60 * 1000;
 const MAX_PUBLIC_KEY_BYTES = 1024;
 const MAX_SIGNATURE_BYTES = 256;
@@ -290,6 +292,27 @@ function normalizeLeaderLocationProof(rawProof, expected, options) {
   };
 }
 
+function normalizePhoneExceptions(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_PHONE_EXCEPTION_COUNT) {
+    throw new Error('crew_presence_phone_exceptions_invalid');
+  }
+  const normalized = [];
+  const seen = new Set();
+  for (const item of value) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error('crew_presence_phone_exception_invalid');
+    }
+    const workerId = requireString(item.workerId, 'crew_presence_phone_exception_worker_id', 160);
+    const reason = requireString(item.reason, 'crew_presence_phone_exception_reason', 40);
+    if (reason !== PHONE_EXCEPTION_REASON) throw new Error('crew_presence_phone_exception_reason_invalid');
+    if (seen.has(workerId)) continue;
+    seen.add(workerId);
+    normalized.push({ workerId, reason });
+  }
+  return normalized;
+}
+
 function normalizeProofBundle(input, expected = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('crew_presence_bundle_invalid');
@@ -313,6 +336,7 @@ function normalizeProofBundle(input, expected = {}) {
     challenge,
     challengeSentAt,
     proofs,
+    phoneExceptions: normalizePhoneExceptions(input.phoneExceptions),
     leaderLocationProof: input.leaderLocationProof
   };
 }
@@ -463,9 +487,30 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
     validatedWorkerIds.push(candidate.workerId);
   }
 
+  const memberByWorkerId = new Map(members.map((member) => [member.workerId, member]));
   const validatedSet = new Set(validatedWorkerIds);
+  const phoneExceptionWorkerIds = [];
+  const phoneExceptionSet = new Set();
+  let rejectedPhoneExceptionCount = 0;
+  for (const exception of bundle.phoneExceptions) {
+    const member = memberByWorkerId.get(exception.workerId);
+    if (
+      !member
+      || exception.workerId === leaderWorkerId
+      || validatedSet.has(exception.workerId)
+      || Boolean(member.attendanceSession?.arrivalReportedAt)
+      || phoneExceptionSet.has(exception.workerId)
+    ) {
+      rejectedPhoneExceptionCount += 1;
+      continue;
+    }
+    phoneExceptionSet.add(exception.workerId);
+    phoneExceptionWorkerIds.push(exception.workerId);
+  }
+
   const notDetectedCount = members.filter((member) => (
     !validatedSet.has(member.workerId)
+    && !phoneExceptionSet.has(member.workerId)
     && !member.attendanceSession?.arrivalReportedAt
   )).length;
 
@@ -473,9 +518,16 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
     serviceRequestId,
     assignmentId,
     validatedWorkerIds,
+    phoneExceptionWorkerIds,
+    members: members.map((member) => ({
+      assignmentId: member.id,
+      workerId: member.workerId,
+      arrivalReported: Boolean(member.attendanceSession?.arrivalReportedAt)
+    })),
     totalMembers: members.length,
     verifiedProofCount: Math.max(0, validatedWorkerIds.length - 1),
     rejectedProofCount,
+    rejectedPhoneExceptionCount,
     notDetectedCount,
     leaderInstallationIdHash: leaderDevice.installationIdHash || null,
     clientCapturedAt: capturedAt,
