@@ -659,130 +659,6 @@ function sameStringArray(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function importBatchIdFromReview(review) {
-  const reason = normalizeString(review?.reason, 500);
-  if (!reason?.startsWith(PAYROLL_IMPORT_REASON_PREFIX)) return null;
-  return normalizeString(reason.slice(PAYROLL_IMPORT_REASON_PREFIX.length), 120);
-}
-
-function sessionMarksById(session) {
-  return new Map((Array.isArray(session?.marks) ? session.marks : []).map((mark) => {
-    const moment = mark?.clientCapturedAt || mark?.serverReceivedAt;
-    const date = moment instanceof Date ? moment : new Date(moment || Number.NaN);
-    return [mark.id, Number.isNaN(date.getTime()) ? null : exactMarkSignature(mark.markType, date)];
-  }));
-}
-
-function replaceableImportedSession(session, importedEvent) {
-  if (!session?.id || !importedEvent) return false;
-  const latestReview = Array.isArray(session.reviews) ? session.reviews[0] : null;
-  const batchId = importBatchIdFromReview(latestReview);
-  if (!batchId || batchId !== importedEvent.entityId) return false;
-  const reviewAt = latestReview?.createdAt ? new Date(latestReview.createdAt) : null;
-  const importedAt = importedEvent?.createdAt ? new Date(importedEvent.createdAt) : null;
-  if (!reviewAt || Number.isNaN(reviewAt.getTime()) || !importedAt || Number.isNaN(importedAt.getTime())) return false;
-  if (reviewAt.getTime() > importedAt.getTime()) return false;
-  const importedWorkday = (Array.isArray(importedEvent.metadata?.workdays) ? importedEvent.metadata.workdays : [])
-    .find((workday) => workday?.sessionId === session.id);
-  if (!importedWorkday) return false;
-  const expectedById = new Map((Array.isArray(importedWorkday.marks) ? importedWorkday.marks : [])
-    .map((mark) => [mark.id, mark.signature]));
-  const currentById = sessionMarksById(session);
-  return expectedById.size > 0
-    && expectedById.size === currentById.size
-    && [...expectedById.entries()].every(([id, signature]) => currentById.get(id) === signature);
-}
-
-function isAdministrativeAttendanceMark(mark) {
-  const idempotencyKey = normalizeString(mark?.idempotencyKey, 200);
-  return Boolean(idempotencyKey?.startsWith('manual-'))
-    && !mark?.workerDeviceId
-    && !mark?.installationIdHash
-    && !mark?.evidenceStorageKey;
-}
-
-function replaceableAdministrativeSession(session) {
-  if (!session?.id) return false;
-  const marks = Array.isArray(session.marks) ? session.marks : [];
-  if (marks.length) return marks.every(isAdministrativeAttendanceMark);
-  return String(session.source || '').toUpperCase() === 'MANUAL'
-    && Boolean(session.arrivalReportedAt || session.departureReportedAt);
-}
-
-function replacementStateFingerprint(session) {
-  if (!session?.id) return null;
-  const latestReview = Array.isArray(session.reviews) ? session.reviews[0] : null;
-  const marks = (Array.isArray(session.marks) ? session.marks : [])
-    .map((mark) => ({
-      id: mark?.id || null,
-      markType: mark?.markType || null,
-      signature: (() => {
-        const moment = mark?.clientCapturedAt || mark?.serverReceivedAt;
-        const date = moment instanceof Date ? moment : new Date(moment || Number.NaN);
-        return Number.isNaN(date.getTime()) ? null : exactMarkSignature(mark.markType, date);
-      })(),
-      idempotencyKey: mark?.idempotencyKey || null,
-      workerDeviceId: mark?.workerDeviceId || null,
-      installationIdHash: mark?.installationIdHash || null,
-      evidenceStorageKey: mark?.evidenceStorageKey || null
-    }))
-    .sort((left, right) => String(left.id || '').localeCompare(String(right.id || '')));
-  return createHash('sha256').update(JSON.stringify({
-    sessionId: session.id,
-    source: session.source || null,
-    arrivalReportedAt: session.arrivalReportedAt ? new Date(session.arrivalReportedAt).toISOString() : null,
-    departureReportedAt: session.departureReportedAt ? new Date(session.departureReportedAt).toISOString() : null,
-    marks,
-    latestReview: latestReview ? {
-      id: latestReview.id || null,
-      action: latestReview.action || null,
-      createdAt: latestReview.createdAt ? new Date(latestReview.createdAt).toISOString() : null
-    } : null
-  })).digest('hex');
-}
-
-function replacementAuthorization(session, importedEventsByBatch) {
-  if (!session?.id) return null;
-  const latestReview = Array.isArray(session.reviews) ? session.reviews[0] : null;
-  const replaceBatchId = importBatchIdFromReview(latestReview);
-  const importedEvent = replaceBatchId ? importedEventsByBatch.get(replaceBatchId) : null;
-  if (replaceBatchId && replaceableImportedSession(session, importedEvent)) {
-    return {
-      replaceMode: 'IMPORTED_INTACT',
-      replaceBatchId,
-      replaceStateFingerprint: replacementStateFingerprint(session)
-    };
-  }
-  if (replaceableAdministrativeSession(session)) {
-    return {
-      replaceMode: 'ADMINISTRATIVE',
-      replaceBatchId: null,
-      replaceStateFingerprint: replacementStateFingerprint(session)
-    };
-  }
-  return null;
-}
-
-async function loadImportedEventsByBatch(prisma, assignments) {
-  const batchIds = [...new Set(assignments
-    .map((assignment) => importBatchIdFromReview(assignment?.attendanceSession?.reviews?.[0]))
-    .filter(Boolean))];
-  const byBatch = new Map();
-  for (const batchId of batchIds) {
-    const events = await prisma.devAuditEvent.findMany({
-      where: {
-        entityType: PAYROLL_IMPORT_ENTITY_TYPE,
-        entityId: batchId,
-        action: PAYROLL_IMPORT_ACTION
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 1
-    });
-    if (events[0]) byBatch.set(batchId, events[0]);
-  }
-  return byBatch;
-}
-
 export async function analyzePayrollAttendanceImport(prisma, parsed, options = {}) {
   if (parsed.needsMapping) {
     return {
@@ -818,18 +694,12 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
         serviceRequest: { include: { operationPoint: true } },
         attendanceSession: {
           include: {
-            marks: { orderBy: { serverReceivedAt: 'asc' } },
-            reviews: {
-              orderBy: { createdAt: 'desc' },
-              select: { id: true, action: true, reason: true, createdAt: true },
-              take: 1
-            }
+            marks: { orderBy: { serverReceivedAt: 'asc' } }
           }
         }
       }
     }) : []
   ]);
-  const importedEventsByBatch = await loadImportedEventsByBatch(prisma, assignments);
 
   const workersByDocument = new Map();
   const workersByName = new Map();
@@ -948,32 +818,15 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
     }
     const hasExistingAttendance = existing.length > 0 || Boolean(session?.arrivalReportedAt || session?.departureReportedAt);
     if (hasExistingAttendance) {
-      const replacement = replacementAuthorization(session, importedEventsByBatch);
-      if (replacement) {
-        return {
-          ...resolvedWorkday,
-          displayIdentity: worker.fullName,
-          workerId: worker.id,
-          assignmentId: assignment.id,
-          sessionId: session.id,
-          status: 'READY',
-          replaceExisting: true,
-          replaceMode: replacement.replaceMode,
-          replaceBatchId: replacement.replaceBatchId,
-          replaceStateFingerprint: replacement.replaceStateFingerprint,
-          message: null
-        };
-      }
       return {
         ...resolvedWorkday,
         displayIdentity: worker.fullName,
         workerId: worker.id,
         assignmentId: assignment.id,
-        sessionId: session?.id || null,
-        status: 'UNRESOLVED',
-        message: existing.length
-          ? 'Las marcaciones existentes tienen origen de portal/dispositivo o no son inequívocamente administrativas; no se sobrescribirán desde el Excel.'
-          : 'La jornada ya tiene horas persistidas de origen no administrativo; no se sobrescribirán desde el Excel.'
+        sessionId: session.id,
+        status: 'READY',
+        replaceExisting: true,
+        message: null
       };
     }
     return {
@@ -1008,9 +861,6 @@ function payrollImportAnalysisFingerprint(analysis) {
     assignmentId: row.assignmentId || null,
     sessionId: row.sessionId || null,
     replaceExisting: row.replaceExisting === true,
-    replaceMode: row.replaceMode || null,
-    replaceBatchId: row.replaceBatchId || null,
-    replaceStateFingerprint: row.replaceStateFingerprint || null,
     marks: (row.marks || []).map((mark) => exactMarkSignature(mark.markType, mark.localDateTime)).filter(Boolean)
   }));
   return createHash('sha256').update(JSON.stringify({
@@ -1076,40 +926,6 @@ async function writeImportAudit(prisma, data) {
   });
 }
 
-async function assertReplacementStillSafe(prisma, row) {
-  const session = await prisma.dispatchAttendanceSession.findUnique({
-    where: { id: row.sessionId },
-    include: {
-      marks: { orderBy: { serverReceivedAt: 'asc' } },
-      reviews: {
-        orderBy: { createdAt: 'desc' },
-        select: { id: true, action: true, reason: true, createdAt: true },
-        take: 1
-      }
-    }
-  });
-  if (!session || replacementStateFingerprint(session) !== row.replaceStateFingerprint) {
-    throw new Error('payroll_import_preview_stale');
-  }
-  if (row.replaceMode === 'ADMINISTRATIVE') {
-    if (!replaceableAdministrativeSession(session)) throw new Error('payroll_import_preview_stale');
-    return;
-  }
-  if (row.replaceMode === 'IMPORTED_INTACT' && row.replaceBatchId) {
-    const events = await prisma.devAuditEvent.findMany({
-      where: {
-        entityType: PAYROLL_IMPORT_ENTITY_TYPE,
-        entityId: row.replaceBatchId,
-        action: PAYROLL_IMPORT_ACTION
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 1
-    });
-    if (replaceableImportedSession(session, events[0])) return;
-  }
-  throw new Error('payroll_import_preview_stale');
-}
-
 export async function commitPayrollAttendanceImport(prisma, file, input = {}, dependencies = {}) {
   const attendanceWriter = dependencies.attendanceWriter || registerManualAttendance;
   const workdayReviewer = dependencies.workdayReviewer || reviewAttendanceWorkdaySession;
@@ -1128,7 +944,6 @@ export async function commitPayrollAttendanceImport(prisma, file, input = {}, de
   for (const row of readyRows) {
     try {
       if (row.replaceExisting) {
-        await assertReplacementStillSafe(prisma, row);
         await workdayReviewer(prisma, {
           sessionId: row.sessionId,
           action: 'CLEAR',
@@ -1144,9 +959,7 @@ export async function commitPayrollAttendanceImport(prisma, file, input = {}, de
         sessionId: session.id,
         assignmentId: row.assignmentId,
         marks: importedMarks,
-        replaced: row.replaceExisting === true,
-        replacementMode: row.replaceExisting ? (row.replaceMode || null) : null,
-        replacedFromBatchId: row.replaceExisting ? (row.replaceBatchId || null) : null
+        replaced: row.replaceExisting === true
       });
     } catch (error) {
       failures.push({ rowNumber: row.sourceRows?.[0] || row.rowNumber || null, code: normalizeString(error?.message, 120) || 'payroll_import_write_failed' });

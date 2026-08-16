@@ -298,7 +298,7 @@ test('explica cuando ninguna de varias asignaciones admite las horas del archivo
   assert.match(analysis.rows[0].message, /asignaciones activas.*no son filas duplicadas.*ninguna coincide/i);
 });
 
-test('una segunda importación reemplaza solo una jornada creada por GeoVictoria que sigue intacta', async () => {
+test('una segunda importación reemplaza una jornada existente aunque provenga de un lote anterior', async () => {
   const oldBatchId = 'TEST-BATCH-1249-OLD';
   const oldMarks = [
     { id: 'TEST-OLD-ARRIVAL', markType: 'ARRIVAL', clientCapturedAt: new Date('2027-01-20T13:15:00.000Z') },
@@ -345,7 +345,7 @@ test('una segunda importación reemplaza solo una jornada creada por GeoVictoria
   assert.equal(analysis.summary.ready, 1);
   assert.equal(analysis.summary.replacements, 1);
   assert.equal(analysis.rows[0].replaceExisting, true);
-  assert.equal(analysis.rows[0].replaceBatchId, oldBatchId);
+  assert.equal(analysis.rows[0].replaceBatchId, undefined);
 
   const preview = buildPayrollAttendanceImportPreview(analysis);
   const workdayReviewer = async (_prisma, input) => {
@@ -397,7 +397,7 @@ test('una segunda importación reemplaza solo una jornada creada por GeoVictoria
   ]);
 });
 
-test('una jornada importada pero modificada después sigue protegida contra sobrescritura', async () => {
+test('una jornada existente modificada después también puede sustituirse desde el Excel', async () => {
   const oldBatchId = 'TEST-BATCH-1249-PROTECTED';
   const session = {
     id: 'TEST-SESSION-1249-PROTECTED',
@@ -425,7 +425,9 @@ test('una jornada importada pero modificada después sigue protegida contra sobr
   ].join('\n'));
   const analysis = await analyzePayrollAttendanceImport(prisma, await parsePayrollAttendanceImportFile(file));
 
-  assert.equal(analysis.summary.ready, 0);
-  assert.equal(analysis.summary.unresolved, 1);
-  assert.match(analysis.rows[0].message, /portal\/dispositivo|no son inequívocamente administrativas/i);
+  assert.equal(analysis.summary.ready, 1);
+  assert.equal(analysis.summary.replacements, 1);
+  assert.equal(analysis.summary.unresolved, 0);
+  assert.equal(analysis.rows[0].status, 'READY');
+  assert.equal(analysis.rows[0].replaceExisting, true);
 });
