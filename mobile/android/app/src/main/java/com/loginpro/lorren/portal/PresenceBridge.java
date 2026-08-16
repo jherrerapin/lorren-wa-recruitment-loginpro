@@ -84,6 +84,8 @@ final class PresenceBridge {
     @JavascriptInterface
     public String setReady(String serviceRequestId) {
         if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
+        String readinessError = activity.ensureNearbyRadioReady();
+        if (readinessError != null) return jsonError(readinessError);
         try {
             manager.startReady(serviceRequestId);
             return jsonOk();
@@ -101,6 +103,8 @@ final class PresenceBridge {
     @JavascriptInterface
     public String startCrewScan(String inputJson) {
         if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
+        String readinessError = activity.ensureNearbyRadioReady();
+        if (readinessError != null) return jsonError(readinessError);
         try {
             JSONObject input = new JSONObject(inputJson == null ? "{}" : inputJson);
             synchronized (this) {
