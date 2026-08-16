@@ -19,6 +19,7 @@ import {
   loadPayrollCompensationMap,
   loadPayrollReport,
   loadWorkerRestAssignments,
+  resolveWorkerRestDatePolicy,
   savePayrollCompensation,
   saveWorkerRestAssignment,
   workerRestDayAdjustment
@@ -156,7 +157,7 @@ test('Suspensión y No remunerada descuentan un día; los demás motivos no', ()
   assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.REMUNERADO), 0);
 });
 
-test('el backend guarda descanso para ambos contratos y solo exige motivo a Directo', async () => {
+test('el backend guarda descanso para ambos contratos y solo exige motivo a Directo en día hábil', async () => {
   const direct = makePrisma();
   const savedDirect = await saveWorkerRestAssignment(direct.prisma, {
     workerId: 'TEST-WORKER-1', restDate: '2026-08-11', reason: WORKER_REST_REASONS.SUSPENSION,
@@ -233,24 +234,66 @@ test('un descanso con solicitud activa exige confirmación explícita sin desasi
   assert.equal(inactive.events.length, 1);
 });
 
-test('el día de descanso no puede ser domingo ni festivo', async () => {
+test('domingo y festivo permiten descanso natural sin justificación, origen ni descuento', async () => {
+  const sundayPolicy = resolveWorkerRestDatePolicy('2026-08-09');
+  assert.equal(sundayPolicy.valid, true);
+  assert.equal(sundayPolicy.isSunday, true);
+  assert.equal(sundayPolicy.isNaturalRestDay, true);
+
   const sunday = makePrisma();
-  await assert.rejects(
-    saveWorkerRestAssignment(sunday.prisma, {
-      workerId: 'TEST-WORKER-1', restDate: '2026-08-09', reason: WORKER_REST_REASONS.VACACIONES
-    }),
-    /worker_rest_invalid/
-  );
-  assert.equal(sunday.events.length, 0);
+  const savedSunday = await saveWorkerRestAssignment(sunday.prisma, {
+    workerId: 'TEST-WORKER-1', restDate: '2026-08-09',
+    reason: WORKER_REST_REASONS.SUSPENSION, originSundayDate: '2026-08-16'
+  });
+  assert.equal(savedSunday.reason, null);
+  assert.equal(savedSunday.originSundayDate, null);
+  assert.equal(savedSunday.dayAdjustment, 0);
+  assert.equal(savedSunday.requiresJustification, false);
+  assert.equal(sunday.events.length, 1);
+
+  const holidayPolicy = resolveWorkerRestDatePolicy('2026-07-20');
+  assert.equal(holidayPolicy.valid, true);
+  assert.equal(holidayPolicy.isHoliday, true);
+  assert.equal(holidayPolicy.isNaturalRestDay, true);
 
   const holiday = makePrisma();
+  const savedHoliday = await saveWorkerRestAssignment(holiday.prisma, {
+    workerId: 'TEST-WORKER-1', restDate: '2026-07-20', reason: WORKER_REST_REASONS.NO_REMUNERADA
+  });
+  assert.equal(savedHoliday.reason, null);
+  assert.equal(savedHoliday.originSundayDate, null);
+  assert.equal(savedHoliday.dayAdjustment, 0);
+  assert.equal(savedHoliday.requiresJustification, false);
+  assert.equal(holiday.events.length, 1);
+
+  const weekdayPolicy = resolveWorkerRestDatePolicy('2026-08-11');
+  assert.equal(weekdayPolicy.isNaturalRestDay, false);
+});
+
+test('un descanso natural conserva la confirmación si ya existe asignación activa', async () => {
+  const activeSundayAssignment = {
+    workerId: 'TEST-WORKER-1',
+    workerName: 'Auxiliar de prueba',
+    serviceRequestId: 'TEST-REQUEST-SUNDAY',
+    serviceDate: '2026-08-09T00:00:00.000Z',
+    status: 'CONFIRMED'
+  };
+  const blocked = makePrisma({ assignments: [activeSundayAssignment] });
   await assert.rejects(
-    saveWorkerRestAssignment(holiday.prisma, {
-      workerId: 'TEST-WORKER-1', restDate: '2026-07-20', reason: WORKER_REST_REASONS.VACACIONES
+    saveWorkerRestAssignment(blocked.prisma, {
+      workerId: 'TEST-WORKER-1', restDate: '2026-08-09'
     }),
-    /worker_rest_invalid/
+    /worker_rest_active_assignment_confirmation_required/
   );
-  assert.equal(holiday.events.length, 0);
+  assert.equal(blocked.events.length, 0);
+
+  const approved = makePrisma({ assignments: [activeSundayAssignment] });
+  const saved = await saveWorkerRestAssignment(approved.prisma, {
+    workerId: 'TEST-WORKER-1', restDate: '2026-08-09', allowAssignedRest: true
+  });
+  assert.equal(saved.requiresJustification, false);
+  assert.equal(saved.assignmentConflictOverride, true);
+  assert.equal(approved.events.length, 1);
 });
 
 test('Remunerado permite domingo futuro no trabajado, mantiene domingo/no festivo y no permite reutilizarlo', async () => {
@@ -383,18 +426,21 @@ test('Nómina refleja días trabajados, descontados y netos', async () => {
   assert.equal(report.totals.netWorkedDays, 0);
 });
 
-test('Asignaciones ofrece fecha editable, motivo solo para Directos, descanso múltiple y confirmación visual de conflictos', async () => {
-  const [route, view, payroll, confirmUi] = await Promise.all([
+test('Asignaciones usa la política canónica de fecha para motivo, descanso múltiple y conflictos', async () => {
+  const [route, view, payroll, confirmUi, boardUi] = await Promise.all([
     readFile('src/routes/dispatchOpsExtras.js', 'utf8'),
     readFile('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8'),
     readFile('src/modules/dispatch-payroll/application/payrollReport.js', 'utf8'),
-    readFile('src/public/assignment-confirm-dialog.js', 'utf8')
+    readFile('src/public/assignment-confirm-dialog.js', 'utf8'),
+    readFile('src/public/dispatch-assignment-board.js', 'utf8')
   ]);
   assert.match(route, /saveWorkerRestAssignment/);
   assert.match(route, /cancelWorkerRestAssignment/);
   assert.match(route, /findWorkerRestAssignmentConflicts/);
+  assert.match(route, /resolveWorkerRestDatePolicy/);
   assert.match(route, /ACTIVE_DISPATCH_ASSIGNMENT_STATUSES/);
   assert.match(route, /checkOnly.*rest-conflicts/);
+  assert.match(route, /rest-date-policy/);
   assert.match(route, /allowAssignedRest/);
   assert.match(route, /router\.post\('\/asignaciones\/descansos'/);
   assert.match(route, /String\(req\.body\.workerId \|\| ''\)\.split\(','\)/);
@@ -408,23 +454,31 @@ test('Asignaciones ofrece fecha editable, motivo solo para Directos, descanso m�
   assert.match(view, /data-contract-type="<%= worker\.contractType %>"/);
   assert.match(view, /type="date" name="restDate" id="restDateValue"/);
   assert.match(view, /id="restReasonField"/);
-  assert.match(view, /let restBatchHasDirect=false/);
-  assert.match(view, /cards\.some\(\(card\)=>card\.dataset\.contractType==='DIRECTO'\)/);
-  assert.match(view, /reasonField\.hidden=!direct/);
-  assert.match(view, /reasonInput\.required=direct/);
-  assert.match(view, /Solo Contratistas: el descanso requiere únicamente la fecha/);
-  assert.match(view, /const remunerado=direct&&reasonInput\?\.value==='REMUNERADO'/);
-  assert.match(view, /field\.hidden=!remunerado/);
-  assert.match(view, /origin\.required=remunerado/);
+  assert.match(view, /domingos y festivos se registran como descanso sin justificación/);
   assert.match(view, /id="originSundayDateInput"/);
-  assert.match(view, /getUTCDay\(\)!==0/);
-  assert.match(view, /workerInput\.value=cards\.map\(\(card\)=>card\.dataset\.workerId\)\.join\(','\)/);
-  assert.match(view, /openRestDialog\(ids\)/);
-  assert.doesNotMatch(view, /Asigna el descanso auxiliar por auxiliar/);
-  assert.doesNotMatch(view, /Debe ser un domingo anterior, trabajado por este auxiliar y no festivo/);
-  assert.doesNotMatch(view, /dateBefore\(|origin\.max=|origin>=restDateValue/);
   assert.match(view, /Descuenta 1 día/);
+  assert.doesNotMatch(view, /El descanso no puede quedar en domingo ni festivo/);
 
+  assert.match(boardUi, /let restBatchHasDirect = false/);
+  assert.match(boardUi, /refreshRestDatePolicy/);
+  assert.match(boardUi, /payload\.set\('checkOnly', 'rest-date-policy'\)/);
+  assert.match(boardUi, /restDatePolicy\.isNaturalRestDay/);
+  assert.match(boardUi, /const direct = restBatchHasDirect && !naturalRestDay/);
+  assert.match(boardUi, /reasonField\.hidden = !direct/);
+  assert.match(boardUi, /reasonInput\.required = direct/);
+  assert.match(boardUi, /el descanso se registra sin justificación/);
+  assert.match(boardUi, /const remunerado = restBatchHasDirect && !restDatePolicy\.isNaturalRestDay/);
+  assert.match(boardUi, /field\.hidden = !remunerado \|\| bulkRemunerado/);
+  assert.match(boardUi, /origin\.required = remunerado && !bulkRemunerado/);
+  assert.match(boardUi, /workerInput\.value = cards\.map\(\(card\) => card\.dataset\.workerId\)\.join\(','\)/);
+  assert.match(boardUi, /openRestDialog\(ids\)/);
+  assert.doesNotMatch(boardUi, /fecha de descanso válida que no sea domingo/);
+  assert.doesNotMatch(boardUi, /Asigna el descanso auxiliar por auxiliar/);
+  assert.doesNotMatch(boardUi, /Debe ser un domingo anterior, trabajado por este auxiliar y no festivo/);
+  assert.doesNotMatch(boardUi, /dateBefore\(|origin\.max=|origin>=restDateValue/);
+
+  assert.match(payroll, /resolveWorkerRestDatePolicy/);
+  assert.match(payroll, /worker\.contractType === 'DIRECTO' && !datePolicy\.isNaturalRestDay/);
   assert.match(payroll, /ACTIVE_DISPATCH_ASSIGNMENT_STATUSES/);
   assert.match(payroll, /worker_rest_active_assignment_confirmation_required/);
   assert.match(payroll, /assignmentConflictOverride/);
