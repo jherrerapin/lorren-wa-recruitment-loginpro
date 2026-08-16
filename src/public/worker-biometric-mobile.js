@@ -468,9 +468,11 @@
     deadline,
     samplesRequired,
     timeoutError,
-    minimumSamplesRequired = samplesRequired
+    minimumSamplesRequired = samplesRequired,
+    options = {}
   ) {
     const samples = [];
+    const enforcePresenceScores = options.enforcePresenceScores !== false;
     let consecutiveFront = 0;
     let latest = null;
     let activeDeadline = deadline;
@@ -501,12 +503,12 @@
       latest = detected;
       consecutiveFront += 1;
       const scores = biometricScores(detected.face);
-      if (scores.realScore < MIN_REAL_SCORE) {
+      if (enforcePresenceScores && scores.realScore < MIN_REAL_SCORE) {
         onStatus?.('Validando que sea un rostro real…');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
       }
-      if (scores.liveScore < MIN_LIVE_SCORE) {
+      if (enforcePresenceScores && scores.liveScore < MIN_LIVE_SCORE) {
         onStatus?.('Mueve ligeramente el rostro y vuelve al centro.');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
@@ -526,6 +528,8 @@
         });
       } catch {
         onStatus?.('No se pudieron leer los rasgos. Mantén la posición.');
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
       }
 
       if (samples.length > 0 && samples.length < samplesRequired && !sampleGraceGranted) {
@@ -561,7 +565,8 @@
       deadline,
       ENROLLMENT_TARGET_SAMPLES,
       'biometric_capture_timeout',
-      ENROLLMENT_MIN_SAMPLES
+      ENROLLMENT_MIN_SAMPLES,
+      { enforcePresenceScores: false }
     );
     const photoBlob = await capturePhoto(video);
     return {
