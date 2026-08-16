@@ -9,10 +9,22 @@ import {
   normalizeDispatchDateParam
 } from './dispatchDate.js';
 import { deriveDispatchRequestOperationalState, operationalAssignments } from './dispatchOperationalCoverage.js';
+import {
+  WORKER_REST_REASONS,
+  loadWorkerRestAssignments
+} from '../modules/dispatch-payroll/application/payrollReport.js';
 
 const execFileAsync = promisify(execFile);
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const COMPLETE_REQUEST_STATUS = 'ASSIGNMENT_COMPLETE';
+const PROGRAMMING_WORKER_ABSENCE_LABELS = Object.freeze({
+  [WORKER_REST_REASONS.VACACIONES]: 'Vacaciones',
+  [WORKER_REST_REASONS.INCAPACIDAD_EPS]: 'Incapacidad EPS',
+  [WORKER_REST_REASONS.INCAPACIDAD_ARL]: 'Incapacidad ARL',
+  [WORKER_REST_REASONS.SUSPENSION]: 'Suspensión',
+  [WORKER_REST_REASONS.NO_REMUNERADA]: 'Descanso no remunerado',
+  [WORKER_REST_REASONS.REMUNERADO]: 'Descanso remunerado'
+});
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -69,6 +81,11 @@ function workerDocumentLabel(worker) {
   if (documentType && documentNumber) return `${documentType} ${documentNumber}`;
   if (documentNumber) return documentNumber;
   return 'Sin documento registrado';
+}
+
+export function programmingWorkerAbsenceLabel(reason) {
+  const normalized = normalizeString(reason)?.toUpperCase() || null;
+  return normalized ? (PROGRAMMING_WORKER_ABSENCE_LABELS[normalized] || normalized.replaceAll('_', ' ')) : 'Descanso';
 }
 
 function cleanServiceName(value) {
@@ -148,6 +165,32 @@ export async function loadProgrammingRequests(prisma, selectedDate, options = {}
   };
 }
 
+export async function loadProgrammingWorkerAbsences(prisma, selectedDate) {
+  const normalizedDate = normalizeProgrammingDate(selectedDate);
+  const restAssignments = await loadWorkerRestAssignments(prisma, { from: normalizedDate, to: normalizedDate });
+  if (!restAssignments.length) return [];
+  const workerIds = [...new Set(restAssignments.map((item) => item.workerId).filter(Boolean))];
+  const workers = workerIds.length && prisma?.dispatchWorker?.findMany
+    ? await prisma.dispatchWorker.findMany({
+      where: { id: { in: workerIds } },
+      select: { id: true, fullName: true, documentType: true, documentNumber: true, contractType: true }
+    })
+    : [];
+  const workersById = new Map(workers.map((worker) => [worker.id, worker]));
+  return restAssignments.map((rest) => {
+    const worker = workersById.get(rest.workerId) || {};
+    return {
+      workerId: rest.workerId,
+      workerName: worker.fullName || 'Auxiliar',
+      document: workerDocumentLabel(worker),
+      contractType: normalizeString(worker.contractType) || 'Sin tipo registrado',
+      reason: rest.reason || null,
+      reasonLabel: programmingWorkerAbsenceLabel(rest.reason),
+      restDate: rest.restDate
+    };
+  }).sort((left, right) => left.workerName.localeCompare(right.workerName, 'es'));
+}
+
 export function buildProgrammingCompletionSummary(requests) {
   const totalRequests = requests.length;
   const completedRequests = requests.filter((request) => effectiveRequestStatus(request) === COMPLETE_REQUEST_STATUS).length;
@@ -168,6 +211,28 @@ export function selectProgrammingRequests(requests = [], options = {}) {
   return requests.filter((request) => effectiveRequestStatus(request) === COMPLETE_REQUEST_STATUS);
 }
 
+export async function loadProgrammingReportData(prisma, options = {}) {
+  const requestId = normalizeString(options.requestId);
+  const loaded = await loadProgrammingRequests(prisma, options.selectedDate || options.fecha || options.date, { requestId });
+  const includePending = normalizeProgrammingIncludePending(options.includePending, true);
+  const requests = selectProgrammingRequests(loaded.requests, { includePending, requestId });
+  const summary = buildProgrammingCompletionSummary(loaded.requests);
+  const includedSummary = buildProgrammingCompletionSummary(requests);
+  const includeWorkerAbsences = !requestId;
+  const workerAbsences = includeWorkerAbsences
+    ? await loadProgrammingWorkerAbsences(prisma, loaded.selectedDate)
+    : [];
+  return {
+    selectedDate: loaded.selectedDate,
+    requests,
+    summary,
+    includedSummary,
+    includePending,
+    includeWorkerAbsences,
+    workerAbsences
+  };
+}
+
 function buildWorkersHtml(request) {
   const assignments = activeAssignments(request);
   if (!assignments.length) return '<p class="empty-workers">Sin auxiliares asignados.</p>';
@@ -177,7 +242,33 @@ function buildWorkersHtml(request) {
   }).join('')}</ol>`;
 }
 
-function buildHtml({ selectedDate, requests, managedBy, includePending, overallSummary }) {
+function buildWorkerAbsencesHtml(workerAbsences = [], includeWorkerAbsences = true) {
+  if (!includeWorkerAbsences) return '';
+  const rows = workerAbsences.length
+    ? workerAbsences.map((absence) => `<tr><td><strong>${escapeHtml(absence.workerName)}</strong></td><td>${escapeHtml(absence.document)}</td><td>${escapeHtml(absence.contractType)}</td><td>${escapeHtml(absence.reasonLabel)}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="absence-empty">No hay descansos ni incapacidades activos reportados para esta fecha.</td></tr>';
+  return `
+    <section class="absence-section">
+      <div class="absence-head">
+        <div><h2>Descansos e incapacidades reportados</h2><p>Novedades activas de personal para la fecha seleccionada.</p></div>
+        <strong>${workerAbsences.length}</strong>
+      </div>
+      <table class="absence-table">
+        <thead><tr><th>Auxiliar</th><th>Documento</th><th>Contrato</th><th>Novedad</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </section>`;
+}
+
+export function buildProgrammingReportHtml({
+  selectedDate,
+  requests,
+  managedBy,
+  includePending,
+  overallSummary,
+  workerAbsences = [],
+  includeWorkerAbsences = true
+}) {
   const requestsByClient = groupByClient(requests);
   const includedSummary = buildProgrammingCompletionSummary(requests);
   const generatedAt = formatBogotaDateTime();
@@ -218,6 +309,7 @@ function buildHtml({ selectedDate, requests, managedBy, includePending, overallS
       </section>
     `;
   }).join('') : `<section class="client-section"><h2>Sin solicitudes para este alcance</h2><p>${includePending ? 'No hay solicitudes programadas para esta fecha.' : 'No hay solicitudes con asignación completa para esta fecha.'}</p></section>`;
+  const workerAbsenceSection = buildWorkerAbsencesHtml(workerAbsences, includeWorkerAbsences);
 
   return `<!doctype html>
 <html lang="es">
@@ -258,6 +350,15 @@ function buildHtml({ selectedDate, requests, managedBy, includePending, overallS
   .workers-list span { color: #475569; margin-left: 6px; }
   .workers-list em { display: inline-block; margin-left: 6px; color: #1d4ed8; font-size: 10px; font-style: normal; font-weight: 800; }
   .empty-workers { padding: 0 11px 11px; color: #991b1b; font-weight: 800; }
+  .absence-section { margin-top: 18px; break-inside: avoid; }
+  .absence-head { border-left: 6px solid #7c3aed; background: #f5f3ff; border-radius: 12px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 8px; }
+  .absence-head h2 { margin: 0; color: #4c1d95; font-size: 16px; }
+  .absence-head p { margin: 3px 0 0; color: #6d28d9; font-size: 10px; }
+  .absence-head > strong { min-width: 28px; text-align: center; border-radius: 999px; padding: 5px 8px; background: #ede9fe; color: #5b21b6; }
+  .absence-table { width: 100%; border-collapse: collapse; border: 1px solid #ddd6fe; }
+  .absence-table th { background: #ede9fe; color: #4c1d95; font-size: 10px; text-align: left; padding: 7px 8px; }
+  .absence-table td { border-top: 1px solid #ede9fe; color: #334155; padding: 7px 8px; vertical-align: top; }
+  .absence-empty { color: #64748b !important; text-align: center; font-style: italic; }
   .footer { margin-top: 18px; border-top: 1px solid #d8e0ea; padding-top: 10px; display: flex; justify-content: space-between; color: #60708a; font-size: 10px; }
 </style>
 </head>
@@ -275,7 +376,8 @@ function buildHtml({ selectedDate, requests, managedBy, includePending, overallS
     <div class="summary-card"><span>Aux. asignados</span><strong>${includedSummary.assignedWorkers}</strong></div>
   </section>
   ${clientSections}
-  <footer class="footer"><span>Documento generado por LoginPro Operaciones.</span><span>Solo incluye nombre completo, documento y estado del auxiliar.</span></footer>
+  ${workerAbsenceSection}
+  <footer class="footer"><span>Documento generado por LoginPro Operaciones.</span><span>Incluye programación y novedades activas de descanso/incapacidad reportadas para la fecha.</span></footer>
 </body>
 </html>`;
 }
@@ -310,23 +412,22 @@ async function htmlToPdfBuffer(html) {
 }
 
 export async function buildProgrammingPdfBuffer(prisma, options = {}) {
-  const loaded = await loadProgrammingRequests(prisma, options.fecha || options.date, { requestId: options.requestId });
-  const includePending = normalizeProgrammingIncludePending(options.includePending, true);
-  const requests = selectProgrammingRequests(loaded.requests, { includePending, requestId: options.requestId });
-  const overallSummary = buildProgrammingCompletionSummary(loaded.requests);
-  const includedSummary = buildProgrammingCompletionSummary(requests);
-  const html = buildHtml({
-    selectedDate: loaded.selectedDate,
-    requests,
+  const report = await loadProgrammingReportData(prisma, options);
+  const html = buildProgrammingReportHtml({
+    selectedDate: report.selectedDate,
+    requests: report.requests,
     managedBy: options.managedBy,
-    includePending,
-    overallSummary
+    includePending: report.includePending,
+    overallSummary: report.summary,
+    workerAbsences: report.workerAbsences,
+    includeWorkerAbsences: report.includeWorkerAbsences
   });
   return {
-    selectedDate: loaded.selectedDate,
-    summary: overallSummary,
-    includedSummary,
-    includePending,
+    selectedDate: report.selectedDate,
+    summary: report.summary,
+    includedSummary: report.includedSummary,
+    includePending: report.includePending,
+    workerAbsences: report.workerAbsences,
     buffer: await htmlToPdfBuffer(html)
   };
 }
