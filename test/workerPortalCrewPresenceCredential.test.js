@@ -4,7 +4,9 @@ import {
   generateKeyPairSync,
   sign
 } from 'node:crypto';
+import { once } from 'node:events';
 import { readFile } from 'node:fs/promises';
+import express from 'express';
 import {
   buildCrewNativeLocationCanonicalProof,
   buildCrewPresenceCanonicalProof,
@@ -14,6 +16,8 @@ import {
 } from '../src/modules/dispatch-attendance/application/crewPresenceCredential.js';
 import { registerCrewArrivalForLeader } from '../src/modules/dispatch-attendance/application/registerCrewArrival.js';
 import { loadCrewAttendancePortalContexts } from '../src/modules/dispatch-attendance/application/crewAttendanceConfig.js';
+import { workerPortalRouter } from '../src/routes/workerPortal.js';
+import { WORKER_PORTAL_SESSION_COOKIE_NAME } from '../src/modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
 
 const SECRET = 'TEST-crew-presence-secret-00000000000000000000000000000000';
 const SERVICE_ID = 'TEST-SERVICE-CREW-01';
@@ -24,6 +28,7 @@ const ATTEMPT_ID = 'TEST-CREW-ATTEMPT-0001';
 const CHALLENGE = 'TEST-CHALLENGE-000000000000000000000000000001';
 const CAPTURED_AT = new Date('2026-08-14T18:00:00-05:00');
 const SERVER_NOW = new Date('2026-08-14T20:00:00-05:00');
+const SESSION_TOKEN = 'S'.repeat(43);
 
 function workerId(index) {
   return `TEST-WORKER-${String(index).padStart(2, '0')}`;
@@ -672,6 +677,135 @@ test('reintento completa al décimo y conserva los ocho ya registrados fuera del
   assert.equal(result.summary.processedCount, 10);
   assert.equal(result.summary.notDetectedCount, 0);
   assert.equal(result.summary.failedCount, 0);
+});
+
+test('sincronización devuelve estados individuales y audita la excepción sin entregarla al escritor', async () => {
+  const operationPoint = {
+    id: 'TEST-OPERATION-01',
+    attendanceEnabled: true,
+    attendanceLatitude: 4.6,
+    attendanceLongitude: -74.08,
+    geofenceRadiusMeters: 100,
+    maxLocationAccuracyMeters: 50
+  };
+  const auditCalls = [];
+  const registerCalls = [];
+  const prisma = {
+    devAuditEvent: {
+      async upsert(input) {
+        auditCalls.push(input);
+        return input.create;
+      }
+    }
+  };
+  const verified = {
+    serviceRequestId: SERVICE_ID,
+    assignmentId: LEADER_ASSIGNMENT_ID,
+    validatedWorkerIds: [LEADER_WORKER_ID, workerId(2)],
+    phoneExceptionWorkerIds: [workerId(3)],
+    members: [
+      { assignmentId: assignmentId(1), workerId: workerId(1), arrivalReported: false },
+      { assignmentId: assignmentId(2), workerId: workerId(2), arrivalReported: false },
+      { assignmentId: assignmentId(3), workerId: workerId(3), arrivalReported: false }
+    ],
+    verifiedProofCount: 1,
+    rejectedProofCount: 0,
+    rejectedPhoneExceptionCount: 0,
+    leaderInstallationIdHash: 'TEST-INSTALL-HASH-01',
+    clientCapturedAt: CAPTURED_AT,
+    leaderLocation: {
+      latitude: 4.6,
+      longitude: -74.08,
+      accuracyMeters: 12,
+      clientCapturedAt: CAPTURED_AT.toISOString()
+    }
+  };
+  const app = express();
+  app.use('/operaciones/portal', workerPortalRouter(prisma, {
+    repository: {},
+    nowFn: () => SERVER_NOW,
+    resolveSessionFn: async () => ({
+      workerId: LEADER_WORKER_ID,
+      deviceId: LEADER_DEVICE_ID,
+      sessionId: 'TEST-SESSION-PORTAL-01',
+      expiresAt: new Date(SERVER_NOW.getTime() + 60 * 60 * 1000)
+    }),
+    loadAssignmentsFn: async () => [],
+    loadBiometricAssignmentFn: async () => ({
+      id: LEADER_ASSIGNMENT_ID,
+      workerId: LEADER_WORKER_ID,
+      serviceRequest: { id: SERVICE_ID, operationPoint }
+    }),
+    verifyCrewPresenceBundleFn: async () => verified,
+    registerCrewPresenceArrivalFn: async (input) => {
+      registerCalls.push(input);
+      return {
+        applied: true,
+        summary: {
+          totalMembers: 3,
+          eligibleMembers: 2,
+          newlyRecordedCount: 2,
+          replayedCount: 0,
+          alreadyRecordedCount: 0,
+          failedCount: 0,
+          reviewPendingCount: 0,
+          notDetectedCount: 1,
+          results: [
+            { assignmentId: assignmentId(1), status: 'RECORDED' },
+            { assignmentId: assignmentId(2), status: 'RECORDED' }
+          ]
+        }
+      };
+    }
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const request = () => fetch(`${origin}/operaciones/portal/cuadrillas/presencia/sincronizar`, {
+    method: 'POST',
+    headers: {
+      Cookie: `${WORKER_PORTAL_SESSION_COOKIE_NAME}=${SESSION_TOKEN}`,
+      'X-Requested-With': 'worker-portal',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      assignmentId: LEADER_ASSIGNMENT_ID,
+      serviceRequestId: SERVICE_ID,
+      idempotencyKey: ATTEMPT_ID,
+      clientCapturedAt: CAPTURED_AT.toISOString(),
+      proofBundle: { version: 1 }
+    })
+  });
+
+  try {
+    const firstResponse = await request();
+    const firstPayload = await firstResponse.json();
+    const secondResponse = await request();
+    const secondPayload = await secondResponse.json();
+
+    assert.equal(firstResponse.status, 200);
+    assert.equal(secondResponse.status, 200);
+    assert.equal(firstPayload.requiresReview, true);
+    assert.equal(firstPayload.phoneExceptionCount, 1);
+    assert.equal(firstPayload.notDetectedCount, 0);
+    assert.deepEqual(firstPayload.memberStatuses, [
+      { assignmentId: assignmentId(1), workerId: workerId(1), isLeader: true, status: 'VERIFIED' },
+      { assignmentId: assignmentId(2), workerId: workerId(2), isLeader: false, status: 'VERIFIED' },
+      { assignmentId: assignmentId(3), workerId: workerId(3), isLeader: false, status: 'NO_PHONE_REVIEW' }
+    ]);
+    assert.deepEqual(secondPayload.memberStatuses, firstPayload.memberStatuses);
+    assert.equal(registerCalls.length, 2);
+    assert.deepEqual(registerCalls[0].validatedWorkerIds, [LEADER_WORKER_ID, workerId(2)]);
+    assert.equal(registerCalls[0].validatedWorkerIds.includes(workerId(3)), false);
+    assert.equal(auditCalls.length, 2);
+    assert.equal(auditCalls[0].where.id, auditCalls[1].where.id);
+    assert.equal(auditCalls[0].create.action, 'CREW_PHONE_EXCEPTION_DECLARED');
+    assert.equal(auditCalls[0].create.metadata.workerId, workerId(3));
+    assert.equal(auditCalls[0].create.metadata.reviewRequired, true);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
 });
 
 test('cola grupal reutiliza el mismo IndexedDB/service worker, prueba ubicación nativa y no crea otro escritor', async () => {
