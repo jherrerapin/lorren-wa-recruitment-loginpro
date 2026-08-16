@@ -3,6 +3,13 @@
 (() => {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/';
   if (normalizedPath !== '/operaciones/portal') return;
+  if (window.LorrenAndroidPresence) {
+    document.getElementById('portal-install-cta')?.remove();
+    const nativeDialog = document.getElementById('portal-install-dialog');
+    if (nativeDialog?.open && typeof nativeDialog.close === 'function') nativeDialog.close();
+    nativeDialog?.remove();
+    return;
+  }
 
   const ENROLLMENT_SUCCESS_PATTERN = /rostro\s+registrado/i;
   const INSTALL_QUERY_PARAM = 'instalarPortal';
