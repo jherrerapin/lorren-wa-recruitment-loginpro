@@ -13,6 +13,7 @@ const PAYROLL_IMPORT_ENTITY_TYPE = 'DISPATCH_PAYROLL_ATTENDANCE_IMPORT';
 const PAYROLL_IMPORT_ACTION = 'PAYROLL_ATTENDANCE_IMPORTED';
 const PAYROLL_IMPORT_REVERSE_ACTION = 'PAYROLL_ATTENDANCE_IMPORT_REVERSED';
 const PAYROLL_IMPORT_REASON_PREFIX = 'Marcaciones importadas desde GeoVictoria · lote ';
+const PAYROLL_IMPORT_COLUMN_MAPPING_PREFIX = '@column:';
 export const PAYROLL_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
 const PAYROLL_IMPORT_MAX_WORKDAYS = 5000;
 const PAYROLL_IMPORT_ALLOWED_MARK_TYPES = Object.freeze(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
@@ -24,10 +25,10 @@ const PAYROLL_IMPORT_HEADER_ALIASES = Object.freeze({
   time: ['hora', 'hora marcacion', 'hora de marcacion'],
   event: ['evento', 'tipo', 'tipo marcacion', 'tipo de marcacion', 'movimiento', 'marca', 'accion'],
   operation: ['operacion', 'punto operacion', 'punto de operacion', 'centro costo', 'centro de costo', 'sucursal', 'lugar'],
-  arrival: ['entrada', 'ingreso', 'hora entrada', 'entrada 1', 'primera entrada'],
-  breakStart: ['inicio almuerzo', 'salida almuerzo', 'inicio colacion', 'salida colacion', 'inicio descanso', 'salida 1'],
-  breakEnd: ['fin almuerzo', 'regreso almuerzo', 'retorno almuerzo', 'fin colacion', 'regreso colacion', 'retorno colacion', 'entrada 2'],
-  departure: ['salida', 'egreso', 'hora salida', 'salida final', 'salida 2', 'ultima salida']
+  arrival: ['entrada', 'ingreso', 'hora entrada', 'hora de entrada', 'entrada 1', 'primera entrada', 'entrada jornada', 'entrada de jornada', 'inicio jornada', 'entrada turno'],
+  breakStart: ['inicio almuerzo', 'inicio de almuerzo', 'salida almuerzo', 'salida a almuerzo', 'inicio colacion', 'salida colacion', 'inicio descanso', 'salida descanso', 'salida a descanso', 'salida 1'],
+  breakEnd: ['fin almuerzo', 'fin de almuerzo', 'regreso almuerzo', 'regreso de almuerzo', 'retorno almuerzo', 'retorno de almuerzo', 'entrada almuerzo', 'entrada de almuerzo', 'fin colacion', 'regreso colacion', 'retorno colacion', 'entrada 2'],
+  departure: ['salida', 'egreso', 'hora salida', 'hora de salida', 'salida final', 'salida jornada', 'salida de jornada', 'salida turno', 'fin jornada', 'salida 2', 'ultima salida']
 });
 
 function normalizeString(value, maxLength = 200) {
@@ -148,8 +149,20 @@ function normalizedMapping(mapping = {}) {
   return result;
 }
 
+function manualMappingColumnIndex(value, foldedHeaders) {
+  const text = normalizeString(value, 160);
+  const indexMatch = text?.match(/^@column:(\d+)$/);
+  if (indexMatch) {
+    const index = Number(indexMatch[1]);
+    return Number.isInteger(index) && index >= 0 && index < foldedHeaders.length ? index : -1;
+  }
+  return text ? foldedHeaders.indexOf(foldImportText(text)) : -1;
+}
+
 function detectHeaderRow(matrix, mapping = {}) {
-  const desiredHeaders = new Set(Object.values(normalizedMapping(mapping)).map(foldImportText));
+  const desiredHeaders = new Set(Object.values(normalizedMapping(mapping))
+    .filter((value) => !value.startsWith(PAYROLL_IMPORT_COLUMN_MAPPING_PREFIX))
+    .map(foldImportText));
   const candidates = matrix.slice(0, 12).map((row, rowIndex) => {
     const cells = row.map(cellScalar);
     const aliases = cells.filter((cell) => aliasFieldForHeader(cell)).length;
@@ -183,7 +196,7 @@ function buildColumnMap(headers, mapping = {}) {
   const columns = {};
   for (const field of Object.keys(PAYROLL_IMPORT_HEADER_ALIASES)) {
     if (manual[field]) {
-      const manualIndex = foldedHeaders.indexOf(foldImportText(manual[field]));
+      const manualIndex = manualMappingColumnIndex(manual[field], foldedHeaders);
       if (manualIndex >= 0) columns[field] = manualIndex;
       continue;
     }
@@ -197,6 +210,25 @@ function buildColumnMap(headers, mapping = {}) {
     }
   }
   return columns;
+}
+
+function importMappingMode(columns) {
+  const dailyFields = ['arrival', 'breakStart', 'breakEnd', 'departure'];
+  const eventFields = ['datetime', 'time', 'event'];
+  if (dailyFields.some((field) => Number.isInteger(columns[field]))) return 'DAILY';
+  if (eventFields.some((field) => Number.isInteger(columns[field]))) return 'EVENT';
+  return Number.isInteger(columns.date) ? 'DAILY' : 'EVENT';
+}
+
+function importMappingFields(mode, columns = {}) {
+  const operation = Number.isInteger(columns.operation) ? ['operation'] : [];
+  if (mode === 'DAILY') {
+    return ['document', 'name', 'date', 'arrival', 'breakStart', 'breakEnd', 'departure', ...operation];
+  }
+  if (Number.isInteger(columns.datetime)) {
+    return ['document', 'name', 'datetime', 'event', ...operation];
+  }
+  return ['document', 'name', 'date', 'time', 'event', ...operation];
 }
 
 function excelSerialToDate(value) {
@@ -366,6 +398,8 @@ function buildImportRowsFromMatrix(matrix, mapping = {}, meta = {}) {
   const detected = detectHeaderRow(matrix, mapping);
   const headers = detected.cells.map((value) => String(cellScalar(value) ?? '').trim());
   const columns = buildColumnMap(headers, mapping);
+  const mappingMode = importMappingMode(columns);
+  const mappingFields = importMappingFields(mappingMode, columns);
   const hasIdentity = Number.isInteger(columns.document) || Number.isInteger(columns.name);
   const hasDaily = Number.isInteger(columns.date) && (Number.isInteger(columns.arrival) || Number.isInteger(columns.departure));
   const hasEvent = (Number.isInteger(columns.datetime) || (Number.isInteger(columns.date) && Number.isInteger(columns.time)));
@@ -376,9 +410,13 @@ function buildImportRowsFromMatrix(matrix, mapping = {}, meta = {}) {
       headers,
       headerRow: detected.rowIndex + 1,
       columns,
+      mappingMode,
+      mappingFields,
       workdays: [],
       needsMapping: true,
-      message: 'No fue posible reconocer automáticamente identidad y fecha/hora. Ajusta las columnas y vuelve a previsualizar.'
+      message: mappingMode === 'DAILY'
+        ? 'Este archivo tiene una fila por jornada. Asigna únicamente identidad, fecha, entrada, salida a almuerzo, regreso de almuerzo y salida de jornada.'
+        : 'Este archivo tiene una fila por marcación. Asigna identidad, fecha/hora y tipo de marcación.'
     };
   }
 
@@ -464,6 +502,8 @@ function buildImportRowsFromMatrix(matrix, mapping = {}, meta = {}) {
     headers,
     headerRow: detected.rowIndex + 1,
     columns,
+    mappingMode,
+    mappingFields,
     needsMapping: false,
     workdays: workdays.slice(0, PAYROLL_IMPORT_MAX_WORKDAYS + 1)
   };
@@ -1192,6 +1232,8 @@ export function buildPayrollAttendanceImportPreview(analysis) {
     delimiter: analysis.delimiter,
     headers: analysis.headers,
     columns: analysis.columns,
+    mappingMode: analysis.mappingMode || null,
+    mappingFields: Array.isArray(analysis.mappingFields) ? analysis.mappingFields : [],
     needsMapping: analysis.needsMapping,
     message: analysis.message || null,
     dateFrom: analysis.dateFrom || null,
