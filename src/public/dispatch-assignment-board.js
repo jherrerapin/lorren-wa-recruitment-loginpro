@@ -5,6 +5,8 @@
   let selectedWorkerIds = new Set();
   let restBatchHasDirect = false;
   let restBatchWorkers = [];
+  let restDatePolicy = { valid: false, restDate: null, isSunday: false, isHoliday: false, isNaturalRestDay: false };
+  let restDatePolicySequence = 0;
   let boardRequestController = null;
 
   function showToast(message) {
@@ -440,8 +442,49 @@
     });
   }
 
+  async function refreshRestDatePolicy(dateValue = qs('#restDateValue')?.value || '') {
+    const form = qs('#restAssignmentForm');
+    const submitButton = form?.querySelector('button[type="submit"]');
+    const requestSequence = ++restDatePolicySequence;
+    if (!form || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateValue || ''))) {
+      restDatePolicy = { valid: false, restDate: null, isSunday: false, isHoliday: false, isNaturalRestDay: false };
+      syncRestFields();
+      return restDatePolicy;
+    }
+
+    if (submitButton) submitButton.disabled = true;
+    try {
+      const payload = new URLSearchParams();
+      payload.set('checkOnly', 'rest-date-policy');
+      payload.set('restDate', dateValue);
+      const response = await fetch(form.action, {
+        method: 'POST',
+        body: payload,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          'X-Requested-With': 'fetch'
+        }
+      });
+      if (!response.ok) throw new Error('No fue posible validar la fecha de descanso.');
+      const data = await response.json();
+      if (requestSequence !== restDatePolicySequence) return restDatePolicy;
+      restDatePolicy = data?.datePolicy || { valid: false, restDate: null, isSunday: false, isHoliday: false, isNaturalRestDay: false };
+      syncRestFields();
+      return restDatePolicy;
+    } catch (error) {
+      if (requestSequence === restDatePolicySequence) {
+        restDatePolicy = { valid: false, restDate: null, isSunday: false, isHoliday: false, isNaturalRestDay: false };
+        syncRestFields();
+      }
+      throw error;
+    } finally {
+      if (requestSequence === restDatePolicySequence && submitButton) submitButton.disabled = false;
+    }
+  }
+
   function syncRestFields() {
-    const direct = restBatchHasDirect;
+    const naturalRestDay = restDatePolicy.isNaturalRestDay === true;
+    const direct = restBatchHasDirect && !naturalRestDay;
     const directWorkers = restBatchWorkers.filter((worker) => worker.contractType === 'DIRECTO');
     const reasonField = qs('#restReasonField');
     const reasonInput = qs('#restReasonInput');
@@ -454,9 +497,11 @@
       if (!direct) reasonInput.value = '';
     }
     if (rule) {
-      rule.textContent = direct
-        ? 'Incluye contrato Directo: selecciona el motivo del descanso.'
-        : 'Solo Contratistas: el descanso requiere únicamente la fecha.';
+      rule.textContent = naturalRestDay
+        ? `${restDatePolicy.isSunday ? 'Domingo' : 'Festivo'}: el descanso se registra sin justificación.`
+        : direct
+          ? 'Incluye contrato Directo: selecciona el motivo del descanso.'
+          : 'Solo Contratistas: el descanso requiere únicamente la fecha.';
     }
 
     const remunerado = direct && reasonInput?.value === 'REMUNERADO';
@@ -512,7 +557,12 @@
     if (originInput) originInput.value = '';
     if (restDate) restDate.value = currentDateFilter() || todayDateInColombia();
     if (allowAssignedRestInput) allowAssignedRestInput.value = 'false';
+    restDatePolicy = { valid: false, restDate: null, isSunday: false, isHoliday: false, isNaturalRestDay: false };
     syncRestFields();
+    refreshRestDatePolicy(restDate?.value || '').catch((error) => {
+      console.error(error);
+      showToast(error.message || 'No fue posible validar la fecha de descanso.');
+    });
 
     const assignedWorkers = restBatchWorkers.filter((worker) => worker.sameDayAssignment);
     if (assignedWorkers.length) {
@@ -569,7 +619,7 @@
     if (qs('#allowAssignedRestInput')?.value === 'true') payload.set('allowAssignedRest', 'true');
     const serviceRequestId = form.querySelector('input[name="serviceRequestId"]')?.value;
     if (serviceRequestId) payload.set('serviceRequestId', serviceRequestId);
-    if (worker.contractType === 'DIRECTO') {
+    if (worker.contractType === 'DIRECTO' && !restDatePolicy.isNaturalRestDay) {
       payload.set('reason', qs('#restReasonInput')?.value || '');
       if (originSundayDate) payload.set('originSundayDate', originSundayDate);
     }
@@ -680,37 +730,52 @@
       qs('#restAssignmentDialog')?.showModal();
     });
     qs('#restReasonInput')?.addEventListener('change', syncRestFields);
+    qs('#restDateValue')?.addEventListener('change', (event) => {
+      refreshRestDatePolicy(event.target.value).catch((error) => {
+        console.error(error);
+        showToast(error.message || 'No fue posible validar la fecha de descanso.');
+      });
+    });
     qs('#cancelRestDialog')?.addEventListener('click', () => qs('#restAssignmentDialog')?.close());
     qs('#cancelRestOriginBatch')?.addEventListener('click', () => {
       qs('#restOriginBatchDialog')?.close();
       qs('#restAssignmentDialog')?.showModal();
     });
     qs('#restOriginBatchForm')?.addEventListener('submit', submitRestBatchWithOrigins);
-    qs('#restAssignmentForm')?.addEventListener('submit', (event) => {
-      const restDateValue = qs('#restDateValue')?.value;
-      const restDate = /^\d{4}-\d{2}-\d{2}$/.test(String(restDateValue || ''))
-        ? new Date(`${restDateValue}T12:00:00.000Z`)
-        : null;
-      if (!restDate || restDate.getUTCDay() === 0) {
-        event.preventDefault();
-        showToast('Selecciona una fecha de descanso válida que no sea domingo.');
+    qs('#restAssignmentForm')?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const restDateValue = qs('#restDateValue')?.value || '';
+      try {
+        const policy = await refreshRestDatePolicy(restDateValue);
+        if (!policy.valid) {
+          showToast('Selecciona una fecha de descanso válida.');
+          return;
+        }
+      } catch (error) {
+        console.error(error);
+        showToast(error.message || 'No fue posible validar la fecha de descanso.');
         return;
       }
-      const remunerado = restBatchHasDirect && qs('#restReasonInput')?.value === 'REMUNERADO';
+
+      const remunerado = restBatchHasDirect && !restDatePolicy.isNaturalRestDay && qs('#restReasonInput')?.value === 'REMUNERADO';
       if (remunerado && restBatchWorkers.length > 1) {
-        event.preventDefault();
         renderRestOriginBatchDialog();
         return;
       }
-      if (!remunerado) return;
+      if (!remunerado) {
+        form.submit();
+        return;
+      }
       const origin = qs('#originSundayDateInput')?.value;
       const originDate = /^\d{4}-\d{2}-\d{2}$/.test(String(origin || ''))
         ? new Date(`${origin}T12:00:00.000Z`)
         : null;
       if (!originDate || originDate.getUTCDay() !== 0) {
-        event.preventDefault();
         showToast('Selecciona un domingo válido para asociar al descanso remunerado.');
+        return;
       }
+      form.submit();
     });
     syncRestFields();
   }
