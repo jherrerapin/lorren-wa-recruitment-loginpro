@@ -311,9 +311,10 @@
   }
 
   function renderPanel() {
-    installStyles();
     let panel = document.getElementById(PANEL_ID);
     if (panel) panel.remove();
+    if (!contexts.length) return;
+    installStyles();
 
     panel = element('section');
     panel.id = PANEL_ID;
@@ -324,16 +325,6 @@
       element('p', 'native-presence-warning', 'La app no escribe asistencia por sí sola: guarda la evidencia y el servidor decide quién puede quedar marcado cuando haya conexión.')
     );
     // Texto histórico protegido por el contrato de Fase A: “Prueba local: todavía no registra asistencia”.
-
-    if (!contexts.length) {
-      panel.append(
-        element('div', 'native-presence-status warning', navigator.onLine
-          ? 'No hay una cuadrilla disponible para este teléfono en este momento.'
-          : 'No hay una cuadrilla guardada en este teléfono. Abre la aplicación una vez con conexión antes del servicio.')
-      );
-      insertPanel(panel);
-      return;
-    }
 
     if (!selectedServiceRequestId || !contexts.some((item) => item.serviceRequestId === selectedServiceRequestId)) {
       selectedServiceRequestId = contexts[0].serviceRequestId;

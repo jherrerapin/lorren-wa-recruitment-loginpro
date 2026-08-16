@@ -91,7 +91,7 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(bridge, /getProofBundle\(/);
 
   assert.match(nativePresence, /Prueba local: todavía no registra asistencia/);
-  assert.match(nativePresence, /Comprobar teléfonos cercanos/);
+  assert.match(nativePresence, /Marcar llegada de toda la cuadrilla/);
   assert.match(nativePresence, /Quedar listo para asistencia/);
   assert.match(nativePresence, /cuadrillas\/proximidad\/contexto/);
   assert.match(nativePresence, /attendanceWriter !== false/);
@@ -101,6 +101,20 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   for (const pattern of ['*.jks', '*.keystore', '*.apk', '*.aab']) {
     assert.ok(ignore.includes(pattern), `falta ignorar ${pattern}`);
   }
+});
+
+test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal individual', async () => {
+  const nativePresence = await read('app/src/main/assets/native-presence.js');
+  const renderPanel = nativePresence.match(/function renderPanel\(\) \{([\s\S]*?)\n  \}\n\n  function insertPanel/);
+
+  assert.ok(renderPanel, 'no se encontró la autoridad renderPanel');
+  assert.match(
+    renderPanel[1],
+    /document\.getElementById\(PANEL_ID\)[\s\S]{0,160}if \(!contexts\.length\) return;[\s\S]{0,80}installStyles\(\);/
+  );
+  assert.doesNotMatch(nativePresence, /No hay una cuadrilla disponible para este teléfono en este momento\./);
+  assert.match(nativePresence, /Presencia de cuadrilla sin internet/);
+  assert.match(nativePresence, /if \(!selectedServiceRequestId \|\| !contexts\.some/);
 });
 
 test('la prueba Android no contiene PII ni una identidad Bluetooth humana', async () => {
