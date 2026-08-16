@@ -22,7 +22,9 @@ const AUTOMATION_CONFIG_ENTITY = 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG';
 const AUTOMATION_CONFIG_ACTION = 'SET_DISPATCH_WHATSAPP_AUTOMATION';
 const AUTOMATION_RUN_ENTITY = 'DISPATCH_WHATSAPP_AUTOMATION_RUN';
 const ASSIGNMENT_SEND_ATTEMPT_ACTION = 'SEND_ASSIGNMENT_CONFIRMATION_ATTEMPT';
+const PENDING_ALERT_ACTION = 'SEND_PENDING_CONFIRMATION_ALERT';
 const PENDING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
+const MAX_PENDING_REPORT_ITEMS = 40;
 const AUTOMATION_MAX_ATTEMPTS_PER_DAY = 3;
 const AUTOMATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const NOTIFICATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
@@ -192,12 +194,17 @@ export function normalizeDispatchAutomationTime(value) {
 
 function automationMetadata(row) {
   const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
-  return { assignmentAutoSendTime: normalizeDispatchAutomationTime(metadata.assignmentAutoSendTime) };
+  return {
+    assignmentAutoSendTime: normalizeDispatchAutomationTime(metadata.assignmentAutoSendTime),
+    pendingConfirmationAlertTime: normalizeDispatchAutomationTime(metadata.pendingConfirmationAlertTime)
+  };
 }
 
 export async function loadDispatchWhatsappAutomationSettings({ prismaClient = prisma, userId } = {}) {
   const id = String(userId || '').trim();
-  if (!id || !prismaClient?.devAuditEvent?.findFirst) return { assignmentAutoSendTime: null };
+  if (!id || !prismaClient?.devAuditEvent?.findFirst) {
+    return { assignmentAutoSendTime: null, pendingConfirmationAlertTime: null };
+  }
   const row = await prismaClient.devAuditEvent.findFirst({
     where: { entityType: AUTOMATION_CONFIG_ENTITY, entityId: id, action: AUTOMATION_CONFIG_ACTION },
     orderBy: { createdAt: 'desc' }
@@ -208,11 +215,13 @@ export async function loadDispatchWhatsappAutomationSettings({ prismaClient = pr
 export async function saveDispatchWhatsappAutomationSettings({
   prismaClient = prisma,
   userId,
-  assignmentAutoSendTime = null
+  assignmentAutoSendTime = null,
+  pendingConfirmationAlertTime = null
 } = {}) {
   const id = String(userId || '').trim();
   if (!id) throw new Error('userId es requerido');
   const normalizedAssignmentTime = normalizeDispatchAutomationTime(assignmentAutoSendTime);
+  const normalizedPendingTime = normalizeDispatchAutomationTime(pendingConfirmationAlertTime);
   await prismaClient.devAuditEvent.create({
     data: {
       entityType: AUTOMATION_CONFIG_ENTITY,
@@ -220,10 +229,16 @@ export async function saveDispatchWhatsappAutomationSettings({
       action: AUTOMATION_CONFIG_ACTION,
       actorUserId: id,
       actorSource: 'dispatch-whatsapp-settings',
-      metadata: { assignmentAutoSendTime: normalizedAssignmentTime }
+      metadata: {
+        assignmentAutoSendTime: normalizedAssignmentTime,
+        pendingConfirmationAlertTime: normalizedPendingTime
+      }
     }
   });
-  return { assignmentAutoSendTime: normalizedAssignmentTime };
+  return {
+    assignmentAutoSendTime: normalizedAssignmentTime,
+    pendingConfirmationAlertTime: normalizedPendingTime
+  };
 }
 
 function bogotaClock(now = new Date()) {
@@ -365,6 +380,74 @@ async function recordAssignmentSendAttempt(prismaClient, {
   });
 }
 
+export function buildDispatchPendingConfirmationAlertText(assignments = [], targetDateKey) {
+  const pending = Array.isArray(assignments) ? assignments : [];
+  const visible = pending.slice(0, MAX_PENDING_REPORT_ITEMS);
+  const lines = visible.map((assignment, index) => {
+    const name = String(assignment?.worker?.fullName || 'Auxiliar').trim() || 'Auxiliar';
+    const phone = normalizeDispatchWhatsappPhone(assignment?.worker?.phone) || 'sin número';
+    return `${index + 1}. ${name} — ${phone}`;
+  });
+  if (pending.length > visible.length) lines.push(`… y ${pending.length - visible.length} auxiliar(es) más.`);
+  return `⏰ Auxiliares pendientes de confirmar para ${dateLabel(targetDateKey)}\n\n${lines.join('\n')}\n\nTotal pendientes: ${pending.length}. Comunícate con ellos para validar su asistencia.`;
+}
+
+function runMarkerId(userId, dateKey) {
+  return `${userId}:${dateKey}`;
+}
+
+async function pendingAlertRunState(prismaClient, userId, dateKey, now) {
+  const rows = await prismaClient.devAuditEvent.findMany({
+    where: {
+      entityType: AUTOMATION_RUN_ENTITY,
+      entityId: runMarkerId(userId, dateKey),
+      action: PENDING_ALERT_ACTION
+    },
+    select: { metadata: true, createdAt: true },
+    orderBy: { createdAt: 'desc' }
+  });
+  let failedAttempts = 0;
+  let latestFailureAt = null;
+  for (const row of rows) {
+    const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+    const pendingCount = Number(metadata.pendingCount || 0);
+    if (metadata.sent || (!metadata.failed && pendingCount === 0)) {
+      return { due: false, reason: 'already_ran', failedAttempts, latestFailureAt };
+    }
+    if (!metadata.failed) continue;
+    failedAttempts += 1;
+    const failedAt = new Date(row?.createdAt || Number.NaN);
+    if (!Number.isNaN(failedAt.getTime()) && (!latestFailureAt || failedAt > latestFailureAt)) latestFailureAt = failedAt;
+  }
+  if (failedAttempts >= AUTOMATION_MAX_ATTEMPTS_PER_DAY) {
+    return { due: false, reason: 'retry_exhausted', failedAttempts, latestFailureAt };
+  }
+  if (latestFailureAt && now.getTime() - latestFailureAt.getTime() < AUTOMATION_RETRY_COOLDOWN_MS) {
+    return { due: false, reason: 'retry_cooldown', failedAttempts, latestFailureAt };
+  }
+  return { due: true, reason: null, failedAttempts, latestFailureAt };
+}
+
+async function recordPendingAlertRun(prismaClient, userId, dateKey, targetDateKey, summary, now = new Date()) {
+  await prismaClient.devAuditEvent.create({
+    data: {
+      entityType: AUTOMATION_RUN_ENTITY,
+      entityId: runMarkerId(userId, dateKey),
+      action: PENDING_ALERT_ACTION,
+      actorUserId: userId,
+      actorSource: 'dispatch-whatsapp-scheduler',
+      metadata: {
+        dateKey,
+        targetDateKey,
+        pendingCount: Number(summary?.pendingCount || 0),
+        sent: Boolean(summary?.sent),
+        failed: Boolean(summary?.failed)
+      },
+      createdAt: now
+    }
+  });
+}
+
 async function runAutomaticAssignmentSends({
   prismaClient, user, dateKey, targetDateKey, axiosClient, sendAssignmentMessage, recoveryMode = false, now = new Date()
 }) {
@@ -413,8 +496,58 @@ async function runAutomaticAssignmentSends({
   }
 }
 
+async function runPendingConfirmationAlert({
+  prismaClient,
+  user,
+  dateKey,
+  targetDateKey,
+  axiosClient,
+  sendAdminMessage,
+  recoveryMode = false,
+  now = new Date()
+}) {
+  const runKey = `${user.id}:${dateKey}:${PENDING_ALERT_ACTION}`;
+  if (activeScheduleRuns.has(runKey)) return { skipped: true, reason: 'running' };
+  activeScheduleRuns.add(runKey);
+  try {
+    const runState = await pendingAlertRunState(prismaClient, user.id, dateKey, now);
+    if (!runState.due) return { skipped: true, reason: runState.reason };
+    if (!user.dispatchAlertPhone) return { skipped: true, reason: 'alert_phone_missing' };
+
+    const assignments = await assignmentsForUserAndDate(prismaClient, user, targetDateKey, PENDING_ASSIGNMENT_STATUSES);
+    const eligibleAssignments = recoveryMode
+      ? assignments.filter((assignment) => isRecoverableAssignment(assignment, targetDateKey, now))
+      : assignments;
+    const summary = { pendingCount: eligibleAssignments.length, sent: false, failed: false };
+    if (!eligibleAssignments.length) {
+      await recordPendingAlertRun(prismaClient, user.id, dateKey, targetDateKey, summary, now);
+      return summary;
+    }
+
+    try {
+      await sendAdminMessage({
+        scope: 'operational',
+        phone: user.dispatchAlertPhone,
+        text: buildDispatchPendingConfirmationAlertText(eligibleAssignments, targetDateKey),
+        axiosClient
+      });
+      summary.sent = true;
+    } catch (error) {
+      summary.failed = true;
+      console.warn(`[dispatch-wa-schedule] Falló reporte de pendientes. userId=${user.id} code=${error?.code || 'provider_error'}.`);
+    }
+    await recordPendingAlertRun(prismaClient, user.id, dateKey, targetDateKey, summary, now);
+    return summary;
+  } finally {
+    activeScheduleRuns.delete(runKey);
+  }
+}
+
 export async function runDispatchUserAutomationScheduler(prismaClient = prisma, {
-  now = new Date(), axiosClient, sendAssignmentMessage = null
+  now = new Date(),
+  axiosClient,
+  sendAssignmentMessage = null,
+  sendAdminMessage = sendDispatchWhatsappTextMessage
 } = {}) {
   const clock = bogotaClock(now);
   const targetDateKey = addIsoDays(clock.dateKey, 1);
@@ -428,9 +561,13 @@ export async function runDispatchUserAutomationScheduler(prismaClient = prisma, 
     assignmentAttempts: 0,
     assignmentSent: 0,
     assignmentFailed: 0,
+    pendingAlertsSent: 0,
+    pendingAlertsFailed: 0,
     recoveryAssignmentAttempts: 0,
     recoveryAssignmentSent: 0,
-    recoveryAssignmentFailed: 0
+    recoveryAssignmentFailed: 0,
+    recoveryPendingAlertsSent: 0,
+    recoveryPendingAlertsFailed: 0
   };
   for (const { user, settings } of configured) {
     const recoveryAllowed = configurationPredatesCurrentDay(settings, clock.dateKey);
@@ -453,6 +590,41 @@ export async function runDispatchUserAutomationScheduler(prismaClient = prisma, 
       result.assignmentAttempts += auto.attempted;
       result.assignmentSent += auto.sent;
       result.assignmentFailed += auto.failed;
+    }
+
+    if (settings.pendingConfirmationAlertTime && recoveryAllowed && clock.timeKey < settings.pendingConfirmationAlertTime) {
+      const recoveryAlert = await runPendingConfirmationAlert({
+        prismaClient,
+        user,
+        dateKey: recoveryScheduleDateKey,
+        targetDateKey: recoveryTargetDateKey,
+        axiosClient,
+        sendAdminMessage,
+        recoveryMode: true,
+        now
+      });
+      if (recoveryAlert?.sent) {
+        result.pendingAlertsSent += 1;
+        result.recoveryPendingAlertsSent += 1;
+      }
+      if (recoveryAlert?.failed) {
+        result.pendingAlertsFailed += 1;
+        result.recoveryPendingAlertsFailed += 1;
+      }
+    }
+
+    if (settings.pendingConfirmationAlertTime && clock.timeKey >= settings.pendingConfirmationAlertTime) {
+      const alert = await runPendingConfirmationAlert({
+        prismaClient,
+        user,
+        dateKey: clock.dateKey,
+        targetDateKey,
+        axiosClient,
+        sendAdminMessage,
+        now
+      });
+      if (alert?.sent) result.pendingAlertsSent += 1;
+      if (alert?.failed) result.pendingAlertsFailed += 1;
     }
   }
   return result;
