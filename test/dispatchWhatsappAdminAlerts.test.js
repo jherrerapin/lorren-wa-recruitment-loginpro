@@ -6,12 +6,12 @@ function read(path) { return fs.readFileSync(path, 'utf8'); }
 
 function assignmentFixture() {
   return {
-    id: 'assignment-test-1',
-    worker: { fullName: 'Auxiliar Prueba', phone: '3001234567', isTestProfile: false },
+    id: 'assignment-1',
+    worker: { fullName: 'Ana Pérez', phone: '3001234567' },
     serviceRequest: {
-      serviceDate: new Date('2026-08-16T05:00:00.000Z'),
-      operationPointName: 'Punto Prueba',
-      address: 'Dirección Prueba',
+      serviceDate: new Date('2026-08-12T05:00:00.000Z'),
+      operationPointName: 'Punto Norte',
+      address: 'Calle 1 # 2-3',
       startTime: '08:00'
     }
   };
@@ -50,14 +50,16 @@ function schedulerPrisma({ configEvents, assignments = [], confirmationRows = []
     },
     appUser: {
       findMany: async () => [{
-        id: 'user-test-1',
-        username: 'coordinador-test',
+        id: 'user-1',
+        username: 'coordinador-a',
         dispatchAlertPhone: '573009998877',
         isActive: true,
         ...userOverrides
       }]
     },
-    dispatchAssignment: { findMany: async () => assignments },
+    dispatchAssignment: {
+      findMany: async () => assignments
+    },
     dispatchWhatsappConfirmation: {
       findMany: async ({ where = {} } = {}) => confirmationRows.filter((row) => {
         const ids = where.assignmentId?.in;
@@ -72,204 +74,115 @@ function schedulerPrisma({ configEvents, assignments = [], confirmationRows = []
 function scheduledAssignment({
   id,
   status = 'CONFIRMATION_PENDING',
-  fullName = 'Auxiliar Prueba',
+  fullName = 'Auxiliar Uno',
   phone = '3001112233',
-  serviceDate = '2026-08-16T05:00:00.000Z',
+  serviceDate = '2026-08-14T05:00:00.000Z',
   startTime = '08:00',
-  createdAt = '2026-08-15T20:00:00.000Z',
-  source = 'MANUAL',
-  isTestProfile = false
+  createdAt = '2026-08-13T20:00:00.000Z'
 }) {
   return {
     id,
     serviceRequestId: `request-${id}`,
     workerId: `worker-${id}`,
     status,
-    createdByUsername: 'coordinador-test',
+    createdByUsername: 'coordinador-a',
     createdAt: new Date(createdAt),
-    worker: { id: `worker-${id}`, fullName, phone, isTestProfile },
+    worker: { id: `worker-${id}`, fullName, phone },
     serviceRequest: {
       id: `request-${id}`,
-      source,
+      source: 'MANUAL',
       serviceDate: new Date(serviceDate),
       startTime
     }
   };
 }
 
-function withDispatchMetaEnv(run) {
-  const keys = [
-    'DISPATCH_META_GRAPH_VERSION',
-    'DISPATCH_META_ACCESS_TOKEN',
-    'DISPATCH_META_PHONE_NUMBER_ID',
-    'DISPATCH_META_VERIFY_TOKEN',
-    'DISPATCH_META_APP_SECRET'
-  ];
-  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
-  Object.assign(process.env, {
-    DISPATCH_META_GRAPH_VERSION: 'v23.0',
-    DISPATCH_META_ACCESS_TOKEN: 'TEST-token-not-real',
-    DISPATCH_META_PHONE_NUMBER_ID: 'TEST-phone-id',
-    DISPATCH_META_VERIFY_TOKEN: 'TEST-verify',
-    DISPATCH_META_APP_SECRET: 'TEST-secret'
-  });
-  return Promise.resolve()
-    .then(run)
-    .finally(() => {
-      for (const key of keys) {
-        if (previous[key] === undefined) delete process.env[key];
-        else process.env[key] = previous[key];
-      }
-    });
-}
-
-function notificationAuditStore() {
-  const events = [];
-  return {
-    events,
-    api: {
-      findMany: async ({ where = {} } = {}) => {
-        if (where.entityType === 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG') return [];
-        return events.filter((event) => (
-          (!where.entityType || event.entityType === where.entityType)
-          && (!where.entityId || event.entityId === where.entityId)
-          && (!where.action || event.action === where.action)
-        )).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      },
-      findFirst: async ({ where = {} } = {}) => events
-        .filter((event) => (
-          (!where.entityType || event.entityType === where.entityType)
-          && (!where.entityId || event.entityId === where.entityId)
-          && (!where.action || event.action === where.action)
-        ))
-        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0] || null,
-      create: async ({ data }) => {
-        const row = { id: `audit-${events.length + 1}`, ...data, createdAt: data.createdAt || new Date() };
-        events.push(row);
-        return row;
-      }
-    }
-  };
-}
-
-test('configuración del coordinador conserva solo el número de alertas y elimina el recordatorio de ventanas ajenas', () => {
+test('cada usuario configura sus alertas dentro de Despacho y no desde administración de usuarios', () => {
   const schema = read('prisma/schema.prisma');
+  const usersView = read('src/views/users.ejs');
+  const admin = read('src/routes/admin.js');
+  const locations = read('src/routes/locations.js');
   const dashboard = read('src/views/operacionesDashboard.ejs');
   const dashboardRoute = read('src/routes/dispatchDashboardMetrics.js');
-  const alerts = read('src/services/dispatchWhatsappAdminAlerts.js');
-
   assert.match(schema, /dispatchAlertPhone\s+String\?/);
+  assert.match(schema, /dispatchWindowExpiryReminderEnabled\s+Boolean\s+@default\(false\)/);
+  assert.doesNotMatch(usersView, /name="dispatchAlertPhone"/);
+  assert.doesNotMatch(usersView, /name="dispatchWindowExpiryReminderEnabled"/);
+  assert.doesNotMatch(admin, /normalizeDispatchAlertPhoneInput/);
+  assert.doesNotMatch(locations, /normalizeDispatchAlertPhoneInput/);
   assert.match(dashboard, /Mis alertas de despacho por WhatsApp/);
+  assert.match(dashboard, /action="\/admin\/operaciones\/alertas-whatsapp"/);
   assert.match(dashboard, /name="dispatchAlertPhone"/);
-  assert.doesNotMatch(dashboard, /dispatchWindowExpiryReminderEnabled/);
-  assert.doesNotMatch(dashboard, /Recordarme antes de que venza la ventana/);
-  assert.doesNotMatch(dashboardRoute, /dispatchWindowExpiryReminderEnabled/);
-  assert.doesNotMatch(alerts, /dispatchWindowExpiryReminderEnabled/);
-  assert.doesNotMatch(alerts, /dispatchWhatsappWindowReminder\./);
-  assert.match(dashboardRoute, /data: \{ dispatchAlertPhone \}/);
+  assert.match(dashboard, /name="dispatchWindowExpiryReminderEnabled"/);
+  assert.match(dashboard, /Guardar cambios/);
+  assert.match(dashboard, /Las novedades reportadas por los auxiliares se notifican aunque este check esté apagado/);
+  assert.match(dashboardRoute, /router\.post\('\/alertas-whatsapp'/);
+  assert.match(dashboardRoute, /findCurrentDispatchAppUser/);
+  assert.match(dashboardRoute, /prisma\.appUser\.update/);
 });
 
 test('mensaje normal de asignación conserva literalmente el cuerpo canónico y usa dos botones', async () => {
   const client = await import('../src/services/dispatchWhatsappCloudClient.js');
   const payload = client.buildDispatchAssignmentInteractivePayload({ assignment: assignmentFixture(), phone: '3001234567' });
   assert.equal(payload.type, 'interactive');
+  assert.equal(payload.interactive.type, 'button');
+  assert.equal(payload.interactive.body.text,
+    'Hola *Ana Pérez*,\n\nMañana: *12/08/2026*\nLlegar a: *Punto Norte  - Calle 1 # 2-3*\nHora : *8:00 AM por favor.*\n\n\n*Confirmado?*');
   assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.title), ['CONFIRMADO', 'REPORTAR NOVEDAD']);
-  assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.id), ['dispatch_confirm:assignment-test-1', 'dispatch_novelty:assignment-test-1']);
+  assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.id), ['dispatch_confirm:assignment-1', 'dispatch_novelty:assignment-1']);
 });
 
-test('alerta de novedad conserva auxiliar e instrucción de contacto', async () => {
+test('alerta de novedad incluye auxiliar, teléfono e instrucción de contacto', async () => {
   const { buildDispatchNoveltyAdminAlertText } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
   const text = buildDispatchNoveltyAdminAlertText(assignmentFixture());
-  assert.match(text, /Auxiliar Prueba/);
-  assert.match(text, /Punto Prueba/);
+  assert.match(text, /Ana Pérez/);
+  assert.match(text, /573001234567/);
+  assert.match(text, /Punto Norte/);
   assert.match(text, /Comunícate con el auxiliar/);
 });
 
 test('envío prioriza ventana de 24h y deja plantilla solo como fallback', () => {
   const assignment = read('src/services/dispatchWhatsappAssignmentService.js');
+  const config = read('src/services/dispatchWhatsappCloudConfig.js');
   assert.match(assignment, /getDispatchWhatsappContactWindowStatus/);
   assert.match(assignment, /contactWindow\.isOpen/);
   assert.match(assignment, /sendCloudAssignmentInteractive/);
   assert.match(assignment, /deliveryMode = 'SESSION_INTERACTIVE'/);
   assert.match(assignment, /deliveryMode = 'TEMPLATE'/);
+  assert.match(assignment, /dispatch_whatsapp_window_closed/);
+  assert.match(config, /assignmentTemplate = false/);
 });
 
-test('cada inbound reinicia la ventana antes de interpretar si es confirmación', () => {
+test('cada inbound reinicia la ventana, Reportar novedad alerta al dueño y Gracias permanece para confirmación', () => {
   const webhook = read('src/services/dispatchWhatsappWebhookService.js');
+  const assignment = read('src/services/dispatchWhatsappAssignmentService.js');
+  const config = read('src/services/dispatchWhatsappCloudConfig.js');
   assert.match(webhook, /recordDispatchWhatsappInboundWindow/);
   assert.ok(webhook.indexOf('recordDispatchWhatsappInboundWindow') < webhook.indexOf('const buttonAction'));
   assert.match(webhook, /sendDispatchNoveltyAdminAlert/);
-  assert.match(webhook, /sendDispatchAllConfirmedAdminAlert/);
+  assert.match(webhook, /claimDispatchAssignmentNovelty/);
+  assert.match(assignment, /alertOwnerUsername:/);
+  assert.match(assignment, /type: 'WHATSAPP_NOVELTY'/);
+  assert.match(config, /AUTOMATIC_CONFIRMATION_REPLY = 'Gracias\.'/);
+  assert.match(webhook, /AUTOMATIC_CONFIRMATION_REPLY/);
 });
 
-test('un punto del coordinador renueva su lastInboundAt aunque no sea una confirmación', async () => {
-  const { recordDispatchWhatsappInboundWindow } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
-  let current = { scope: 'operational', phone: '573009998877', lastInboundAt: new Date('2026-08-15T20:00:00.000Z') };
-  const prismaClient = {
-    dispatchWhatsappContactWindow: {
-      findUnique: async () => current,
-      update: async ({ data }) => { current = { ...current, ...data }; return current; }
-    }
-  };
-  const result = await recordDispatchWhatsappInboundWindow({
-    scope: 'operational',
-    message: { from: '3009998877', text: { body: '.' }, timestamp: String(Date.parse('2026-08-15T21:00:00.000Z') / 1000) },
-    prismaClient
-  });
-  assert.equal(new Date(result.lastInboundAt).toISOString(), '2026-08-15T21:00:00.000Z');
+test('recordatorio es persistente, por usuario y conserva al menos veinte minutos de margen', () => {
+  const schema = read('prisma/schema.prisma');
+  const alerts = read('src/services/dispatchWhatsappAdminAlerts.js');
+  const worker = read('src/workers/jobWorker.js');
+  assert.match(schema, /model DispatchWhatsappContactWindow/);
+  assert.match(schema, /model DispatchWhatsappWindowReminder/);
+  assert.match(schema, /@@unique\(\[scope, phone, appUserId, windowStartedAt\]\)/);
+  assert.match(alerts, /DISPATCH_WINDOW_REMINDER_LEAD_MS = 25 \* 60 \* 1000/);
+  assert.match(alerts, /vence en aproximadamente 25 minutos/);
+  assert.match(alerts, /dispatchWindowExpiryReminderEnabled/);
+  assert.match(alerts, /dispatchWhatsappWindowReminder\.create/);
+  assert.match(worker, /runDispatchWhatsappWindowReminderDispatcher/);
+  assert.match(worker, /DISPATCH_WINDOW_REMINDER_SWEEP_MS = 10000/);
 });
 
-test('recordatorio de ventana se envía solo al coordinador sobre su propia ventana y se deduplica por renovación', async () => {
-  await withDispatchMetaEnv(async () => {
-    const { runDispatchWhatsappWindowReminderDispatcher } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
-    const audit = notificationAuditStore();
-    const outbound = [];
-    const now = new Date('2026-08-15T23:00:00.000Z');
-    const coordinatorWindow = {
-      scope: 'operational',
-      phone: '573009998877',
-      lastInboundAt: new Date('2026-08-14T23:24:00.000Z')
-    };
-    const auxiliaryWindow = {
-      scope: 'operational',
-      phone: '573001112233',
-      lastInboundAt: new Date('2026-08-14T23:24:00.000Z')
-    };
-    const prismaClient = {
-      devAuditEvent: audit.api,
-      dispatchWhatsappContactWindow: { findMany: async () => [coordinatorWindow, auxiliaryWindow] },
-      appUser: {
-        findMany: async () => [{ id: 'user-test-1', username: 'coordinador-test', isActive: true, dispatchAlertPhone: '3009998877' }]
-      }
-    };
-    const axiosClient = {
-      post: async (_url, payload) => {
-        outbound.push(payload);
-        return { data: { messages: [{ id: `wamid-${outbound.length}` }] } };
-      }
-    };
-
-    const first = await runDispatchWhatsappWindowReminderDispatcher(prismaClient, { now, axiosClient });
-    assert.equal(first.sent, 1);
-    assert.equal(outbound[0].to, '573009998877');
-    assert.match(outbound[0].text.body, /ventana personal/);
-    assert.match(outbound[0].text.body, /punto \(\.\)/);
-    assert.match(outbound[0].text.body, /25 minutos/);
-
-    const duplicate = await runDispatchWhatsappWindowReminderDispatcher(prismaClient, { now: new Date(now.getTime() + 60_000), axiosClient });
-    assert.equal(duplicate.sent, 0);
-    assert.equal(outbound.length, 1);
-
-    coordinatorWindow.lastInboundAt = new Date('2026-08-15T00:24:00.000Z');
-    const renewedNow = new Date('2026-08-15T23:59:00.000Z');
-    const renewed = await runDispatchWhatsappWindowReminderDispatcher(prismaClient, { now: renewedNow, axiosClient });
-    assert.equal(renewed.sent, 1);
-    assert.equal(outbound.length, 2);
-    assert.ok(outbound.every((payload) => payload.to === '573009998877'));
-  });
-});
-
-test('horario automático se guarda por usuario sin conservar el reporte horario de pendientes', async () => {
+test('horarios automáticos se guardan por usuario y siempre se interpretan en Bogotá', async () => {
   const {
     isDispatchBogotaScheduleDue,
     loadDispatchWhatsappAutomationSettings,
@@ -279,7 +192,7 @@ test('horario automático se guarda por usuario sin conservar el reporte horario
   const events = [];
   const prismaClient = {
     devAuditEvent: {
-      create: async ({ data }) => { events.push({ ...data, createdAt: new Date('2026-08-15T20:00:00.000Z') }); return data; },
+      create: async ({ data }) => { events.push({ ...data, createdAt: new Date('2026-08-13T00:00:00.000Z') }); return data; },
       findFirst: async ({ where }) => events.filter((event) => (
         event.entityType === where.entityType && event.entityId === where.entityId && event.action === where.action
       )).at(-1) || null
@@ -288,53 +201,77 @@ test('horario automático se guarda por usuario sin conservar el reporte horario
 
   assert.equal(normalizeDispatchAutomationTime('18:05'), '18:05');
   assert.equal(normalizeDispatchAutomationTime('25:00'), null);
-  assert.equal(isDispatchBogotaScheduleDue('18:00', new Date('2026-08-15T23:30:00.000Z')), true);
+  assert.equal(isDispatchBogotaScheduleDue('19:00', new Date('2026-08-13T00:30:00.000Z')), true);
+  assert.equal(isDispatchBogotaScheduleDue('20:00', new Date('2026-08-13T00:30:00.000Z')), false);
 
-  await saveDispatchWhatsappAutomationSettings({ prismaClient, userId: 'user-test-1', assignmentAutoSendTime: '18:30' });
-  assert.deepEqual(await loadDispatchWhatsappAutomationSettings({ prismaClient, userId: 'user-test-1' }), { assignmentAutoSendTime: '18:30' });
-
-  events.push({
-    entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG', entityId: 'user-test-legacy', action: 'SET_DISPATCH_WHATSAPP_AUTOMATION',
-    metadata: { assignmentAutoSendTime: '17:00', pendingConfirmationAlertTime: '19:00' }, createdAt: new Date('2026-08-15T20:00:00.000Z')
+  await saveDispatchWhatsappAutomationSettings({
+    prismaClient,
+    userId: 'user-1',
+    assignmentAutoSendTime: '18:30',
+    pendingConfirmationAlertTime: '19:15'
   });
-  assert.deepEqual(await loadDispatchWhatsappAutomationSettings({ prismaClient, userId: 'user-test-legacy' }), { assignmentAutoSendTime: '17:00' });
+  assert.deepEqual(await loadDispatchWhatsappAutomationSettings({ prismaClient, userId: 'user-1' }), {
+    assignmentAutoSendTime: '18:30',
+    pendingConfirmationAlertTime: '19:15'
+  });
+  assert.deepEqual(await loadDispatchWhatsappAutomationSettings({ prismaClient, userId: 'user-2' }), {
+    assignmentAutoSendTime: null,
+    pendingConfirmationAlertTime: null
+  });
 });
 
-test('scheduler envía pendientes sin evidencia previa y no genera reporte al coordinador', async () => {
+test('scheduler envía CONFIRMATION_PENDING sin evidencia previa y no duplica una confirmación ya enviada', async () => {
   const { runDispatchUserAutomationScheduler } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
-  const now = new Date('2026-08-15T23:30:00.000Z');
+  const now = new Date('2026-08-14T00:30:00.000Z'); // 19:30 del 13/08 en Colombia.
   const configEvents = [{
-    entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG', entityId: 'user-test-1', action: 'SET_DISPATCH_WHATSAPP_AUTOMATION',
-    metadata: { assignmentAutoSendTime: '18:30', pendingConfirmationAlertTime: '19:15' }, createdAt: new Date('2026-08-14T20:00:00.000Z')
+    id: 'config-1',
+    entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG',
+    entityId: 'user-1',
+    action: 'SET_DISPATCH_WHATSAPP_AUTOMATION',
+    metadata: { assignmentAutoSendTime: '18:30', pendingConfirmationAlertTime: '19:15' },
+    createdAt: new Date('2026-08-12T20:00:00.000Z')
   }];
   const runEvents = [];
-  const confirmationRows = [{ assignmentId: 'already-sent', status: 'SENT', createdAt: new Date('2026-08-15T23:00:00.000Z') }];
-  const unsent = scheduledAssignment({ id: 'needs-send' });
-  const alreadySent = scheduledAssignment({ id: 'already-sent', phone: '3002223344' });
+  const confirmationRows = [{
+    assignmentId: 'already-sent', status: 'SENT', createdAt: new Date('2026-08-13T23:00:00.000Z')
+  }];
+  const unsent = scheduledAssignment({ id: 'needs-send', fullName: 'Auxiliar Sin Envío' });
+  const alreadySent = scheduledAssignment({ id: 'already-sent', fullName: 'Auxiliar Contactado', phone: '3002223344' });
   const prismaClient = schedulerPrisma({ configEvents, assignments: [unsent, alreadySent], confirmationRows, runEvents });
   const assignmentSends = [];
+  const adminSends = [];
   const sendAssignmentMessage = async ({ context, phone, actorUsername }) => {
     assignmentSends.push({ assignmentId: context.assignmentId, phone, actorUsername });
     confirmationRows.push({ assignmentId: context.assignmentId, status: 'SENT', createdAt: now });
     return { providerMessageId: 'wamid-test-send' };
   };
+  const sendAdminMessage = async ({ phone, text }) => { adminSends.push({ phone, text }); return 'wamid-admin'; };
 
-  const first = await runDispatchUserAutomationScheduler(prismaClient, { now, sendAssignmentMessage });
-  assert.equal(first.targetDateKey, '2026-08-16');
+  const first = await runDispatchUserAutomationScheduler(prismaClient, { now, sendAssignmentMessage, sendAdminMessage });
+  assert.equal(first.targetDateKey, '2026-08-14');
   assert.equal(first.assignmentSent, 1);
-  assert.equal('pendingAlertsSent' in first, false);
-  assert.deepEqual(assignmentSends, [{ assignmentId: 'needs-send', phone: '573001112233', actorUsername: 'coordinador-test' }]);
+  assert.deepEqual(assignmentSends, [{ assignmentId: 'needs-send', phone: '573001112233', actorUsername: 'coordinador-a' }]);
+  assert.equal(first.pendingAlertsSent, 1);
+  assert.equal(adminSends.length, 1);
+  assert.match(adminSends[0].text, /Auxiliar Sin Envío/);
+  assert.match(adminSends[0].text, /Auxiliar Contactado/);
 
-  const second = await runDispatchUserAutomationScheduler(prismaClient, { now, sendAssignmentMessage });
+  const second = await runDispatchUserAutomationScheduler(prismaClient, { now, sendAssignmentMessage, sendAdminMessage });
   assert.equal(second.assignmentSent, 0);
+  assert.equal(second.pendingAlertsSent, 0);
   assert.equal(assignmentSends.length, 1);
+  assert.equal(adminSends.length, 1);
 });
 
-test('un fallo transitorio espera cinco minutos y luego recupera el envío automático', async () => {
+test('un fallo transitorio de confirmación espera cinco minutos y luego recupera el envío', async () => {
   const { runDispatchUserAutomationScheduler } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
   const configEvents = [{
-    entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG', entityId: 'user-test-1', action: 'SET_DISPATCH_WHATSAPP_AUTOMATION',
-    metadata: { assignmentAutoSendTime: '18:30' }, createdAt: new Date('2026-08-14T20:00:00.000Z')
+    id: 'config-retry',
+    entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG',
+    entityId: 'user-1',
+    action: 'SET_DISPATCH_WHATSAPP_AUTOMATION',
+    metadata: { assignmentAutoSendTime: '18:30', pendingConfirmationAlertTime: null },
+    createdAt: new Date('2026-08-12T20:00:00.000Z')
   }];
   const runEvents = [];
   const confirmationRows = [];
@@ -343,95 +280,128 @@ test('un fallo transitorio espera cinco minutos y luego recupera el envío autom
   let attempts = 0;
   const sendAssignmentMessage = async ({ context }) => {
     attempts += 1;
-    if (attempts === 1) throw Object.assign(new Error('fallo temporal simulado'), { code: 'provider_temporal' });
-    confirmationRows.push({ assignmentId: context.assignmentId, status: 'SENT', createdAt: new Date('2026-08-15T23:36:00.000Z') });
+    if (attempts === 1) {
+      const error = new Error('fallo temporal simulado');
+      error.code = 'provider_temporal';
+      throw error;
+    }
+    confirmationRows.push({ assignmentId: context.assignmentId, status: 'SENT', createdAt: new Date('2026-08-13T23:36:00.000Z') });
     return { providerMessageId: 'wamid-recovered' };
   };
 
-  const first = await runDispatchUserAutomationScheduler(prismaClient, { now: new Date('2026-08-15T23:31:00.000Z'), sendAssignmentMessage });
+  const first = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-13T23:31:00.000Z'), sendAssignmentMessage
+  });
   assert.equal(first.assignmentFailed, 1);
-  const tooSoon = await runDispatchUserAutomationScheduler(prismaClient, { now: new Date('2026-08-15T23:32:00.000Z'), sendAssignmentMessage });
+  assert.equal(attempts, 1);
+
+  const tooSoon = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-13T23:32:00.000Z'), sendAssignmentMessage
+  });
   assert.equal(tooSoon.assignmentAttempts, 0);
-  const recovered = await runDispatchUserAutomationScheduler(prismaClient, { now: new Date('2026-08-15T23:36:00.000Z'), sendAssignmentMessage });
+  assert.equal(attempts, 1);
+
+  const recovered = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-13T23:36:00.000Z'), sendAssignmentMessage
+  });
   assert.equal(recovered.assignmentSent, 1);
+  assert.equal(attempts, 2);
+
+  const afterSuccess = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-13T23:42:00.000Z'), sendAssignmentMessage
+  });
+  assert.equal(afterSuccess.assignmentAttempts, 0);
   assert.equal(attempts, 2);
 });
 
-test('tres fallos automáticos agotan los reintentos del día', async () => {
+test('tres fallos automáticos agotan los reintentos del día y evitan un bucle cada diez segundos', async () => {
   const { runDispatchUserAutomationScheduler } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
   const configEvents = [{
-    entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG', entityId: 'user-test-1', action: 'SET_DISPATCH_WHATSAPP_AUTOMATION',
-    metadata: { assignmentAutoSendTime: '18:30' }, createdAt: new Date('2026-08-14T20:00:00.000Z')
+    id: 'config-bounded',
+    entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG',
+    entityId: 'user-1',
+    action: 'SET_DISPATCH_WHATSAPP_AUTOMATION',
+    metadata: { assignmentAutoSendTime: '18:30', pendingConfirmationAlertTime: null },
+    createdAt: new Date('2026-08-12T20:00:00.000Z')
   }];
   const runEvents = [];
-  const prismaClient = schedulerPrisma({ configEvents, assignments: [scheduledAssignment({ id: 'bounded-retry' })], runEvents });
+  const assignment = scheduledAssignment({ id: 'bounded-retry' });
+  const prismaClient = schedulerPrisma({ configEvents, assignments: [assignment], runEvents });
   let attempts = 0;
-  const sendAssignmentMessage = async () => { attempts += 1; throw Object.assign(new Error('fallo simulado'), { code: 'provider_down' }); };
-  for (const at of ['2026-08-15T23:31:00.000Z', '2026-08-15T23:36:00.000Z', '2026-08-15T23:41:00.000Z']) {
+  const sendAssignmentMessage = async () => {
+    attempts += 1;
+    const error = new Error('fallo simulado');
+    error.code = 'provider_down';
+    throw error;
+  };
+
+  for (const at of ['2026-08-13T23:31:00.000Z', '2026-08-13T23:36:00.000Z', '2026-08-13T23:41:00.000Z']) {
     const result = await runDispatchUserAutomationScheduler(prismaClient, { now: new Date(at), sendAssignmentMessage });
     assert.equal(result.assignmentFailed, 1);
   }
-  const exhausted = await runDispatchUserAutomationScheduler(prismaClient, { now: new Date('2026-08-15T23:46:00.000Z'), sendAssignmentMessage });
+  const exhausted = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-13T23:46:00.000Z'), sendAssignmentMessage
+  });
   assert.equal(exhausted.assignmentAttempts, 0);
   assert.equal(attempts, 3);
 });
 
-test('aviso de todos confirmados sale una vez por composición y no sale mientras exista un pendiente', async () => {
-  await withDispatchMetaEnv(async () => {
-    const { sendDispatchAllConfirmedAdminAlert } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
-    const audit = notificationAuditStore();
-    const assignments = [
-      scheduledAssignment({ id: 'confirmed-a', status: 'CONFIRMED' }),
-      scheduledAssignment({ id: 'pending-b', status: 'CONFIRMATION_PENDING', phone: '3002223344' })
-    ];
-    const outbound = [];
-    const prismaClient = {
-      devAuditEvent: audit.api,
-      appUser: {
-        findUnique: async () => ({ id: 'user-test-1', username: 'coordinador-test', isActive: true, dispatchAlertPhone: '573009998877' })
-      },
-      dispatchAssignment: { findMany: async () => assignments }
-    };
-    const axiosClient = {
-      post: async (_url, payload) => { outbound.push(payload); return { data: { messages: [{ id: `wamid-admin-${outbound.length}` }] } }; }
-    };
-    const target = assignments[0];
-    const link = { alertOwnerUsername: 'coordinador-test' };
+test('reporte de pendientes fallido no queda cerrado: respeta cooldown, reintenta y luego no duplica', async () => {
+  const { runDispatchUserAutomationScheduler } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
+  const configEvents = [{
+    id: 'config-alert-retry',
+    entityType: 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG',
+    entityId: 'user-1',
+    action: 'SET_DISPATCH_WHATSAPP_AUTOMATION',
+    metadata: { assignmentAutoSendTime: null, pendingConfirmationAlertTime: '19:00' },
+    createdAt: new Date('2026-08-12T20:00:00.000Z')
+  }];
+  const runEvents = [];
+  const assignment = scheduledAssignment({ id: 'pending-alert', fullName: 'Auxiliar Pendiente' });
+  const prismaClient = schedulerPrisma({ configEvents, assignments: [assignment], runEvents });
+  let attempts = 0;
+  const sendAdminMessage = async () => {
+    attempts += 1;
+    if (attempts === 1) throw Object.assign(new Error('fallo temporal simulado'), { code: 'provider_temporal' });
+    return 'wamid-admin-recovered';
+  };
 
-    const pending = await sendDispatchAllConfirmedAdminAlert({ scope: 'operational', link, assignment: target, prismaClient, axiosClient });
-    assert.equal(pending.sent, false);
-    assert.equal(pending.reason, 'pending_assignments');
-    assert.equal(outbound.length, 0);
-
-    assignments[1].status = 'CONFIRMED';
-    const complete = await sendDispatchAllConfirmedAdminAlert({ scope: 'operational', link, assignment: target, prismaClient, axiosClient });
-    assert.equal(complete.sent, true);
-    assert.equal(outbound.length, 1);
-    assert.equal(outbound[0].to, '573009998877');
-    assert.match(outbound[0].text.body, /Todos tus auxiliares/);
-
-    const duplicate = await sendDispatchAllConfirmedAdminAlert({ scope: 'operational', link, assignment: target, prismaClient, axiosClient });
-    assert.equal(duplicate.sent, false);
-    assert.equal(duplicate.duplicate, true);
-    assert.equal(outbound.length, 1);
-
-    assignments.push(scheduledAssignment({ id: 'confirmed-c', status: 'CONFIRMED', phone: '3003334455' }));
-    const changedComposition = await sendDispatchAllConfirmedAdminAlert({ scope: 'operational', link, assignment: target, prismaClient, axiosClient });
-    assert.equal(changedComposition.sent, true);
-    assert.equal(outbound.length, 2);
+  const first = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-14T00:01:00.000Z'), sendAdminMessage
   });
+  assert.equal(first.pendingAlertsFailed, 1);
+  assert.equal(attempts, 1);
+
+  const tooSoon = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-14T00:02:00.000Z'), sendAdminMessage
+  });
+  assert.equal(tooSoon.pendingAlertsSent, 0);
+  assert.equal(tooSoon.pendingAlertsFailed, 0);
+  assert.equal(attempts, 1);
+
+  const recovered = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-14T00:06:00.000Z'), sendAdminMessage
+  });
+  assert.equal(recovered.pendingAlertsSent, 1);
+  assert.equal(attempts, 2);
+
+  const afterSuccess = await runDispatchUserAutomationScheduler(prismaClient, {
+    now: new Date('2026-08-14T00:07:00.000Z'), sendAdminMessage
+  });
+  assert.equal(afterSuccess.pendingAlertsSent, 0);
+  assert.equal(attempts, 2);
 });
 
-test('UI conserva solo hora de envío y explica el aviso automático de todos confirmados', () => {
+test('UI de horarios es funcional para usuarios de Despacho sin exponer configuración técnica adicional', () => {
   const route = read('src/routes/dispatchWhatsappNotifications.js');
   const view = read('src/views/operacionesWhatsappEstado.ejs');
   assert.match(route, /router\.post\('\/programacion-automatica'/);
   assert.match(route, /saveDispatchWhatsappAutomationSettings/);
-  assert.doesNotMatch(route, /pendingConfirmationAlertTime/);
-  assert.doesNotMatch(route, /dispatchPendingConfirmationAlertTime/);
-  assert.match(view, /Envío automático de confirmaciones/);
+  assert.match(route, /pendingConfirmationAlertTime <= assignmentAutoSendTime/);
+  assert.match(view, /Horarios automáticos de confirmación/);
+  assert.match(view, /Bogotá · America\/Bogota/);
   assert.match(view, /name="dispatchAssignmentAutoSendTime"/);
-  assert.doesNotMatch(view, /dispatchPendingConfirmationAlertTime/);
-  assert.doesNotMatch(view, /Avisarme quiénes siguen sin confirmar/);
-  assert.match(view, /todos tus auxiliares activos de una misma fecha hayan confirmado/);
+  assert.match(view, /name="dispatchPendingConfirmationAlertTime"/);
+  assert.match(view, /Mis alertas de despacho por WhatsApp/);
+  assert.match(view, /<% if \(isDevView\) \{ %>[\s\S]*Configuración activa · solo DEV/);
 });
