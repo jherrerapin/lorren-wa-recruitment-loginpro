@@ -13,6 +13,8 @@ const CREDENTIAL_AUDIENCE = 'lorren-crew-presence';
 const CREDENTIAL_HMAC_CONTEXT = 'lorren-crew-presence-credential-v1';
 const PROOF_CONTEXT = 'lorren-presence-v1';
 const NATIVE_LOCATION_CONTEXT = 'lorren-native-location-v1';
+const NATIVE_ATTENDANCE_LOCATION_CONTEXT = 'lorren-native-attendance-location-v1';
+const ATTENDANCE_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 const DEFAULT_CREDENTIAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MIN_CREDENTIAL_TTL_MS = 15 * 60 * 1000;
 const MAX_CREDENTIAL_TTL_MS = 14 * 24 * 60 * 60 * 1000;
@@ -189,6 +191,12 @@ function parseLocationNumber(value, label, min, max) {
   return { text, number };
 }
 
+function normalizeAttendanceMarkType(value) {
+  const markType = requireString(value, 'attendance_native_location_mark_type', 40).toUpperCase();
+  if (!ATTENDANCE_MARK_TYPES.has(markType)) throw new Error('attendance_native_location_mark_type_invalid');
+  return markType;
+}
+
 export function buildCrewNativeLocationCanonicalProof(input = {}) {
   const attemptId = requireString(input.attemptId, 'crew_presence_attempt_id', 160);
   const serviceRequestId = requireString(input.serviceRequestId, 'crew_presence_service_request_id', 160);
@@ -199,6 +207,19 @@ export function buildCrewNativeLocationCanonicalProof(input = {}) {
   if (!Number.isFinite(capturedAt) || capturedAt <= 0) throw new Error('crew_presence_location_captured_at_invalid');
   if (typeof input.isMock !== 'boolean') throw new Error('crew_presence_location_mock_signal_invalid');
   return `${NATIVE_LOCATION_CONTEXT}\n${attemptId}\n${serviceRequestId}\n${latitude}\n${longitude}\n${accuracyMeters}\n${Math.trunc(capturedAt)}\n${input.isMock ? '1' : '0'}`;
+}
+
+export function buildNativeAttendanceLocationCanonicalProof(input = {}) {
+  const assignmentId = requireString(input.assignmentId, 'attendance_native_location_assignment_id', 160);
+  const markType = normalizeAttendanceMarkType(input.markType);
+  const idempotencyKey = requireString(input.idempotencyKey, 'attendance_native_location_idempotency_key', 160);
+  const latitude = parseLocationNumber(input.latitude, 'attendance_native_location_latitude', -90, 90).text;
+  const longitude = parseLocationNumber(input.longitude, 'attendance_native_location_longitude', -180, 180).text;
+  const accuracyMeters = parseLocationNumber(input.accuracyMeters, 'attendance_native_location_accuracy', 0, 100_000).text;
+  const capturedAt = Number(input.capturedAt);
+  if (!Number.isFinite(capturedAt) || capturedAt <= 0) throw new Error('attendance_native_location_captured_at_invalid');
+  if (typeof input.isMock !== 'boolean') throw new Error('attendance_native_location_mock_signal_invalid');
+  return `${NATIVE_ATTENDANCE_LOCATION_CONTEXT}\n${assignmentId}\n${markType}\n${idempotencyKey}\n${latitude}\n${longitude}\n${accuracyMeters}\n${Math.trunc(capturedAt)}\n${input.isMock ? '1' : '0'}`;
 }
 
 function requirePrisma(prisma) {
@@ -244,6 +265,96 @@ function verifyNativeLocationSignatureValue(proof, credentialPayload) {
   } catch {
     return false;
   }
+}
+
+function verifyNativeAttendanceLocationSignatureValue(proof, credentialPayload) {
+  const { encoded, publicKey } = parsePresencePublicKey(proof.publicKey);
+  if (publicKeyHash(encoded) !== credentialPayload.keyHash) return false;
+  const canonical = buildNativeAttendanceLocationCanonicalProof(proof);
+  const signature = decodeBase64(
+    proof.signature,
+    'attendance_native_location_signature',
+    MAX_SIGNATURE_BYTES
+  );
+  try {
+    return verifySignature('sha256', Buffer.from(canonical, 'utf8'), publicKey, signature);
+  } catch {
+    return false;
+  }
+}
+
+export function verifyNativeAttendanceLocationProof(input = {}, options = {}) {
+  const expectedWorkerId = requireString(input.workerId, 'attendance_native_location_worker_id', 160);
+  const expectedDeviceId = requireString(input.deviceId, 'attendance_native_location_device_id', 160);
+  const expectedAssignmentId = requireString(input.assignmentId, 'attendance_native_location_assignment_id', 160);
+  const expectedMarkType = normalizeAttendanceMarkType(input.markType);
+  const expectedIdempotencyKey = requireString(
+    input.idempotencyKey,
+    'attendance_native_location_idempotency_key',
+    160
+  );
+  const now = requireDate(input.now ?? new Date(), 'attendance_native_location_now');
+  const rawProof = input.proof;
+  if (!rawProof || typeof rawProof !== 'object' || Array.isArray(rawProof)) {
+    throw new Error('attendance_native_location_required');
+  }
+  if (rawProof.version !== 1) throw new Error('attendance_native_location_invalid');
+
+  const latitude = parseLocationNumber(rawProof.latitude, 'attendance_native_location_latitude', -90, 90);
+  const longitude = parseLocationNumber(rawProof.longitude, 'attendance_native_location_longitude', -180, 180);
+  const accuracy = parseLocationNumber(rawProof.accuracyMeters, 'attendance_native_location_accuracy', 0, 100_000);
+  const proof = {
+    assignmentId: requireString(rawProof.assignmentId, 'attendance_native_location_assignment_id', 160),
+    markType: normalizeAttendanceMarkType(rawProof.markType),
+    idempotencyKey: requireString(rawProof.idempotencyKey, 'attendance_native_location_idempotency_key', 160),
+    latitude: latitude.text,
+    longitude: longitude.text,
+    accuracyMeters: accuracy.text,
+    capturedAt: Number(rawProof.capturedAt),
+    isMock: rawProof.isMock,
+    publicKey: requireString(rawProof.publicKey, 'attendance_native_location_public_key', 4096),
+    signature: requireString(rawProof.signature, 'attendance_native_location_signature', 1024),
+    credential: requireString(rawProof.credential, 'attendance_native_location_credential', 4096)
+  };
+  if (
+    proof.assignmentId !== expectedAssignmentId
+    || proof.markType !== expectedMarkType
+    || proof.idempotencyKey !== expectedIdempotencyKey
+    || !Number.isFinite(proof.capturedAt)
+    || proof.capturedAt <= 0
+    || typeof proof.isMock !== 'boolean'
+  ) {
+    throw new Error('attendance_native_location_invalid');
+  }
+
+  const capturedAt = new Date(proof.capturedAt);
+  if (Math.abs(now.getTime() - capturedAt.getTime()) > MAX_PROOF_CLOCK_DELTA_MS) {
+    throw new Error('attendance_native_location_time_mismatch');
+  }
+
+  let credential;
+  try {
+    credential = readCrewPresenceCredential({ credential: proof.credential, at: capturedAt }, options);
+    if (
+      credential.workerId !== expectedWorkerId
+      || credential.deviceId !== expectedDeviceId
+      || !verifyNativeAttendanceLocationSignatureValue(proof, credential)
+    ) {
+      throw new Error('identity_invalid');
+    }
+  } catch {
+    throw new Error('attendance_native_location_identity_invalid');
+  }
+  if (proof.isMock) throw new Error('attendance_mock_location_detected');
+
+  return {
+    latitude: latitude.number,
+    longitude: longitude.number,
+    accuracyMeters: accuracy.number,
+    capturedAt,
+    clientCapturedAt: capturedAt.toISOString(),
+    credential
+  };
 }
 
 function normalizeLeaderLocationProof(rawProof, expected, options) {
