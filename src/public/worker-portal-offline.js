@@ -10,6 +10,7 @@
   const SYNC_TAG = 'lorren-worker-arrivals';
   const MAX_SELFIE_BYTES = 3 * 1024 * 1024;
   const MAX_QUEUE_AGE_MS = 72 * 60 * 60 * 1000;
+  const MAX_NATIVE_LOCATION_PROOF_BYTES = 16 * 1024;
   const MAX_CREW_PROOF_BYTES = 480 * 1024;
   const MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
   const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -154,6 +155,36 @@
     if (Number.isNaN(new Date(payload.clientCapturedAt).getTime())) throw new Error(`${prefix}_captured_at_invalid`);
   }
 
+  function validateNativeLocationProof(payload, markType) {
+    const proof = payload.nativeLocationProof;
+    if (proof === undefined || proof === null) return null;
+    if (!proof || typeof proof !== 'object' || Array.isArray(proof)) {
+      throw new Error('offline_mark_native_location_proof_invalid');
+    }
+    if (
+      proof.version !== 1
+      || String(proof.assignmentId || '').trim() !== String(payload.assignmentId || '').trim()
+      || String(proof.markType || '').trim().toUpperCase() !== markType
+      || String(proof.idempotencyKey || '').trim() !== String(payload.idempotencyKey || '').trim()
+      || proof.isMock !== false
+    ) {
+      throw new Error('offline_mark_native_location_proof_context_invalid');
+    }
+    if (
+      Number(proof.latitude) !== Number(payload.latitude)
+      || Number(proof.longitude) !== Number(payload.longitude)
+      || Number(proof.accuracyMeters) !== Number(payload.accuracyMeters)
+      || Number(proof.capturedAt) !== new Date(payload.clientCapturedAt).getTime()
+    ) {
+      throw new Error('offline_mark_native_location_proof_location_invalid');
+    }
+    const serialized = JSON.stringify(proof);
+    if (!serialized || new TextEncoder().encode(serialized).byteLength > MAX_NATIVE_LOCATION_PROOF_BYTES) {
+      throw new Error('offline_mark_native_location_proof_too_large');
+    }
+    return JSON.parse(serialized);
+  }
+
   function validatePayload(payload) {
     if (!payload || typeof payload !== 'object') throw new Error('offline_mark_payload_invalid');
     if (!/^[A-Za-z0-9_-]{16,100}$/.test(String(payload.idempotencyKey || ''))) {
@@ -163,13 +194,14 @@
     const markType = String(payload.markType || '').trim().toUpperCase();
     if (!MARK_TYPES.has(markType)) throw new Error('offline_mark_type_invalid');
     validateLocationPayload(payload, 'offline_mark');
+    const nativeLocationProof = validateNativeLocationProof(payload, markType);
     if (payload.selfie) {
       if (!(payload.selfie instanceof Blob) || !ALLOWED_IMAGE_TYPES.has(payload.selfie.type) || payload.selfie.size > MAX_SELFIE_BYTES) {
         throw new Error('offline_mark_selfie_invalid');
       }
       if (payload.photoConsent !== true) throw new Error('offline_mark_photo_consent_required');
     }
-    return markType;
+    return { markType, nativeLocationProof };
   }
 
   function validateCrewPresencePayload(payload) {
@@ -254,7 +286,7 @@
   }
 
   async function queueMark(payload) {
-    const markType = validatePayload(payload);
+    const { markType, nativeLocationProof } = validatePayload(payload);
     const now = new Date().toISOString();
     const record = {
       idempotencyKey: String(payload.idempotencyKey),
@@ -264,6 +296,7 @@
       longitude: Number(payload.longitude),
       accuracyMeters: Number(payload.accuracyMeters),
       clientCapturedAt: new Date(payload.clientCapturedAt).toISOString(),
+      ...(nativeLocationProof ? { nativeLocationProof } : {}),
       photoConsent: payload.photoConsent === true,
       selfie: payload.selfie || null,
       captureMode: 'OFFLINE_WEB',
