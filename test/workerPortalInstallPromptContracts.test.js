@@ -10,13 +10,14 @@ const handoffRouteSource = fs.readFileSync(new URL('../src/routes/workerPortalSe
 const androidBuildSource = fs.readFileSync(new URL('../mobile/android/app/build.gradle', import.meta.url), 'utf8');
 const presenceBridgeSource = fs.readFileSync(new URL('../mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java', import.meta.url), 'utf8');
 const serviceWorkerSource = fs.readFileSync(new URL('../src/public/worker-portal-sw.js', import.meta.url), 'utf8');
+const portalViewSource = fs.readFileSync(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
 const manifest = JSON.parse(fs.readFileSync(new URL('../src/public/worker-portal.webmanifest', import.meta.url), 'utf8'));
 
 
 test('el cargador incluye instalación, sesión y actualización sin duplicar el nombre de caché', () => {
   assert.match(loaderSource, /worker-portal-install\.js/);
   assert.match(loaderSource, /worker-portal-session-handoff\.js/);
-  assert.match(loaderSource, /20260803-worker-portal-runtime-v5/);
+  assert.match(loaderSource, /BIOMETRIC_ASSET_RELEASE = '20260814-worker-portal-biometric-v10'/);
   assert.match(loaderSource, /PORTAL_SHELL_UPDATED/);
   assert.match(loaderSource, /message\.cacheName/);
   assert.match(loaderSource, /registration\?\.update/);
@@ -35,6 +36,15 @@ test('el portal conserva un único CTA de descarga aunque el rostro ya estuviera
   assert.match(installSource, /buildPersistentCta\(\)/);
   assert.match(installSource, /insertAdjacentElement\('afterend', cta\)/);
   assert.doesNotMatch(installSource, /portal-install-cta-v2|android-install-cta-final/i);
+});
+
+
+test('el APK usa el bridge nativo para no ofrecer la instalación PWA dentro de sí mismo', () => {
+  assert.match(installSource, /if \(window\.LorrenAndroidPresence\) \{/);
+  assert.match(installSource, /document\.getElementById\('portal-install-cta'\)\?\.remove\(\)/);
+  assert.match(installSource, /document\.getElementById\('portal-install-dialog'\)/);
+  assert.match(installSource, /nativeDialog\?\.remove\(\);[\s\S]{0,40}return;/);
+  assert.match(presenceBridgeSource, /JS_NAME = "LorrenAndroidPresence"/);
 });
 
 
@@ -58,6 +68,16 @@ test('Android conserva temporalmente la instalación PWA mientras el APK se vali
   assert.doesNotMatch(installSource, /APK privado/);
   assert.doesNotMatch(installSource, /open-worker-portal-native/);
   assert.doesNotMatch(installSource, /lorren:\/\/portal\/transferencia/);
+});
+
+
+test('la marcación móvil prioriza la cámara y compacta consentimiento, estado y ubicación', () => {
+  assert.match(portalViewSource, /#photo-consent-wrap \{[^}]*font-size: 14px;[^}]*\}/);
+  assert.match(portalViewSource, /#mark-result \{[^}]*min-height: 64px;[^}]*font-size: clamp\(15px, 4vw, 18px\);[^}]*\}/);
+  assert.match(portalViewSource, /#camera-step \.face-stage \{[^}]*height: 100%;[^}]*margin: 5px auto 0;[^}]*\}/);
+  assert.match(portalViewSource, /#location-step \.step-copy \{[^}]*font-size: 12px;[^}]*\}/);
+  assert.match(portalViewSource, /#mark-dialog #submit-mark \{[^}]*min-height: 54px;[^}]*\}/);
+  assert.match(portalViewSource, /#mark-dialog \.mark-status \{ font-size: 16px; \}/);
 });
 
 

@@ -197,7 +197,6 @@
     style.textContent = `
       #${PANEL_ID}{margin:12px 0 16px;padding:14px;border:1px solid #99c8aa;border-radius:16px;background:#f1faf4;display:grid;gap:11px;color:#173b25}
       #${PANEL_ID} h3{margin:0;font-size:16px;color:#176c36}#${PANEL_ID} p{margin:0;font-size:12px;line-height:1.5;color:#55705f}
-      .native-presence-warning{padding:9px 10px;border-radius:10px;background:#fff6df;color:#76520b!important;font-weight:750}
       .native-presence-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}.native-presence-field{display:grid;gap:4px}.native-presence-field label{font-size:11px;font-weight:850;color:#34553e}.native-presence-field select{width:100%;min-height:42px;border:1px solid #b9c9bd;border-radius:10px;background:#fff;padding:8px 10px;color:#173b25;font:inherit}
       .native-presence-btn{min-height:44px;border:0;border-radius:11px;padding:9px 13px;background:#176c36;color:#fff;font:inherit;font-size:13px;font-weight:850;cursor:pointer}.native-presence-btn.secondary{background:#e4ece7;color:#234a30}.native-presence-btn:disabled{opacity:.55;cursor:wait}
       .native-presence-status{padding:10px 11px;border-radius:11px;background:#eaf8ef;color:#176c36;font-size:12px;font-weight:800;line-height:1.45}.native-presence-status.warning{background:#fff6df;color:#76520b}.native-presence-status.error{background:#fff1f2;color:#9f1239}
@@ -244,8 +243,10 @@
     node.textContent = String(scanVerifiedCount);
     const pending = document.querySelector(`#${PANEL_ID} [data-native-presence-pending]`);
     if (pending) pending.textContent = scanPendingCount > 0
-      ? `${scanPendingCount} conexión${scanPendingCount === 1 ? '' : 'es'} en proceso`
-      : 'Esperando teléfonos cercanos';
+      ? `${scanPendingCount} pendiente${scanPendingCount === 1 ? '' : 's'}`
+      : scanVerifiedCount > 0
+        ? `${scanVerifiedCount} auxiliar${scanVerifiedCount === 1 ? '' : 'es'} verificado${scanVerifiedCount === 1 ? '' : 's'}`
+        : 'Aún sin verificar';
   }
 
   function currentContext() {
@@ -318,13 +319,11 @@
 
     panel = element('section');
     panel.id = PANEL_ID;
-    panel.setAttribute('aria-label', 'Presencia local de cuadrilla');
+    panel.setAttribute('aria-label', 'Presencia de cuadrilla');
     panel.append(
-      element('h3', '', 'Presencia de cuadrilla sin internet'),
-      element('p', '', 'Los teléfonos Lórren se comprueban entre sí. No se necesita ningún dispositivo Bluetooth instalado en la operación.'),
-      element('p', 'native-presence-warning', 'La app no escribe asistencia por sí sola: guarda la evidencia y el servidor decide quién puede quedar marcado cuando haya conexión.')
+      element('h3', '', 'Presencia de cuadrilla'),
+      element('p', '', 'Comprueba quiénes están presentes.')
     );
-    // Texto histórico protegido por el contrato de Fase A: “Prueba local: todavía no registra asistencia”.
 
     if (!selectedServiceRequestId || !contexts.some((item) => item.serviceRequestId === selectedServiceRequestId)) {
       selectedServiceRequestId = contexts[0].serviceRequestId;
@@ -359,7 +358,7 @@
     if (context?.isCrewLeader) {
       action.textContent = retryNotDetectedCount > 0 || hasCompletedLeaderScan
         ? 'Reintentar no detectados'
-        : 'Marcar llegada de toda la cuadrilla';
+        : 'Verificar presencia';
       action.dataset.nativePresenceLeaderScan = 'true';
       action.addEventListener('click', () => startLeaderScan(false));
     } else {
@@ -371,10 +370,10 @@
     panel.appendChild(row);
 
     const status = element('div', 'native-presence-status warning', context?.isCrewLeader
-      ? 'Pulsa una vez. Lórren comprobará los teléfonos cercanos, guardará el intento y nunca marcará automáticamente a quien no sea detectado.'
+      ? 'Listo para verificar.'
       : credentialPrepared()
-        ? 'Al llegar, pulsa una vez y mantén Lórren abierto mientras el encargado hace la comprobación.'
-        : 'Este teléfono necesita abrir Lórren una vez con Internet para preparar su credencial de presencia.');
+        ? 'Listo para asistencia.'
+        : 'Conéctate una vez para preparar este teléfono.');
     status.dataset.nativePresenceStatus = 'true';
     panel.appendChild(status);
 
@@ -382,7 +381,7 @@
       const countWrap = element('div');
       const count = element('div', 'native-presence-count', '0');
       count.dataset.nativePresenceCount = 'true';
-      const pending = element('div', 'native-presence-small', 'Esperando teléfonos cercanos');
+      const pending = element('div', 'native-presence-small', 'Aún sin verificar');
       pending.dataset.nativePresencePending = 'true';
       countWrap.append(count, pending);
       panel.appendChild(countWrap);
@@ -394,7 +393,7 @@
     stop.dataset.nativePresenceStop = 'true';
     stop.addEventListener('click', () => {
       stopNativeModes();
-      setStatus('Comprobación local detenida.', 'warning');
+      setStatus('Verificación detenida.', 'warning');
       stop.hidden = true;
     });
     panel.appendChild(stop);
@@ -421,7 +420,7 @@
     if (!context || context.isCrewLeader) return;
     if (!credentialPrepared()) {
       if (!navigator.onLine || !(await provisionCredential())) {
-        setStatus('Abre Lórren una vez con Internet para preparar este teléfono antes de usar asistencia por cuadrilla.', 'warning');
+        setStatus('Conecta este teléfono a Internet una vez antes de usar la asistencia de cuadrilla.', 'warning');
         return;
       }
     }
@@ -432,7 +431,7 @@
     }
     activeMode = 'READY';
     showStop();
-    setStatus('Preparando este teléfono para que el encargado pueda encontrarlo…', 'warning');
+    setStatus('Listo para asistencia.', '');
   }
 
   async function startLeaderScan(automaticRetry = false) {
@@ -466,12 +465,7 @@
     }
     activeMode = 'LEADER';
     showStop();
-    setStatus(
-      automaticRetry
-        ? 'Reintentando conexiones transitorias con un challenge nuevo…'
-        : 'Buscando teléfonos cercanos y verificando la ubicación Android del encargado…',
-      'warning'
-    );
+    setStatus(automaticRetry ? 'Reintentando a quienes faltan…' : 'Verificando presencia…', 'warning');
   }
 
   function stopNativeModes() {
@@ -538,13 +532,13 @@
     }
     if (type === 'ready') {
       activeMode = 'READY';
-      setStatus('Listo. Mantén Lórren abierto mientras el encargado realiza la comprobación.', '');
+      setStatus('Listo para asistencia.', '');
       showStop();
       return;
     }
     if (type === 'scan_started') {
       activeMode = 'LEADER';
-      setStatus('Buscando teléfonos cercanos. Esto tarda solo unos segundos…', 'warning');
+      setStatus('Verificando presencia…', 'warning');
       showStop();
       return;
     }
@@ -557,11 +551,11 @@
       scanVerifiedCount = Math.max(scanVerifiedCount, Number(detail.verifiedCount || 0));
       scanPendingCount = Math.max(0, Number(detail.pendingCount ?? (scanPendingCount - 1)));
       updateCount();
-      setStatus(`${scanVerifiedCount} teléfono${scanVerifiedCount === 1 ? '' : 's'} auxiliar${scanVerifiedCount === 1 ? '' : 'es'} respondió${scanVerifiedCount === 1 ? '' : 'ieron'} con firma válida.`, '');
+      setStatus(`${scanVerifiedCount} auxiliar${scanVerifiedCount === 1 ? '' : 'es'} verificado${scanVerifiedCount === 1 ? '' : 's'}.`, '');
       return;
     }
     if (type === 'proof_sent') {
-      setStatus('El encargado recibió la respuesta firmada de este teléfono.', '');
+      setStatus('Presencia enviada al encargado.', '');
       return;
     }
     if (type === 'scan_complete') {
@@ -578,18 +572,16 @@
           activeAttempt = null;
           if (transientFailures > 0 && autoRetryRemaining > 0) {
             autoRetryRemaining -= 1;
-            setStatus(
-              `Comprobación guardada: encargado + ${proofCount} auxiliar${proofCount === 1 ? '' : 'es'}. Hubo una conexión transitoria; Lórren hará un reintento automático con un challenge nuevo.`,
-              'warning'
-            );
+            setStatus('Verificación guardada. Hubo un problema de conexión; Lórren reintentará automáticamente.', 'warning');
             autoRetryTimer = window.setTimeout(() => {
               autoRetryTimer = null;
               startLeaderScan(true);
             }, AUTO_RETRY_DELAY_MS);
             return;
           }
+          const totalVerified = proofCount + 1;
           setStatus(
-            `Comprobación guardada: encargado + ${proofCount} teléfono${proofCount === 1 ? '' : 's'} auxiliar${proofCount === 1 ? '' : 'es'} detectado${proofCount === 1 ? '' : 's'}. Los no detectados no se marcarán. Puedes pulsar “Reintentar no detectados” aun sin Internet. ${navigator.onLine ? 'Lórren está sincronizando.' : 'Se sincronizará cuando vuelva Internet.'}`,
+            `${totalVerified} integrante${totalVerified === 1 ? '' : 's'} verificado${totalVerified === 1 ? '' : 's'}. Puedes reintentar a quienes falten.`,
             navigator.onLine ? '' : 'warning'
           );
         })
@@ -622,12 +614,12 @@
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {
-      setStatus('La comprobación guardada no pudo convertirse en marcación. Ninguna persona sin evidencia fue agregada automáticamente.', 'error');
+      setStatus('No fue posible completar la verificación. Revisa a quienes siguen pendientes e intenta nuevamente.', 'error');
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_RETRY') {
       if (Number(message.retryAfterMs || 0) > 0) {
-        setStatus('La comprobación está guardada. Lórren volverá a sincronizarla automáticamente.', 'warning');
+        setStatus('La verificación sigue pendiente y Lórren la reintentará automáticamente.', 'warning');
       }
     }
   }
