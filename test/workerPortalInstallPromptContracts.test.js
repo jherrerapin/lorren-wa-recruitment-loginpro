@@ -57,6 +57,7 @@ test('Android conserva temporalmente la instalación PWA mientras el APK se vali
   assert.doesNotMatch(installSource, /sesion-transferencia\/android-app/);
   assert.doesNotMatch(installSource, /APK privado/);
   assert.doesNotMatch(installSource, /open-worker-portal-native/);
+  assert.doesNotMatch(installSource, /lorren:\/\/portal\/transferencia/);
 });
 
 
@@ -93,6 +94,19 @@ test('Android conserva el handoff de sesión para navegador y futura app nativa'
   assert.match(handoffSource, /lorren:\/\/portal\/transferencia\?transferencia=/);
   assert.match(handoffSource, /encodeURIComponent\(handoffToken\)/);
   assert.match(handoffSource, /stopImmediatePropagation/);
+});
+
+
+test('Android vuelve a ofrecer abrir el APK instalado sin mover la instalación PWA', () => {
+  assert.match(handoffSource, /function ensureNativeOpenButton\(\)/);
+  assert.match(handoffSource, /#portal-install-dialog \.portal-install-actions/);
+  assert.match(handoffSource, /button\.className = 'portal-install-secondary'/);
+  assert.match(handoffSource, /button\.id = NATIVE_OPEN_BUTTON_ID/);
+  assert.match(handoffSource, /Ya instalé Lórren · abrir app/);
+  assert.match(handoffSource, /actions\.insertBefore\(button, closeButton\)/);
+  assert.match(handoffSource, /const nativeButton = ensureNativeOpenButton\(\)/);
+  assert.match(handoffSource, /nativeButton\.dataset\.installAction = 'session-handoff-native'/);
+  assert.doesNotMatch(installSource, /open-worker-portal-native|session-handoff-native/);
 });
 
 

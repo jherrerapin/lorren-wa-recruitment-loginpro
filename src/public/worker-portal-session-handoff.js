@@ -59,6 +59,26 @@
     if (status.textContent !== message) status.textContent = message;
   }
 
+  function ensureNativeOpenButton() {
+    if (isNativeAndroidApp()) return null;
+    const actions = document.querySelector('#portal-install-dialog .portal-install-actions');
+    if (!actions) return null;
+
+    let button = document.getElementById(NATIVE_OPEN_BUTTON_ID);
+    if (button) return button;
+
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'portal-install-secondary';
+    button.id = NATIVE_OPEN_BUTTON_ID;
+    button.textContent = 'Ya instalé Lórren · abrir app';
+
+    const closeButton = actions.querySelector('#dismiss-worker-portal-install');
+    if (closeButton) actions.insertBefore(button, closeButton);
+    else actions.appendChild(button);
+    return button;
+  }
+
   function prepareInstallButtons() {
     if (!isAndroid()) return;
     if (shouldTransferInstallToChrome()) {
@@ -72,7 +92,7 @@
         button.dataset.installAction = 'session-handoff-chrome';
       }
     }
-    const nativeButton = document.getElementById(NATIVE_OPEN_BUTTON_ID);
+    const nativeButton = ensureNativeOpenButton();
     if (nativeButton) nativeButton.dataset.installAction = 'session-handoff-native';
   }
 
@@ -125,7 +145,7 @@
     if (!button?.isConnected) return;
     button.disabled = false;
     button.textContent = originalText || (button.id === NATIVE_OPEN_BUTTON_ID
-      ? 'Ya la instalé · abrir Lórren'
+      ? 'Ya instalé Lórren · abrir app'
       : 'Descargar app');
   }
 
