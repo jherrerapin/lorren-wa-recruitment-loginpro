@@ -72,7 +72,7 @@ test('dashboard and summary tabs use the route mounted by dispatchDashboardMetri
   }
 });
 
-test('novedades usa el resumen canónico y conserva la fecha de la solicitud al abrir asignación', async () => {
+test('novedades usa el resumen canónico, una sola búsqueda por fecha y conserva la fecha al abrir asignación', async () => {
   const noveltyTemplate = await readFile('src/views/operacionesNovedades.ejs', 'utf8');
   const html = ejs.render(noveltyTemplate, {
     pageTitle: 'Novedades operativas',
@@ -103,6 +103,8 @@ test('novedades usa el resumen canónico y conserva la fecha de la solicitud al 
 
   assert.match(html, /action="\/admin\/operaciones\/resumen"/);
   assert.match(html, /name="type" value="total"/);
+  assert.match(html, /Buscar solicitudes para reportar novedad/);
+  assert.doesNotMatch(html, /Ver solicitudes de la fecha seleccionada/);
   assert.ok(html.includes(expectedRenderedUrl('total')));
   assert.ok(html.includes(`/admin/operaciones/asignaciones?serviceRequestId=TEST-REQUEST-1260&amp;fecha=${SELECTED_DATE}`));
   assert.match(html, /Cierra solo el seguimiento de esta novedad\. No modifica la solicitud ni sus asignaciones\./);
