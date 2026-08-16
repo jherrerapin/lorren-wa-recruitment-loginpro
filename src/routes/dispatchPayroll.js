@@ -1,5 +1,6 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
+import multer from 'multer';
 import {
   buildPayrollExportRows,
   loadPayrollPolicies,
@@ -13,6 +14,16 @@ import {
   formatPayrollMinutes,
   minutesToDecimalHours
 } from '../modules/dispatch-payroll/domain/payrollConceptEngine.js';
+import {
+  PAYROLL_IMPORT_MAX_BYTES,
+  analyzePayrollAttendanceImport,
+  buildPayrollAttendanceImportPreview,
+  commitPayrollAttendanceImport,
+  loadRecentPayrollAttendanceImports,
+  parsePayrollAttendanceImportFile,
+  payrollAttendanceImportErrorMessage,
+  reversePayrollAttendanceImportBatch
+} from '../modules/dispatch-payroll/application/payrollAttendanceImport.js';
 import {
   resolvePayrollFeatureAccess,
   setPayrollFeatureAccess
@@ -66,6 +77,7 @@ function normalizeWorkerIds(value) {
 
 function actor(req) {
   return {
+    actorUserId: normalizeString(req.session?.userId || req.userId, 120),
     actorUsername: normalizeString(req.session?.username || req.username, 160),
     actorRole: normalizeString(req.session?.userRole || req.userRole, 80),
     ipAddress: normalizeString(req.ip, 120),
@@ -126,7 +138,15 @@ function publicError(error) {
     payroll_access_dev_required: 'Solo DEV puede cambiar este permiso.',
     payroll_access_user_not_found: 'El usuario ya no existe.'
   };
-  return messages[code] || 'No fue posible completar la operación de nómina.';
+  return messages[code] || payrollAttendanceImportErrorMessage(code) || 'No fue posible completar la operación de nómina.';
+}
+
+function multerUploadHandler(upload) {
+  return (req, res, next) => upload(req, res, (error) => {
+    if (!error) return next();
+    if (error?.code === 'LIMIT_FILE_SIZE') return res.status(413).json({ ok: false, error: publicError(new Error('payroll_import_file_too_large')) });
+    return res.status(400).json({ ok: false, error: publicError(new Error('payroll_import_file_invalid')) });
+  });
 }
 
 async function loadAccess(prisma, req) {
@@ -187,10 +207,7 @@ export function buildPayrollExcelWorkbook(report) {
 
   const sheet = workbook.addWorksheet('Nómina');
   sheet.properties.defaultRowHeight = 20;
-  sheet.columns = headers.map((header) => ({
-    key: header,
-    width: payrollExcelColumnWidth(header)
-  }));
+  sheet.columns = headers.map((header) => ({ key: header, width: payrollExcelColumnWidth(header) }));
 
   const lastColumnLetter = sheet.getColumn(headers.length).letter;
   sheet.mergeCells(`A1:${lastColumnLetter}1`);
@@ -237,8 +254,7 @@ export function buildPayrollExcelWorkbook(report) {
     row.eachCell({ includeEmpty: true }, (cell, columnIndex) => {
       const header = headers[columnIndex - 1];
       cell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
+        type: 'pattern', pattern: 'solid',
         fgColor: { argb: rowIndex % 2 ? PAYROLL_EXCEL_COLORS.stripe : PAYROLL_EXCEL_COLORS.white }
       };
       cell.border = {
@@ -254,43 +270,24 @@ export function buildPayrollExcelWorkbook(report) {
       if (isPayrollHourHeader(header)) cell.numFmt = '0.0';
       if (['DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos'].includes(header)) cell.numFmt = '0.##';
     });
-
     if (statusIndex > 0) {
       const statusCell = row.getCell(statusIndex);
       const hasNovelties = statusCell.value === 'Con novedades';
-      statusCell.font = {
-        bold: true,
-        color: { argb: hasNovelties ? PAYROLL_EXCEL_COLORS.amber : PAYROLL_EXCEL_COLORS.green }
-      };
+      statusCell.font = { bold: true, color: { argb: hasNovelties ? PAYROLL_EXCEL_COLORS.amber : PAYROLL_EXCEL_COLORS.green } };
       statusCell.fill = {
-        type: 'pattern',
-        pattern: 'solid',
+        type: 'pattern', pattern: 'solid',
         fgColor: { argb: hasNovelties ? PAYROLL_EXCEL_COLORS.amberSoft : PAYROLL_EXCEL_COLORS.greenSoft }
       };
     }
   });
 
-  sheet.views = [{
-    state: 'frozen',
-    xSplit: 3,
-    ySplit: PAYROLL_EXCEL_HEADER_ROW,
-    topLeftCell: 'D5',
-    activeCell: 'D5',
-    showGridLines: false
-  }];
-  sheet.autoFilter = {
-    from: `A${PAYROLL_EXCEL_HEADER_ROW}`,
-    to: `${lastColumnLetter}${PAYROLL_EXCEL_HEADER_ROW}`
-  };
+  sheet.views = [{ state: 'frozen', xSplit: 3, ySplit: PAYROLL_EXCEL_HEADER_ROW, topLeftCell: 'D5', activeCell: 'D5', showGridLines: false }];
+  sheet.autoFilter = { from: `A${PAYROLL_EXCEL_HEADER_ROW}`, to: `${lastColumnLetter}${PAYROLL_EXCEL_HEADER_ROW}` };
   sheet.pageSetup = {
-    orientation: 'landscape',
-    fitToPage: true,
-    fitToWidth: 1,
-    fitToHeight: 0,
+    orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
     margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
   };
   sheet.headerFooter.oddFooter = '&LLoginPro Service&C&P de &N&RReporte de Nómina';
-
   return workbook;
 }
 
@@ -343,9 +340,7 @@ async function reportForRequest(prisma, req, source) {
   const workerIds = normalizeWorkerIds(input.workerId);
   delete input.workerId;
   delete input.filterWorkerId;
-  const report = await loadPayrollReport(prisma, input, {
-    allowTestData: allowTestData(req)
-  });
+  const report = await loadPayrollReport(prisma, input, { allowTestData: allowTestData(req) });
   return applyPayrollWorkerSelection(report, workerIds);
 }
 
@@ -353,15 +348,13 @@ export function dispatchPayrollRouter(prisma) {
   const router = express.Router();
   const formParser = express.urlencoded({ extended: false, limit: '24kb' });
   const jsonParser = express.json({ limit: '8kb', strict: true });
+  const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: PAYROLL_IMPORT_MAX_BYTES, files: 1 } }).single('file');
+  const importParser = multerUploadHandler(importUpload);
 
   router.get('/api/users/:userId/access', requireDev, async (req, res) => {
     noStore(res);
     try {
-      const access = await resolvePayrollFeatureAccess(prisma, {
-        userRole: 'admin',
-        userId: req.params.userId,
-        username: null
-      });
+      const access = await resolvePayrollFeatureAccess(prisma, { userRole: 'admin', userId: req.params.userId, username: null });
       return res.json({ ok: true, enabled: access.allowed, userId: access.userId });
     } catch (error) {
       return res.status(400).json({ ok: false, error: error?.message || 'payroll_access_failed' });
@@ -371,11 +364,7 @@ export function dispatchPayrollRouter(prisma) {
   router.post('/api/users/:userId/access', requireDev, jsonParser, async (req, res) => {
     noStore(res);
     try {
-      const result = await setPayrollFeatureAccess(prisma, {
-        targetUserId: req.params.userId,
-        enabled: req.body?.enabled === true,
-        ...actor(req)
-      });
+      const result = await setPayrollFeatureAccess(prisma, { targetUserId: req.params.userId, enabled: req.body?.enabled === true, ...actor(req) });
       return res.json({ ok: true, ...result });
     } catch (error) {
       return res.status(400).json({ ok: false, error: error?.message || 'payroll_access_failed' });
@@ -388,11 +377,7 @@ export function dispatchPayrollRouter(prisma) {
     const user = username ? await prisma.appUser.findUnique({ where: { username }, select: { id: true } }) : null;
     if (!user) return res.status(404).json({ ok: false, error: 'payroll_access_user_not_found' });
     try {
-      const result = await setPayrollFeatureAccess(prisma, {
-        targetUserId: user.id,
-        enabled: req.body?.enabled === true,
-        ...actor(req)
-      });
+      const result = await setPayrollFeatureAccess(prisma, { targetUserId: user.id, enabled: req.body?.enabled === true, ...actor(req) });
       return res.json({ ok: true, ...result });
     } catch (error) {
       return res.status(400).json({ ok: false, error: error?.message || 'payroll_access_failed' });
@@ -412,46 +397,77 @@ export function dispatchPayrollRouter(prisma) {
     }
   });
 
+  router.post('/imports/preview', importParser, async (req, res) => {
+    try {
+      const parsed = await parsePayrollAttendanceImportFile(req.file, { mapping: req.body?.mapping });
+      const analysis = await analyzePayrollAttendanceImport(prisma, parsed, {
+        includeTest: allowTestData(req) && String(req.body?.includeTest || '').toLowerCase() === 'true'
+      });
+      return res.status(200).json(buildPayrollAttendanceImportPreview(analysis));
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: publicError(error), code: normalizeString(error?.message, 120) });
+    }
+  });
+
+  router.post('/imports/commit', importParser, async (req, res) => {
+    try {
+      const result = await commitPayrollAttendanceImport(prisma, req.file, {
+        mapping: req.body?.mapping,
+        previewFingerprint: normalizeString(req.body?.previewFingerprint, 128),
+        includeTest: allowTestData(req) && String(req.body?.includeTest || '').toLowerCase() === 'true',
+        actor: actor(req)
+      });
+      return res.status(200).json({ ok: true, ...result });
+    } catch (error) {
+      console.warn('[PAYROLL_ATTENDANCE_IMPORT_FAILED]', { code: normalizeString(error?.message, 120) || 'unknown' });
+      return res.status(400).json({ ok: false, error: publicError(error), code: normalizeString(error?.message, 120) });
+    }
+  });
+
+  router.post('/imports/:batchId/reverse', formParser, async (req, res) => {
+    try {
+      const result = await reversePayrollAttendanceImportBatch(prisma, req.params.batchId, { actor: actor(req) });
+      const message = result.conflicts
+        ? `Reversa parcial: ${result.reversedWorkdays} jornada(s) reversada(s) y ${result.conflicts} protegida(s) por cambios posteriores.`
+        : `Importación reversada: ${result.reversedWorkdays} jornada(s).`;
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { success: message });
+    } catch (error) {
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { error: publicError(error) });
+    }
+  });
+
   router.get('/', async (req, res) => {
     try {
-      const report = await reportForRequest(prisma, req, req.query || {});
+      const [report, recentImports] = await Promise.all([
+        reportForRequest(prisma, req, req.query || {}),
+        loadRecentPayrollAttendanceImports(prisma, 20).catch(() => [])
+      ]);
       const selectedClientId = report.filters.clientId || report.clients[0]?.id || '';
       const selectedPolicies = await loadPayrollPolicies(prisma, selectedClientId ? [selectedClientId] : []);
       const selectedPolicy = selectedPolicies.get(selectedClientId) || DEFAULT_PAYROLL_POLICY;
       return res.render('operacionesNomina', {
-        pageTitle: 'Nómina y tiempo trabajado',
-        role: roleFromRequest(req),
-        report,
-        selectedPolicy,
-        conceptCodes: PAYROLL_CONCEPT_CODES,
-        formatPayrollMinutes,
-        success: normalizeString(req.query?.success, 300),
-        error: normalizeString(req.query?.error, 300)
+        pageTitle: 'Nómina y tiempo trabajado', role: roleFromRequest(req), report, recentImports, selectedPolicy,
+        conceptCodes: PAYROLL_CONCEPT_CODES, formatPayrollMinutes,
+        success: normalizeString(req.query?.success, 300), error: normalizeString(req.query?.error, 300)
       });
     } catch (error) {
       console.error('[PAYROLL_REPORT_FAILED]', error);
       return res.status(500).render('operacionesNomina', {
-        pageTitle: 'Nómina y tiempo trabajado',
-        role: roleFromRequest(req),
+        pageTitle: 'Nómina y tiempo trabajado', role: roleFromRequest(req), recentImports: [],
         report: {
           period: { periodType: 'WEEKLY', from: '', to: '', anchor: '' },
           filters: { clientId: '', operationPointId: '', workerId: '', search: '', includeTest: false },
           clients: [], workers: [], rows: [], conceptCodes: PAYROLL_CONCEPT_CODES,
           totals: { workers: 0, totalMinutes: 0, ordinaryMinutes: 0, overtimeMinutes: 0, exportableWorkers: 0, workersWithNovelties: 0, conceptMinutes: {}, conceptHours: {} }
         },
-        selectedPolicy: DEFAULT_PAYROLL_POLICY,
-        conceptCodes: PAYROLL_CONCEPT_CODES,
-        formatPayrollMinutes,
-        success: null,
-        error: publicError(error)
+        selectedPolicy: DEFAULT_PAYROLL_POLICY, conceptCodes: PAYROLL_CONCEPT_CODES, formatPayrollMinutes,
+        success: null, error: publicError(error)
       });
     }
   });
 
   router.post('/policy', formParser, async (req, res) => {
-    if (roleFromRequest(req) !== 'dev') {
-      return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { error: 'Solo DEV puede modificar la política de jornada.' });
-    }
+    if (roleFromRequest(req) !== 'dev') return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { error: 'Solo DEV puede modificar la política de jornada.' });
     try {
       await savePayrollPolicy(prisma, { ...req.body, recognizeEarlyArrival: req.body.recognizeEarlyArrival === 'true', ...actor(req) });
       return redirectToPayroll(res, sanitizedPayrollInput(req, req.body), { success: 'Política de jornada guardada con auditoría.' });
