@@ -57,8 +57,7 @@ const PAYROLL_EXCEL_COLUMN_WIDTHS = Object.freeze({
   HorasOrdinarias: 16,
   TotalTrabajado: 16,
   HorasExtraTotal: 16,
-  Estado: 16,
-  Novedades: 42
+  Estado: 16
 });
 
 function normalizeString(value, maxLength = 200) {
@@ -180,7 +179,7 @@ function sumRows(rows, field) {
 
 function payrollExcelHeaders(rows) {
   return rows.length
-    ? Object.keys(rows[0])
+    ? Object.keys(rows[0]).filter((header) => header !== 'Novedades')
     : ['Documento', 'Nombre', 'FechaInicial', 'FechaFinal', ...PAYROLL_CONCEPT_CODES];
 }
 
@@ -245,7 +244,7 @@ export function buildPayrollExcelWorkbook(report) {
   headerRow.height = 32;
 
   const statusIndex = headers.indexOf('Estado') + 1;
-  const wrapHeaders = new Set(['Nombre', 'Descansos', 'Novedades']);
+  const wrapHeaders = new Set(['Nombre', 'Descansos']);
   const centeredHeaders = new Set(['TipoDocumento', 'FechaInicial', 'FechaFinal', 'DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos', 'Estado']);
 
   rows.forEach((sourceRow, rowIndex) => {

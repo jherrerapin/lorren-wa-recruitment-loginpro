@@ -44,7 +44,7 @@ test('Nómina retira el botón CSV pero conserva la descarga Excel', async () =>
   assert.match(route, /router\.get\('\/export\.csv'/);
 });
 
-test('el Excel de Nómina conserva datos y aplica formato profesional', async () => {
+test('el Excel de Nómina conserva datos y aplica formato profesional sin exponer la columna Novedades', async () => {
   const workbook = buildPayrollExcelWorkbook(syntheticReport());
   const sheet = workbook.getWorksheet('Nómina');
   assert.ok(sheet);
@@ -58,20 +58,22 @@ test('el Excel de Nómina conserva datos y aplica formato profesional', async ()
   assert.equal(sheet.views[0].showGridLines, false);
   assert.match(JSON.stringify(sheet.autoFilter), /A4/);
 
+  const headers = sheet.getRow(4).values.slice(1);
+  assert.equal(headers.includes('Novedades'), false);
+
   const documentoColumn = headerColumn(sheet, 'Documento');
   const nombreColumn = headerColumn(sheet, 'Nombre');
   const horasColumn = headerColumn(sheet, 'HorasOrdinarias');
-  const novedadesColumn = headerColumn(sheet, 'Novedades');
   const estadoColumn = headerColumn(sheet, 'Estado');
 
   assert.equal(sheet.getCell(5, documentoColumn).value, 'TEST-DOC-001');
   assert.equal(sheet.getCell(5, nombreColumn).value, 'TEST Auxiliar Uno');
   assert.equal(sheet.getCell(5, horasColumn).value, 70);
+  assert.equal(sheet.getCell(5, estadoColumn).value, 'Con novedades');
   assert.equal(sheet.getColumn(nombreColumn).width, 30);
   assert.equal(sheet.getCell(4, documentoColumn).fill.fgColor.argb, 'FF0D7A6B');
   assert.equal(sheet.getCell(4, documentoColumn).font.color.argb, 'FFFFFFFF');
   assert.equal(sheet.getCell(5, horasColumn).numFmt, '0.0');
-  assert.equal(sheet.getCell(5, novedadesColumn).alignment.wrapText, true);
   assert.equal(sheet.getCell(5, estadoColumn).fill.fgColor.argb, 'FFFEF3C7');
 
   const buffer = await workbook.xlsx.writeBuffer();
