@@ -103,6 +103,20 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   }
 });
 
+test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal individual', async () => {
+  const nativePresence = await read('app/src/main/assets/native-presence.js');
+  const renderPanel = nativePresence.match(/function renderPanel\(\) \{([\s\S]*?)\n  \}\n\n  function insertPanel/);
+
+  assert.ok(renderPanel, 'no se encontró la autoridad renderPanel');
+  assert.match(
+    renderPanel[1],
+    /document\.getElementById\(PANEL_ID\)[\s\S]{0,160}if \(!contexts\.length\) return;[\s\S]{0,80}installStyles\(\);/
+  );
+  assert.doesNotMatch(nativePresence, /No hay una cuadrilla disponible para este teléfono en este momento\./);
+  assert.match(nativePresence, /Presencia de cuadrilla sin internet/);
+  assert.match(nativePresence, /if \(!selectedServiceRequestId \|\| !contexts\.some/);
+});
+
 test('la prueba Android no contiene PII ni una identidad Bluetooth humana', async () => {
   const [nearby, nativePresence, readme] = await Promise.all([
     read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
