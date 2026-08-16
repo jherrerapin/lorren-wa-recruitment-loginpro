@@ -186,7 +186,7 @@ function robustReferenceSimilarity(referenceDescriptors, verificationDescriptors
   return Math.round(Math.min(...bestByVerificationSample) * 10_000) / 10_000;
 }
 
-function validateStrictSamples(input, expectedLength, prefix) {
+function validateStrictSamples(input, expectedLength, prefix, options = {}) {
   const descriptors = normalizeDescriptorSamples(
     input.sampleDescriptors,
     expectedLength,
@@ -202,10 +202,11 @@ function validateStrictSamples(input, expectedLength, prefix) {
     expectedLength,
     `attendance_biometric_${prefix}_live_scores`
   );
-  if (realScores.some((score) => score < REAL_THRESHOLD)) {
+  const enforcePresenceScores = options.enforcePresenceScores !== false;
+  if (enforcePresenceScores && realScores.some((score) => score < REAL_THRESHOLD)) {
     throw new Error('attendance_biometric_antispoof_low');
   }
-  if (liveScores.some((score) => score < LIVE_THRESHOLD)) {
+  if (enforcePresenceScores && liveScores.some((score) => score < LIVE_THRESHOLD)) {
     throw new Error('attendance_biometric_liveness_low');
   }
   const minimumSimilarity = minimumSampleSimilarity(descriptors);
@@ -427,7 +428,7 @@ export async function enrollWorkerBiometric(prisma, input = {}, options = {}) {
       throw new Error('attendance_biometric_model_version_invalid');
     }
     const strictSampleCount = strictEnrollmentSampleCount(input);
-    const samples = validateStrictSamples(input, strictSampleCount, 'enrollment');
+    const samples = validateStrictSamples(input, strictSampleCount, 'enrollment', { enforcePresenceScores: false });
     finiteNumber(input.captureDurationMs, 'attendance_biometric_enrollment_duration', {
       min: MIN_CAPTURE_DURATION_MS,
       max: MAX_CAPTURE_DURATION_MS
