@@ -9,7 +9,7 @@ import {
 } from '../services/dispatchWhatsappCloudService.js';
 import { addDispatchIsoDays, todayIsoDateCO } from '../services/dispatchDate.js';
 import { confirmedOperationalAssignments, deriveDispatchRequestOperationalState } from '../services/dispatchOperationalCoverage.js';
-import { buildProgrammingCompletionSummary, loadProgrammingRequests } from '../services/dispatchProgrammingPdfService.js';
+import { loadProgrammingReportData } from '../services/dispatchProgrammingPdfService.js';
 import {
   sendDispatchWhatsappProgrammingDateMenu,
   sendDispatchWhatsappProgrammingFormatMenu,
@@ -158,20 +158,34 @@ async function auditProgrammingReply(prisma, { phone, body, messageType, provide
   await recordDispatchWhatsappMessageAudit({ prismaClient: prisma, scope: 'operational', direction: 'OUTBOUND', phone, body, messageType, providerMessageId, source, occurredAt: new Date() });
 }
 
-async function sendProgrammingSummary(prisma, contact, selectedDate = todayIsoDateCO()) {
-  const loaded = await loadProgrammingRequests(prisma, selectedDate);
-  const summary = buildProgrammingCompletionSummary(loaded.requests);
-  const confirmedWorkers = loaded.requests.reduce((sum, request) => sum + confirmedOperationalAssignments(request).length, 0);
-  const pendingRequests = loaded.requests.filter((request) => PENDING_PROGRAMMING_STATUSES.has(deriveDispatchRequestOperationalState(request).status)).length;
-  const text = [
-    `📊 *Resumen operativo — ${formatDateLabel(loaded.selectedDate)}*`,
-    `Solicitudes: ${summary.totalRequests}`,
-    `Completas: ${summary.completedRequests}`,
+export function buildProgrammingSummaryText(report = {}) {
+  const requests = Array.isArray(report.requests) ? report.requests : [];
+  const summary = report.summary || {};
+  const workerAbsences = Array.isArray(report.workerAbsences) ? report.workerAbsences : [];
+  const confirmedWorkers = requests.reduce((sum, request) => sum + confirmedOperationalAssignments(request).length, 0);
+  const pendingRequests = requests.filter((request) => PENDING_PROGRAMMING_STATUSES.has(deriveDispatchRequestOperationalState(request).status)).length;
+  const lines = [
+    `📊 *Resumen operativo — ${formatDateLabel(report.selectedDate)}*`,
+    `Solicitudes: ${Number(summary.totalRequests || 0)}`,
+    `Completas: ${Number(summary.completedRequests || 0)}`,
     `Pendientes: ${pendingRequests}`,
-    `Auxiliares requeridos: ${summary.requiredWorkers}`,
-    `Asignados: ${summary.assignedWorkers}`,
-    `Confirmados: ${confirmedWorkers}`
-  ].join('\n');
+    `Auxiliares requeridos: ${Number(summary.requiredWorkers || 0)}`,
+    `Asignados: ${Number(summary.assignedWorkers || 0)}`,
+    `Confirmados: ${confirmedWorkers}`,
+    `Descansos/incapacidades: ${workerAbsences.length}`
+  ];
+  if (workerAbsences.length) {
+    lines.push('', '*Novedades de descanso:*');
+    workerAbsences.forEach((absence) => {
+      lines.push(`• ${absence.workerName || 'Auxiliar'} — ${absence.reasonLabel || 'Descanso'}`);
+    });
+  }
+  return lines.join('\n');
+}
+
+async function sendProgrammingSummary(prisma, contact, selectedDate = todayIsoDateCO()) {
+  const report = await loadProgrammingReportData(prisma, { selectedDate, includePending: true });
+  const text = buildProgrammingSummaryText(report);
   const providerMessageId = await sendDispatchWhatsappTextMessage({ scope: 'operational', phone: contact.phone, text });
   await auditProgrammingReply(prisma, { phone: contact.phone, body: text, messageType: 'TEXT', providerMessageId, source: 'PROGRAMMING_CONTACT_SUMMARY' });
 }
