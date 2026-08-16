@@ -20,8 +20,14 @@ final class PresenceBridge {
     static final String JS_NAME = "LorrenAndroidPresence";
     private static final String PREFS = "lorren_presence_native_v1";
     private static final String CREDENTIAL_KEY = "presence_credential";
+    private static final String NATIVE_ATTENDANCE_LOCATION_CONTEXT = "lorren-native-attendance-location-v1";
     private static final long MAX_LAST_LOCATION_AGE_MS = 30_000L;
     private static final long LOCATION_TIMEOUT_MS = 15_000L;
+
+    private interface NativeLocationSink {
+        void onLocation(Location location);
+        void onError(String code);
+    }
 
     private final MainActivity activity;
     private final SharedPreferences preferences;
@@ -84,6 +90,8 @@ final class PresenceBridge {
     @JavascriptInterface
     public String setReady(String serviceRequestId) {
         if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
+        String readinessError = activity.ensureNearbyRadioReady();
+        if (readinessError != null) return jsonError(readinessError);
         try {
             manager.startReady(serviceRequestId);
             return jsonOk();
@@ -101,6 +109,8 @@ final class PresenceBridge {
     @JavascriptInterface
     public String startCrewScan(String inputJson) {
         if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
+        String readinessError = activity.ensureNearbyRadioReady();
+        if (readinessError != null) return jsonError(readinessError);
         try {
             JSONObject input = new JSONObject(inputJson == null ? "{}" : inputJson);
             synchronized (this) {
@@ -141,6 +151,39 @@ final class PresenceBridge {
         return bundle.toString();
     }
 
+    @JavascriptInterface
+    public String requestAttendanceLocation(String inputJson) {
+        if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
+        String credential = presenceCredential();
+        if (credential.isEmpty()) return jsonError("native_location_credential_required");
+        try {
+            JSONObject input = new JSONObject(inputJson == null ? "{}" : inputJson);
+            String assignmentId = requiredToken(input.optString("assignmentId"), "assignmentId");
+            String markType = normalizedMarkType(input.optString("markType"));
+            String idempotencyKey = requiredToken(input.optString("idempotencyKey"), "idempotencyKey");
+            captureNativeLocation(false, new NativeLocationSink() {
+                @Override
+                public void onLocation(Location location) {
+                    storeAttendanceLocationProof(
+                        assignmentId,
+                        markType,
+                        idempotencyKey,
+                        credential,
+                        location
+                    );
+                }
+
+                @Override
+                public void onError(String code) {
+                    emitAttendanceLocationError(assignmentId, markType, idempotencyKey, code);
+                }
+            });
+            return jsonOk();
+        } catch (Exception error) {
+            return jsonError("native_attendance_location_input_invalid");
+        }
+    }
+
     void shutdown() {
         cancelPendingLocation();
         manager.shutdown();
@@ -149,17 +192,32 @@ final class PresenceBridge {
     private void captureLeaderLocation(JSONObject input) {
         String attemptId = requiredToken(input.optString("attemptId"), "attemptId");
         String serviceRequestId = requiredToken(input.optString("serviceRequestId"), "serviceRequestId");
+        captureNativeLocation(true, new NativeLocationSink() {
+            @Override
+            public void onLocation(Location location) {
+                storeLeaderLocationProof(attemptId, serviceRequestId, location);
+            }
+
+            @Override
+            public void onError(String code) {
+                emitLocationError(code);
+            }
+        });
+    }
+
+    private void captureNativeLocation(boolean allowRecent, NativeLocationSink sink) {
         if (locationManager == null) {
-            emitLocationError("native_location_unavailable");
+            sink.onError("native_location_unavailable");
             return;
         }
 
-        Location recent = freshestLastKnownLocation();
-        if (recent != null) storeLeaderLocationProof(attemptId, serviceRequestId, recent);
+        Location recent = allowRecent ? freshestLastKnownLocation() : null;
+        boolean deliveredRecent = recent != null;
+        if (deliveredRecent) sink.onLocation(recent);
 
         String provider = preferredProvider();
         if (provider == null) {
-            if (recent == null) emitLocationError("native_location_unavailable");
+            if (!deliveredRecent) sink.onError("native_location_unavailable");
             return;
         }
 
@@ -168,7 +226,7 @@ final class PresenceBridge {
             @Override
             public void onLocationChanged(Location location) {
                 cancelPendingLocation();
-                storeLeaderLocationProof(attemptId, serviceRequestId, location);
+                sink.onLocation(location);
             }
 
             @Override
@@ -188,9 +246,7 @@ final class PresenceBridge {
             pendingLocationListener = listener;
             pendingLocationTimeout = () -> {
                 cancelPendingLocation();
-                synchronized (PresenceBridge.this) {
-                    if (leaderLocationProof == null) emitLocationError("native_location_unavailable");
-                }
+                if (!deliveredRecent) sink.onError("native_location_unavailable");
             };
         }
         try {
@@ -204,15 +260,15 @@ final class PresenceBridge {
                     if (timeout != null) mainHandler.postDelayed(timeout, LOCATION_TIMEOUT_MS);
                 } catch (SecurityException error) {
                     cancelPendingLocation();
-                    emitLocationError("permissions_required");
+                    sink.onError("permissions_required");
                 } catch (Exception error) {
                     cancelPendingLocation();
-                    emitLocationError("native_location_unavailable");
+                    sink.onError("native_location_unavailable");
                 }
             });
         } catch (Exception error) {
             cancelPendingLocation();
-            emitLocationError("native_location_unavailable");
+            sink.onError("native_location_unavailable");
         }
     }
 
@@ -251,10 +307,10 @@ final class PresenceBridge {
     private void storeLeaderLocationProof(String attemptId, String serviceRequestId, Location location) {
         if (location == null) return;
         try {
-            String latitude = String.format(Locale.US, "%.7f", location.getLatitude());
-            String longitude = String.format(Locale.US, "%.7f", location.getLongitude());
-            String accuracy = String.format(Locale.US, "%.2f", Math.max(0f, location.getAccuracy()));
-            long capturedAt = location.getTime() > 0L ? location.getTime() : System.currentTimeMillis();
+            String latitude = latitude(location);
+            String longitude = longitude(location);
+            String accuracy = accuracy(location);
+            long capturedAt = capturedAt(location);
             boolean mock = isMockLocation(location);
             String canonical = canonicalLocationProof(
                 attemptId,
@@ -277,7 +333,7 @@ final class PresenceBridge {
             proof.put("isMock", mock);
             proof.put("publicKey", DeviceKeyStore.publicKeyBase64());
             proof.put("signature", DeviceKeyStore.signBase64(canonical));
-            proof.put("credential", preferences.getString(CREDENTIAL_KEY, ""));
+            proof.put("credential", presenceCredential());
             synchronized (this) {
                 leaderLocationProof = proof;
             }
@@ -288,6 +344,91 @@ final class PresenceBridge {
         } catch (Exception error) {
             emitLocationError("native_location_proof_failed");
         }
+    }
+
+    private void storeAttendanceLocationProof(
+        String assignmentId,
+        String markType,
+        String idempotencyKey,
+        String credential,
+        Location location
+    ) {
+        if (location == null) return;
+        try {
+            String latitude = latitude(location);
+            String longitude = longitude(location);
+            String accuracy = accuracy(location);
+            long capturedAt = capturedAt(location);
+            boolean mock = isMockLocation(location);
+            if (mock) {
+                emitAttendanceLocationError(
+                    assignmentId,
+                    markType,
+                    idempotencyKey,
+                    "mock_location_detected"
+                );
+                return;
+            }
+            String canonical = canonicalAttendanceLocationProof(
+                assignmentId,
+                markType,
+                idempotencyKey,
+                latitude,
+                longitude,
+                accuracy,
+                capturedAt,
+                false
+            );
+            JSONObject proof = new JSONObject();
+            proof.put("version", 1);
+            proof.put("assignmentId", assignmentId);
+            proof.put("markType", markType);
+            proof.put("idempotencyKey", idempotencyKey);
+            proof.put("latitude", latitude);
+            proof.put("longitude", longitude);
+            proof.put("accuracyMeters", accuracy);
+            proof.put("capturedAt", capturedAt);
+            proof.put("isMock", false);
+            proof.put("publicKey", DeviceKeyStore.publicKeyBase64());
+            proof.put("signature", DeviceKeyStore.signBase64(canonical));
+            proof.put("credential", credential);
+
+            JSONObject event = new JSONObject();
+            event.put("type", "attendance_location_ready");
+            event.put("assignmentId", assignmentId);
+            event.put("markType", markType);
+            event.put("idempotencyKey", idempotencyKey);
+            event.put("proof", proof);
+            activity.emitPresenceEvent(event);
+        } catch (Exception error) {
+            emitAttendanceLocationError(
+                assignmentId,
+                markType,
+                idempotencyKey,
+                "native_location_proof_failed"
+            );
+        }
+    }
+
+    private static String latitude(Location location) {
+        return String.format(Locale.US, "%.7f", location.getLatitude());
+    }
+
+    private static String longitude(Location location) {
+        return String.format(Locale.US, "%.7f", location.getLongitude());
+    }
+
+    private static String accuracy(Location location) {
+        return String.format(Locale.US, "%.2f", Math.max(0f, location.getAccuracy()));
+    }
+
+    private static long capturedAt(Location location) {
+        return location.getTime() > 0L ? location.getTime() : System.currentTimeMillis();
+    }
+
+    private String presenceCredential() {
+        String credential = preferences.getString(CREDENTIAL_KEY, "");
+        return credential == null ? "" : credential.trim();
     }
 
     private static boolean isMockLocation(Location location) {
@@ -307,6 +448,27 @@ final class PresenceBridge {
         return "lorren-native-location-v1\n"
             + attemptId + "\n"
             + serviceRequestId + "\n"
+            + latitude + "\n"
+            + longitude + "\n"
+            + accuracyMeters + "\n"
+            + capturedAt + "\n"
+            + (mock ? "1" : "0");
+    }
+
+    private static String canonicalAttendanceLocationProof(
+        String assignmentId,
+        String markType,
+        String idempotencyKey,
+        String latitude,
+        String longitude,
+        String accuracyMeters,
+        long capturedAt,
+        boolean mock
+    ) {
+        return NATIVE_ATTENDANCE_LOCATION_CONTEXT + "\n"
+            + assignmentId + "\n"
+            + markType + "\n"
+            + idempotencyKey + "\n"
             + latitude + "\n"
             + longitude + "\n"
             + accuracyMeters + "\n"
@@ -336,6 +498,37 @@ final class PresenceBridge {
             activity.emitPresenceEvent(event);
         } catch (Exception ignored) {
         }
+    }
+
+    private void emitAttendanceLocationError(
+        String assignmentId,
+        String markType,
+        String idempotencyKey,
+        String code
+    ) {
+        try {
+            JSONObject event = new JSONObject();
+            event.put("type", "attendance_location_error");
+            event.put("assignmentId", assignmentId);
+            event.put("markType", markType);
+            event.put("idempotencyKey", idempotencyKey);
+            event.put("code", code);
+            activity.emitPresenceEvent(event);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String normalizedMarkType(String value) {
+        String normalized = requiredToken(value, "markType").toUpperCase(Locale.ROOT);
+        if (
+            !"ARRIVAL".equals(normalized)
+            && !"BREAK_START".equals(normalized)
+            && !"BREAK_END".equals(normalized)
+            && !"DEPARTURE".equals(normalized)
+        ) {
+            throw new IllegalArgumentException("markType_invalid");
+        }
+        return normalized;
     }
 
     private static String requiredToken(String value, String label) {

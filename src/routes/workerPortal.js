@@ -11,7 +11,8 @@ import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../modules/dispatch-attenda
 import { registerCrewArrivalForLeader } from '../modules/dispatch-attendance/application/registerCrewArrival.js';
 import {
   issueCrewPresenceCredential,
-  verifyCrewPresenceBundle
+  verifyCrewPresenceBundle,
+  verifyNativeAttendanceLocationProof
 } from '../modules/dispatch-attendance/application/crewPresenceCredential.js';
 import {
   CREW_BLUETOOTH_OPERATION_CHARACTERISTIC_UUID,
@@ -36,6 +37,7 @@ export * from './workerPortalCore.js';
 
 const HUMAN_CDN_ORIGIN = 'https://cdn.jsdelivr.net';
 const WORKER_PORTAL_REQUEST_HEADER = 'worker-portal';
+const NATIVE_ANDROID_USER_AGENT_TOKEN = 'LorrenNative/1';
 const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
 const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
 const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
@@ -67,6 +69,42 @@ function normalizeBiometricMarkType(value) {
   const markType = normalizedString(value, 40)?.toUpperCase();
   if (!BIOMETRIC_MARK_TYPES.has(markType)) throw new Error('attendance_biometric_mark_type_invalid');
   return markType;
+}
+
+function isNativeAndroidRequest(req) {
+  const userAgent = req.get?.('user-agent');
+  return typeof userAgent === 'string' && userAgent.includes(NATIVE_ANDROID_USER_AGENT_TOKEN);
+}
+
+function parseNativeAttendanceLocationProof(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim() || value.length > 16_384) {
+    throw new Error('attendance_native_location_required');
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('invalid');
+    return parsed;
+  } catch {
+    throw new Error('attendance_native_location_invalid');
+  }
+}
+
+function nativeAttendanceLocationPublicError(error) {
+  const code = typeof error?.message === 'string' ? error.message : 'attendance_native_location_invalid';
+  if (code === 'crew_presence_secret_required') {
+    return [503, 'native_location_temporarily_unavailable', 'No fue posible validar la ubicación nativa en este momento.'];
+  }
+  if (code === 'attendance_mock_location_detected') {
+    return [409, code, 'Android detectó una ubicación simulada. Desactiva la ubicación de prueba antes de marcar.'];
+  }
+  if (code === 'attendance_native_location_time_mismatch') {
+    return [409, code, 'La ubicación nativa venció. Actualiza la ubicación e intenta nuevamente.'];
+  }
+  if (code === 'attendance_native_location_required') {
+    return [400, code, 'La app necesita una ubicación nativa válida para esta marcación.'];
+  }
+  return [409, /^[A-Za-z0-9_]{1,100}$/.test(code) ? code : 'attendance_native_location_invalid', 'No fue posible validar la ubicación firmada de este teléfono.'];
 }
 
 function crewPhoneExceptionAuditId(idempotencyKey, assignmentId) {
@@ -276,6 +314,8 @@ export function workerPortalRouter(prisma, options = {}) {
   const issueCrewPresenceCredentialFn = options.issueCrewPresenceCredentialFn || issueCrewPresenceCredential;
   const verifyCrewPresenceBundleFn = options.verifyCrewPresenceBundleFn
     || ((input, verifyOptions) => verifyCrewPresenceBundle(prisma, input, verifyOptions));
+  const verifyNativeAttendanceLocationProofFn = options.verifyNativeAttendanceLocationProofFn
+    || ((input, verifyOptions) => verifyNativeAttendanceLocationProof(input, verifyOptions));
   const registerCrewPresenceArrivalFn = options.registerCrewPresenceArrivalFn
     || ((input) => registerCrewArrivalForLeader(prisma, input));
   const auditCrewPhoneExceptionFn = options.auditCrewPhoneExceptionFn
@@ -294,7 +334,7 @@ export function workerPortalRouter(prisma, options = {}) {
 
   const markUpload = options.strictMarkUpload || options.markUpload || options.arrivalUpload || multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: MAX_ATTENDANCE_EVIDENCE_BYTES, files: 1, fields: 12, fieldSize: 4 * 1024 }
+    limits: { fileSize: MAX_ATTENDANCE_EVIDENCE_BYTES, files: 1, fields: 12, fieldSize: 16 * 1024 }
   }).single('selfie');
   const biometricJson = express.json({ limit: '512kb', strict: true, type: 'application/json' });
 
@@ -317,6 +357,28 @@ export function workerPortalRouter(prisma, options = {}) {
       return false;
     }
     return true;
+  }
+
+  function requireNativeAttendanceLocation(req, res, portalSession, expected, now) {
+    try {
+      const proof = parseNativeAttendanceLocationProof(req.body?.nativeLocationProof);
+      return verifyNativeAttendanceLocationProofFn({
+        workerId: portalSession.workerId,
+        deviceId: portalSession.deviceId,
+        assignmentId: expected.assignmentId,
+        markType: expected.markType,
+        idempotencyKey: expected.idempotencyKey,
+        proof,
+        now
+      }, {
+        env: options.env || process.env,
+        secret: options.crewPresenceSecret
+      });
+    } catch (error) {
+      const [status, code, message] = nativeAttendanceLocationPublicError(error);
+      strictError(res, status, code, message);
+      return null;
+    }
   }
 
   async function requireBiometricAssignment(req, res, portalSession, now) {
@@ -419,11 +481,24 @@ export function workerPortalRouter(prisma, options = {}) {
       const requestedCrewGroup = markType === 'ARRIVAL'
         && captureMode === ONLINE_WEB_CAPTURE_MODE
         && req.get?.('x-lorren-crew-group') === 'true';
+      let locationInput = req.body;
+      if (
+        captureMode === ONLINE_WEB_CAPTURE_MODE
+        && !requestedCrewGroup
+        && isNativeAndroidRequest(req)
+      ) {
+        locationInput = requireNativeAttendanceLocation(req, res, portalSession, {
+          assignmentId: assignment.id,
+          markType,
+          idempotencyKey
+        }, now);
+        if (!locationInput) return;
+      }
       const location = await requireStrictAttendanceLocation(
         prisma,
         res,
         assignment.serviceRequest.operationPoint,
-        req.body,
+        locationInput,
         { allowCrossOperation: !requestedCrewGroup }
       );
       if (!location) return;
@@ -804,11 +879,20 @@ export function workerPortalRouter(prisma, options = {}) {
       if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
       const context = await requireBiometricAssignment(req, res, portalSession, now);
       if (!context) return;
+      let locationInput = req.body;
+      if (isNativeAndroidRequest(req)) {
+        locationInput = requireNativeAttendanceLocation(req, res, portalSession, {
+          assignmentId: context.assignmentId,
+          markType: context.markType,
+          idempotencyKey: context.idempotencyKey
+        }, now);
+        if (!locationInput) return;
+      }
       const location = await requireStrictAttendanceLocation(
         prisma,
         res,
         context.assignment.serviceRequest.operationPoint,
-        req.body
+        locationInput
       );
       if (!location) return;
       const enrollment = await getEnrollmentFn(portalSession.workerId);

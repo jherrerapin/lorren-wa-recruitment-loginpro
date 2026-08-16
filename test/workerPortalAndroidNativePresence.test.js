@@ -62,7 +62,34 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(mainActivity, /setMixedContentMode\(WebSettings\.MIXED_CONTENT_NEVER_ALLOW\)/);
   assert.match(mainActivity, /setAllowFileAccess\(false\)/);
   assert.match(mainActivity, /setAcceptThirdPartyCookies\(webView, false\)/);
+  assert.match(mainActivity, /NATIVE_USER_AGENT_TOKEN = "LorrenNative\/1"/);
+  assert.match(mainActivity, /setUserAgentString\(userAgent \+ " " \+ NATIVE_USER_AGENT_TOKEN\)/);
   assert.doesNotMatch(mainActivity, /Log\.[vdiew]|System\.out|System\.err/);
+
+  assert.match(mainActivity, /REQUEST_APP_PREPARE/);
+  assert.match(mainActivity, /prepareAttendanceDeviceOnce\(\)/);
+  assert.match(mainActivity, /attendancePermissions\(true\)/);
+  assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.CAMERA\)/);
+  assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.ACCESS_FINE_LOCATION\)/);
+  assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
+  assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
+  assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
+  assert.match(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
+  assert.match(mainActivity, /BluetoothManager/);
+  assert.match(mainActivity, /adapter\.isEnabled\(\)/);
+  assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_ENABLE/);
+  assert.match(mainActivity, /REQUEST_ENABLE_BLUETOOTH/);
+  assert.match(mainActivity, /"bluetooth_unavailable"/);
+  assert.match(mainActivity, /"bluetooth_disabled"/);
+
+  const stopLifecycle = mainActivity.match(/protected void onStop\(\) \{([\s\S]*?)\n    \}/);
+  assert.ok(stopLifecycle, 'falta detectar una salida real de la app');
+  assert.match(stopLifecycle[1], /stoppedForBackground = true/);
+  assert.match(mainActivity, /private void refreshPortalSilently\(\)/);
+  assert.match(mainActivity, /navigator\.onLine/);
+  assert.match(mainActivity, /#mark-dialog\[open\],#enrollment-dialog\[open\]/);
+  assert.match(mainActivity, /window\.location\.reload\(\)/);
+  assert.match(mainActivity, /stoppedForSystemPrompt/);
 
   assert.match(keyStore, /AndroidKeyStore/);
   assert.match(keyStore, /secp256r1/);
@@ -89,6 +116,8 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(bridge, /setReady\(/);
   assert.match(bridge, /startCrewScan\(/);
   assert.match(bridge, /getProofBundle\(/);
+  assert.match(bridge, /setReady[\s\S]{0,500}ensureNearbyRadioReady\(\)[\s\S]{0,500}manager\.startReady/);
+  assert.match(bridge, /startCrewScan[\s\S]{0,500}ensureNearbyRadioReady\(\)[\s\S]{0,800}manager\.startLeaderScan/);
 
   assert.match(nativePresence, /Presencia de cuadrilla/);
   assert.match(nativePresence, /Comprueba quiénes están presentes\./);
@@ -97,6 +126,10 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(nativePresence, /Reintentar no detectados/);
   assert.match(nativePresence, /cuadrillas\/proximidad\/contexto/);
   assert.match(nativePresence, /attendanceWriter !== false/);
+  assert.match(nativePresence, /bluetooth_disabled: 'Bluetooth está apagado\. Actívalo para continuar\.'/);
+  assert.match(nativePresence, /bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible/);
+  assert.match(nativePresence, /type === 'bluetooth'/);
+  assert.match(nativePresence, /Bluetooth listo\. Pulsa nuevamente para continuar\./);
   assert.doesNotMatch(nativePresence, /Los teléfonos Lórren se comprueban entre sí/);
   assert.doesNotMatch(nativePresence, /La app no escribe asistencia por sí sola/);
   assert.doesNotMatch(nativePresence, /Pulsa una vez\. Lórren comprobará los teléfonos cercanos/);
