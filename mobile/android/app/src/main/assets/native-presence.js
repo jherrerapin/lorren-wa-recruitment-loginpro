@@ -13,6 +13,7 @@
   const DEFAULT_SCAN_MS = 12_000;
   const AUTO_RETRY_DELAY_MS = 1_500;
   const CREDENTIAL_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
+  const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
   const TRANSIENT_SCAN_ERRORS = new Set([
     'connection_failed',
     'connection_request_failed',
@@ -33,6 +34,9 @@
   let autoRetryRemaining = 1;
   let autoRetryTimer = null;
   let provisioningPromise = null;
+  let pendingPhoneExceptionWorkerId = '';
+  const phoneExceptionsByService = new Map();
+  const serverMemberStatusesByService = new Map();
 
   function parseBridgeResult(value) {
     if (typeof value !== 'string') return null;
@@ -54,18 +58,36 @@
     return bridgeCall('getCapabilities');
   }
 
+  function safeMember(value) {
+    if (!value || typeof value !== 'object') return null;
+    const assignmentId = String(value.assignmentId || '').trim();
+    const workerId = String(value.workerId || '').trim();
+    if (!assignmentId || !workerId) return null;
+    return {
+      assignmentId,
+      workerId,
+      displayName: String(value.displayName || 'Auxiliar').trim().slice(0, 160) || 'Auxiliar',
+      arrivalReported: value.arrivalReported === true,
+      isLeader: value.isLeader === true
+    };
+  }
+
   function safeContext(value) {
     if (!value || typeof value !== 'object') return null;
     const assignmentId = String(value.assignmentId || '').trim();
     const serviceRequestId = String(value.serviceRequestId || '').trim();
     if (!assignmentId || !serviceRequestId) return null;
+    const isCrewLeader = value.isCrewLeader === true;
     return {
       assignmentId,
       serviceRequestId,
       operationPointId: String(value.operationPointId || '').trim(),
       mode: value.mode === 'CREW' ? 'CREW' : 'INDIVIDUAL',
-      isCrewLeader: value.isCrewLeader === true,
-      crewAvailable: value.crewAvailable === true
+      isCrewLeader,
+      crewAvailable: value.crewAvailable === true,
+      members: isCrewLeader
+        ? (Array.isArray(value.members) ? value.members.map(safeMember).filter(Boolean) : [])
+        : []
     };
   }
 
@@ -201,7 +223,8 @@
       .native-presence-btn{min-height:44px;border:0;border-radius:11px;padding:9px 13px;background:#176c36;color:#fff;font:inherit;font-size:13px;font-weight:850;cursor:pointer}.native-presence-btn.secondary{background:#e4ece7;color:#234a30}.native-presence-btn:disabled{opacity:.55;cursor:wait}
       .native-presence-status{padding:10px 11px;border-radius:11px;background:#eaf8ef;color:#176c36;font-size:12px;font-weight:800;line-height:1.45}.native-presence-status.warning{background:#fff6df;color:#76520b}.native-presence-status.error{background:#fff1f2;color:#9f1239}
       .native-presence-count{font-size:26px;font-weight:900;color:#176c36;line-height:1}.native-presence-small{font-size:11px;color:#647568}
-      @media(max-width:620px){.native-presence-row{grid-template-columns:1fr}.native-presence-btn{width:100%}}
+      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
+      @media(max-width:620px){.native-presence-row{grid-template-columns:1fr}.native-presence-btn{width:100%}.native-presence-member{grid-template-columns:minmax(0,1fr)}.native-presence-member-side{justify-content:flex-start}}
     `;
     document.head.appendChild(style);
   }
@@ -243,14 +266,127 @@
     node.textContent = String(scanVerifiedCount);
     const pending = document.querySelector(`#${PANEL_ID} [data-native-presence-pending]`);
     if (pending) pending.textContent = scanPendingCount > 0
-      ? `${scanPendingCount} pendiente${scanPendingCount === 1 ? '' : 's'}`
+      ? `${scanPendingCount} conexión${scanPendingCount === 1 ? '' : 'es'} en proceso`
       : scanVerifiedCount > 0
-        ? `${scanVerifiedCount} auxiliar${scanVerifiedCount === 1 ? '' : 'es'} verificado${scanVerifiedCount === 1 ? '' : 's'}`
-        : 'Aún sin verificar';
+        ? `${scanVerifiedCount} respuesta${scanVerifiedCount === 1 ? '' : 's'} recibida${scanVerifiedCount === 1 ? '' : 's'}`
+        : 'Aún sin respuestas';
   }
 
   function currentContext() {
     return contexts.find((item) => item.serviceRequestId === selectedServiceRequestId) || contexts[0] || null;
+  }
+
+  function phoneExceptionSet(serviceRequestId) {
+    if (!phoneExceptionsByService.has(serviceRequestId)) {
+      phoneExceptionsByService.set(serviceRequestId, new Set());
+    }
+    return phoneExceptionsByService.get(serviceRequestId);
+  }
+
+  function serverStatusMap(serviceRequestId) {
+    if (!serverMemberStatusesByService.has(serviceRequestId)) {
+      serverMemberStatusesByService.set(serviceRequestId, new Map());
+    }
+    return serverMemberStatusesByService.get(serviceRequestId);
+  }
+
+  function memberStatus(context, member) {
+    const serverStatus = serverStatusMap(context.serviceRequestId).get(member.workerId);
+    if (serverStatus) return serverStatus;
+    if (member.arrivalReported) return 'REGISTERED';
+    if (phoneExceptionSet(context.serviceRequestId).has(member.workerId)) return 'NO_PHONE_REVIEW';
+    return 'PENDING';
+  }
+
+  function memberStatusPresentation(status) {
+    if (status === 'VERIFIED') return { label: '✓ Verificado', className: 'verified' };
+    if (status === 'REGISTERED') return { label: '✓ Registrado', className: 'registered' };
+    if (status === 'NO_PHONE_REVIEW') return { label: 'Sin teléfono · por revisar', className: 'no-phone' };
+    return { label: 'Pendiente', className: 'pending' };
+  }
+
+  function setMemberServerStatuses(serviceRequestId, statuses) {
+    const map = new Map();
+    const phoneSet = phoneExceptionSet(serviceRequestId);
+    (Array.isArray(statuses) ? statuses : []).forEach((item) => {
+      const workerId = String(item?.workerId || '').trim();
+      const status = String(item?.status || '').trim().toUpperCase();
+      if (!workerId || !['VERIFIED', 'REGISTERED', 'NO_PHONE_REVIEW', 'PENDING'].includes(status)) return;
+      map.set(workerId, status);
+      if (status === 'NO_PHONE_REVIEW') phoneSet.add(workerId);
+      else if (status === 'VERIFIED' || status === 'REGISTERED') phoneSet.delete(workerId);
+    });
+    serverMemberStatusesByService.set(serviceRequestId, map);
+  }
+
+  function renderCrewMembers(panel, context) {
+    if (!context?.isCrewLeader || !Array.isArray(context.members) || !context.members.length) return;
+    const list = element('div', 'native-presence-members');
+    list.setAttribute('aria-label', 'Integrantes de la cuadrilla');
+    context.members.forEach((member) => {
+      const status = memberStatus(context, member);
+      const presentation = memberStatusPresentation(status);
+      const row = element('div', 'native-presence-member');
+      row.dataset.nativePresenceMember = member.workerId;
+      const copy = element('div', 'native-presence-member-copy');
+      copy.append(
+        element('strong', 'native-presence-member-name', member.displayName),
+        element('span', 'native-presence-member-role', member.isLeader ? 'Encargado' : 'Auxiliar')
+      );
+      const side = element('div', 'native-presence-member-side');
+      side.appendChild(element('span', `native-presence-badge ${presentation.className}`, presentation.label));
+
+      if (!member.isLeader && status === 'PENDING') {
+        const button = element('button', 'native-presence-member-action', 'Sin teléfono');
+        button.type = 'button';
+        button.dataset.nativePresenceNoPhone = member.workerId;
+        button.addEventListener('click', () => {
+          pendingPhoneExceptionWorkerId = member.workerId;
+          renderPanel();
+        });
+        side.appendChild(button);
+      } else if (!member.isLeader && status === 'NO_PHONE_REVIEW') {
+        const restore = element('button', 'native-presence-member-action', 'Ya tiene teléfono');
+        restore.type = 'button';
+        restore.addEventListener('click', () => {
+          phoneExceptionSet(context.serviceRequestId).delete(member.workerId);
+          serverStatusMap(context.serviceRequestId).set(member.workerId, 'PENDING');
+          pendingPhoneExceptionWorkerId = '';
+          retryNotDetectedCount = Math.max(1, retryNotDetectedCount);
+          hasCompletedLeaderScan = true;
+          renderPanel();
+          setStatus('Este auxiliar volverá a comprobarse en el próximo intento.', 'warning');
+        });
+        side.appendChild(restore);
+      }
+      row.append(copy, side);
+
+      if (pendingPhoneExceptionWorkerId === member.workerId && status === 'PENDING') {
+        const confirm = element('div', 'native-presence-confirm');
+        confirm.appendChild(element('div', 'native-presence-confirm-copy', '¿Confirmar que está presente pero no tiene su teléfono?'));
+        const actions = element('div', 'native-presence-confirm-actions');
+        const yes = element('button', 'native-presence-confirm-yes', 'Confirmar sin teléfono');
+        yes.type = 'button';
+        yes.addEventListener('click', () => {
+          phoneExceptionSet(context.serviceRequestId).add(member.workerId);
+          serverStatusMap(context.serviceRequestId).delete(member.workerId);
+          pendingPhoneExceptionWorkerId = '';
+          renderPanel();
+          setStatus('Quedará como “Sin teléfono · por revisar” al confirmar este intento.', 'warning');
+        });
+        const no = element('button', 'native-presence-confirm-no', 'Cancelar');
+        no.type = 'button';
+        no.addEventListener('click', () => {
+          pendingPhoneExceptionWorkerId = '';
+          renderPanel();
+        });
+        actions.append(yes, no);
+        confirm.appendChild(actions);
+        row.appendChild(confirm);
+      }
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
   }
 
   function randomToken(bytes = 24) {
@@ -344,6 +480,7 @@
     select.addEventListener('change', () => {
       stopNativeModes();
       selectedServiceRequestId = select.value;
+      pendingPhoneExceptionWorkerId = '';
       retryNotDetectedCount = 0;
       hasCompletedLeaderScan = false;
       autoRetryRemaining = 1;
@@ -378,10 +515,11 @@
     panel.appendChild(status);
 
     if (context?.isCrewLeader) {
+      renderCrewMembers(panel, context);
       const countWrap = element('div');
       const count = element('div', 'native-presence-count', '0');
       count.dataset.nativePresenceCount = 'true';
-      const pending = element('div', 'native-presence-small', 'Aún sin verificar');
+      const pending = element('div', 'native-presence-small', 'Aún sin respuestas');
       pending.dataset.nativePresencePending = 'true';
       countWrap.append(count, pending);
       panel.appendChild(countWrap);
@@ -438,6 +576,7 @@
     const context = currentContext();
     if (!context?.isCrewLeader || activeMode === 'LEADER') return;
     clearAutoRetry();
+    pendingPhoneExceptionWorkerId = '';
     if (!automaticRetry) autoRetryRemaining = 1;
     scanTransientFailureCount = 0;
     scanVerifiedCount = 0;
@@ -512,6 +651,10 @@
     ) {
       throw new Error('crew_proof_bundle_invalid');
     }
+    proofBundle.phoneExceptions = [...phoneExceptionSet(attempt.serviceRequestId)].map((workerId) => ({
+      workerId,
+      reason: PHONE_EXCEPTION_REASON
+    }));
     const nativeLocation = nativeLocationFromBundle(proofBundle);
     const offline = window.LorrenWorkerPortalOffline;
     if (typeof offline?.queueCrewPresence !== 'function') throw new Error('offline_queue_unavailable');
@@ -551,7 +694,7 @@
       scanVerifiedCount = Math.max(scanVerifiedCount, Number(detail.verifiedCount || 0));
       scanPendingCount = Math.max(0, Number(detail.pendingCount ?? (scanPendingCount - 1)));
       updateCount();
-      setStatus(`${scanVerifiedCount} auxiliar${scanVerifiedCount === 1 ? '' : 'es'} verificado${scanVerifiedCount === 1 ? '' : 's'}.`, '');
+      setStatus(`${scanVerifiedCount} respuesta${scanVerifiedCount === 1 ? '' : 's'} recibida${scanVerifiedCount === 1 ? '' : 's'}.`, '');
       return;
     }
     if (type === 'proof_sent') {
@@ -579,9 +722,9 @@
             }, AUTO_RETRY_DELAY_MS);
             return;
           }
-          const totalVerified = proofCount + 1;
+          const responses = proofCount;
           setStatus(
-            `${totalVerified} integrante${totalVerified === 1 ? '' : 's'} verificado${totalVerified === 1 ? '' : 's'}. Puedes reintentar a quienes falten.`,
+            `${responses} respuesta${responses === 1 ? '' : 's'} recibida${responses === 1 ? '' : 's'}. Esperando validación.`,
             navigator.onLine ? '' : 'warning'
           );
         })
@@ -606,10 +749,13 @@
     if (!message || typeof message !== 'object') return;
     if (message.type === 'CREW_PRESENCE_SYNCED') {
       const payload = message.payload || {};
+      const serviceRequestId = String(payload.serviceRequestId || selectedServiceRequestId || '').trim();
+      if (serviceRequestId) setMemberServerStatuses(serviceRequestId, payload.memberStatuses);
       retryNotDetectedCount = Math.max(0, Number(payload.notDetectedCount || 0));
-      const total = Number(payload.totalMembers || 0);
-      const processed = Number(payload.processedCount || 0);
-      setStatus(payload.message || `${processed} de ${total} integrantes fueron procesados.`, payload.requiresReview ? 'warning' : '');
+      hasCompletedLeaderScan = retryNotDetectedCount > 0;
+      pendingPhoneExceptionWorkerId = '';
+      renderPanel();
+      setStatus(payload.message || 'Verificación actualizada.', payload.requiresReview ? 'warning' : '');
       if (retryNotDetectedCount > 0) markRetryAvailable();
       return;
     }

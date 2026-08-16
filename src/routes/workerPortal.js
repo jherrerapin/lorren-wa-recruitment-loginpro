@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
 import { workerPortalRouter as coreWorkerPortalRouter, applyWorkerPortalSecurityHeaders } from './workerPortalCore.js';
@@ -38,6 +39,9 @@ const WORKER_PORTAL_REQUEST_HEADER = 'worker-portal';
 const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
 const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
 const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
+const CREW_PHONE_EXCEPTION_ENTITY_TYPE = 'DISPATCH_CREW_PHONE_EXCEPTION';
+const CREW_PHONE_EXCEPTION_ACTION = 'CREW_PHONE_EXCEPTION_DECLARED';
+const CREW_PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
 
 function markTypeFromPath(pathname = '') {
   if (pathname.endsWith('/llegada')) return 'ARRIVAL';
@@ -63,6 +67,52 @@ function normalizeBiometricMarkType(value) {
   const markType = normalizedString(value, 40)?.toUpperCase();
   if (!BIOMETRIC_MARK_TYPES.has(markType)) throw new Error('attendance_biometric_mark_type_invalid');
   return markType;
+}
+
+function crewPhoneExceptionAuditId(idempotencyKey, assignmentId) {
+  const digest = createHash('sha256')
+    .update(`${idempotencyKey}:${assignmentId}`)
+    .digest('hex')
+    .slice(0, 48);
+  return `crew_phone_${digest}`;
+}
+
+async function auditCrewPhoneException(prisma, input = {}) {
+  if (!prisma?.devAuditEvent || typeof prisma.devAuditEvent.upsert !== 'function') {
+    throw new Error('crew_phone_exception_audit_contract_invalid');
+  }
+  const id = crewPhoneExceptionAuditId(input.idempotencyKey, input.assignmentId);
+  try {
+    return await prisma.devAuditEvent.upsert({
+      where: { id },
+      update: {},
+      create: {
+        id,
+        entityType: CREW_PHONE_EXCEPTION_ENTITY_TYPE,
+        entityId: input.assignmentId,
+        entityLabel: `assignment:${input.assignmentId}`,
+        action: CREW_PHONE_EXCEPTION_ACTION,
+        actorUsername: `worker-portal:${input.leaderWorkerId}`,
+        actorRole: 'crew-leader',
+        actorSource: 'worker-portal',
+        ipAddress: input.ipAddress || null,
+        userAgent: input.userAgent || null,
+        metadata: {
+          serviceRequestId: input.serviceRequestId,
+          assignmentId: input.assignmentId,
+          workerId: input.workerId,
+          leaderWorkerId: input.leaderWorkerId,
+          attemptId: input.idempotencyKey,
+          reason: CREW_PHONE_EXCEPTION_REASON,
+          declaredAt: input.clientCapturedAt.toISOString(),
+          reviewRequired: true
+        }
+      }
+    });
+  } catch (error) {
+    if (error?.message === 'crew_phone_exception_audit_contract_invalid') throw error;
+    throw new Error('crew_phone_exception_audit_failed');
+  }
 }
 
 function strictError(res, status, error, message) {
@@ -188,6 +238,7 @@ function crewPresencePublicError(error) {
     : 'crew_presence_error';
   if (
     code === 'crew_presence_secret_required'
+    || code === 'crew_phone_exception_audit_failed'
     || code.endsWith('_contract_invalid')
   ) return [503, 'crew_presence_temporarily_unavailable'];
   if (code === 'attendance_offline_capture_expired') return [409, 'offline_capture_expired'];
@@ -227,6 +278,8 @@ export function workerPortalRouter(prisma, options = {}) {
     || ((input, verifyOptions) => verifyCrewPresenceBundle(prisma, input, verifyOptions));
   const registerCrewPresenceArrivalFn = options.registerCrewPresenceArrivalFn
     || ((input) => registerCrewArrivalForLeader(prisma, input));
+  const auditCrewPhoneExceptionFn = options.auditCrewPhoneExceptionFn
+    || ((input) => auditCrewPhoneException(prisma, input));
   const loadBiometricAssignmentFn = options.loadBiometricAssignmentFn || (async (workerId, assignmentId) => (
     prisma.dispatchAssignment.findFirst({
       where: {
@@ -574,6 +627,23 @@ export function workerPortalRouter(prisma, options = {}) {
       );
       if (!location) return;
 
+      const verifiedMembers = Array.isArray(verified.members) ? verified.members : [];
+      const memberByWorkerId = new Map(verifiedMembers.map((member) => [member.workerId, member]));
+      await Promise.all((verified.phoneExceptionWorkerIds || []).map(async (workerId) => {
+        const member = memberByWorkerId.get(workerId);
+        if (!member) throw new Error('crew_phone_exception_member_contract_invalid');
+        await auditCrewPhoneExceptionFn({
+          leaderWorkerId: portalSession.workerId,
+          serviceRequestId,
+          assignmentId: member.assignmentId,
+          workerId,
+          idempotencyKey,
+          clientCapturedAt: verified.clientCapturedAt,
+          ipAddress: normalizedString(req.ip, 120),
+          userAgent: normalizedString(req.get?.('user-agent'), 500)
+        });
+      }));
+
       const result = await registerCrewPresenceArrivalFn({
         leaderWorkerId: portalSession.workerId,
         assignmentId,
@@ -601,11 +671,34 @@ export function workerPortalRouter(prisma, options = {}) {
 
       const summary = result.summary;
       const processedCount = summary.newlyRecordedCount + summary.replayedCount + summary.alreadyRecordedCount;
-      const notDetectedCount = Math.max(summary.notDetectedCount, verified.notDetectedCount);
-      let message = `${processedCount} de ${summary.totalMembers} integrante${summary.totalMembers === 1 ? '' : 's'} quedaron procesados en este intento.`;
-      if (notDetectedCount > 0) {
-        message += ` ${notDetectedCount} no fue${notDetectedCount === 1 ? '' : 'ron'} detectado${notDetectedCount === 1 ? '' : 's'} y no se marcó${notDetectedCount === 1 ? '' : 'aron'} automáticamente.`;
-      }
+      const validatedSet = new Set(verified.validatedWorkerIds || []);
+      const phoneExceptionSet = new Set(verified.phoneExceptionWorkerIds || []);
+      const resultByAssignment = new Map((summary.results || []).map((item) => [item.assignmentId, item]));
+      const memberStatuses = verifiedMembers.map((member) => {
+        const canonicalResult = resultByAssignment.get(member.assignmentId);
+        let status = 'PENDING';
+        if (validatedSet.has(member.workerId)) status = 'VERIFIED';
+        else if (phoneExceptionSet.has(member.workerId)) status = 'NO_PHONE_REVIEW';
+        else if (member.arrivalReported || canonicalResult?.status === 'ALREADY_RECORDED') status = 'REGISTERED';
+        return {
+          assignmentId: member.assignmentId,
+          workerId: member.workerId,
+          isLeader: member.workerId === portalSession.workerId,
+          status
+        };
+      });
+      const verifiedCount = memberStatuses.filter((member) => member.status === 'VERIFIED').length;
+      const registeredCount = memberStatuses.filter((member) => member.status === 'REGISTERED').length;
+      const pendingCount = memberStatuses.filter((member) => member.status === 'PENDING').length;
+      const phoneExceptionCount = memberStatuses.filter((member) => member.status === 'NO_PHONE_REVIEW').length;
+      const notDetectedCount = pendingCount;
+      const requiresReview = summary.failedCount > 0
+        || summary.reviewPendingCount > 0
+        || phoneExceptionCount > 0;
+      let message = `${verifiedCount} integrante${verifiedCount === 1 ? '' : 's'} verificado${verifiedCount === 1 ? '' : 's'}.`;
+      if (registeredCount > 0) message += ` ${registeredCount} ya estaba${registeredCount === 1 ? '' : 'n'} registrado${registeredCount === 1 ? '' : 's'}.`;
+      if (pendingCount > 0) message += ` ${pendingCount} queda${pendingCount === 1 ? '' : 'n'} pendiente${pendingCount === 1 ? '' : 's'}.`;
+      if (phoneExceptionCount > 0) message += ` ${phoneExceptionCount} sin teléfono queda${phoneExceptionCount === 1 ? '' : 'n'} por revisar.`;
       if (summary.failedCount > 0 || summary.reviewPendingCount > 0) {
         message += ' Una o más marcaciones requieren revisión.';
       }
@@ -614,6 +707,7 @@ export function workerPortalRouter(prisma, options = {}) {
         ok: true,
         crewGroup: true,
         presenceValidated: true,
+        serviceRequestId,
         totalMembers: summary.totalMembers,
         detectedMembers: summary.eligibleMembers,
         processedCount,
@@ -625,7 +719,10 @@ export function workerPortalRouter(prisma, options = {}) {
         notDetectedCount,
         verifiedProofCount: verified.verifiedProofCount,
         rejectedProofCount: verified.rejectedProofCount,
-        requiresReview: summary.failedCount > 0 || summary.reviewPendingCount > 0,
+        phoneExceptionCount,
+        rejectedPhoneExceptionCount: verified.rejectedPhoneExceptionCount || 0,
+        memberStatuses,
+        requiresReview,
         message
       });
     } catch (error) {
