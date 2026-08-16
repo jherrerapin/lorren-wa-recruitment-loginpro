@@ -5,17 +5,19 @@ import {
   validateAttendanceTimelineAgainstAssignment
 } from '../../dispatch-attendance/application/adminAttendance.js';
 import { reviewAttendanceWorkdaySession } from '../../dispatch-attendance/application/attendanceAdminWorkday.js';
+import { resolveDispatchAttendanceOperationalWindow } from '../../dispatch-attendance/application/registerArrival.js';
 import { dispatchServiceDateKey } from '../../../services/dispatchDate.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../../../services/dispatchOperationalCoverage.js';
 
 const PAYROLL_IMPORT_ENTITY_TYPE = 'DISPATCH_PAYROLL_ATTENDANCE_IMPORT';
 const PAYROLL_IMPORT_ACTION = 'PAYROLL_ATTENDANCE_IMPORTED';
 const PAYROLL_IMPORT_REVERSE_ACTION = 'PAYROLL_ATTENDANCE_IMPORT_REVERSED';
+const PAYROLL_IMPORT_REASON_PREFIX = 'Marcaciones importadas desde GeoVictoria · lote ';
 export const PAYROLL_IMPORT_MAX_BYTES = 8 * 1024 * 1024;
 const PAYROLL_IMPORT_MAX_WORKDAYS = 5000;
 const PAYROLL_IMPORT_ALLOWED_MARK_TYPES = Object.freeze(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 const PAYROLL_IMPORT_HEADER_ALIASES = Object.freeze({
-  document: ['documento', 'identificacion', 'cedula', 'numero documento', 'numero de documento', 'num documento', 'id empleado', 'rut', 'codigo empleado', 'codigo colaborador'],
+  document: ['documento', 'identificacion', 'identificador', 'cedula', 'numero documento', 'numero de documento', 'num documento', 'id empleado', 'rut', 'codigo empleado', 'codigo colaborador'],
   name: ['nombre', 'nombre completo', 'empleado', 'colaborador', 'trabajador', 'funcionario'],
   date: ['fecha', 'dia', 'fecha marcacion', 'fecha de marcacion', 'fecha turno'],
   datetime: ['fecha hora', 'fecha y hora', 'fecha marcacion hora', 'fecha hora marcacion', 'marcacion', 'timestamp'],
@@ -158,6 +160,23 @@ function detectHeaderRow(matrix, mapping = {}) {
   return candidates.sort((left, right) => right.score - left.score || left.rowIndex - right.rowIndex)[0] || { rowIndex: 0, cells: [], score: 0 };
 }
 
+function repeatedGeoVictoriaPunchColumns(foldedHeaders) {
+  const entered = [];
+  const exited = [];
+  foldedHeaders.forEach((header, index) => {
+    if (header === 'entro') entered.push(index);
+    if (header === 'salio') exited.push(index);
+  });
+  if (entered.length !== 2 || exited.length !== 2) return null;
+  if (!(entered[0] < exited[0] && exited[0] < entered[1] && entered[1] < exited[1])) return null;
+  return {
+    arrival: entered[0],
+    breakStart: exited[0],
+    breakEnd: entered[1],
+    departure: exited[1]
+  };
+}
+
 function buildColumnMap(headers, mapping = {}) {
   const manual = normalizedMapping(mapping);
   const foldedHeaders = headers.map((header) => foldImportText(cellScalar(header)));
@@ -170,6 +189,12 @@ function buildColumnMap(headers, mapping = {}) {
     }
     const index = headers.findIndex((header) => aliasFieldForHeader(cellScalar(header)) === field);
     if (index >= 0) columns[field] = index;
+  }
+  const repeatedPunches = repeatedGeoVictoriaPunchColumns(foldedHeaders);
+  if (repeatedPunches) {
+    for (const [field, index] of Object.entries(repeatedPunches)) {
+      if (!manual[field]) columns[field] = index;
+    }
   }
   return columns;
 }
@@ -490,6 +515,53 @@ function candidateTimeline(workday) {
   };
 }
 
+function addImportLocalDays(localDateTime, days) {
+  const text = normalizeString(localDateTime, 32);
+  const match = text?.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})$/);
+  if (!match) return localDateTime;
+  const date = new Date(`${match[1]}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return localDateTime;
+  date.setUTCDate(date.getUTCDate() + days);
+  return `${dateKeyFromDate(date)}T${match[2]}`;
+}
+
+function resolveOvernightWorkdayMarks(workday, assignment) {
+  if (!workday?.dateKey || !Array.isArray(workday.marks) || !workday.marks.length) return workday;
+  let operational;
+  try {
+    operational = resolveDispatchAttendanceOperationalWindow(
+      assignment?.serviceRequest,
+      assignment?.attendanceSession || null
+    );
+  } catch {
+    return workday;
+  }
+  if (!operational.overnight) return workday;
+
+  let previousMoment = null;
+  const marks = workday.marks.map((mark) => {
+    let localDateTime = mark.localDateTime;
+    let moment = importLocalToDate(localDateTime);
+    const usesServiceDate = localDateTime?.slice(0, 10) === workday.dateKey;
+    if (mark.markType !== 'ARRIVAL' && usesServiceDate && moment) {
+      const shiftedLocalDateTime = addImportLocalDays(localDateTime, 1);
+      const shiftedMoment = importLocalToDate(shiftedLocalDateTime);
+      const needsRollover = moment.getTime() < operational.recordingOpensAt.getTime()
+        || (previousMoment && moment.getTime() < previousMoment.getTime());
+      const shiftedFits = shiftedMoment
+        && shiftedMoment.getTime() < operational.continuityClosesAt.getTime()
+        && (!previousMoment || shiftedMoment.getTime() >= previousMoment.getTime());
+      if (needsRollover && shiftedFits) {
+        localDateTime = shiftedLocalDateTime;
+        moment = shiftedMoment;
+      }
+    }
+    if (moment) previousMoment = moment;
+    return { ...mark, localDateTime };
+  });
+  return { ...workday, marks };
+}
+
 function existingMarkSignatures(session) {
   return (Array.isArray(session?.marks) ? session.marks : [])
     .map((mark) => {
@@ -509,11 +581,65 @@ function sameStringArray(left, right) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function importBatchIdFromReview(review) {
+  const reason = normalizeString(review?.reason, 500);
+  if (!reason?.startsWith(PAYROLL_IMPORT_REASON_PREFIX)) return null;
+  return normalizeString(reason.slice(PAYROLL_IMPORT_REASON_PREFIX.length), 120);
+}
+
+function sessionMarksById(session) {
+  return new Map((Array.isArray(session?.marks) ? session.marks : []).map((mark) => {
+    const moment = mark?.clientCapturedAt || mark?.serverReceivedAt;
+    const date = moment instanceof Date ? moment : new Date(moment || Number.NaN);
+    return [mark.id, Number.isNaN(date.getTime()) ? null : exactMarkSignature(mark.markType, date)];
+  }));
+}
+
+function replaceableImportedSession(session, importedEvent) {
+  if (!session?.id || !importedEvent) return false;
+  const latestReview = Array.isArray(session.reviews) ? session.reviews[0] : null;
+  const batchId = importBatchIdFromReview(latestReview);
+  if (!batchId || batchId !== importedEvent.entityId) return false;
+  const reviewAt = latestReview?.createdAt ? new Date(latestReview.createdAt) : null;
+  const importedAt = importedEvent?.createdAt ? new Date(importedEvent.createdAt) : null;
+  if (!reviewAt || Number.isNaN(reviewAt.getTime()) || !importedAt || Number.isNaN(importedAt.getTime())) return false;
+  if (reviewAt.getTime() > importedAt.getTime()) return false;
+  const importedWorkday = (Array.isArray(importedEvent.metadata?.workdays) ? importedEvent.metadata.workdays : [])
+    .find((workday) => workday?.sessionId === session.id);
+  if (!importedWorkday) return false;
+  const expectedById = new Map((Array.isArray(importedWorkday.marks) ? importedWorkday.marks : [])
+    .map((mark) => [mark.id, mark.signature]));
+  const currentById = sessionMarksById(session);
+  return expectedById.size > 0
+    && expectedById.size === currentById.size
+    && [...expectedById.entries()].every(([id, signature]) => currentById.get(id) === signature);
+}
+
+async function loadImportedEventsByBatch(prisma, assignments) {
+  const batchIds = [...new Set(assignments
+    .map((assignment) => importBatchIdFromReview(assignment?.attendanceSession?.reviews?.[0]))
+    .filter(Boolean))];
+  const byBatch = new Map();
+  for (const batchId of batchIds) {
+    const events = await prisma.devAuditEvent.findMany({
+      where: {
+        entityType: PAYROLL_IMPORT_ENTITY_TYPE,
+        entityId: batchId,
+        action: PAYROLL_IMPORT_ACTION
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 1
+    });
+    if (events[0]) byBatch.set(batchId, events[0]);
+  }
+  return byBatch;
+}
+
 export async function analyzePayrollAttendanceImport(prisma, parsed, options = {}) {
   if (parsed.needsMapping) {
     return {
       ...parsed,
-      summary: { parsedWorkdays: 0, ready: 0, duplicates: 0, unresolved: 0, invalid: 0 },
+      summary: { parsedWorkdays: 0, ready: 0, replacements: 0, duplicates: 0, unresolved: 0, invalid: 0 },
       rows: []
     };
   }
@@ -542,10 +668,20 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
       },
       include: {
         serviceRequest: { include: { operationPoint: true } },
-        attendanceSession: { include: { marks: { orderBy: { serverReceivedAt: 'asc' } } } }
+        attendanceSession: {
+          include: {
+            marks: { orderBy: { serverReceivedAt: 'asc' } },
+            reviews: {
+              orderBy: { createdAt: 'desc' },
+              select: { action: true, reason: true, createdAt: true },
+              take: 1
+            }
+          }
+        }
       }
     }) : []
   ]);
+  const importedEventsByBatch = await loadImportedEventsByBatch(prisma, assignments);
 
   const workersByDocument = new Map();
   const workersByName = new Map();
@@ -604,24 +740,67 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
         message: 'El punto de operación no permite marcación administrativa.'
       };
     }
-    const existing = existingMarkSignatures(assignment.attendanceSession);
-    const candidate = candidateMarkSignatures(workday);
-    if (existing.length) {
+
+    const resolvedWorkday = resolveOvernightWorkdayMarks(workday, assignment);
+    try {
+      validateAttendanceTimelineAgainstAssignment(
+        assignment.serviceRequest,
+        candidateTimeline(resolvedWorkday),
+        assignment.attendanceSession || null
+      );
+    } catch {
       return {
-        ...workday,
+        ...resolvedWorkday,
+        displayIdentity: worker.fullName,
+        workerId: worker.id,
+        assignmentId: assignment.id,
+        status: 'UNRESOLVED',
+        message: 'Las horas detectadas no caben de forma segura en la ventana operacional de esta asignación.'
+      };
+    }
+
+    const existing = existingMarkSignatures(assignment.attendanceSession);
+    const candidate = candidateMarkSignatures(resolvedWorkday);
+    if (existing.length) {
+      if (sameStringArray(existing, candidate)) {
+        return {
+          ...resolvedWorkday,
+          displayIdentity: worker.fullName,
+          workerId: worker.id,
+          assignmentId: assignment.id,
+          sessionId: assignment.attendanceSession?.id || null,
+          status: 'DUPLICATE',
+          message: 'La jornada ya contiene exactamente estas marcaciones.'
+        };
+      }
+      const replaceBatchId = importBatchIdFromReview(assignment.attendanceSession?.reviews?.[0]);
+      const importedEvent = replaceBatchId ? importedEventsByBatch.get(replaceBatchId) : null;
+      if (replaceBatchId && replaceableImportedSession(assignment.attendanceSession, importedEvent)) {
+        return {
+          ...resolvedWorkday,
+          displayIdentity: worker.fullName,
+          workerId: worker.id,
+          assignmentId: assignment.id,
+          sessionId: assignment.attendanceSession?.id || null,
+          status: 'READY',
+          replaceExisting: true,
+          replaceBatchId,
+          message: null
+        };
+      }
+      return {
+        ...resolvedWorkday,
         displayIdentity: worker.fullName,
         workerId: worker.id,
         assignmentId: assignment.id,
         sessionId: assignment.attendanceSession?.id || null,
-        status: sameStringArray(existing, candidate) ? 'DUPLICATE' : 'UNRESOLVED',
-        message: sameStringArray(existing, candidate)
-          ? 'La jornada ya contiene exactamente estas marcaciones.'
-          : 'La jornada ya tiene marcaciones diferentes; no se sobrescribirán.'
+        status: 'UNRESOLVED',
+        message: 'La jornada ya tiene marcaciones diferentes y no corresponde a un lote GeoVictoria intacto; no se sobrescribirá.'
       };
     }
     if (assignment.attendanceSession?.arrivalReportedAt || assignment.attendanceSession?.departureReportedAt) {
       return {
-        ...workday,
+        ...resolvedWorkday,
         displayIdentity: worker.fullName,
         workerId: worker.id,
         assignmentId: assignment.id,
@@ -630,24 +809,13 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
         message: 'La jornada ya tiene horas persistidas aunque no tenga marcas detalladas; no se sobrescribirán.'
       };
     }
-    try {
-      validateAttendanceTimelineAgainstAssignment(assignment.serviceRequest, candidateTimeline(workday), assignment.attendanceSession || null);
-    } catch {
-      return {
-        ...workday,
-        displayIdentity: worker.fullName,
-        workerId: worker.id,
-        assignmentId: assignment.id,
-        status: 'UNRESOLVED',
-        message: 'Las horas detectadas no caben de forma segura en la ventana operacional de esta asignación.'
-      };
-    }
     return {
-      ...workday,
+      ...resolvedWorkday,
       displayIdentity: worker.fullName,
       workerId: worker.id,
       assignmentId: assignment.id,
       status: 'READY',
+      replaceExisting: false,
       message: null
     };
   });
@@ -655,6 +823,7 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
   const summary = {
     parsedWorkdays: parsed.workdays.length,
     ready: rows.filter((row) => row.status === 'READY').length,
+    replacements: rows.filter((row) => row.status === 'READY' && row.replaceExisting).length,
     duplicates: rows.filter((row) => row.status === 'DUPLICATE').length,
     unresolved: rows.filter((row) => row.status === 'UNRESOLVED').length,
     invalid: rows.filter((row) => row.status === 'INVALID').length,
@@ -670,6 +839,9 @@ function payrollImportAnalysisFingerprint(analysis) {
     status: row.status || null,
     workerId: row.workerId || null,
     assignmentId: row.assignmentId || null,
+    sessionId: row.sessionId || null,
+    replaceExisting: row.replaceExisting === true,
+    replaceBatchId: row.replaceBatchId || null,
     marks: (row.marks || []).map((mark) => exactMarkSignature(mark.markType, mark.localDateTime)).filter(Boolean)
   }));
   return createHash('sha256').update(JSON.stringify({
@@ -689,7 +861,7 @@ function workdayWriterInput(row, auditActor, batchId) {
     breakStartAt: marks.get('BREAK_START'),
     breakEndAt: marks.get('BREAK_END'),
     departureReportedAt: marks.get('DEPARTURE'),
-    reason: `Marcaciones importadas desde GeoVictoria · lote ${batchId}`,
+    reason: `${PAYROLL_IMPORT_REASON_PREFIX}${batchId}`,
     notes: null,
     actorUsername: auditActor.actorUsername || 'operaciones',
     actorRole: auditActor.actorRole || null
@@ -735,8 +907,33 @@ async function writeImportAudit(prisma, data) {
   });
 }
 
+async function assertReplacementStillSafe(prisma, row) {
+  const session = await prisma.dispatchAttendanceSession.findUnique({
+    where: { id: row.sessionId },
+    include: {
+      marks: { orderBy: { serverReceivedAt: 'asc' } },
+      reviews: {
+        orderBy: { createdAt: 'desc' },
+        select: { action: true, reason: true, createdAt: true },
+        take: 1
+      }
+    }
+  });
+  const events = await prisma.devAuditEvent.findMany({
+    where: {
+      entityType: PAYROLL_IMPORT_ENTITY_TYPE,
+      entityId: row.replaceBatchId,
+      action: PAYROLL_IMPORT_ACTION
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 1
+  });
+  if (!replaceableImportedSession(session, events[0])) throw new Error('payroll_import_preview_stale');
+}
+
 export async function commitPayrollAttendanceImport(prisma, file, input = {}, dependencies = {}) {
   const attendanceWriter = dependencies.attendanceWriter || registerManualAttendance;
+  const workdayReviewer = dependencies.workdayReviewer || reviewAttendanceWorkdaySession;
   const parsed = await parsePayrollAttendanceImportFile(file, { mapping: input.mapping });
   const analysis = await analyzePayrollAttendanceImport(prisma, parsed, { includeTest: input.includeTest === true });
   if (analysis.needsMapping) throw new Error('payroll_import_headers_unrecognized');
@@ -751,10 +948,25 @@ export async function commitPayrollAttendanceImport(prisma, file, input = {}, de
   const failures = [];
   for (const row of readyRows) {
     try {
+      if (row.replaceExisting) {
+        await assertReplacementStillSafe(prisma, row);
+        await workdayReviewer(prisma, {
+          sessionId: row.sessionId,
+          action: 'CLEAR',
+          actorUsername: input.actor?.actorUsername || 'operaciones',
+          actorRole: input.actor?.actorRole || null,
+          now: input.now instanceof Date ? input.now : new Date()
+        });
+      }
       const session = await attendanceWriter(prisma, workdayWriterInput(row, input.actor || {}, batchId));
       const importedMarks = await importedMarksForRow(prisma, session.id, row);
       if (importedMarks.length !== row.marks.length) throw new Error('payroll_import_mark_capture_mismatch');
-      importedWorkdays.push({ sessionId: session.id, assignmentId: row.assignmentId, marks: importedMarks });
+      importedWorkdays.push({
+        sessionId: session.id,
+        assignmentId: row.assignmentId,
+        marks: importedMarks,
+        replacedFromBatchId: row.replaceExisting ? row.replaceBatchId : null
+      });
     } catch (error) {
       failures.push({ rowNumber: row.sourceRows?.[0] || row.rowNumber || null, code: normalizeString(error?.message, 120) || 'payroll_import_write_failed' });
     }
@@ -768,6 +980,7 @@ export async function commitPayrollAttendanceImport(prisma, file, input = {}, de
     parsedWorkdays: analysis.summary.parsedWorkdays,
     importedWorkdays: importedWorkdays.length,
     importedMarks: importedWorkdays.reduce((sum, workday) => sum + workday.marks.length, 0),
+    replacedWorkdays: importedWorkdays.filter((workday) => workday.replacedFromBatchId).length,
     duplicates: analysis.summary.duplicates,
     unresolved: analysis.summary.unresolved,
     invalid: analysis.summary.invalid,
