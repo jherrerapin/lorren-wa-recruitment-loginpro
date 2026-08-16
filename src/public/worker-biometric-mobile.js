@@ -27,7 +27,7 @@
   const ENROLLMENT_TARGET_SAMPLES = 1;
   const ENROLLMENT_MIN_SAMPLES = 1;
   const VERIFICATION_STAGE_SAMPLES = 1;
-  const MIN_STABLE_FACE_DURATION_MS = 5_000;
+  const REQUIRED_STABLE_FRONT_FRAMES = 1;
   const REQUIRED_ACTION_FRAMES = 3;
   const BACKENDS = Object.freeze(IS_ANDROID ? ['cpu'] : ['webgl', 'wasm', 'cpu']);
   const activeStreams = new Set();
@@ -471,14 +471,10 @@
     minimumSamplesRequired = samplesRequired
   ) {
     const samples = [];
+    let consecutiveFront = 0;
     let latest = null;
-    let stableStartedAt = null;
     let activeDeadline = deadline;
     let sampleGraceGranted = false;
-
-    function resetStableWindow() {
-      stableStartedAt = null;
-    }
 
     function selectionResult(sampleCount) {
       const selected = samples.slice(-sampleCount);
@@ -496,52 +492,41 @@
     while (Date.now() < activeDeadline) {
       const detected = await detectOneFace(human, video, onStatus);
       if (!detected || !frontFacing(detected.face)) {
-        resetStableWindow();
+        consecutiveFront = 0;
         if (detected) onStatus?.('Mira de frente.');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
       }
 
       latest = detected;
+      consecutiveFront += 1;
       const scores = biometricScores(detected.face);
       if (scores.realScore < MIN_REAL_SCORE) {
-        resetStableWindow();
         onStatus?.('Validando que sea un rostro real…');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
       }
       if (scores.liveScore < MIN_LIVE_SCORE) {
-        resetStableWindow();
         onStatus?.('Mueve ligeramente el rostro y vuelve al centro.');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
       }
+      if (consecutiveFront < REQUIRED_STABLE_FRONT_FRAMES) {
+        onStatus?.('Mantén el rostro quieto.');
+        await sleep(DETECTION_INTERVAL_MS);
+        continue;
+      }
 
-      let descriptor;
       try {
-        descriptor = normalizeDescriptor(detected.face.embedding);
+        samples.push({
+          descriptor: normalizeDescriptor(detected.face.embedding),
+          realScore: scores.realScore,
+          liveScore: scores.liveScore,
+          geometry: faceGeometry(detected.face, detected.quality)
+        });
       } catch {
-        resetStableWindow();
         onStatus?.('No se pudieron leer los rasgos. Mantén la posición.');
-        await sleep(DETECTION_INTERVAL_MS);
-        continue;
       }
-
-      if (stableStartedAt === null) stableStartedAt = Date.now();
-      const stableElapsedMs = Date.now() - stableStartedAt;
-      if (stableElapsedMs < MIN_STABLE_FACE_DURATION_MS) {
-        const secondsRemaining = Math.max(1, Math.ceil((MIN_STABLE_FACE_DURATION_MS - stableElapsedMs) / 1_000));
-        onStatus?.(`Mantén el rostro de frente y quieto · ${secondsRemaining} s.`);
-        await sleep(DETECTION_INTERVAL_MS);
-        continue;
-      }
-
-      samples.push({
-        descriptor,
-        realScore: scores.realScore,
-        liveScore: scores.liveScore,
-        geometry: faceGeometry(detected.face, detected.quality)
-      });
 
       if (samples.length > 0 && samples.length < samplesRequired && !sampleGraceGranted) {
         sampleGraceGranted = true;
