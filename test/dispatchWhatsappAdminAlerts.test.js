@@ -152,7 +152,7 @@ function notificationAuditStore() {
   };
 }
 
-test('configuración del coordinador conserva solo el número de alertas y elimina el recordatorio de ventanas', () => {
+test('configuración del coordinador conserva solo el número de alertas y elimina el recordatorio de ventanas ajenas', () => {
   const schema = read('prisma/schema.prisma');
   const dashboard = read('src/views/operacionesDashboard.ejs');
   const dashboardRoute = read('src/routes/dispatchDashboardMetrics.js');
@@ -202,9 +202,9 @@ test('cada inbound reinicia la ventana antes de interpretar si es confirmación'
   assert.match(webhook, /sendDispatchAllConfirmedAdminAlert/);
 });
 
-test('un punto del auxiliar renueva lastInboundAt aunque no sea una confirmación', async () => {
+test('un punto del coordinador renueva su lastInboundAt aunque no sea una confirmación', async () => {
   const { recordDispatchWhatsappInboundWindow } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
-  let current = { scope: 'operational', phone: '573001112233', lastInboundAt: new Date('2026-08-15T20:00:00.000Z') };
+  let current = { scope: 'operational', phone: '573009998877', lastInboundAt: new Date('2026-08-15T20:00:00.000Z') };
   const prismaClient = {
     dispatchWhatsappContactWindow: {
       findUnique: async () => current,
@@ -213,33 +213,34 @@ test('un punto del auxiliar renueva lastInboundAt aunque no sea una confirmació
   };
   const result = await recordDispatchWhatsappInboundWindow({
     scope: 'operational',
-    message: { from: '3001112233', text: { body: '.' }, timestamp: String(Date.parse('2026-08-15T21:00:00.000Z') / 1000) },
+    message: { from: '3009998877', text: { body: '.' }, timestamp: String(Date.parse('2026-08-15T21:00:00.000Z') / 1000) },
     prismaClient
   });
   assert.equal(new Date(result.lastInboundAt).toISOString(), '2026-08-15T21:00:00.000Z');
 });
 
-test('recordatorio de ventana se envía al auxiliar y se deduplica por la ventana renovable', async () => {
+test('recordatorio de ventana se envía solo al coordinador sobre su propia ventana y se deduplica por renovación', async () => {
   await withDispatchMetaEnv(async () => {
     const { runDispatchWhatsappWindowReminderDispatcher } = await import('../src/services/dispatchWhatsappAdminAlerts.js');
     const audit = notificationAuditStore();
     const outbound = [];
     const now = new Date('2026-08-15T23:00:00.000Z');
-    const window = {
+    const coordinatorWindow = {
+      scope: 'operational',
+      phone: '573009998877',
+      lastInboundAt: new Date('2026-08-14T23:24:00.000Z')
+    };
+    const auxiliaryWindow = {
       scope: 'operational',
       phone: '573001112233',
       lastInboundAt: new Date('2026-08-14T23:24:00.000Z')
     };
     const prismaClient = {
       devAuditEvent: audit.api,
-      dispatchWhatsappContactWindow: { findMany: async () => [window] },
-      dispatchWhatsappConfirmation: {
-        findMany: async () => [{
-          status: 'SENT',
-          assignment: scheduledAssignment({ id: 'window-reminder', serviceDate: '2026-08-16T05:00:00.000Z' })
-        }]
-      },
-      appUser: { findMany: async () => [] }
+      dispatchWhatsappContactWindow: { findMany: async () => [coordinatorWindow, auxiliaryWindow] },
+      appUser: {
+        findMany: async () => [{ id: 'user-test-1', username: 'coordinador-test', isActive: true, dispatchAlertPhone: '3009998877' }]
+      }
     };
     const axiosClient = {
       post: async (_url, payload) => {
@@ -250,7 +251,8 @@ test('recordatorio de ventana se envía al auxiliar y se deduplica por la ventan
 
     const first = await runDispatchWhatsappWindowReminderDispatcher(prismaClient, { now, axiosClient });
     assert.equal(first.sent, 1);
-    assert.equal(outbound[0].to, '573001112233');
+    assert.equal(outbound[0].to, '573009998877');
+    assert.match(outbound[0].text.body, /ventana personal/);
     assert.match(outbound[0].text.body, /punto \(\.\)/);
     assert.match(outbound[0].text.body, /25 minutos/);
 
@@ -258,11 +260,12 @@ test('recordatorio de ventana se envía al auxiliar y se deduplica por la ventan
     assert.equal(duplicate.sent, 0);
     assert.equal(outbound.length, 1);
 
-    window.lastInboundAt = new Date('2026-08-15T00:24:00.000Z');
+    coordinatorWindow.lastInboundAt = new Date('2026-08-15T00:24:00.000Z');
     const renewedNow = new Date('2026-08-15T23:59:00.000Z');
     const renewed = await runDispatchWhatsappWindowReminderDispatcher(prismaClient, { now: renewedNow, axiosClient });
     assert.equal(renewed.sent, 1);
     assert.equal(outbound.length, 2);
+    assert.ok(outbound.every((payload) => payload.to === '573009998877'));
   });
 });
 
