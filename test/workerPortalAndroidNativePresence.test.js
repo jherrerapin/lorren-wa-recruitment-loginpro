@@ -90,11 +90,17 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(bridge, /startCrewScan\(/);
   assert.match(bridge, /getProofBundle\(/);
 
-  assert.match(nativePresence, /Prueba local: todavía no registra asistencia/);
-  assert.match(nativePresence, /Marcar llegada de toda la cuadrilla/);
+  assert.match(nativePresence, /Presencia de cuadrilla/);
+  assert.match(nativePresence, /Comprueba quiénes están presentes\./);
+  assert.match(nativePresence, /Verificar presencia/);
   assert.match(nativePresence, /Quedar listo para asistencia/);
+  assert.match(nativePresence, /Reintentar no detectados/);
   assert.match(nativePresence, /cuadrillas\/proximidad\/contexto/);
   assert.match(nativePresence, /attendanceWriter !== false/);
+  assert.doesNotMatch(nativePresence, /Los teléfonos Lórren se comprueban entre sí/);
+  assert.doesNotMatch(nativePresence, /La app no escribe asistencia por sí sola/);
+  assert.doesNotMatch(nativePresence, /Pulsa una vez\. Lórren comprobará los teléfonos cercanos/);
+  assert.doesNotMatch(nativePresence, /Prueba local: todavía no registra asistencia/);
   assert.doesNotMatch(nativePresence, /\/llegada|\/salida|inicio-almuerzo|fin-almuerzo|registerDispatchArrival|registerCrewArrivalForLeader/);
   assert.doesNotMatch(nativePresence, /alert\s*\(|confirm\s*\(|prompt\s*\(/);
 
@@ -113,7 +119,7 @@ test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal
     /document\.getElementById\(PANEL_ID\)[\s\S]{0,160}if \(!contexts\.length\) return;[\s\S]{0,80}installStyles\(\);/
   );
   assert.doesNotMatch(nativePresence, /No hay una cuadrilla disponible para este teléfono en este momento\./);
-  assert.match(nativePresence, /Presencia de cuadrilla sin internet/);
+  assert.match(nativePresence, /Presencia de cuadrilla/);
   assert.match(nativePresence, /if \(!selectedServiceRequestId \|\| !contexts\.some/);
 });
 
