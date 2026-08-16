@@ -116,7 +116,7 @@ test('el APK conserva la misma proof nativa desde captura offline hasta sincroni
 
 test('el backend valida ubicación nativa también al sincronizar OFFLINE_WEB desde el APK', () => {
   assert.match(strictRouteSource, /if \(!requestedCrewGroup && isNativeAndroidRequest\(req\)\)/);
-  assert.match(strictRouteSource, /captureMode: captureMode/);
+  assert.match(strictRouteSource, /idempotencyKey,\s*captureMode/s);
   assert.match(strictRouteSource, /expected\.captureMode === OFFLINE_WEB_CAPTURE_MODE/);
   assert.match(strictRouteSource, /verificationAt = proofCapturedAt/);
   assert.match(strictRouteSource, /applyVerifiedNativeLocationToBody\(req, locationInput\)/);
