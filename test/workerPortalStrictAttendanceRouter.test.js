@@ -375,7 +375,7 @@ test('en el APK la geocerca usa coordenadas verificadas y no las coordenadas web
   });
 });
 
-test('el cliente nativo obtiene proof firmado antes del desafío y lo reenvía al marcar', () => {
+test('el cliente nativo obtiene proof firmado antes del desafío y conserva fallback PWA separado', () => {
   const flow = fs.readFileSync(new URL('../src/public/worker-portal-biometric-flow.js', import.meta.url), 'utf8');
   assert.match(flow, /nativeAttendanceLocationEnabled/);
   assert.match(flow, /requestAttendanceLocation/);
@@ -391,5 +391,14 @@ test('el cliente nativo obtiene proof firmado antes del desafío y lo reenvía a
   assert.match(flow, /error\?\.payload\?\.riskFlags/);
   assert.match(flow, /BIOMETRIC_FACE_MISMATCH/);
   assert.match(flow, /Android detectó una ubicación simulada/);
-  assert.doesNotMatch(flow, /nativeAttendanceLocationEnabled[\s\S]{0,800}navigator\.geolocation\.getCurrentPosition/);
+
+  const requestLocationBlock = flow.match(
+    /function requestLocation\(localRunToken\) \{([\s\S]*?)\n  \}\n\n  function handleNativeAttendanceLocation/
+  );
+  assert.ok(requestLocationBlock, 'falta autoridad requestLocation');
+  assert.match(
+    requestLocationBlock[1],
+    /if \(nativeAttendanceLocationEnabled\) \{[\s\S]*?requestNativeLocation\(localRunToken\);[\s\S]*?return;/
+  );
+  assert.match(requestLocationBlock[1], /navigator\.geolocation\.getCurrentPosition/);
 });
