@@ -427,5 +427,5 @@ test('una jornada importada pero modificada después sigue protegida contra sobr
 
   assert.equal(analysis.summary.ready, 0);
   assert.equal(analysis.summary.unresolved, 1);
-  assert.match(analysis.rows[0].message, /no corresponde a un lote GeoVictoria intacto/i);
+  assert.match(analysis.rows[0].message, /portal\/dispositivo|no son inequívocamente administrativas/i);
 });
