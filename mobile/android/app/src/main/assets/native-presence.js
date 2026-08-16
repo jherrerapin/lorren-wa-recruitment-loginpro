@@ -405,9 +405,11 @@
 
   function publicNativeError(code) {
     const messages = {
-      permissions_required: 'Android necesita permiso para buscar teléfonos cercanos. Autoriza el permiso y pulsa nuevamente.',
-      advertising_failed: 'No fue posible iniciar la búsqueda de esta cuadrilla. Revisa Bluetooth y vuelve a intentarlo.',
-      discovery_failed: 'No fue posible preparar este teléfono para ser detectado. Revisa Bluetooth y vuelve a intentarlo.',
+      permissions_required: 'Autoriza los permisos solicitados por Android para continuar.',
+      bluetooth_disabled: 'Bluetooth está apagado. Actívalo para continuar.',
+      bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible para verificar la cuadrilla.',
+      advertising_failed: 'No fue posible iniciar la verificación. Intenta nuevamente.',
+      discovery_failed: 'No fue posible dejar este teléfono listo para asistencia. Intenta nuevamente.',
       connection_failed: 'Una conexión cercana falló. La comprobación continuará con los demás teléfonos.',
       connection_request_failed: 'No fue posible conectar este teléfono con el encargado.',
       connection_accept_failed: 'No fue posible aceptar una conexión cercana.',
@@ -671,6 +673,12 @@
       setStatus(detail.granted
         ? 'Permisos listos. Pulsa nuevamente para continuar.'
         : 'Android no autorizó los permisos necesarios para detectar teléfonos cercanos.', detail.granted ? 'warning' : 'error');
+      return;
+    }
+    if (type === 'bluetooth') {
+      setStatus(detail.enabled
+        ? 'Bluetooth listo. Pulsa nuevamente para continuar.'
+        : 'Bluetooth sigue apagado. Actívalo para continuar.', detail.enabled ? 'warning' : 'error');
       return;
     }
     if (type === 'ready') {
