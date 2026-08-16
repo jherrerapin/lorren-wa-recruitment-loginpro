@@ -93,7 +93,7 @@ El módulo identifica, entre otras:
 - exceso del límite extra semanal;
 - compensatorio pendiente exclusivamente para el día de descanso obligatorio.
 
-Un festivo no genera `COMPENSATION_PENDING`. La tabla conserva el estado y el detalle de novedades para revisión operativa. El Excel `.xlsx` descargable conserva `Estado`, pero no incluye una columna `Novedades`; retirar esa columna es una decisión de presentación y no elimina las novedades del cálculo ni del runtime.
+Un festivo no genera `COMPENSATION_PENDING`. La tabla conserva el estado y el detalle de novedades para revisión operativa. El Excel `.xlsx` descargable no incluye columnas `Estado` ni `Novedades`; retirarlas es una decisión de presentación y no elimina el estado ni las novedades del cálculo o del runtime.
 
 ## Compensatorios
 
@@ -122,7 +122,7 @@ Se ofrecen:
 - CSV separado por punto y coma y codificado para Excel;
 - Excel `.xlsx` con encabezados, filtro y horas decimales.
 
-El reporte conserva identificación, rango, horas ordinarias, total trabajado, horas extra, los códigos canónicos de conceptos, estado y novedades. En el XLSX descargable se exportan esos datos salvo el detalle textual de `Novedades`; `Estado` permanece para indicar si la fila requiere revisión. El endpoint CSV heredado conserva su contrato actual.
+El reporte conserva identificación, rango, horas ordinarias, total trabajado, horas extra, los códigos canónicos de conceptos, estado y novedades. El XLSX descargable omite únicamente las columnas de presentación `Estado` y `Novedades`; el endpoint CSV heredado conserva su contrato actual.
 
 ## Alcance de esta entrega
 
