@@ -47,42 +47,31 @@ test('la oferta automática sigue apareciendo después de confirmar el registro 
 });
 
 
-test('Android usa el APK privado autenticado y no el instalador PWA', () => {
-  assert.match(installSource, /sesion-transferencia\/android-app/);
-  assert.match(installSource, /APK privado/);
-  assert.match(installSource, /downloadUrl\.startsWith\('\/operaciones\/portal\/'\)/);
-  assert.match(installSource, /window\.location\.href = downloadUrl/);
-  assert.match(installSource, /open-worker-portal-native/);
-  assert.match(installSource, /Ya la instalé · abrir Lórren/);
-  assert.match(installSource, /beforeinstallprompt[\s\S]*if \(isAndroid\(\)\) return/);
-  assert.doesNotMatch(installSource, /No se descarga un APK/);
+test('Android conserva temporalmente la instalación PWA mientras el APK se valida', () => {
+  assert.match(installSource, /beforeinstallprompt/);
+  assert.match(installSource, /event\.preventDefault\(\)/);
+  assert.match(installSource, /promptEvent\.prompt\(\)/);
+  assert.match(installSource, /promptEvent\.userChoice/);
+  assert.match(installSource, /No se descarga un APK/);
+  assert.match(installSource, /Abrir en Chrome y descargar/);
+  assert.doesNotMatch(installSource, /sesion-transferencia\/android-app/);
+  assert.doesNotMatch(installSource, /APK privado/);
+  assert.doesNotMatch(installSource, /open-worker-portal-native/);
 });
 
 
-test('la app Android expone su versión y solo ofrece actualización si el servidor tiene versionCode mayor', () => {
+test('la app Android mantiene versión configurable para retomar la distribución nativa después', () => {
   assert.match(presenceBridgeSource, /"appVersionCode", BuildConfig\.VERSION_CODE/);
   assert.match(presenceBridgeSource, /"appVersionName", BuildConfig\.VERSION_NAME/);
-  assert.match(installSource, /function checkNativeUpdate\(\)/);
-  assert.match(installSource, /metadata\.versionCode > installedVersionCode/);
-  assert.match(installSource, /Actualización de Lórren disponible/);
-  assert.match(installSource, /Actualizar Lórren/);
-  assert.match(installSource, /if \(isNativeAndroidApp\(\)\) \{[\s\S]*checkNativeUpdate\(\)/);
-  assert.doesNotMatch(installSource, /update-worker-portal-v2|android-updater-final/i);
+  assert.match(androidBuildSource, /gradleProperty\('lorrenVersionCode'\)/);
+  assert.match(androidBuildSource, /gradleProperty\('lorrenVersionName'\)/);
+  assert.match(androidBuildSource, /versionCode lorrenVersionCode/);
+  assert.match(androidBuildSource, /versionName lorrenVersionName/);
+  assert.doesNotMatch(androidBuildSource, /storePassword|keyPassword|\.jks|\.keystore|signingConfig\s*\{/i);
 });
 
 
-test('la actualización reutiliza el mismo CTA y reconoce explícitamente el WebView nativo antes de pasarlo a Chrome', () => {
-  assert.match(installSource, /id: 'open-worker-portal-install'/);
-  assert.match(handoffSource, /'open-worker-portal-install'/);
-  assert.match(handoffSource, /function isNativeAndroidApp\(\)/);
-  assert.match(handoffSource, /window\.LorrenAndroidPresence/);
-  assert.match(handoffSource, /function shouldTransferInstallToChrome\(\)/);
-  assert.match(handoffSource, /isNativeAndroidApp\(\) \|\| isAndroidInAppBrowser\(\)/);
-  assert.match(handoffSource, /window\.location\.href = chromeIntentUrl\(handoffToken\)/);
-});
-
-
-test('el APK se sirve solo desde sesión activa y sin revelar la ruta del servidor', () => {
+test('el backend conserva la distribución APK preparada sin exponerla desde el CTA temporal PWA', () => {
   assert.match(handoffRouteSource, /ATTENDANCE_ANDROID_APK_PATH/);
   assert.match(handoffRouteSource, /ATTENDANCE_ANDROID_APP_VERSION_NAME/);
   assert.match(handoffRouteSource, /ATTENDANCE_ANDROID_APP_VERSION_CODE/);
@@ -96,19 +85,18 @@ test('el APK se sirve solo desde sesión activa y sin revelar la ruta del servid
 });
 
 
-test('Android transfiere la sesión a la app mediante el deep link ya declarado', () => {
+test('Android conserva el handoff de sesión para navegador y futura app nativa', () => {
   assert.match(handoffSource, /sesion-transferencia\/crear/);
+  assert.match(handoffSource, /sesion-transferencia\/continuar/);
   assert.match(handoffSource, /X-Requested-With/);
   assert.match(handoffSource, /credentials: 'include'/);
-  assert.match(handoffSource, /open-worker-portal-native/);
   assert.match(handoffSource, /lorren:\/\/portal\/transferencia\?transferencia=/);
   assert.match(handoffSource, /encodeURIComponent\(handoffToken\)/);
-  assert.match(handoffSource, /window\.location\.href = nativeDeepLink\(handoffToken\)/);
   assert.match(handoffSource, /stopImmediatePropagation/);
 });
 
 
-test('el navegador interno primero rota la sesión hacia Chrome para descargar', () => {
+test('el navegador interno primero rota la sesión hacia Chrome para instalar la PWA', () => {
   assert.match(handoffSource, /isAndroidInAppBrowser/);
   assert.match(handoffSource, /sesion-transferencia\/continuar/);
   assert.match(handoffSource, /package=com\.android\.chrome/);
@@ -122,15 +110,6 @@ test('el observador de handoff solo procesa controles de instalación relevantes
   assert.match(handoffSource, /mutations\.some\(mutationAddsInstallButton\)/);
   assert.match(handoffSource, /NATIVE_OPEN_BUTTON_ID/);
   assert.doesNotMatch(handoffSource, /new MutationObserver\(prepareInstallButtons\)/);
-});
-
-
-test('versionCode y versionName Android son configurables sin versionar llaves de firma', () => {
-  assert.match(androidBuildSource, /gradleProperty\('lorrenVersionCode'\)/);
-  assert.match(androidBuildSource, /gradleProperty\('lorrenVersionName'\)/);
-  assert.match(androidBuildSource, /versionCode lorrenVersionCode/);
-  assert.match(androidBuildSource, /versionName lorrenVersionName/);
-  assert.doesNotMatch(androidBuildSource, /storePassword|keyPassword|\.jks|\.keystore|signingConfig\s*\{/i);
 });
 
 
@@ -176,7 +155,7 @@ test('la ruta visual admite el portal con o sin barra final', () => {
 });
 
 
-test('el manifiesto conserva PWA para plataformas no Android', () => {
+test('el manifiesto conserva PWA mientras la app Android nativa sigue en validación', () => {
   assert.equal(manifest.id, '/operaciones/portal');
   assert.equal(manifest.start_url, '/operaciones/portal');
   assert.equal(manifest.scope, '/operaciones/portal');
