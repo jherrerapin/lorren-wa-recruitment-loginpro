@@ -29,6 +29,8 @@ const NOTIFICATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const WINDOW_EXPIRY_NOTIFICATION = 'WINDOW_EXPIRY_REMINDER';
 const ALL_CONFIRMED_NOTIFICATION = 'ALL_ASSIGNMENTS_CONFIRMED';
 const activeScheduleRuns = new Set();
+const activeNotificationClaims = new Set();
+const NOTIFICATION_ENTITY = 'DISPATCH_WHATSAPP_NOTIFICATION';
 
 function inboundReceivedAt(message = {}) {
   const timestamp = Number(message.timestamp || 0);
@@ -121,43 +123,65 @@ function notificationKey(kind, parts = []) {
 }
 
 async function claimDispatchWhatsappNotification(prismaClient, {
-  scope,
-  phone,
   notificationType,
   key,
   eventAt,
   now = new Date()
 }) {
+  if (activeNotificationClaims.has(key)) return { claimed: false, reason: 'running' };
+  activeNotificationClaims.add(key);
   try {
-    return {
-      claimed: true,
-      row: await prismaClient.dispatchWhatsappNotification.create({
-        data: { scope, phone, notificationType, notificationKey: key, eventAt, status: 'PENDING' }
-      })
-    };
+    const previous = await prismaClient.devAuditEvent.findFirst({
+      where: { entityType: NOTIFICATION_ENTITY, entityId: key, action: notificationType },
+      orderBy: { createdAt: 'desc' }
+    });
+    const metadata = previous?.metadata && typeof previous.metadata === 'object' ? previous.metadata : {};
+    if (metadata.status === 'SENT') {
+      activeNotificationClaims.delete(key);
+      return { claimed: false, reason: 'already_sent' };
+    }
+    if (previous && ['PENDING', 'FAILED'].includes(metadata.status)) {
+      const previousAt = new Date(previous.createdAt || Number.NaN);
+      if (!Number.isNaN(previousAt.getTime()) && now.getTime() - previousAt.getTime() < NOTIFICATION_RETRY_COOLDOWN_MS) {
+        activeNotificationClaims.delete(key);
+        return { claimed: false, reason: 'retry_cooldown' };
+      }
+    }
+    const row = await prismaClient.devAuditEvent.create({
+      data: {
+        entityType: NOTIFICATION_ENTITY,
+        entityId: key,
+        action: notificationType,
+        actorSource: 'dispatch-whatsapp-notification',
+        metadata: { status: 'PENDING', eventAt: new Date(eventAt || now).toISOString() },
+        createdAt: now
+      }
+    });
+    return { claimed: true, row, key, notificationType };
   } catch (error) {
-    if (error?.code !== 'P2002') throw error;
+    activeNotificationClaims.delete(key);
+    throw error;
   }
-  const existing = await prismaClient.dispatchWhatsappNotification.findUnique({ where: { notificationKey: key } });
-  if (!existing || existing.status !== 'FAILED') return { claimed: false, row: existing };
-  const updatedAt = new Date(existing.updatedAt || existing.createdAt || Number.NaN);
-  if (!Number.isNaN(updatedAt.getTime()) && now.getTime() - updatedAt.getTime() < NOTIFICATION_RETRY_COOLDOWN_MS) {
-    return { claimed: false, row: existing };
-  }
-  const claimed = await prismaClient.dispatchWhatsappNotification.updateMany({
-    where: { id: existing.id, status: 'FAILED' },
-    data: { status: 'PENDING', lastError: null }
-  });
-  return { claimed: Boolean(claimed.count), row: existing };
 }
 
-async function markDispatchWhatsappNotification(prismaClient, rowId, { sent, error = null } = {}) {
-  return prismaClient.dispatchWhatsappNotification.update({
-    where: { id: rowId },
-    data: sent
-      ? { status: 'SENT', sentAt: new Date(), lastError: null }
-      : { status: 'FAILED', lastError: String(error?.message || error || 'provider_error').slice(0, 400) }
-  });
+async function markDispatchWhatsappNotification(prismaClient, claim, { sent, error = null, now = new Date() } = {}) {
+  try {
+    await prismaClient.devAuditEvent.create({
+      data: {
+        entityType: NOTIFICATION_ENTITY,
+        entityId: claim.key,
+        action: claim.notificationType,
+        actorSource: 'dispatch-whatsapp-notification',
+        metadata: {
+          status: sent ? 'SENT' : 'FAILED',
+          error: sent ? null : String(error?.message || error || 'provider_error').slice(0, 300)
+        },
+        createdAt: now
+      }
+    });
+  } finally {
+    activeNotificationClaims.delete(claim.key);
+  }
 }
 
 function eligibleServiceDate(assignment) {
@@ -456,8 +480,6 @@ export async function sendDispatchAllConfirmedAdminAlert({
   const ids = assignments.map((item) => item.id).sort();
   const key = notificationKey(ALL_CONFIRMED_NOTIFICATION, [scope, user.id, dateKey, ...ids]);
   const claim = await claimDispatchWhatsappNotification(prismaClient, {
-    scope,
-    phone: user.dispatchAlertPhone,
     notificationType: ALL_CONFIRMED_NOTIFICATION,
     key,
     eventAt: now,
@@ -471,10 +493,10 @@ export async function sendDispatchAllConfirmedAdminAlert({
       text: buildDispatchAllConfirmedAdminAlertText({ serviceDate: dateKey, confirmedCount: assignments.length }),
       axiosClient
     });
-    await markDispatchWhatsappNotification(prismaClient, claim.row.id, { sent: true });
+    await markDispatchWhatsappNotification(prismaClient, claim, { sent: true });
     return { sent: true, userId: user.id, confirmedCount: assignments.length };
   } catch (error) {
-    await markDispatchWhatsappNotification(prismaClient, claim.row.id, { sent: false, error }).catch(() => {});
+    await markDispatchWhatsappNotification(prismaClient, claim, { sent: false, error }).catch(() => {});
     console.warn(`[dispatch-wa-cloud] Falló aviso de todos confirmados para ${user.username}: ${error?.message || error}`);
     return { sent: false, reason: 'provider_error', error: String(error?.message || error).slice(0, 300) };
   }
@@ -504,8 +526,6 @@ export async function runDispatchWhatsappWindowReminderDispatcher(prismaClient =
     if (!links.some((item) => eligibleServiceDate(item.assignment) && isOperationalDispatchWorker(item.assignment?.worker))) continue;
     const key = notificationKey(WINDOW_EXPIRY_NOTIFICATION, [window.scope, window.phone, new Date(window.lastInboundAt).toISOString()]);
     const claim = await claimDispatchWhatsappNotification(prismaClient, {
-      scope: window.scope,
-      phone: window.phone,
       notificationType: WINDOW_EXPIRY_NOTIFICATION,
       key,
       eventAt: window.lastInboundAt,
@@ -519,10 +539,10 @@ export async function runDispatchWhatsappWindowReminderDispatcher(prismaClient =
         text: buildDispatchWindowExpiryReminderText(),
         axiosClient
       });
-      await markDispatchWhatsappNotification(prismaClient, claim.row.id, { sent: true });
+      await markDispatchWhatsappNotification(prismaClient, claim, { sent: true });
       sent += 1;
     } catch (error) {
-      await markDispatchWhatsappNotification(prismaClient, claim.row.id, { sent: false, error }).catch(() => {});
+      await markDispatchWhatsappNotification(prismaClient, claim, { sent: false, error }).catch(() => {});
       failed += 1;
       console.warn(`[dispatch-wa-cloud] Falló recordatorio de ventana al auxiliar: ${error?.message || error}`);
     }
