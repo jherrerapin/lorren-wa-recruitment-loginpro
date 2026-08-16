@@ -48,7 +48,7 @@
       </div>
       <div class="actions">
         <a class="btn" href="/admin/operaciones">Volver a Operaciones</a>
-        <a class="btn" href="/admin/operaciones/resumen?fecha=<%= selectedDate %>&type=total">Solicitudes del día</a>
+        <a class="btn" href="/admin/operaciones/resumen?fecha=<%= selectedDate %>&amp;type=total">Solicitudes del día</a>
         <a class="btn btn-primary" href="#registrarNovedad">Registrar novedad</a>
       </div>
     </section>
@@ -66,7 +66,7 @@
         </div>
         <div class="create-actions">
           <button class="btn btn-primary" type="submit">Buscar solicitudes para reportar novedad</button>
-          <a class="btn" href="/admin/operaciones/resumen?fecha=<%= selectedDate %>&type=total">Ver solicitudes de la fecha seleccionada</a>
+          <a class="btn" href="/admin/operaciones/resumen?fecha=<%= selectedDate %>&amp;type=total">Ver solicitudes de la fecha seleccionada</a>
         </div>
       </form>
       <span>En el listado, abre <strong>“Reportar novedad de esta solicitud”</strong> y registra el tipo, auxiliar relacionado si aplica, quién reporta y descripción.</span>
@@ -101,7 +101,7 @@
                 <span>Reportado por: <%= incident.reportedBy || incident.createdByUsername || 'No registrado' %></span>
               </div>
             </div>
-            <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>&fecha=<%= requestDate %>">Ver asignación</a>
+            <a class="btn" href="/admin/operaciones/asignaciones?serviceRequestId=<%= request.id %>&amp;fecha=<%= requestDate %>">Ver asignación</a>
           </div>
           <p><%= incident.description %></p>
           <% if (incident.resolutionNote) { %><p class="muted"><strong>Cierre:</strong> <%= incident.resolutionNote %></p><% } %>
