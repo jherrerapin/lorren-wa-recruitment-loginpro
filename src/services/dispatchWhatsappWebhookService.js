@@ -16,6 +16,7 @@ import { claimDispatchAssignmentConfirmation, claimDispatchAssignmentNovelty } f
 import { dispatchWhatsappProviderErrorMessage, sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
 import {
   recordDispatchWhatsappInboundWindow,
+  sendDispatchAllConfirmedAdminAlert,
   sendDispatchNoveltyAdminAlert
 } from './dispatchWhatsappAdminAlerts.js';
 import { recordDispatchWhatsappMessageAudit } from './dispatchWhatsappMonitor.js';
@@ -247,8 +248,13 @@ export async function processDispatchWhatsappInboundMessage({
   if (!claim.shouldReply) {
     return { handled: claim.duplicate, duplicate: claim.duplicate, assignmentConfirmed: claim.assignmentConfirmed, replySent: false };
   }
+  let allConfirmedAlertSent = false;
   if (claim.assignmentConfirmed && scope === 'operational') {
     const statusResult = await recalculateDispatchServiceRequestStatus(prismaClient, target.assignment.serviceRequestId);
+    const allConfirmedAlert = await sendDispatchAllConfirmedAdminAlert({
+      scope, link: target.link, assignment: target.assignment, prismaClient, axiosClient, now: receivedAt
+    }).catch((error) => ({ sent: false, error }));
+    allConfirmedAlertSent = Boolean(allConfirmedAlert?.sent);
     if (statusResult?.status === 'ASSIGNMENT_COMPLETE') {
       const completionEmail = await sendDispatchCompletionEmail(prismaClient, target.assignment.serviceRequestId);
       if (completionEmail?.error) {
@@ -285,8 +291,8 @@ export async function processDispatchWhatsappInboundMessage({
     lastInboundAt: new Date().toISOString(),
     ...(replySent ? { lastError: null } : {})
   });
-  console.info(`[dispatch-wa-cloud] Confirmación inbound procesada. scope=${scope} assignment=${target.assignment.id} changed=${claim.assignmentConfirmed ? 'yes' : 'no'} reply=${replySent ? 'sent' : 'pending'}.`);
-  return { handled: true, duplicate: false, assignmentConfirmed: claim.assignmentConfirmed, replySent };
+  console.info(`[dispatch-wa-cloud] Confirmación inbound procesada. scope=${scope} assignment=${target.assignment.id} changed=${claim.assignmentConfirmed ? 'yes' : 'no'} reply=${replySent ? 'sent' : 'pending'} allConfirmedAlert=${allConfirmedAlertSent ? 'sent' : 'not-sent'}.`);
+  return { handled: true, duplicate: false, assignmentConfirmed: claim.assignmentConfirmed, replySent, allConfirmedAlertSent };
 }
 
 function normalizedProviderStatus(value) {

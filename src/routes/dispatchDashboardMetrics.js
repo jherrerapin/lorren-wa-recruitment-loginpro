@@ -54,8 +54,7 @@ async function loadCurrentDispatchAlertSettings(prisma, req) {
   const user = await findCurrentDispatchAppUser(prisma, req);
   return {
     available: Boolean(user),
-    phone: dispatchAlertPhoneForInput(user?.dispatchAlertPhone),
-    reminderEnabled: Boolean(user?.dispatchWindowExpiryReminderEnabled)
+    phone: dispatchAlertPhoneForInput(user?.dispatchAlertPhone)
   };
 }
 
@@ -176,22 +175,10 @@ function normalizeSummaryType(value) {
 
 function summaryTypeMeta(type) {
   return ({
-    total: {
-      title: 'Solicitudes del rango',
-      description: 'Todas las solicitudes programadas para el rango seleccionado.'
-    },
-    pending: {
-      title: 'Solicitudes pendientes',
-      description: 'Solicitudes del rango que aún requieren asignación, cobertura parcial o confirmación.'
-    },
-    complete: {
-      title: 'Solicitudes con asignación completa',
-      description: 'Solicitudes del rango cuya cobertura ya está confirmada.'
-    },
-    incidents: {
-      title: 'Solicitudes con novedades abiertas',
-      description: 'Solicitudes del rango que tienen novedades abiertas o en proceso.'
-    }
+    total: { title: 'Solicitudes del rango', description: 'Todas las solicitudes programadas para el rango seleccionado.' },
+    pending: { title: 'Solicitudes pendientes', description: 'Solicitudes del rango que aún requieren asignación, cobertura parcial o confirmación.' },
+    complete: { title: 'Solicitudes con asignación completa', description: 'Solicitudes del rango cuya cobertura ya está confirmada.' },
+    incidents: { title: 'Solicitudes con novedades abiertas', description: 'Solicitudes del rango que tienen novedades abiertas o en proceso.' }
   }[type]);
 }
 
@@ -212,9 +199,7 @@ function buildOperationsDashboardMetrics(requests = []) {
 }
 
 function excludeDevTestRequests(where = {}) {
-  return {
-    AND: [where, { source: { not: DEV_TEST_REQUEST_SOURCE } }]
-  };
+  return { AND: [where, { source: { not: DEV_TEST_REQUEST_SOURCE } }] };
 }
 
 function buildDateRangeWhere(range) {
@@ -236,10 +221,7 @@ async function loadServiceRequestsForRange(prisma, range) {
     include: {
       service: true,
       ...DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
-      assignments: {
-        include: { worker: true },
-        orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
-      },
+      assignments: { include: { worker: true }, orderBy: [{ status: 'asc' }, { createdAt: 'asc' }] },
       incidents: {
         where: { status: { in: OPEN_INCIDENT_STATUSES } },
         include: { worker: true, assignment: { include: { worker: true } } },
@@ -248,11 +230,7 @@ async function loadServiceRequestsForRange(prisma, range) {
     },
     orderBy: [{ serviceDate: 'asc' }, { clientName: 'asc' }, { operationPointName: 'asc' }, { startTime: 'asc' }, { createdAt: 'asc' }]
   });
-
-  return filterRequestsByDateRange(requests, range).map((request) => ({
-    ...request,
-    status: deriveDispatchRequestOperationalState(request).status
-  }));
+  return filterRequestsByDateRange(requests, range).map((request) => ({ ...request, status: deriveDispatchRequestOperationalState(request).status }));
 }
 
 async function loadServiceRequestsForDate(prisma, selectedDate) {
@@ -279,7 +257,6 @@ function applyTitle(worksheet, title, subtitle, columnCount) {
   titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
   titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E2D3D' } };
   worksheet.getRow(1).height = 28;
-
   worksheet.mergeCells(2, 1, 2, columnCount);
   const subtitleCell = worksheet.getCell(2, 1);
   subtitleCell.value = subtitle;
@@ -290,10 +267,8 @@ function applyTitle(worksheet, title, subtitle, columnCount) {
 
 function commonBorder(color = 'FFE5E7EB') {
   return {
-    top: { style: 'thin', color: { argb: color } },
-    left: { style: 'thin', color: { argb: color } },
-    bottom: { style: 'thin', color: { argb: color } },
-    right: { style: 'thin', color: { argb: color } }
+    top: { style: 'thin', color: { argb: color } }, left: { style: 'thin', color: { argb: color } },
+    bottom: { style: 'thin', color: { argb: color } }, right: { style: 'thin', color: { argb: color } }
   };
 }
 
@@ -357,20 +332,10 @@ function renderSummary(res, req, range, type, requests) {
     role: req.session?.userRole || req.userRole,
     pageTitle: meta.title,
     subtitle: `${meta.description} Rango: ${dateRangeLabel(range)}.`,
-    selectedDate: dateRangeLabel(range),
-    selectedDateFrom: range.from,
-    selectedDateTo: range.to,
-    type,
-    typeLabel: meta.title,
-    metrics,
-    requests: filteredRequests,
-    message: normalizeString(req.query.message),
-    activeAssignments,
-    confirmedAssignments,
-    statusLabel,
-    assignmentStatusLabel,
-    buildHorario,
-    buildCoverageText,
+    selectedDate: dateRangeLabel(range), selectedDateFrom: range.from, selectedDateTo: range.to,
+    type, typeLabel: meta.title, metrics, requests: filteredRequests,
+    message: normalizeString(req.query.message), activeAssignments, confirmedAssignments, statusLabel,
+    assignmentStatusLabel, buildHorario, buildCoverageText,
     resolveServiceRequestPolicy: resolveDispatchServiceRequestPolicy,
     canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
   });
@@ -382,70 +347,46 @@ async function exportRequestsToExcel(res, range, serviceRequests) {
   workbook.created = new Date();
   const rangeText = dateRangeLabel(range);
   const subtitle = range.from === range.to ? `Fecha de servicio: ${rangeText}` : `Rango de servicio: ${rangeText}`;
-
   const summarySheet = workbook.addWorksheet('Resumen');
   const summaryColumns = [
-    { header: 'Cliente', key: 'client', width: 28 },
-    { header: 'Operación', key: 'operation', width: 28 },
-    { header: 'Servicio', key: 'service', width: 24 },
-    { header: 'Horario', key: 'horario', width: 18 },
-    { header: 'Requeridos', key: 'required', width: 13 },
-    { header: 'Asignados', key: 'assigned', width: 13 },
-    { header: 'Confirmados', key: 'confirmed', width: 13 },
-    { header: 'Estado', key: 'status', width: 22 },
+    { header: 'Cliente', key: 'client', width: 28 }, { header: 'Operación', key: 'operation', width: 28 },
+    { header: 'Servicio', key: 'service', width: 24 }, { header: 'Horario', key: 'horario', width: 18 },
+    { header: 'Requeridos', key: 'required', width: 13 }, { header: 'Asignados', key: 'assigned', width: 13 },
+    { header: 'Confirmados', key: 'confirmed', width: 13 }, { header: 'Estado', key: 'status', width: 22 },
     { header: 'Auxiliares asignados', key: 'workers', width: 48 }
   ];
   summarySheet.columns = summaryColumns;
   applyTitle(summarySheet, 'Solicitudes de Operaciones', subtitle, summaryColumns.length);
   const headerRow = summarySheet.addRow(summaryColumns.map((column) => column.header));
   styleHeader(headerRow);
-
   serviceRequests.forEach((request, index) => {
     const row = summarySheet.addRow({
-      client: request.clientName || 'Sin cliente',
-      operation: request.operationPointName || request.operationPoint?.name || 'Sin operación',
-      service: request.serviceName || request.service?.name || 'Sin servicio',
-      horario: buildHorario(request),
-      required: request.requiredWorkers || 0,
-      assigned: activeAssignments(request).length,
-      confirmed: confirmedAssignments(request).length,
-      status: statusLabel(request.status),
-      workers: buildAssignedWorkersCell(request)
+      client: request.clientName || 'Sin cliente', operation: request.operationPointName || request.operationPoint?.name || 'Sin operación',
+      service: request.serviceName || request.service?.name || 'Sin servicio', horario: buildHorario(request),
+      required: request.requiredWorkers || 0, assigned: activeAssignments(request).length,
+      confirmed: confirmedAssignments(request).length, status: statusLabel(request.status), workers: buildAssignedWorkersCell(request)
     });
-    styleDataRow(row, index);
-    styleStatusCell(row.getCell('status'), request.status);
+    styleDataRow(row, index); styleStatusCell(row.getCell('status'), request.status);
   });
-
   summarySheet.views = [{ state: 'frozen', ySplit: 3 }];
   summarySheet.autoFilter = { from: 'A3', to: 'I3' };
   summarySheet.getColumn('workers').alignment = { wrapText: true, vertical: 'top' };
-
   for (const [clientName, requests] of groupByClient(serviceRequests)) {
     const sheet = workbook.addWorksheet(cleanSheetName(clientName, 'Cliente'));
-    sheet.columns = summaryColumns;
-    applyTitle(sheet, clientName, subtitle, summaryColumns.length);
-    const clientHeader = sheet.addRow(summaryColumns.map((column) => column.header));
-    styleHeader(clientHeader);
+    sheet.columns = summaryColumns; applyTitle(sheet, clientName, subtitle, summaryColumns.length);
+    const clientHeader = sheet.addRow(summaryColumns.map((column) => column.header)); styleHeader(clientHeader);
     requests.forEach((request, index) => {
       const row = sheet.addRow({
-        client: request.clientName || clientName,
-        operation: request.operationPointName || request.operationPoint?.name || 'Sin operación',
-        service: request.serviceName || request.service?.name || 'Sin servicio',
-        horario: buildHorario(request),
-        required: request.requiredWorkers || 0,
-        assigned: activeAssignments(request).length,
-        confirmed: confirmedAssignments(request).length,
-        status: statusLabel(request.status),
-        workers: buildAssignedWorkersCell(request)
+        client: request.clientName || clientName, operation: request.operationPointName || request.operationPoint?.name || 'Sin operación',
+        service: request.serviceName || request.service?.name || 'Sin servicio', horario: buildHorario(request),
+        required: request.requiredWorkers || 0, assigned: activeAssignments(request).length,
+        confirmed: confirmedAssignments(request).length, status: statusLabel(request.status), workers: buildAssignedWorkersCell(request)
       });
-      styleDataRow(row, index);
-      styleStatusCell(row.getCell('status'), request.status);
+      styleDataRow(row, index); styleStatusCell(row.getCell('status'), request.status);
     });
-    sheet.views = [{ state: 'frozen', ySplit: 3 }];
-    sheet.autoFilter = { from: 'A3', to: 'I3' };
+    sheet.views = [{ state: 'frozen', ySplit: 3 }]; sheet.autoFilter = { from: 'A3', to: 'I3' };
     sheet.getColumn('workers').alignment = { wrapText: true, vertical: 'top' };
   }
-
   const buffer = await workbook.xlsx.writeBuffer();
   const fileRange = range.from === range.to ? range.from : `${range.from}-a-${range.to}`;
   const fileName = `solicitudes-operaciones-${fileRange}.xlsx`;
@@ -460,14 +401,9 @@ export function dispatchDashboardMetricsRouter(prisma) {
   router.get('/', requireOps, async (req, res) => {
     const range = selectedDateRangeFromQuery(req.query);
     const rangeRequestsPromise = loadServiceRequestsForRange(prisma, range);
-    const programmingRequestsPromise = range.from === range.to
-      ? rangeRequestsPromise
-      : loadServiceRequestsForDate(prisma, range.to);
+    const programmingRequestsPromise = range.from === range.to ? rangeRequestsPromise : loadServiceRequestsForDate(prisma, range.to);
     const [requests, programmingRequests, attendanceAccess, dispatchAlertSettings] = await Promise.all([
-      rangeRequestsPromise,
-      programmingRequestsPromise,
-      loadAttendanceAccessForDashboard(prisma, req),
-      loadCurrentDispatchAlertSettings(prisma, req)
+      rangeRequestsPromise, programmingRequestsPromise, loadAttendanceAccessForDashboard(prisma, req), loadCurrentDispatchAlertSettings(prisma, req)
     ]);
     return renderHome(res, req, range, requests, programmingRequests, attendanceAccess, dispatchAlertSettings);
   });
@@ -478,27 +414,13 @@ export function dispatchDashboardMetricsRouter(prisma) {
       const params = new URLSearchParams({ fechaDesde: range.from, fechaHasta: range.to, [key]: message });
       return res.redirect(`/admin/operaciones?${params.toString()}`);
     };
-
     const rawPhone = normalizeString(req.body?.dispatchAlertPhone);
     const dispatchAlertPhone = normalizeDispatchAlertPhoneInput(rawPhone);
-    const dispatchWindowExpiryReminderEnabled = req.body?.dispatchWindowExpiryReminderEnabled === 'true';
-    if (rawPhone && !dispatchAlertPhone) {
-      return redirectWith('alertSettingsError', 'El WhatsApp de alertas debe ser un celular colombiano válido.');
-    }
-    if (dispatchWindowExpiryReminderEnabled && !dispatchAlertPhone) {
-      return redirectWith('alertSettingsError', 'Configura un WhatsApp de alertas antes de activar el recordatorio de ventana.');
-    }
-
+    if (rawPhone && !dispatchAlertPhone) return redirectWith('alertSettingsError', 'El WhatsApp de alertas debe ser un celular colombiano válido.');
     const user = await findCurrentDispatchAppUser(prisma, req);
-    if (!user) {
-      return redirectWith('alertSettingsError', 'No fue posible identificar tu usuario para guardar esta configuración.');
-    }
-
-    await prisma.appUser.update({
-      where: { id: user.id },
-      data: { dispatchAlertPhone, dispatchWindowExpiryReminderEnabled }
-    });
-    return redirectWith('alertSettingsMessage', 'Configuración de alertas de despacho guardada.');
+    if (!user) return redirectWith('alertSettingsError', 'No fue posible identificar tu usuario para guardar esta configuración.');
+    await prisma.appUser.update({ where: { id: user.id }, data: { dispatchAlertPhone } });
+    return redirectWith('alertSettingsMessage', 'WhatsApp de alertas de despacho guardado.');
   });
 
   router.get('/resumen', requireOps, async (req, res) => {
@@ -520,30 +442,17 @@ export function dispatchDashboardMetricsRouter(prisma) {
       include: {
         service: true,
         ...DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
-        assignments: {
-          include: { worker: true },
-          orderBy: [{ status: 'asc' }, { createdAt: 'asc' }]
-        },
-        incidents: {
-          include: { worker: true, assignment: { include: { worker: true } } },
-          orderBy: { createdAt: 'desc' }
-        }
+        assignments: { include: { worker: true }, orderBy: [{ status: 'asc' }, { createdAt: 'asc' }] },
+        incidents: { include: { worker: true, assignment: { include: { worker: true } } }, orderBy: { createdAt: 'desc' } }
       }
     });
     if (!request || request.source === DEV_TEST_REQUEST_SOURCE) return res.status(404).send('Solicitud no encontrada');
     const derivedRequest = { ...request, status: deriveDispatchRequestOperationalState(request).status };
     return res.render('operacionesSolicitudDetalle', {
-      role: req.session?.userRole || req.userRole,
-      request: derivedRequest,
-      selectedDate: dispatchServiceDateKey(request.serviceDate),
-      activeAssignments,
-      confirmedAssignments,
-      assignmentStatusLabel,
-      statusLabel,
-      buildHorario,
-      buildCoverageText,
-      resolveServiceRequestPolicy: resolveDispatchServiceRequestPolicy,
-      message: normalizeString(req.query.message)
+      role: req.session?.userRole || req.userRole, request: derivedRequest,
+      selectedDate: dispatchServiceDateKey(request.serviceDate), activeAssignments, confirmedAssignments,
+      assignmentStatusLabel, statusLabel, buildHorario, buildCoverageText,
+      resolveServiceRequestPolicy: resolveDispatchServiceRequestPolicy, message: normalizeString(req.query.message)
     });
   });
 
