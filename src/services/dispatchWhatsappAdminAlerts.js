@@ -1,5 +1,11 @@
+import { createHash } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
 import { buildDispatchServiceDateWhere, dispatchServiceDateKey, todayIsoDateCO } from './dispatchDate.js';
+import {
+  ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
+  CONFIRMED_DISPATCH_ASSIGNMENT_STATUS,
+  isOperationalDispatchWorker
+} from './dispatchOperationalCoverage.js';
 import { dispatchServiceRequestStartAt } from './dispatchServiceRequestPolicy.js';
 import {
   ACTIVE_LINK_STATUSES,
@@ -16,11 +22,12 @@ const AUTOMATION_CONFIG_ENTITY = 'DISPATCH_WHATSAPP_AUTOMATION_CONFIG';
 const AUTOMATION_CONFIG_ACTION = 'SET_DISPATCH_WHATSAPP_AUTOMATION';
 const AUTOMATION_RUN_ENTITY = 'DISPATCH_WHATSAPP_AUTOMATION_RUN';
 const ASSIGNMENT_SEND_ATTEMPT_ACTION = 'SEND_ASSIGNMENT_CONFIRMATION_ATTEMPT';
-const PENDING_ALERT_ACTION = 'SEND_PENDING_CONFIRMATION_ALERT';
 const PENDING_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING'];
-const MAX_PENDING_REPORT_ITEMS = 40;
 const AUTOMATION_MAX_ATTEMPTS_PER_DAY = 3;
 const AUTOMATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
+const NOTIFICATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
+const WINDOW_EXPIRY_NOTIFICATION = 'WINDOW_EXPIRY_REMINDER';
+const ALL_CONFIRMED_NOTIFICATION = 'ALL_ASSIGNMENTS_CONFIRMED';
 const activeScheduleRuns = new Set();
 
 function inboundReceivedAt(message = {}) {
@@ -78,10 +85,12 @@ export function buildDispatchNoveltyAdminAlertText(assignment) {
   return `⚠️ Novedad reportada\n${name} (${phone}) reportó una novedad sobre su asignación del ${dateLabel(request.serviceDate)} en ${operation}.\nComunícate con el auxiliar para conocer qué ocurrió y gestionar lo necesario.`;
 }
 
-function reminderAlertText(assignment) {
-  const name = assignment?.worker?.fullName || 'el auxiliar';
-  const phone = normalizeDispatchWhatsappPhone(assignment?.worker?.phone) || 'sin número';
-  return `⏰ La ventana de 24 horas con ${name} (${phone}) vence en aproximadamente 25 minutos. Si necesitas enviarle información sin plantilla, hazlo antes del vencimiento.`;
+export function buildDispatchWindowExpiryReminderText() {
+  return '⏰ Tu ventana de WhatsApp con Despacho vence en aproximadamente 25 minutos. Si quieres mantenerla abierta, responde este mensaje; puede ser incluso con un punto (.).';
+}
+
+export function buildDispatchAllConfirmedAdminAlertText({ serviceDate, confirmedCount } = {}) {
+  return `✅ Todos tus auxiliares asignados para el ${dateLabel(serviceDate)} ya confirmaron. Total confirmados: ${Number(confirmedCount || 0)}.`;
 }
 
 async function alertUserByUsername(prismaClient, username) {
@@ -89,13 +98,7 @@ async function alertUserByUsername(prismaClient, username) {
   if (!normalized) return null;
   return prismaClient.appUser.findUnique({
     where: { username: normalized },
-    select: {
-      id: true,
-      username: true,
-      isActive: true,
-      dispatchAlertPhone: true,
-      dispatchWindowExpiryReminderEnabled: true
-    }
+    select: { id: true, username: true, isActive: true, dispatchAlertPhone: true }
   });
 }
 
@@ -112,6 +115,51 @@ export async function sendDispatchNoveltyAdminAlert({ scope = 'operational', lin
   }
 }
 
+function notificationKey(kind, parts = []) {
+  const digest = createHash('sha256').update([kind, ...parts].join('|')).digest('hex');
+  return `${kind.toLowerCase()}:${digest}`;
+}
+
+async function claimDispatchWhatsappNotification(prismaClient, {
+  scope,
+  phone,
+  notificationType,
+  key,
+  eventAt,
+  now = new Date()
+}) {
+  try {
+    return {
+      claimed: true,
+      row: await prismaClient.dispatchWhatsappNotification.create({
+        data: { scope, phone, notificationType, notificationKey: key, eventAt, status: 'PENDING' }
+      })
+    };
+  } catch (error) {
+    if (error?.code !== 'P2002') throw error;
+  }
+  const existing = await prismaClient.dispatchWhatsappNotification.findUnique({ where: { notificationKey: key } });
+  if (!existing || existing.status !== 'FAILED') return { claimed: false, row: existing };
+  const updatedAt = new Date(existing.updatedAt || existing.createdAt || Number.NaN);
+  if (!Number.isNaN(updatedAt.getTime()) && now.getTime() - updatedAt.getTime() < NOTIFICATION_RETRY_COOLDOWN_MS) {
+    return { claimed: false, row: existing };
+  }
+  const claimed = await prismaClient.dispatchWhatsappNotification.updateMany({
+    where: { id: existing.id, status: 'FAILED' },
+    data: { status: 'PENDING', lastError: null }
+  });
+  return { claimed: Boolean(claimed.count), row: existing };
+}
+
+async function markDispatchWhatsappNotification(prismaClient, rowId, { sent, error = null } = {}) {
+  return prismaClient.dispatchWhatsappNotification.update({
+    where: { id: rowId },
+    data: sent
+      ? { status: 'SENT', sentAt: new Date(), lastError: null }
+      : { status: 'FAILED', lastError: String(error?.message || error || 'provider_error').slice(0, 400) }
+  });
+}
+
 function eligibleServiceDate(assignment) {
   const key = dispatchServiceDateKey(assignment?.serviceRequest?.serviceDate);
   return Boolean(key && key >= todayIsoDateCO());
@@ -125,23 +173,14 @@ export function normalizeDispatchAutomationTime(value) {
 
 function automationMetadata(row) {
   const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
-  return {
-    assignmentAutoSendTime: normalizeDispatchAutomationTime(metadata.assignmentAutoSendTime),
-    pendingConfirmationAlertTime: normalizeDispatchAutomationTime(metadata.pendingConfirmationAlertTime)
-  };
+  return { assignmentAutoSendTime: normalizeDispatchAutomationTime(metadata.assignmentAutoSendTime) };
 }
 
 export async function loadDispatchWhatsappAutomationSettings({ prismaClient = prisma, userId } = {}) {
   const id = String(userId || '').trim();
-  if (!id || !prismaClient?.devAuditEvent?.findFirst) {
-    return { assignmentAutoSendTime: null, pendingConfirmationAlertTime: null };
-  }
+  if (!id || !prismaClient?.devAuditEvent?.findFirst) return { assignmentAutoSendTime: null };
   const row = await prismaClient.devAuditEvent.findFirst({
-    where: {
-      entityType: AUTOMATION_CONFIG_ENTITY,
-      entityId: id,
-      action: AUTOMATION_CONFIG_ACTION
-    },
+    where: { entityType: AUTOMATION_CONFIG_ENTITY, entityId: id, action: AUTOMATION_CONFIG_ACTION },
     orderBy: { createdAt: 'desc' }
   });
   return automationMetadata(row);
@@ -150,13 +189,11 @@ export async function loadDispatchWhatsappAutomationSettings({ prismaClient = pr
 export async function saveDispatchWhatsappAutomationSettings({
   prismaClient = prisma,
   userId,
-  assignmentAutoSendTime = null,
-  pendingConfirmationAlertTime = null
+  assignmentAutoSendTime = null
 } = {}) {
   const id = String(userId || '').trim();
   if (!id) throw new Error('userId es requerido');
   const normalizedAssignmentTime = normalizeDispatchAutomationTime(assignmentAutoSendTime);
-  const normalizedPendingTime = normalizeDispatchAutomationTime(pendingConfirmationAlertTime);
   await prismaClient.devAuditEvent.create({
     data: {
       entityType: AUTOMATION_CONFIG_ENTITY,
@@ -164,32 +201,18 @@ export async function saveDispatchWhatsappAutomationSettings({
       action: AUTOMATION_CONFIG_ACTION,
       actorUserId: id,
       actorSource: 'dispatch-whatsapp-settings',
-      metadata: {
-        assignmentAutoSendTime: normalizedAssignmentTime,
-        pendingConfirmationAlertTime: normalizedPendingTime
-      }
+      metadata: { assignmentAutoSendTime: normalizedAssignmentTime }
     }
   });
-  return {
-    assignmentAutoSendTime: normalizedAssignmentTime,
-    pendingConfirmationAlertTime: normalizedPendingTime
-  };
+  return { assignmentAutoSendTime: normalizedAssignmentTime };
 }
 
 function bogotaClock(now = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
     timeZone: BOGOTA_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23'
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
   }).formatToParts(now).filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]));
-  return {
-    dateKey: `${parts.year}-${parts.month}-${parts.day}`,
-    timeKey: `${parts.hour}:${parts.minute}`
-  };
+  return { dateKey: `${parts.year}-${parts.month}-${parts.day}`, timeKey: `${parts.hour}:${parts.minute}` };
 }
 
 function addIsoDays(dateKey, days) {
@@ -247,10 +270,7 @@ async function assignmentsForUserAndDate(prismaClient, user, dateKey, statuses) 
     where: {
       createdByUsername: user.username,
       status: { in: statuses },
-      serviceRequest: {
-        source: { not: 'DEV_TEST' },
-        ...buildDispatchServiceDateWhere(dateKey)
-      }
+      serviceRequest: { source: { not: 'DEV_TEST' }, ...buildDispatchServiceDateWhere(dateKey) }
     },
     include: { worker: true, serviceRequest: true },
     orderBy: { createdAt: 'asc' }
@@ -258,6 +278,7 @@ async function assignmentsForUserAndDate(prismaClient, user, dateKey, statuses) 
   return rows.filter((assignment) => (
     assignment?.serviceRequest?.source !== 'DEV_TEST'
     && dispatchServiceDateKey(assignment?.serviceRequest?.serviceDate) === dateKey
+    && isOperationalDispatchWorker(assignment?.worker)
   ));
 }
 
@@ -271,85 +292,46 @@ function confirmationBlocksAutomaticSend(status) {
 
 async function loadAssignmentSendStates(prismaClient, userId, assignmentIds, dateKey, now) {
   const ids = [...new Set(assignmentIds.filter(Boolean))];
-  const states = new Map(ids.map((assignmentId) => [assignmentId, {
-    due: true,
-    reason: null,
-    failedAttempts: 0,
-    latestFailureAt: null
-  }]));
+  const states = new Map(ids.map((assignmentId) => [assignmentId, { due: true, reason: null, failedAttempts: 0, latestFailureAt: null }]));
   if (!ids.length) return states;
-
-  const markerToAssignment = new Map(ids.map((assignmentId) => [
-    assignmentRunMarkerId(userId, dateKey, assignmentId),
-    assignmentId
-  ]));
+  const markerToAssignment = new Map(ids.map((assignmentId) => [assignmentRunMarkerId(userId, dateKey, assignmentId), assignmentId]));
   const [confirmations, attempts] = await Promise.all([
     prismaClient.dispatchWhatsappConfirmation.findMany({
-      where: { assignmentId: { in: ids } },
-      select: { assignmentId: true, status: true, createdAt: true },
-      orderBy: { createdAt: 'desc' }
+      where: { assignmentId: { in: ids } }, select: { assignmentId: true, status: true, createdAt: true }, orderBy: { createdAt: 'desc' }
     }),
     prismaClient.devAuditEvent.findMany({
-      where: {
-        entityType: AUTOMATION_RUN_ENTITY,
-        action: ASSIGNMENT_SEND_ATTEMPT_ACTION,
-        entityId: { in: [...markerToAssignment.keys()] }
-      },
-      select: { entityId: true, metadata: true, createdAt: true },
-      orderBy: { createdAt: 'desc' }
+      where: { entityType: AUTOMATION_RUN_ENTITY, action: ASSIGNMENT_SEND_ATTEMPT_ACTION, entityId: { in: [...markerToAssignment.keys()] } },
+      select: { entityId: true, metadata: true, createdAt: true }, orderBy: { createdAt: 'desc' }
     })
   ]);
-
   for (const row of confirmations) {
     if (!confirmationBlocksAutomaticSend(row?.status)) continue;
     const state = states.get(row.assignmentId);
-    if (!state) continue;
-    state.due = false;
-    state.reason = 'already_sent';
+    if (state) { state.due = false; state.reason = 'already_sent'; }
   }
-
   for (const row of attempts) {
     const assignmentId = markerToAssignment.get(String(row?.entityId || ''));
     const state = states.get(assignmentId);
     if (!state) continue;
     const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
-    if (metadata.sent) {
-      state.due = false;
-      state.reason = 'already_sent';
-      continue;
-    }
+    if (metadata.sent) { state.due = false; state.reason = 'already_sent'; continue; }
     if (!metadata.failed) continue;
     state.failedAttempts += 1;
     const failedAt = new Date(row?.createdAt || Number.NaN);
-    if (!Number.isNaN(failedAt.getTime()) && (!state.latestFailureAt || failedAt > state.latestFailureAt)) {
-      state.latestFailureAt = failedAt;
-    }
+    if (!Number.isNaN(failedAt.getTime()) && (!state.latestFailureAt || failedAt > state.latestFailureAt)) state.latestFailureAt = failedAt;
   }
-
   for (const state of states.values()) {
     if (!state.due) continue;
-    if (state.failedAttempts >= AUTOMATION_MAX_ATTEMPTS_PER_DAY) {
-      state.due = false;
-      state.reason = 'retry_exhausted';
-      continue;
-    }
+    if (state.failedAttempts >= AUTOMATION_MAX_ATTEMPTS_PER_DAY) { state.due = false; state.reason = 'retry_exhausted'; continue; }
     if (state.latestFailureAt && now.getTime() - state.latestFailureAt.getTime() < AUTOMATION_RETRY_COOLDOWN_MS) {
-      state.due = false;
-      state.reason = 'retry_cooldown';
+      state.due = false; state.reason = 'retry_cooldown';
     }
   }
   return states;
 }
 
 async function recordAssignmentSendAttempt(prismaClient, {
-  userId,
-  dateKey,
-  targetDateKey,
-  assignmentId,
-  sent = false,
-  failed = false,
-  errorCode = null,
-  now = new Date()
+  userId, dateKey, targetDateKey, assignmentId, sent = false, failed = false, errorCode = null, now = new Date()
 }) {
   await prismaClient.devAuditEvent.create({
     data: {
@@ -358,114 +340,24 @@ async function recordAssignmentSendAttempt(prismaClient, {
       action: ASSIGNMENT_SEND_ATTEMPT_ACTION,
       actorUserId: userId,
       actorSource: 'dispatch-whatsapp-scheduler',
-      metadata: {
-        dateKey,
-        targetDateKey,
-        sent: Boolean(sent),
-        failed: Boolean(failed),
-        errorCode: errorCode ? String(errorCode).slice(0, 100) : null
-      },
-      createdAt: now
-    }
-  });
-}
-
-export function buildDispatchPendingConfirmationAlertText(assignments = [], targetDateKey) {
-  const pending = Array.isArray(assignments) ? assignments : [];
-  const visible = pending.slice(0, MAX_PENDING_REPORT_ITEMS);
-  const lines = visible.map((assignment, index) => {
-    const name = String(assignment?.worker?.fullName || 'Auxiliar').trim() || 'Auxiliar';
-    const phone = normalizeDispatchWhatsappPhone(assignment?.worker?.phone) || 'sin número';
-    return `${index + 1}. ${name} — ${phone}`;
-  });
-  if (pending.length > visible.length) lines.push(`… y ${pending.length - visible.length} auxiliar(es) más.`);
-  return `⏰ Auxiliares pendientes de confirmar para ${dateLabel(targetDateKey)}\n\n${lines.join('\n')}\n\nTotal pendientes: ${pending.length}. Comunícate con ellos para validar su asistencia.`;
-}
-
-function runMarkerId(userId, dateKey) {
-  return `${userId}:${dateKey}`;
-}
-
-async function pendingAlertRunState(prismaClient, userId, dateKey, now) {
-  const rows = await prismaClient.devAuditEvent.findMany({
-    where: {
-      entityType: AUTOMATION_RUN_ENTITY,
-      entityId: runMarkerId(userId, dateKey),
-      action: PENDING_ALERT_ACTION
-    },
-    select: { metadata: true, createdAt: true },
-    orderBy: { createdAt: 'desc' }
-  });
-  let failedAttempts = 0;
-  let latestFailureAt = null;
-  for (const row of rows) {
-    const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
-    const pendingCount = Number(metadata.pendingCount || 0);
-    if (metadata.sent || (!metadata.failed && pendingCount === 0)) {
-      return { due: false, reason: 'already_ran', failedAttempts, latestFailureAt };
-    }
-    if (!metadata.failed) continue;
-    failedAttempts += 1;
-    const failedAt = new Date(row?.createdAt || Number.NaN);
-    if (!Number.isNaN(failedAt.getTime()) && (!latestFailureAt || failedAt > latestFailureAt)) latestFailureAt = failedAt;
-  }
-  if (failedAttempts >= AUTOMATION_MAX_ATTEMPTS_PER_DAY) {
-    return { due: false, reason: 'retry_exhausted', failedAttempts, latestFailureAt };
-  }
-  if (latestFailureAt && now.getTime() - latestFailureAt.getTime() < AUTOMATION_RETRY_COOLDOWN_MS) {
-    return { due: false, reason: 'retry_cooldown', failedAttempts, latestFailureAt };
-  }
-  return { due: true, reason: null, failedAttempts, latestFailureAt };
-}
-
-async function recordPendingAlertRun(prismaClient, userId, dateKey, targetDateKey, summary, now = new Date()) {
-  await prismaClient.devAuditEvent.create({
-    data: {
-      entityType: AUTOMATION_RUN_ENTITY,
-      entityId: runMarkerId(userId, dateKey),
-      action: PENDING_ALERT_ACTION,
-      actorUserId: userId,
-      actorSource: 'dispatch-whatsapp-scheduler',
-      metadata: {
-        dateKey,
-        targetDateKey,
-        pendingCount: Number(summary?.pendingCount || 0),
-        sent: Boolean(summary?.sent),
-        failed: Boolean(summary?.failed)
-      },
+      metadata: { dateKey, targetDateKey, sent: Boolean(sent), failed: Boolean(failed), errorCode: errorCode ? String(errorCode).slice(0, 100) : null },
       createdAt: now
     }
   });
 }
 
 async function runAutomaticAssignmentSends({
-  prismaClient,
-  user,
-  dateKey,
-  targetDateKey,
-  axiosClient,
-  sendAssignmentMessage,
-  recoveryMode = false,
-  now = new Date()
+  prismaClient, user, dateKey, targetDateKey, axiosClient, sendAssignmentMessage, recoveryMode = false, now = new Date()
 }) {
   const runKey = `${user.id}:${dateKey}:${ASSIGNMENT_SEND_ATTEMPT_ACTION}`;
   if (activeScheduleRuns.has(runKey)) return { skipped: true, reason: 'running', eligible: 0, attempted: 0, sent: 0, failed: 0 };
   activeScheduleRuns.add(runKey);
   try {
     const assignments = await assignmentsForUserAndDate(prismaClient, user, targetDateKey, PENDING_ASSIGNMENT_STATUSES);
-    const eligibleAssignments = recoveryMode
-      ? assignments.filter((assignment) => isRecoverableAssignment(assignment, targetDateKey, now))
-      : assignments;
-    const states = await loadAssignmentSendStates(
-      prismaClient,
-      user.id,
-      eligibleAssignments.map((item) => item.id),
-      dateKey,
-      now
-    );
+    const eligibleAssignments = recoveryMode ? assignments.filter((assignment) => isRecoverableAssignment(assignment, targetDateKey, now)) : assignments;
+    const states = await loadAssignmentSendStates(prismaClient, user.id, eligibleAssignments.map((item) => item.id), dateKey, now);
     const pending = eligibleAssignments.filter((assignment) => states.get(assignment.id)?.due !== false);
     if (!pending.length) return { eligible: eligibleAssignments.length, attempted: 0, sent: 0, failed: 0 };
-
     const sender = sendAssignmentMessage || (await import('./dispatchWhatsappAssignmentService.js')).sendDispatchWhatsappMessage;
     let sent = 0;
     let failed = 0;
@@ -473,15 +365,7 @@ async function runAutomaticAssignmentSends({
       const phone = normalizeDispatchWhatsappPhone(assignment?.worker?.phone);
       if (!phone) {
         failed += 1;
-        await recordAssignmentSendAttempt(prismaClient, {
-          userId: user.id,
-          dateKey,
-          targetDateKey,
-          assignmentId: assignment.id,
-          failed: true,
-          errorCode: 'phone_missing',
-          now
-        });
+        await recordAssignmentSendAttempt(prismaClient, { userId: user.id, dateKey, targetDateKey, assignmentId: assignment.id, failed: true, errorCode: 'phone_missing', now });
         continue;
       }
       try {
@@ -494,31 +378,13 @@ async function runAutomaticAssignmentSends({
             recipientName: assignment.worker?.fullName || null,
             messageType: 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST'
           },
-          scope: 'operational',
-          actorUsername: user.username,
-          prismaClient,
-          axiosClient
+          scope: 'operational', actorUsername: user.username, prismaClient, axiosClient
         });
         sent += 1;
-        await recordAssignmentSendAttempt(prismaClient, {
-          userId: user.id,
-          dateKey,
-          targetDateKey,
-          assignmentId: assignment.id,
-          sent: true,
-          now
-        });
+        await recordAssignmentSendAttempt(prismaClient, { userId: user.id, dateKey, targetDateKey, assignmentId: assignment.id, sent: true, now });
       } catch (error) {
         failed += 1;
-        await recordAssignmentSendAttempt(prismaClient, {
-          userId: user.id,
-          dateKey,
-          targetDateKey,
-          assignmentId: assignment.id,
-          failed: true,
-          errorCode: error?.code || 'provider_error',
-          now
-        });
+        await recordAssignmentSendAttempt(prismaClient, { userId: user.id, dateKey, targetDateKey, assignmentId: assignment.id, failed: true, errorCode: error?.code || 'provider_error', now });
         console.warn(`[dispatch-wa-schedule] Falló envío automático. userId=${user.id} assignment=${assignment.id} code=${error?.code || 'unknown'}.`);
       }
     }
@@ -528,58 +394,8 @@ async function runAutomaticAssignmentSends({
   }
 }
 
-async function runPendingConfirmationAlert({
-  prismaClient,
-  user,
-  dateKey,
-  targetDateKey,
-  axiosClient,
-  sendAdminMessage,
-  recoveryMode = false,
-  now = new Date()
-}) {
-  const runKey = `${user.id}:${dateKey}:${PENDING_ALERT_ACTION}`;
-  if (activeScheduleRuns.has(runKey)) return { skipped: true, reason: 'running' };
-  activeScheduleRuns.add(runKey);
-  try {
-    const runState = await pendingAlertRunState(prismaClient, user.id, dateKey, now);
-    if (!runState.due) return { skipped: true, reason: runState.reason };
-    if (!user.dispatchAlertPhone) return { skipped: true, reason: 'alert_phone_missing' };
-
-    const assignments = await assignmentsForUserAndDate(prismaClient, user, targetDateKey, PENDING_ASSIGNMENT_STATUSES);
-    const eligibleAssignments = recoveryMode
-      ? assignments.filter((assignment) => isRecoverableAssignment(assignment, targetDateKey, now))
-      : assignments;
-    const summary = { pendingCount: eligibleAssignments.length, sent: false, failed: false };
-    if (!eligibleAssignments.length) {
-      await recordPendingAlertRun(prismaClient, user.id, dateKey, targetDateKey, summary, now);
-      return summary;
-    }
-
-    try {
-      await sendAdminMessage({
-        scope: 'operational',
-        phone: user.dispatchAlertPhone,
-        text: buildDispatchPendingConfirmationAlertText(eligibleAssignments, targetDateKey),
-        axiosClient
-      });
-      summary.sent = true;
-    } catch (error) {
-      summary.failed = true;
-      console.warn(`[dispatch-wa-schedule] Falló reporte de pendientes. userId=${user.id} code=${error?.code || 'provider_error'}.`);
-    }
-    await recordPendingAlertRun(prismaClient, user.id, dateKey, targetDateKey, summary, now);
-    return summary;
-  } finally {
-    activeScheduleRuns.delete(runKey);
-  }
-}
-
 export async function runDispatchUserAutomationScheduler(prismaClient = prisma, {
-  now = new Date(),
-  axiosClient,
-  sendAssignmentMessage = null,
-  sendAdminMessage = sendDispatchWhatsappTextMessage
+  now = new Date(), axiosClient, sendAssignmentMessage = null
 } = {}) {
   const clock = bogotaClock(now);
   const targetDateKey = addIsoDays(clock.dateKey, 1);
@@ -593,28 +409,16 @@ export async function runDispatchUserAutomationScheduler(prismaClient = prisma, 
     assignmentAttempts: 0,
     assignmentSent: 0,
     assignmentFailed: 0,
-    pendingAlertsSent: 0,
-    pendingAlertsFailed: 0,
     recoveryAssignmentAttempts: 0,
     recoveryAssignmentSent: 0,
-    recoveryAssignmentFailed: 0,
-    recoveryPendingAlertsSent: 0,
-    recoveryPendingAlertsFailed: 0
+    recoveryAssignmentFailed: 0
   };
-
   for (const { user, settings } of configured) {
     const recoveryAllowed = configurationPredatesCurrentDay(settings, clock.dateKey);
-
     if (settings.assignmentAutoSendTime && recoveryAllowed && clock.timeKey < settings.assignmentAutoSendTime) {
       const recovery = await runAutomaticAssignmentSends({
-        prismaClient,
-        user,
-        dateKey: recoveryScheduleDateKey,
-        targetDateKey: recoveryTargetDateKey,
-        axiosClient,
-        sendAssignmentMessage,
-        recoveryMode: true,
-        now
+        prismaClient, user, dateKey: recoveryScheduleDateKey, targetDateKey: recoveryTargetDateKey,
+        axiosClient, sendAssignmentMessage, recoveryMode: true, now
       });
       result.assignmentAttempts += recovery.attempted;
       result.assignmentSent += recovery.sent;
@@ -623,58 +427,57 @@ export async function runDispatchUserAutomationScheduler(prismaClient = prisma, 
       result.recoveryAssignmentSent += recovery.sent;
       result.recoveryAssignmentFailed += recovery.failed;
     }
-
     if (settings.assignmentAutoSendTime && clock.timeKey >= settings.assignmentAutoSendTime) {
       const auto = await runAutomaticAssignmentSends({
-        prismaClient,
-        user,
-        dateKey: clock.dateKey,
-        targetDateKey,
-        axiosClient,
-        sendAssignmentMessage,
-        now
+        prismaClient, user, dateKey: clock.dateKey, targetDateKey, axiosClient, sendAssignmentMessage, now
       });
       result.assignmentAttempts += auto.attempted;
       result.assignmentSent += auto.sent;
       result.assignmentFailed += auto.failed;
     }
-
-    if (settings.pendingConfirmationAlertTime && recoveryAllowed && clock.timeKey < settings.pendingConfirmationAlertTime) {
-      const recoveryAlert = await runPendingConfirmationAlert({
-        prismaClient,
-        user,
-        dateKey: recoveryScheduleDateKey,
-        targetDateKey: recoveryTargetDateKey,
-        axiosClient,
-        sendAdminMessage,
-        recoveryMode: true,
-        now
-      });
-      if (recoveryAlert?.sent) {
-        result.pendingAlertsSent += 1;
-        result.recoveryPendingAlertsSent += 1;
-      }
-      if (recoveryAlert?.failed) {
-        result.pendingAlertsFailed += 1;
-        result.recoveryPendingAlertsFailed += 1;
-      }
-    }
-
-    if (settings.pendingConfirmationAlertTime && clock.timeKey >= settings.pendingConfirmationAlertTime) {
-      const alert = await runPendingConfirmationAlert({
-        prismaClient,
-        user,
-        dateKey: clock.dateKey,
-        targetDateKey,
-        axiosClient,
-        sendAdminMessage,
-        now
-      });
-      if (alert?.sent) result.pendingAlertsSent += 1;
-      if (alert?.failed) result.pendingAlertsFailed += 1;
-    }
   }
   return result;
+}
+
+export async function sendDispatchAllConfirmedAdminAlert({
+  scope = 'operational', link, assignment, prismaClient = prisma, axiosClient, now = new Date()
+} = {}) {
+  if (scope !== 'operational') return { sent: false, reason: 'scope_not_operational' };
+  const ownerUsername = String(link?.alertOwnerUsername || assignment?.createdByUsername || '').trim();
+  const user = await alertUserByUsername(prismaClient, ownerUsername);
+  if (!user?.isActive || !user.dispatchAlertPhone) return { sent: false, reason: 'admin_alert_not_configured' };
+  const dateKey = dispatchServiceDateKey(assignment?.serviceRequest?.serviceDate);
+  if (!dateKey) return { sent: false, reason: 'service_date_missing' };
+  const assignments = await assignmentsForUserAndDate(prismaClient, user, dateKey, ACTIVE_DISPATCH_ASSIGNMENT_STATUSES);
+  if (!assignments.length) return { sent: false, reason: 'no_active_assignments' };
+  if (assignments.some((item) => item.status !== CONFIRMED_DISPATCH_ASSIGNMENT_STATUS)) {
+    return { sent: false, reason: 'pending_assignments', total: assignments.length };
+  }
+  const ids = assignments.map((item) => item.id).sort();
+  const key = notificationKey(ALL_CONFIRMED_NOTIFICATION, [scope, user.id, dateKey, ...ids]);
+  const claim = await claimDispatchWhatsappNotification(prismaClient, {
+    scope,
+    phone: user.dispatchAlertPhone,
+    notificationType: ALL_CONFIRMED_NOTIFICATION,
+    key,
+    eventAt: now,
+    now
+  });
+  if (!claim.claimed) return { sent: false, duplicate: true, reason: 'already_notified' };
+  try {
+    await sendDispatchWhatsappTextMessage({
+      scope,
+      phone: user.dispatchAlertPhone,
+      text: buildDispatchAllConfirmedAdminAlertText({ serviceDate: dateKey, confirmedCount: assignments.length }),
+      axiosClient
+    });
+    await markDispatchWhatsappNotification(prismaClient, claim.row.id, { sent: true });
+    return { sent: true, userId: user.id, confirmedCount: assignments.length };
+  } catch (error) {
+    await markDispatchWhatsappNotification(prismaClient, claim.row.id, { sent: false, error }).catch(() => {});
+    console.warn(`[dispatch-wa-cloud] Falló aviso de todos confirmados para ${user.username}: ${error?.message || error}`);
+    return { sent: false, reason: 'provider_error', error: String(error?.message || error).slice(0, 300) };
+  }
 }
 
 export async function runDispatchWhatsappWindowReminderDispatcher(prismaClient = prisma, { now = new Date(), axiosClient } = {}) {
@@ -688,67 +491,42 @@ export async function runDispatchWhatsappWindowReminderDispatcher(prismaClient =
   });
   let sent = 0;
   let failed = 0;
-
   for (const window of windows) {
     const links = await prismaClient.dispatchWhatsappConfirmation.findMany({
       where: {
         phone: window.phone,
-        alertOwnerUsername: { not: null },
         status: { in: [...ACTIVE_LINK_STATUSES, 'CONFIRMED'] },
         createdAt: { gte: new Date(nowMs - (7 * 24 * 60 * 60 * 1000)) }
       },
       orderBy: { createdAt: 'desc' },
       include: { assignment: { include: { worker: true, serviceRequest: true } } }
     });
-    const latestByOwner = new Map();
-    for (const link of links) {
-      if (!eligibleServiceDate(link.assignment)) continue;
-      if (!latestByOwner.has(link.alertOwnerUsername)) latestByOwner.set(link.alertOwnerUsername, link);
-    }
-
-    for (const [ownerUsername, link] of latestByOwner.entries()) {
-      const user = await alertUserByUsername(prismaClient, ownerUsername);
-      if (!user?.isActive || !user.dispatchAlertPhone || !user.dispatchWindowExpiryReminderEnabled) continue;
-
-      let reminder;
-      try {
-        reminder = await prismaClient.dispatchWhatsappWindowReminder.create({
-          data: {
-            scope: window.scope,
-            phone: window.phone,
-            appUserId: user.id,
-            windowStartedAt: window.lastInboundAt,
-            status: 'PENDING'
-          }
-        });
-      } catch (error) {
-        if (error?.code === 'P2002') continue;
-        throw error;
-      }
-
-      try {
-        await sendDispatchWhatsappTextMessage({
-          scope: window.scope,
-          phone: user.dispatchAlertPhone,
-          text: reminderAlertText(link.assignment),
-          axiosClient
-        });
-        await prismaClient.dispatchWhatsappWindowReminder.update({
-          where: { id: reminder.id },
-          data: { status: 'SENT', sentAt: new Date(), lastError: null }
-        });
-        sent += 1;
-      } catch (error) {
-        await prismaClient.dispatchWhatsappWindowReminder.update({
-          where: { id: reminder.id },
-          data: { status: 'FAILED', lastError: String(error?.message || error).slice(0, 400) }
-        });
-        failed += 1;
-        console.warn(`[dispatch-wa-cloud] Falló recordatorio de ventana para ${user.username}: ${error?.message || error}`);
-      }
+    if (!links.some((item) => eligibleServiceDate(item.assignment) && isOperationalDispatchWorker(item.assignment?.worker))) continue;
+    const key = notificationKey(WINDOW_EXPIRY_NOTIFICATION, [window.scope, window.phone, new Date(window.lastInboundAt).toISOString()]);
+    const claim = await claimDispatchWhatsappNotification(prismaClient, {
+      scope: window.scope,
+      phone: window.phone,
+      notificationType: WINDOW_EXPIRY_NOTIFICATION,
+      key,
+      eventAt: window.lastInboundAt,
+      now
+    });
+    if (!claim.claimed) continue;
+    try {
+      await sendDispatchWhatsappTextMessage({
+        scope: window.scope,
+        phone: window.phone,
+        text: buildDispatchWindowExpiryReminderText(),
+        axiosClient
+      });
+      await markDispatchWhatsappNotification(prismaClient, claim.row.id, { sent: true });
+      sent += 1;
+    } catch (error) {
+      await markDispatchWhatsappNotification(prismaClient, claim.row.id, { sent: false, error }).catch(() => {});
+      failed += 1;
+      console.warn(`[dispatch-wa-cloud] Falló recordatorio de ventana al auxiliar: ${error?.message || error}`);
     }
   }
-
   await runDispatchUserAutomationScheduler(prismaClient, { now, axiosClient }).catch((error) =>
     console.warn('[DISPATCH_WHATSAPP_AUTOMATION_ERROR]', error?.message || error)
   );
