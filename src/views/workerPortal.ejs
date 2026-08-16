@@ -24,7 +24,9 @@
     .warning { background: #fff6df; color: #76520b; }
     .danger { background: #fdecec; color: #8f2525; }
     .portal-header { display: flex; gap: 14px; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; }
+    .portal-header-actions { display: grid; gap: 8px; justify-items: end; flex: 0 0 auto; }
     .session-chip { flex: 0 0 auto; padding: 8px 10px; border-radius: 999px; background: #eaf8ef; color: #176c36; font-size: 12px; font-weight: 800; }
+    .portal-refresh-link { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 9px 12px; border: 1px solid #c9d5cd; border-radius: 11px; background: #fff; color: #176c36; font-size: 12px; font-weight: 850; text-decoration: none; white-space: nowrap; }
     .connectivity-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 14px; border: 1px solid #dfe4ea; border-radius: 14px; background: #fff; font-size: 13px; }
     .connectivity-dot { width: 10px; height: 10px; border-radius: 999px; background: #176c36; box-shadow: 0 0 0 4px #eaf8ef; flex: 0 0 auto; }
     .connectivity-bar.offline { background: #fff9e9; border-color: #efd89a; }
@@ -196,7 +198,10 @@
           <h1><%= portalWorkerIdentity ? portalWorkerIdentity.fullName : 'Portal del Auxiliar' %></h1>
           <% if (portalWorkerIdentity) { %><p>Documento: <%= portalWorkerIdentity.documentNumber || 'No registrado' %></p><% } %>
         </div>
-        <span class="session-chip">Dispositivo verificado</span>
+        <div class="portal-header-actions">
+          <span class="session-chip">Dispositivo verificado</span>
+          <a class="portal-refresh-link" href="/operaciones/portal">Actualizar asignaciones</a>
+        </div>
       </header>
       <section id="portal-connectivity" class="connectivity-bar" aria-live="polite">
         <span class="connectivity-dot" aria-hidden="true"></span>
