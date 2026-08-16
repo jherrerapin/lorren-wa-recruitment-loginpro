@@ -69,13 +69,9 @@
     .dispatch-alert-settings-head { display:flex; justify-content:space-between; gap:14px; align-items:flex-start; flex-wrap:wrap; }
     .dispatch-alert-settings h2 { margin:0 0 4px; color:var(--navy); font-size:18px; }
     .dispatch-alert-settings p { margin:0; color:var(--muted); font-size:13px; line-height:1.45; }
-    .dispatch-alert-settings-form { display:grid; grid-template-columns:minmax(220px, 360px) minmax(260px, 1fr) auto; gap:12px; align-items:end; }
+    .dispatch-alert-settings-form { display:grid; grid-template-columns:minmax(220px, 360px) auto; gap:12px; align-items:end; }
     .dispatch-alert-settings-form .field label { display:block; color:var(--navy); font-size:12px; font-weight:900; margin-bottom:5px; }
     .dispatch-alert-settings-form input[type="tel"] { width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 11px; font:inherit; }
-    .dispatch-alert-reminder { display:flex; gap:9px; align-items:flex-start; padding:10px 12px; border:1px solid #bfdbfe; background:#eff6ff; border-radius:12px; color:#1e3a8a; min-height:42px; }
-    .dispatch-alert-reminder input { margin-top:2px; width:17px; height:17px; accent-color:var(--teal); }
-    .dispatch-alert-reminder strong { display:block; font-size:12px; }
-    .dispatch-alert-reminder small { display:block; margin-top:2px; color:#475569; font-size:11px; line-height:1.3; }
     .dispatch-settings-alert { border-radius:10px; padding:10px 12px; font-size:12px; font-weight:800; }
     .dispatch-settings-alert.success { background:#dcfce7; color:#166534; }
     .dispatch-settings-alert.error { background:#fee2e2; color:#991b1b; }
@@ -111,56 +107,24 @@
         <p><%= subtitle %></p>
       </div>
       <div class="actions" aria-label="Acciones principales de operaciones">
-        <div class="action-item">
-          <a class="btn btn-primary" href="/admin/operaciones/clientes">Clientes</a>
-          <small>Crea clientes, puntos operativos y links públicos de solicitud.</small>
-        </div>
-        <div class="action-item">
-          <a class="btn" href="/admin/operaciones/solicitudes">Crear solicitud</a>
-          <small>Abre el formulario para registrar una nueva solicitud operativa.</small>
-        </div>
-        <div class="action-item">
-          <a class="btn" href="/admin/operaciones/asignaciones">Asignación de auxiliares</a>
-          <small>Arrastra auxiliares disponibles y guarda asignaciones.</small>
-        </div>
-        <div class="action-item">
-          <a class="btn" href="/admin/operaciones/personal">Personal operativo</a>
-          <small>Consulta, sincroniza o crea auxiliares manualmente.</small>
-        </div>
-        <% if (typeof canAccessAttendanceFeature !== 'undefined' && canAccessAttendanceFeature) { %>
-          <div class="action-item attendance">
-            <a class="btn" href="/admin/operaciones/asistencia">Asistencia</a>
-            <small>Valida llegadas, revisa geocerca, evidencia y ausencias.</small>
-          </div>
-        <% } %>
-        <div class="action-item session-checking" id="dispatchSessionAction">
-          <a class="btn" id="dispatchSessionButton" href="/admin/operaciones/whatsapp" aria-describedby="dispatchSessionHint">WhatsApp despacho</a>
-          <small id="dispatchSessionHint">Revisando estado de la sesión...</small>
-        </div>
+        <div class="action-item"><a class="btn btn-primary" href="/admin/operaciones/clientes">Clientes</a><small>Crea clientes, puntos operativos y links públicos de solicitud.</small></div>
+        <div class="action-item"><a class="btn" href="/admin/operaciones/solicitudes">Crear solicitud</a><small>Abre el formulario para registrar una nueva solicitud operativa.</small></div>
+        <div class="action-item"><a class="btn" href="/admin/operaciones/asignaciones">Asignación de auxiliares</a><small>Arrastra auxiliares disponibles y guarda asignaciones.</small></div>
+        <div class="action-item"><a class="btn" href="/admin/operaciones/personal">Personal operativo</a><small>Consulta, sincroniza o crea auxiliares manualmente.</small></div>
+        <% if (typeof canAccessAttendanceFeature !== 'undefined' && canAccessAttendanceFeature) { %><div class="action-item attendance"><a class="btn" href="/admin/operaciones/asistencia">Asistencia</a><small>Valida llegadas, revisa geocerca, evidencia y ausencias.</small></div><% } %>
+        <div class="action-item session-checking" id="dispatchSessionAction"><a class="btn" id="dispatchSessionButton" href="/admin/operaciones/whatsapp" aria-describedby="dispatchSessionHint">WhatsApp despacho</a><small id="dispatchSessionHint">Revisando estado de la sesión...</small></div>
       </div>
     </section>
 
     <section class="dispatch-alert-settings" aria-label="Configuración personal de alertas de despacho por WhatsApp">
-      <div class="dispatch-alert-settings-head">
-        <div>
-          <h2>Mis alertas de despacho por WhatsApp</h2>
-          <p>Configura el número al que quieres recibir novedades de tus auxiliares. Puedes cambiarlo en cualquier momento desde aquí.</p>
-        </div>
-      </div>
+      <div class="dispatch-alert-settings-head"><div><h2>Mis alertas de despacho por WhatsApp</h2><p>Configura el número al que quieres recibir novedades y el aviso automático cuando todos tus auxiliares de una fecha hayan confirmado.</p></div></div>
       <% if (typeof alertSettingsMessage !== 'undefined' && alertSettingsMessage) { %><div class="dispatch-settings-alert success"><%= alertSettingsMessage %></div><% } %>
       <% if (typeof alertSettingsError !== 'undefined' && alertSettingsError) { %><div class="dispatch-settings-alert error"><%= alertSettingsError %></div><% } %>
       <% if (typeof dispatchAlertSettings !== 'undefined' && dispatchAlertSettings?.available) { %>
         <form class="dispatch-alert-settings-form" method="post" action="/admin/operaciones/alertas-whatsapp">
           <input type="hidden" name="fechaDesde" value="<%= selectedDateFrom %>" />
           <input type="hidden" name="fechaHasta" value="<%= selectedDateTo %>" />
-          <div class="field">
-            <label for="dispatchAlertPhone">WhatsApp para mis alertas de despacho</label>
-            <input id="dispatchAlertPhone" name="dispatchAlertPhone" type="tel" inputmode="numeric" value="<%= dispatchAlertSettings.phone || '' %>" placeholder="3001234567" />
-          </div>
-          <label class="dispatch-alert-reminder" for="dispatchWindowExpiryReminderEnabled">
-            <input id="dispatchWindowExpiryReminderEnabled" name="dispatchWindowExpiryReminderEnabled" type="checkbox" value="true" <%= dispatchAlertSettings.reminderEnabled ? 'checked' : '' %> />
-            <span><strong>Recordarme antes de que venza la ventana de 24 horas</strong><small>Si está activo, recibirás el aviso aproximadamente 25 minutos antes. Las novedades reportadas por los auxiliares se notifican aunque este check esté apagado.</small></span>
-          </label>
+          <div class="field"><label for="dispatchAlertPhone">WhatsApp para mis alertas de despacho</label><input id="dispatchAlertPhone" name="dispatchAlertPhone" type="tel" inputmode="numeric" value="<%= dispatchAlertSettings.phone || '' %>" placeholder="3001234567" /></div>
           <button class="btn btn-primary" type="submit">Guardar cambios</button>
         </form>
       <% } else { %>
@@ -169,68 +133,22 @@
     </section>
 
     <section class="dashboard-toolbar" aria-label="Filtro de rango del panel operativo">
-      <div>
-        <h2>Indicadores por fecha de servicio</h2>
-        <p>Selecciona un rango de fechas operativas. Los indicadores, el detalle y el Excel se calculan sobre todo el rango.</p>
-      </div>
+      <div><h2>Indicadores por fecha de servicio</h2><p>Selecciona un rango de fechas operativas. Los indicadores, el detalle y el Excel se calculan sobre todo el rango.</p></div>
       <form class="date-filter" method="get" action="/admin/operaciones">
-        <div class="field">
-          <label for="fechaDesde">Desde</label>
-          <input id="fechaDesde" name="fechaDesde" type="date" value="<%= selectedDateFrom %>" />
-        </div>
-        <div class="field">
-          <label for="fechaHasta">Hasta</label>
-          <input id="fechaHasta" name="fechaHasta" type="date" value="<%= selectedDateTo %>" />
-        </div>
-        <button class="btn btn-primary" type="submit">Aplicar rango</button>
-        <button class="btn btn-excel" type="submit" formaction="/admin/operaciones/resumen/exportar">Descargar Excel</button>
-        <a class="btn" href="/admin/operaciones">Hoy</a>
+        <div class="field"><label for="fechaDesde">Desde</label><input id="fechaDesde" name="fechaDesde" type="date" value="<%= selectedDateFrom %>" /></div>
+        <div class="field"><label for="fechaHasta">Hasta</label><input id="fechaHasta" name="fechaHasta" type="date" value="<%= selectedDateTo %>" /></div>
+        <button class="btn btn-primary" type="submit">Aplicar rango</button><button class="btn btn-excel" type="submit" formaction="/admin/operaciones/resumen/exportar">Descargar Excel</button><a class="btn" href="/admin/operaciones">Hoy</a>
       </form>
     </section>
 
     <section class="programming-card <%= programmingComplete ? 'complete' : '' %>" aria-label="Programación del día" hidden>
-      <div class="programming-head">
-        <div>
-          <h2>Programación del día — <%= selectedDate %></h2>
-          <p>Genera la programación del día final del rango en PDF o Excel, con clientes, horarios, auxiliares y el estado actual de cada solicitud incluida.</p>
-        </div>
-        <span class="programming-pill <%= programmingComplete ? 'complete' : '' %>"><%= programmingComplete ? 'Programación completa' : `Faltan ${Math.max(totalRequests - completedRequests, 0)} solicitud(es)` %></span>
-      </div>
-      <div class="manager-row">
-        <div>
-          <label for="programManagedBy">Gestionado por</label>
-          <select id="programManagedBy"><option value="Julián Herrera">Julián Herrera</option></select>
-        </div>
-        <button class="btn" type="button" id="addProgramManager">+ Agregar</button>
-        <div id="customProgramManagerWrap" hidden>
-          <label for="customProgramManager">Nuevo nombre</label>
-          <input id="customProgramManager" type="text" maxlength="80" placeholder="Nombre de quien gestionó" />
-        </div>
-      </div>
-      <div class="programming-options">
-        <input id="includePendingProgramming" type="checkbox" />
-        <label for="includePendingProgramming">Incluir solicitudes pendientes o por confirmar<small>Marcado: incluye asignación pendiente, parcial y pendientes de confirmación. Sin marcar: envía únicamente solicitudes completas.</small></label>
-      </div>
-      <div class="programming-formats" aria-label="Formatos para enviar">
-        <strong>Enviar reportes:</strong>
-        <label for="sendProgramPdf"><input id="sendProgramPdf" type="checkbox" value="pdf" checked /> PDF</label>
-        <label for="sendProgramExcel"><input id="sendProgramExcel" type="checkbox" value="excel" /> Excel</label>
-        <small>Puedes marcar PDF, Excel o ambos. Los formatos seleccionados usan exactamente el mismo alcance de solicitudes.</small>
-      </div>
-      <div class="programming-recipients" aria-label="Destinatarios del envío de programación">
-        <strong>Destinatarios:</strong>
-        <div class="programming-recipient-choices" id="programRecipientChoices"><span>Cargando destinatarios...</span></div>
-        <small>Marca uno, varios o todos. Esta selección aplica solo al envío actual y no modifica la configuración guardada.</small>
-      </div>
-      <div class="programming-actions">
-        <a class="btn" id="programPdfLink" href="/admin/operaciones/programacion.pdf?fecha=<%= selectedDate %>&includePending=false">Descargar PDF</a>
-        <a class="btn btn-excel" id="programExcelLink" href="/admin/operaciones/programacion.xlsx?fecha=<%= selectedDate %>&includePending=false">Descargar Excel</a>
-        <a class="btn" id="programEmailLink" href="#" target="_blank" rel="noopener">Abrir correo</a>
-        <button class="btn btn-primary" type="button" id="sendProgramWhatsapp">Enviar</button>
-      </div>
-      <div class="programming-note">
-        <strong>Estado del día <%= selectedDate %>:</strong> <%= completedRequests %>/<%= totalRequests %> solicitudes completas. El envío está siempre disponible. Sin marcar pendientes se incluyen solo las completas; al marcar esa opción también se incluyen pendientes y parciales.
-      </div>
+      <div class="programming-head"><div><h2>Programación del día — <%= selectedDate %></h2><p>Genera la programación del día final del rango en PDF o Excel, con clientes, horarios, auxiliares y el estado actual de cada solicitud incluida.</p></div><span class="programming-pill <%= programmingComplete ? 'complete' : '' %>"><%= programmingComplete ? 'Programación completa' : `Faltan ${Math.max(totalRequests - completedRequests, 0)} solicitud(es)` %></span></div>
+      <div class="manager-row"><div><label for="programManagedBy">Gestionado por</label><select id="programManagedBy"><option value="Julián Herrera">Julián Herrera</option></select></div><button class="btn" type="button" id="addProgramManager">+ Agregar</button><div id="customProgramManagerWrap" hidden><label for="customProgramManager">Nuevo nombre</label><input id="customProgramManager" type="text" maxlength="80" placeholder="Nombre de quien gestionó" /></div></div>
+      <div class="programming-options"><input id="includePendingProgramming" type="checkbox" /><label for="includePendingProgramming">Incluir solicitudes pendientes o por confirmar<small>Marcado: incluye asignación pendiente, parcial y pendientes de confirmación. Sin marcar: envía únicamente solicitudes completas.</small></label></div>
+      <div class="programming-formats" aria-label="Formatos para enviar"><strong>Enviar reportes:</strong><label for="sendProgramPdf"><input id="sendProgramPdf" type="checkbox" value="pdf" checked /> PDF</label><label for="sendProgramExcel"><input id="sendProgramExcel" type="checkbox" value="excel" /> Excel</label><small>Puedes marcar PDF, Excel o ambos. Los formatos seleccionados usan exactamente el mismo alcance de solicitudes.</small></div>
+      <div class="programming-recipients" aria-label="Destinatarios del envío de programación"><strong>Destinatarios:</strong><div class="programming-recipient-choices" id="programRecipientChoices"><span>Cargando destinatarios...</span></div><small>Marca uno, varios o todos. Esta selección aplica solo al envío actual y no modifica la configuración guardada.</small></div>
+      <div class="programming-actions"><a class="btn" id="programPdfLink" href="/admin/operaciones/programacion.pdf?fecha=<%= selectedDate %>&includePending=false">Descargar PDF</a><a class="btn btn-excel" id="programExcelLink" href="/admin/operaciones/programacion.xlsx?fecha=<%= selectedDate %>&includePending=false">Descargar Excel</a><a class="btn" id="programEmailLink" href="#" target="_blank" rel="noopener">Abrir correo</a><button class="btn btn-primary" type="button" id="sendProgramWhatsapp">Enviar</button></div>
+      <div class="programming-note"><strong>Estado del día <%= selectedDate %>:</strong> <%= completedRequests %>/<%= totalRequests %> solicitudes completas. El envío está siempre disponible. Sin marcar pendientes se incluyen solo las completas; al marcar esa opción también se incluyen pendientes y parciales.</div>
     </section>
 
     <section class="summary-grid" aria-label="Resumen operativo del rango <%= selectedRangeLabel %>">
@@ -272,31 +190,8 @@
     function saveManager(name){const clean=String(name||'').trim();if(!clean)return;const managers=[...new Set(['Julián Herrera',...loadManagers(),clean])];localStorage.setItem(MANAGERS_KEY,JSON.stringify(managers.filter((item)=>item!=='Julián Herrera')));renderManagers(clean);}
     function renderManagers(selected='Julián Herrera'){if(!managerSelect)return;const managers=[...new Set(['Julián Herrera',...loadManagers()])];managerSelect.innerHTML=managers.map((name)=>`<option value="${name.replace(/"/g,'&quot;')}">${name}</option>`).join('');managerSelect.value=managers.includes(selected)?selected:'Julián Herrera';refreshProgrammingLinks();}
     function refreshProgrammingLinks(){const manager=currentManager();const includePending=includePendingRequests();const params=new URLSearchParams({fecha:selectedDate,managedBy:manager,includePending:String(includePending)});if(pdfLink)pdfLink.href='/admin/operaciones/programacion.pdf?'+params.toString();if(excelLink)excelLink.href='/admin/operaciones/programacion.xlsx?'+params.toString();if(emailLink){const scope=includePending?'incluyendo solicitudes pendientes o por confirmar':'con las solicitudes completas';const subject='Programación operativa - '+selectedDate;const body=['Hola,','','Adjunto programación operativa para la fecha '+selectedDate+', '+scope+'.','','Gestionado por: '+manager].join('\n');const emails=[...new Set(selectedRecipientEmails())];emailLink.href='mailto:'+emails.join(',')+'?subject='+encodeURIComponent(subject)+'&body='+encodeURIComponent(body);}}
-    function setDispatchSessionState(state, hint){
-      if(!dispatchSessionAction||!dispatchSessionButton||!dispatchSessionHint)return;
-      dispatchSessionAction.classList.remove('session-online','session-offline','session-checking');
-      dispatchSessionAction.classList.add(state);
-      dispatchSessionHint.textContent=hint;
-      dispatchSessionButton.textContent=state==='session-online'?'WhatsApp despacho activo':state==='session-offline'?'WhatsApp despacho sin sesión':'WhatsApp despacho';
-    }
-    async function refreshDispatchSessionState(){
-      try{
-        const response=await fetch('/admin/operaciones/whatsapp/estado',{cache:'no-store'});
-        if(!response.ok)throw new Error('Estado no disponible');
-        const data=await response.json();
-        if(data.ready){
-          setDispatchSessionState('session-online','Sesión iniciada. Puedes enviar mensajes desde despacho.');
-          return;
-        }
-        if(data.qrImage){
-          setDispatchSessionState('session-offline','Sesión no iniciada. Entra y escanea el QR para habilitar envíos.');
-          return;
-        }
-        setDispatchSessionState('session-offline','Sesión no iniciada. Entra al módulo para revisar la conexión.');
-      }catch(_error){
-        setDispatchSessionState('session-offline','No se pudo validar la sesión. Entra al módulo para revisar.');
-      }
-    }
+    function setDispatchSessionState(state, hint){if(!dispatchSessionAction||!dispatchSessionButton||!dispatchSessionHint)return;dispatchSessionAction.classList.remove('session-online','session-offline','session-checking');dispatchSessionAction.classList.add(state);dispatchSessionHint.textContent=hint;dispatchSessionButton.textContent=state==='session-online'?'WhatsApp despacho activo':state==='session-offline'?'WhatsApp despacho sin sesión':'WhatsApp despacho';}
+    async function refreshDispatchSessionState(){try{const response=await fetch('/admin/operaciones/whatsapp/estado',{cache:'no-store'});if(!response.ok)throw new Error('Estado no disponible');const data=await response.json();if(data.ready){setDispatchSessionState('session-online','Sesión iniciada. Puedes enviar mensajes desde despacho.');return;}if(data.qrImage){setDispatchSessionState('session-offline','Sesión no iniciada. Entra y escanea el QR para habilitar envíos.');return;}setDispatchSessionState('session-offline','Sesión no iniciada. Entra al módulo para revisar la conexión.');}catch(_error){setDispatchSessionState('session-offline','No se pudo validar la sesión. Entra al módulo para revisar.');}}
     addManagerButton?.addEventListener('click',()=>{customManagerWrap.hidden=false;customManagerInput?.focus();});
     customManagerInput?.addEventListener('keydown',(event)=>{if(event.key==='Enter'){event.preventDefault();saveManager(customManagerInput.value);customManagerInput.value='';customManagerWrap.hidden=true;}});
     customManagerInput?.addEventListener('blur',()=>{if(customManagerInput.value.trim()){saveManager(customManagerInput.value);customManagerInput.value='';}customManagerWrap.hidden=true;});
