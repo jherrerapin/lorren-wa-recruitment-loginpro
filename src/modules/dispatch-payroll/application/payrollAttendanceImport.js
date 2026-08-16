@@ -782,8 +782,8 @@ export async function analyzePayrollAttendanceImport(prisma, parsed, options = {
           workerId: worker.id,
           status: 'UNRESOLVED',
           message: compatible.length
-            ? 'Hay varias asignaciones posibles para esa fecha.'
-            : 'Hay varias asignaciones en esa fecha, pero ninguna admite de forma segura las horas detectadas.'
+            ? `Lórren encontró ${candidates.length} asignaciones activas para este auxiliar en esa fecha. No son filas duplicadas del archivo: más de una coincide con las horas y no se puede elegir una sola con seguridad.`
+            : `Lórren encontró ${candidates.length} asignaciones activas para este auxiliar en esa fecha. No son filas duplicadas del archivo: ninguna coincide de forma segura con las horas detectadas.`
         };
       }
       assignment = compatible[0].assignment;
