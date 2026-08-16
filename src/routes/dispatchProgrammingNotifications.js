@@ -5,10 +5,10 @@ import {
   buildProgrammingFilename,
   buildProgrammingPdfBuffer,
   buildProgrammingCompletionSummary,
+  loadProgrammingReportData,
   loadProgrammingRequests,
   normalizeProgrammingDate,
-  normalizeProgrammingIncludePending,
-  selectProgrammingRequests
+  normalizeProgrammingIncludePending
 } from '../services/dispatchProgrammingPdfService.js';
 import {
   confirmedOperationalAssignments,
@@ -375,26 +375,66 @@ function addProgrammingRows(sheet, requests = []) {
     });
   });
 }
+function addWorkerAbsenceWorksheet(workbook, report, manager) {
+  const sheet = workbook.addWorksheet('Descansos e incapacidades');
+  sheet.mergeCells('A1:D1');
+  sheet.getCell('A1').value = 'Descansos e incapacidades reportados';
+  sheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
+  sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4C1D95' } };
+  sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
+  sheet.mergeCells('A2:D2');
+  sheet.getCell('A2').value = `Fecha: ${report.selectedDate} · Novedades activas · Gestionado por: ${manager}`;
+  sheet.getCell('A2').font = { bold: true, color: { argb: 'FF6D28D9' } };
+  sheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
+  const header = sheet.getRow(3);
+  header.values = ['Auxiliar', 'Documento', 'Contrato', 'Novedad'];
+  header.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF7C3AED' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+  });
+  sheet.columns = [{ width: 34 }, { width: 24 }, { width: 20 }, { width: 28 }];
+  sheet.views = [{ state: 'frozen', ySplit: 3 }];
+  sheet.autoFilter = { from: 'A3', to: 'D3' };
+  if (!report.workerAbsences.length) {
+    const row = sheet.addRow(['No hay descansos ni incapacidades activos reportados para esta fecha.', '', '', '']);
+    sheet.mergeCells(`A${row.number}:D${row.number}`);
+    row.getCell(1).font = { italic: true, color: { argb: 'FF64748B' } };
+    return;
+  }
+  report.workerAbsences.forEach((absence, index) => {
+    const row = sheet.addRow([absence.workerName, absence.document, absence.contractType, absence.reasonLabel]);
+    row.eachCell((cell) => {
+      cell.alignment = { vertical: 'top', wrapText: true };
+      if (index % 2 === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF5F3FF' } };
+    });
+  });
+}
 
 export async function buildProgrammingExcelBuffer(prisma, { selectedDate, managedBy, includePending }) {
-  const loaded = await loadProgrammingRequests(prisma, selectedDate);
-  const requests = selectProgrammingRequests(loaded.requests, { includePending });
-  const summary = buildProgrammingCompletionSummary(loaded.requests);
-  const includedSummary = buildProgrammingCompletionSummary(requests);
+  const report = await loadProgrammingReportData(prisma, { selectedDate, includePending });
   const manager = normalizeString(managedBy) || 'LoginPro Operaciones';
-  const scope = includePending ? 'Completas y pendientes' : 'Solo solicitudes completas';
+  const scope = report.includePending ? 'Completas y pendientes' : 'Solo solicitudes completas';
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Lórren Dispatch';
   workbook.created = new Date();
   const summarySheet = workbook.addWorksheet('Programación');
-  styleProgrammingWorksheet(summarySheet, 'Programación operativa', `Fecha: ${loaded.selectedDate} · ${scope} · Gestionado por: ${manager}`);
-  addProgrammingRows(summarySheet, requests);
-  for (const [clientName, clientRequests] of groupByClient(requests)) {
+  styleProgrammingWorksheet(summarySheet, 'Programación operativa', `Fecha: ${report.selectedDate} · ${scope} · Gestionado por: ${manager}`);
+  addProgrammingRows(summarySheet, report.requests);
+  for (const [clientName, clientRequests] of groupByClient(report.requests)) {
     const sheet = workbook.addWorksheet(cleanSheetName(clientName, 'Cliente'));
-    styleProgrammingWorksheet(sheet, clientName, `Fecha: ${loaded.selectedDate} · ${scope} · Gestionado por: ${manager}`);
+    styleProgrammingWorksheet(sheet, clientName, `Fecha: ${report.selectedDate} · ${scope} · Gestionado por: ${manager}`);
     addProgrammingRows(sheet, clientRequests);
   }
-  return { selectedDate: loaded.selectedDate, summary, includedSummary, includePending, buffer: Buffer.from(await workbook.xlsx.writeBuffer()) };
+  addWorkerAbsenceWorksheet(workbook, report, manager);
+  return {
+    selectedDate: report.selectedDate,
+    summary: report.summary,
+    includedSummary: report.includedSummary,
+    includePending: report.includePending,
+    workerAbsences: report.workerAbsences,
+    buffer: Buffer.from(await workbook.xlsx.writeBuffer())
+  };
 }
 export function buildProgrammingExcelFilename(selectedDate, suffix = 'completa') {
   return `programacion-operativa-${suffix}-${selectedDate}.xlsx`.replace(/[^a-zA-Z0-9_.-]/g, '-');
