@@ -19,6 +19,10 @@ function showsAllDates(query = {}) {
   return query.allDates === '1' || query.allDates === 'true';
 }
 
+function hasExplicitAssignmentDate(query = {}) {
+  return Boolean(normalizeString(query.fecha || query.date));
+}
+
 export function assignmentDateFromQuery(query = {}) {
   if (showsAllDates(query)) return null;
   return normalizeDispatchDateParam(query.fecha || query.date);
@@ -129,22 +133,36 @@ async function installAssignmentRedirectDate(prisma, req, res) {
   };
 }
 
+async function inferAssignmentDateFromRequestedService(prisma, serviceRequestId) {
+  if (!serviceRequestId) return null;
+  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+    where: { id: serviceRequestId },
+    select: { serviceDate: true }
+  });
+  return dispatchServiceDateKey(serviceRequest?.serviceDate);
+}
+
 export function dispatchAssignmentDateGuard(prisma) {
   return async function assignmentDateGuard(req, res, next) {
     try {
       if (req.method === 'GET') {
         const query = req.query || {};
-        const selectedDate = assignmentDateFromQuery(query);
+        const requestedServiceRequestId = normalizeString(query.serviceRequestId);
+        let selectedDate = assignmentDateFromQuery(query);
+
+        // Un enlace a una solicitud concreta debe abrir el tablero en la fecha de esa solicitud.
+        // Solo inferimos cuando el enlace omitió fecha; una fecha explícita y allDates conservan prioridad.
+        if (!showsAllDates(query) && requestedServiceRequestId && !hasExplicitAssignmentDate(query)) {
+          selectedDate = await inferAssignmentDateFromRequestedService(prisma, requestedServiceRequestId) || selectedDate;
+        }
 
         // La fecha visible y la fecha que consume la ruta activa deben ser la misma.
-        // Cuando el usuario entra sin parámetros, assignmentDateFromQuery() resuelve hoy
-        // en America/Bogota; la hacemos explícita para todo el pipeline posterior.
+        // Una entrada completamente vacía sigue resolviendo hoy en America/Bogota.
         if (selectedDate) {
           query.fecha = selectedDate;
           delete query.date;
         }
 
-        const requestedServiceRequestId = normalizeString(query.serviceRequestId);
         const context = selectedDate
           ? await loadAssignmentDateContext(prisma, selectedDate, requestedServiceRequestId)
           : null;

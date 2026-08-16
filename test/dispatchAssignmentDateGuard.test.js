@@ -37,6 +37,50 @@ test('bare assignment entry makes today explicit for the downstream assignment r
   assert.equal(req.query.serviceRequestId, undefined);
 });
 
+test('serviceRequestId without date opens the board on that request service date', async () => {
+  const serviceDate = new Date('2026-08-03T05:00:00.000Z');
+  let findUniqueCalls = 0;
+  const prisma = {
+    dispatchServiceRequest: {
+      findUnique: async ({ where }) => {
+        findUniqueCalls += 1;
+        assert.equal(where.id, 'TEST-REQUEST-HISTORICAL');
+        return { serviceDate };
+      },
+      findMany: async () => [{ id: 'TEST-REQUEST-HISTORICAL', serviceDate, assignments: [] }]
+    },
+    dispatchAssignment: { findMany: async () => [] }
+  };
+  const req = { method: 'GET', query: { serviceRequestId: 'TEST-REQUEST-HISTORICAL' } };
+  const res = { render() {} };
+
+  await dispatchAssignmentDateGuard(prisma)(req, res, () => {});
+
+  assert.equal(findUniqueCalls, 1);
+  assert.equal(req.query.fecha, '2026-08-03');
+  assert.equal(req.query.serviceRequestId, 'TEST-REQUEST-HISTORICAL');
+});
+
+test('explicit assignment date keeps priority over the service request inferred date', async () => {
+  const serviceDate = new Date('2026-08-12T05:00:00.000Z');
+  let findUniqueCalls = 0;
+  const prisma = {
+    dispatchServiceRequest: {
+      findUnique: async () => { findUniqueCalls += 1; return { serviceDate: new Date('2026-08-03T05:00:00.000Z') }; },
+      findMany: async () => [{ id: 'TEST-REQUEST-EXPLICIT', serviceDate, assignments: [] }]
+    },
+    dispatchAssignment: { findMany: async () => [] }
+  };
+  const req = { method: 'GET', query: { serviceRequestId: 'TEST-REQUEST-EXPLICIT', fecha: '2026-08-12' } };
+  const res = { render() {} };
+
+  await dispatchAssignmentDateGuard(prisma)(req, res, () => {});
+
+  assert.equal(findUniqueCalls, 0);
+  assert.equal(req.query.fecha, '2026-08-12');
+  assert.equal(req.query.serviceRequestId, 'TEST-REQUEST-EXPLICIT');
+});
+
 test('allDates remains explicit and is not replaced by today', async () => {
   let serviceRequestQueries = 0;
   const prisma = {
