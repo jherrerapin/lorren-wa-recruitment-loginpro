@@ -71,3 +71,41 @@ test('dashboard and summary tabs use the route mounted by dispatchDashboardMetri
     assert.doesNotMatch(html, /(?:\?|&amp;)tipo=/);
   }
 });
+
+test('novedades usa el resumen canónico y conserva la fecha de la solicitud al abrir asignación', async () => {
+  const noveltyTemplate = await readFile('src/views/operacionesNovedades.ejs', 'utf8');
+  const html = ejs.render(noveltyTemplate, {
+    pageTitle: 'Novedades operativas',
+    role: 'dev',
+    selectedDate: SELECTED_DATE,
+    status: 'OPEN',
+    incidents: [{
+      id: 'TEST-INCIDENT-1260',
+      type: 'RETRASO',
+      status: 'OPEN',
+      description: 'Novedad operativa de prueba.',
+      reportedBy: 'Coordinación prueba',
+      createdByUsername: 'TEST-USER',
+      resolutionNote: null,
+      worker: null,
+      assignment: null,
+      serviceRequest: {
+        id: 'TEST-REQUEST-1260',
+        clientName: 'Cliente Prueba',
+        operationPointName: 'Operación Prueba',
+        cityName: 'Ciudad Prueba',
+        serviceDate: new Date('2026-07-29T05:00:00.000Z'),
+        startTime: '07:00',
+        endTime: '15:00'
+      }
+    }]
+  });
+
+  assert.match(html, /action="\/admin\/operaciones\/resumen"/);
+  assert.match(html, /name="type" value="total"/);
+  assert.ok(html.includes(expectedRenderedUrl('total')));
+  assert.ok(html.includes(`/admin/operaciones/asignaciones?serviceRequestId=TEST-REQUEST-1260&amp;fecha=${SELECTED_DATE}`));
+  assert.match(html, /Cierra solo el seguimiento de esta novedad\. No modifica la solicitud ni sus asignaciones\./);
+  assert.doesNotMatch(html, /\/admin\/operaciones\/solicitudes\/resumen/);
+  assert.doesNotMatch(html, /(?:\?|&amp;)tipo=/);
+});
