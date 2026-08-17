@@ -136,9 +136,10 @@ test('la vista limita el selector a auxiliares reales y compacta novedades y mar
     readFile(new URL('../src/views/partials/operacionesNominaTabla.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/public/operaciones-nomina.css', import.meta.url), 'utf8')
   ]);
-  assert.match(view, /<label for="workerId">Auxiliares<\/label>/);
-  assert.match(view, /name="workerId" multiple/);
-  assert.match(view, /Solo aparecen auxiliares con información en este corte/);
+  assert.match(view, /<label>Auxiliares<\/label>/);
+  assert.match(view, /type="checkbox" name="workerId"/);
+  assert.match(view, /Si no marcas ninguno, se analizan todos los que tienen información en este corte/);
+  assert.doesNotMatch(view, /name="workerId" multiple/);
   assert.match(view, /partials\/operacionesNominaTabla/);
   assert.match(view, /operaciones-nomina\.css/);
   assert.doesNotMatch(view, /operaciones-nomina\.js/);
