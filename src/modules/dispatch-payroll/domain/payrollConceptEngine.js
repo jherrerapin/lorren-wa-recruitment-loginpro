@@ -367,15 +367,13 @@ export function formatPayrollMinutes(minutes) {
   return `${hours} h ${String(remainder).padStart(2, '0')} min`;
 }
 
-function enrichPayrollMinute(record, workerId, compensationByWorkerDate, holidayCache, dailyWorked, weeklyWorked) {
+function enrichPayrollMinute(record, workerId, compensationByWorkerDate, holidayCache, dailyWorked) {
   const parts = bogotaClockParts(record.timestamp);
   if (!parts) return null;
   const workdayKey = record.workdayKey || parts.dateKey;
   const weekKey = payrollWeekStartKey(workdayKey, record.policy.weekStartsOn);
   const dayWorkedIndex = dailyWorked.get(workdayKey) || 0;
-  const weekWorkedIndex = weeklyWorked.get(weekKey) || 0;
   dailyWorked.set(workdayKey, dayWorkedIndex + 1);
-  weeklyWorked.set(weekKey, weekWorkedIndex + 1);
 
   const year = Number(parts.dateKey.slice(0, 4));
   if (!holidayCache.has(year)) holidayCache.set(year, colombianHolidayKeys(year));
@@ -393,9 +391,7 @@ function enrichPayrollMinute(record, workerId, compensationByWorkerDate, holiday
     workdayKey,
     weekKey,
     dayWorkedIndex,
-    weekWorkedIndex,
     dailyExcess: dayWorkedIndex >= record.policy.dailyOrdinaryMinutes,
-    weeklyOverflow: weekWorkedIndex >= record.policy.weeklyOrdinaryMinutes,
     holiday,
     rest,
     compensationStatus,
@@ -408,7 +404,7 @@ function enrichPayrollMinute(record, workerId, compensationByWorkerDate, holiday
   };
 }
 
-function markFlexibleWeeklyOvertime(records, summary) {
+function markDailyBalanceOvertime(records, summary) {
   const recordsByWeek = new Map();
   for (const record of records) {
     if (!recordsByWeek.has(record.weekKey)) recordsByWeek.set(record.weekKey, []);
@@ -417,24 +413,16 @@ function markFlexibleWeeklyOvertime(records, summary) {
 
   for (const [weekKey, weekRecords] of recordsByWeek) {
     const policy = weekRecords[0]?.policy || DEFAULT_PAYROLL_POLICY;
-    const netExcessMinutes = Math.max(0, weekRecords.length - policy.weeklyOrdinaryMinutes);
-    if (!netExcessMinutes) continue;
+    const workedByDay = new Map();
+    for (const record of weekRecords) {
+      workedByDay.set(record.workdayKey, (workedByDay.get(record.workdayKey) || 0) + 1);
+    }
 
+    const deficitMinutes = [...workedByDay.values()]
+      .reduce((sum, workedMinutes) => sum + Math.max(0, policy.dailyOrdinaryMinutes - workedMinutes), 0);
     const candidateSet = new Set(weekRecords.filter((record) => record.dailyExcess));
-    if (candidateSet.size < netExcessMinutes) {
-      for (const record of weekRecords) {
-        if (!record.weeklyOverflow || candidateSet.has(record)) continue;
-        candidateSet.add(record);
-        if (candidateSet.size >= netExcessMinutes) break;
-      }
-    }
-    if (candidateSet.size < netExcessMinutes) {
-      for (let index = weekRecords.length - 1; index >= 0 && candidateSet.size < netExcessMinutes; index -= 1) {
-        candidateSet.add(weekRecords[index]);
-      }
-    }
+    let minutesToOffset = Math.min(deficitMinutes, candidateSet.size);
 
-    let minutesToOffset = Math.max(0, candidateSet.size - netExcessMinutes);
     for (const code of OVERTIME_DEDUCTION_ORDER) {
       if (!minutesToOffset) break;
       for (const record of weekRecords) {
@@ -445,16 +433,18 @@ function markFlexibleWeeklyOvertime(records, summary) {
       }
     }
 
-    if (candidateSet.size !== netExcessMinutes) {
-      throw new Error('payroll_weekly_overtime_reconciliation_failed');
+    if (minutesToOffset !== 0) {
+      throw new Error('payroll_daily_balance_overtime_reconciliation_failed');
     }
 
-    const recognized = netExcessMinutes >= MIN_OVERTIME_RECOGNITION_MINUTES;
+    const remainingExtraMinutes = candidateSet.size;
+    if (!remainingExtraMinutes) continue;
+    const recognized = remainingExtraMinutes > MIN_OVERTIME_RECOGNITION_MINUTES;
     if (!recognized) {
-      pushNovelty(summary.novelties, 'OVERTIME_BELOW_MINIMUM', `El exceso semanal de ${netExcessMinutes} minuto(s) no alcanzó el mínimo de ${MIN_OVERTIME_RECOGNITION_MINUTES} minutos para reconocerse como hora extra.`, {
+      pushNovelty(summary.novelties, 'OVERTIME_BELOW_MINIMUM', `El remanente de ${remainingExtraMinutes} minuto(s) después de compensar jornadas cortas no superó el umbral de ${MIN_OVERTIME_RECOGNITION_MINUTES} minutos para reconocerse como hora extra.`, {
         dateKey: weekKey,
         blocking: false,
-        overtimeMinutes: netExcessMinutes,
+        overtimeMinutes: remainingExtraMinutes,
         minimumMinutes: MIN_OVERTIME_RECOGNITION_MINUTES
       });
     }
@@ -505,7 +495,6 @@ export function calculatePayrollConceptReport(input = {}) {
     const overlappingSessionIds = findOverlappingSessionIds(rawRecords, summary.novelties);
     const seenMinutes = new Set();
     const dailyWorked = new Map();
-    const weeklyWorked = new Map();
     const classifiedRecords = [];
 
     for (const record of rawRecords) {
@@ -523,11 +512,11 @@ export function calculatePayrollConceptReport(input = {}) {
         continue;
       }
       seenMinutes.add(minuteKey);
-      const classified = enrichPayrollMinute(record, workerId, compensationByWorkerDate, holidayCache, dailyWorked, weeklyWorked);
+      const classified = enrichPayrollMinute(record, workerId, compensationByWorkerDate, holidayCache, dailyWorked);
       if (classified) classifiedRecords.push(classified);
     }
 
-    markFlexibleWeeklyOvertime(classifiedRecords, summary);
+    markDailyBalanceOvertime(classifiedRecords, summary);
     const recognizedDailyOvertime = new Map();
     const recognizedWeeklyOvertime = new Map();
 

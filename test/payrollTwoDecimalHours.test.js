@@ -47,7 +47,7 @@ test('convierte minutos a horas con máximo un decimal', () => {
   assert.equal(minutesToDecimalHours(480), 8);
 });
 
-test('el reporte conserva el redondeo aunque 500 minutos aislados no sean hora extra semanal', () => {
+test('500 minutos aislados dejan 80 minutos de extra después de la referencia diaria', () => {
   const report = calculatePayrollConceptReport({
     sessions: [session({ minutes: 500 })],
     policiesByClientId: new Map(),
@@ -58,11 +58,11 @@ test('el reporte conserva el redondeo aunque 500 minutos aislados no sean hora e
 
   assert.equal(row.totalMinutes, 500);
   assert.equal(row.totalHours, 8.3);
-  assert.equal(row.ordinaryMinutes, 500);
-  assert.equal(row.ordinaryHours, 8.3);
-  assert.equal(row.overtimeMinutes, 0);
-  assert.equal(row.overtimeHours, 0);
-  assert.equal(row.conceptMinutes.HEDO, 0);
-  assert.equal(row.conceptHours.HEDO, 0);
+  assert.equal(row.ordinaryMinutes, 420);
+  assert.equal(row.ordinaryHours, 7);
+  assert.equal(row.overtimeMinutes, 80);
+  assert.equal(row.overtimeHours, 1.3);
+  assert.equal(row.conceptMinutes.HEDO, 80);
+  assert.equal(row.conceptHours.HEDO, 1.3);
   assert.equal(report.totals.totalHours, 8.3);
 });

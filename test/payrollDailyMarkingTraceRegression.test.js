@@ -66,11 +66,12 @@ function workerRow(id, { totalMinutes, ordinaryMinutes, overtimeMinutes, workedD
   };
 }
 
-test('muestra marcaciones por día sin convertir 7.5 h aisladas en hora extra', async () => {
+test('muestra marcaciones por día sin reconocer como extra un remanente exacto de 30 minutos', async () => {
   const report = await reportFor([sessionFixture()]);
   const day = report.rows[0].daily[0];
-  assert.equal(day.ordinaryHours, 7.5);
+  assert.equal(day.ordinaryHours, 7);
   assert.equal(day.overtimeHours, 0);
+  assert.equal(day.unrecognizedOvertimeHours, 0.5);
   assert.equal(day.totalHours, 7.5);
   assert.equal(day.markings.length, 1);
   const marking = day.markings[0];
@@ -152,6 +153,8 @@ test('la vista limita el selector a auxiliares reales y compacta novedades y mar
   assert.match(detail, /Informativa:/);
   assert.doesNotMatch(detail, /novelty-summary/);
   assert.doesNotMatch(detail, /Marcaciones que sustentan el cálculo de este día/);
+  assert.match(detail, /El exceso de un día cubre faltantes de otros días trabajados/);
+  assert.doesNotMatch(detail, /42 h semanales/);
   assert.match(css, /\.novelty-line/);
   assert.match(css, /\.marking-inline/);
 });

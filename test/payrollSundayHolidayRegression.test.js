@@ -32,19 +32,19 @@ function payrollSession({
       workerId,
       worker: {
         id: workerId,
-        fullName: 'Auxiliar de prueba',
+        fullName: 'TEST Auxiliar',
         documentType: 'CC',
         documentNumber: 'TEST-DOC-1',
         phone: 'TEST-PHONE-1'
       },
       serviceRequest: {
-        clientName: 'Cliente de prueba',
-        operationPointName: 'Operación de prueba',
+        clientName: 'TEST Cliente',
+        operationPointName: 'TEST Operación',
         operationPoint: {
           id: 'TEST-POINT-1',
           clientId,
-          name: 'Operación de prueba',
-          client: { id: clientId, name: 'Cliente de prueba' }
+          name: 'TEST Operación',
+          client: { id: clientId, name: 'TEST Cliente' }
         }
       }
     }
@@ -95,7 +95,7 @@ test('domingo de 18:00 a 22:00 separa recargo diurno y nocturno sin perder minut
   assert.equal(compensated.rows[0].conceptMinutes.RND, 0);
 });
 
-test('una política histórica que inicia domingo se normaliza a lunes y no reinicia las 42 horas antes del dominical nocturno', () => {
+test('un domingo corto no se vuelve extra solo porque lunes a sábado tuvieron siete horas', () => {
   const historicalPolicy = {
     weeklyOrdinaryMinutes: 42 * 60,
     dailyOrdinaryMinutes: 7 * 60,
@@ -121,7 +121,7 @@ test('una política histórica que inicia domingo se normaliza a lunes y no rein
     }));
   }
   sessions.push(payrollSession({
-    id: 'TEST-SUNDAY-NIGHT-EXTRA',
+    id: 'TEST-SUNDAY-NIGHT-SHORT',
     arrivalAt: '2026-08-10T00:00:00.000Z',
     departureAt: '2026-08-10T02:00:00.000Z',
     workedMinutes: 120
@@ -134,10 +134,10 @@ test('una política histórica que inicia domingo se normaliza a lunes y no rein
   });
   const row = result.rows[0];
   assert.equal(row.totalMinutes, 120);
-  assert.equal(row.ordinaryMinutes, 0);
-  assert.equal(row.overtimeMinutes, 120);
-  assert.equal(row.conceptMinutes.HEND, 120);
-  assert.equal(row.conceptMinutes.RND, 0);
+  assert.equal(row.ordinaryMinutes, 120);
+  assert.equal(row.overtimeMinutes, 0);
+  assert.equal(row.conceptMinutes.HEND, 0);
+  assert.equal(row.conceptMinutes.RND, 120);
 });
 
 test('festivo conserva RDF y RNF como indicativo y nunca abre compensatorio', () => {
@@ -178,7 +178,7 @@ test('el backend rechaza guardar compensatorio en una fecha festiva', async () =
     dispatchWorker: {
       async findUnique() {
         workerLookupCalled = true;
-        return { id: 'TEST-WORKER-1', fullName: 'Auxiliar de prueba' };
+        return { id: 'TEST-WORKER-1', fullName: 'TEST Auxiliar' };
       }
     },
     devAuditEvent: {
@@ -214,7 +214,7 @@ test('la interfaz usa calendario propio de lunes a domingo y muestra festivo sin
       workers: [],
       rows: [{
         workerId: 'TEST-WORKER-1',
-        fullName: 'Auxiliar de prueba',
+        fullName: 'TEST Auxiliar',
         documentType: 'CC',
         documentNumber: 'TEST-DOC-1',
         exportable: true,
@@ -231,8 +231,8 @@ test('la interfaz usa calendario propio de lunes a domingo y muestra festivo sin
           ordinaryHours: 2,
           overtimeHours: 0,
           unrecognizedOvertimeHours: 0,
-          clientNames: ['Cliente de prueba'],
-          operationNames: ['Operación de prueba'],
+          clientNames: ['TEST Cliente'],
+          operationNames: ['TEST Operación'],
           isHoliday: true,
           isRestDay: false,
           compensationStatus: PAYROLL_COMPENSATION_STATUS.COMPENSATED

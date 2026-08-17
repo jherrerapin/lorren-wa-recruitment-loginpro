@@ -41,7 +41,7 @@ function eightHourSessionWithoutBreak() {
   };
 }
 
-test('una política histórica no cambia la referencia fija 42 h semanales / 7 h diarias', async () => {
+test('la política histórica conserva valores compatibles pero la extra nace del exceso diario remanente', async () => {
   const prisma = {
     devAuditEvent: {
       findMany: async () => [{
@@ -78,14 +78,14 @@ test('una política histórica no cambia la referencia fija 42 h semanales / 7 h
 
   const row = report.rows[0];
   assert.equal(row.totalMinutes, 480);
-  assert.equal(row.ordinaryMinutes, 480, 'superar 7 h en un día no dispara extra por sí solo');
-  assert.equal(row.overtimeMinutes, 0);
-  assert.equal(row.conceptMinutes.HEDO, 0);
-  assert.equal(row.daily[0].ordinaryMinutes, 480);
-  assert.equal(row.daily[0].overtimeMinutes, 0);
+  assert.equal(row.ordinaryMinutes, 420);
+  assert.equal(row.overtimeMinutes, 60);
+  assert.equal(row.conceptMinutes.HEDO, 60);
+  assert.equal(row.daily[0].ordinaryMinutes, 420);
+  assert.equal(row.daily[0].overtimeMinutes, 60);
 });
 
-test('guardar una política persiste 42 h / 7 h aunque el formulario envíe otros valores', async () => {
+test('guardar una política conserva 42 h / 7 h como compatibilidad persistida', async () => {
   let createdEvent = null;
   const prisma = {
     dispatchClient: {

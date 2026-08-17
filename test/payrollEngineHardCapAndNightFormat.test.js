@@ -42,7 +42,7 @@ function isolatedEightHourSession() {
   };
 }
 
-test('el motor fija 42 h / 7 h pero una jornada aislada de 8 h sigue siendo ordinaria mientras la semana no supere 42 h', () => {
+test('una jornada aislada de 8 h genera una hora extra aunque el valor semanal siga persistido por compatibilidad', () => {
   const historicalPolicy = {
     weeklyOrdinaryMinutes: 48 * 60,
     dailyOrdinaryMinutes: 8 * 60,
@@ -70,11 +70,11 @@ test('el motor fija 42 h / 7 h pero una jornada aislada de 8 h sigue siendo ordi
 
   assert.equal(report.rows.length, 1);
   assert.equal(report.rows[0].totalMinutes, 480);
-  assert.equal(report.rows[0].ordinaryMinutes, 480);
-  assert.equal(report.rows[0].overtimeMinutes, 0);
-  assert.equal(report.rows[0].conceptMinutes.HEDO, 0);
-  assert.equal(report.totals.ordinaryMinutes, 480);
-  assert.equal(report.totals.overtimeMinutes, 0);
+  assert.equal(report.rows[0].ordinaryMinutes, 420);
+  assert.equal(report.rows[0].overtimeMinutes, 60);
+  assert.equal(report.rows[0].conceptMinutes.HEDO, 60);
+  assert.equal(report.totals.ordinaryMinutes, 420);
+  assert.equal(report.totals.overtimeMinutes, 60);
 });
 
 test('la política nocturna se muestra como 19:00 y 06:00, no como números aislados', async () => {
