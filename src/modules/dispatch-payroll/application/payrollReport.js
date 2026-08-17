@@ -45,6 +45,12 @@ const PAYROLL_MARK_TIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
   minute: '2-digit',
   hour12: true
 });
+const PAYROLL_BOGOTA_CLOCK_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'America/Bogota',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23'
+});
 const PAYROLL_MARK_TYPE_LABELS = Object.freeze({
   ARRIVAL: 'Entrada',
   BREAK_START: 'Inicio de almuerzo',
@@ -515,6 +521,43 @@ function dateValue(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function bogotaMinuteOfDay(value) {
+  const date = dateValue(value);
+  if (!date) return null;
+  const parts = Object.fromEntries(
+    PAYROLL_BOGOTA_CLOCK_FORMATTER.formatToParts(date)
+      .filter((part) => part.type === 'hour' || part.type === 'minute')
+      .map((part) => [part.type, Number(part.value)])
+  );
+  if (!Number.isInteger(parts.hour) || !Number.isInteger(parts.minute)) return null;
+  return (parts.hour * 60) + parts.minute;
+}
+
+function sessionWorkerId(session) {
+  return session?.assignment?.workerId || session?.assignment?.worker?.id || null;
+}
+
+function sessionScheduledDateKey(session) {
+  return bogotaDateKey(dateValue(session?.expectedStartAt) || dateValue(session?.arrivalReportedAt));
+}
+
+function sessionHasCompletedWorkday(session) {
+  const arrivalAt = dateValue(session?.arrivalReportedAt);
+  const departureAt = dateValue(session?.departureReportedAt);
+  return Boolean(arrivalAt && departureAt && departureAt > arrivalAt);
+}
+
+function sessionIsPersistedAbsence(session) {
+  return String(session?.attendanceStatus || '').toUpperCase() === 'ABSENT'
+    && !dateValue(session?.arrivalReportedAt)
+    && !dateValue(session?.departureReportedAt);
+}
+
+function sessionStartsAtNight(session) {
+  const minute = bogotaMinuteOfDay(session?.expectedStartAt);
+  return Number.isInteger(minute) && minute >= DEFAULT_PAYROLL_POLICY.nightStartMinute;
+}
+
 function attendanceMarkMoment(mark) {
   return dateValue(mark?.clientCapturedAt || mark?.serverReceivedAt);
 }
@@ -557,7 +600,7 @@ function manualMarkCorrections(session, workdayKey) {
 }
 
 function sessionPayrollMarking(session) {
-  const workerId = session?.assignment?.workerId || session?.assignment?.worker?.id || null;
+  const workerId = sessionWorkerId(session);
   const arrivalAt = dateValue(session?.arrivalReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'ARRIVAL'));
   const departureAt = dateValue(session?.departureReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'DEPARTURE'));
   const breakStartAt = attendanceMarkMoment(latestAttendanceMark(session, 'BREAK_START'));
@@ -616,6 +659,14 @@ function emptyPayrollRow(worker) {
     ordinaryHours: 0,
     overtimeHours: 0,
     unrecognizedOvertimeHours: 0,
+    workedDays: 0,
+    deductedDays: 0,
+    netWorkedDays: 0,
+    remuneratedDays: 0,
+    unremuneratedDays: 0,
+    nightShiftCount: 0,
+    sundayCount: 0,
+    holidayCount: 0,
     daily: [],
     novelties: [],
     status: 'CALCULADO',
@@ -623,9 +674,10 @@ function emptyPayrollRow(worker) {
   };
 }
 
-function decoratePayrollRows(report, workers, rests, filters, filteredSessions) {
+function decoratePayrollRows(report, workers, rests, filters, filteredSessions, absentSessions, period) {
   const workerById = new Map(workers.map((worker) => [worker.id, worker]));
-  const sessionWorkerIds = new Set(filteredSessions.map((session) => session.assignment?.workerId).filter(Boolean));
+  const relevantSessions = [...filteredSessions, ...absentSessions];
+  const sessionWorkerIds = new Set(relevantSessions.map((session) => sessionWorkerId(session)).filter(Boolean));
   const rowByWorker = new Map(report.rows.map((row) => [row.workerId, row]));
   const markingsByWorkerDate = payrollMarkingsByWorkerDate(filteredSessions);
   const search = filters.search.toLowerCase();
@@ -650,11 +702,65 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions) 
     }
   }
 
+  for (const session of absentSessions) {
+    const workerId = sessionWorkerId(session);
+    if (!workerId || rowByWorker.has(workerId)) continue;
+    const worker = workerById.get(workerId);
+    if (!worker) continue;
+    const row = emptyPayrollRow(worker);
+    report.rows.push(row);
+    rowByWorker.set(workerId, row);
+  }
+
   for (const row of report.rows) {
+    const worker = workerById.get(row.workerId);
     row.restAssignments = visibleRests.filter((rest) => rest.workerId === row.workerId).sort((a, b) => a.restDate.localeCompare(b.restDate));
-    row.workedDays = row.daily.filter((day) => Number(day.totalMinutes || 0) > 0).length;
+
+    const workedDateKeys = new Set(
+      row.daily
+        .filter((day) => Number(day.totalMinutes || 0) > 0)
+        .map((day) => validDateKey(day.dateKey))
+        .filter(Boolean)
+    );
+    const remuneratedDateKeys = new Set(workedDateKeys);
+    if (worker?.contractType === 'DIRECTO') {
+      row.restAssignments
+        .filter((rest) => rest.reason === WORKER_REST_REASONS.REMUNERADO)
+        .forEach((rest) => remuneratedDateKeys.add(rest.restDate));
+    }
+
+    const unremuneratedDateKeys = new Set(
+      row.restAssignments
+        .filter((rest) => rest.dayAdjustment === -1)
+        .map((rest) => rest.restDate)
+    );
+    absentSessions
+      .filter((session) => sessionWorkerId(session) === row.workerId)
+      .map((session) => sessionScheduledDateKey(session))
+      .filter((dateKey) => dateKey && dateKey >= period.from && dateKey <= period.to)
+      .forEach((dateKey) => unremuneratedDateKeys.add(dateKey));
+
+    const civilDateKeys = new Set(
+      row.daily.flatMap((day) => {
+        const keys = Array.isArray(day.civilDateKeys) && day.civilDateKeys.length ? day.civilDateKeys : [day.dateKey];
+        return keys.map(validDateKey).filter(Boolean);
+      })
+    );
+    const holidayDateKeys = new Set([...civilDateKeys].filter((dateKey) => holidayDateKey(dateKey)));
+    const sundayDateKeys = new Set([...civilDateKeys].filter((dateKey) => isSundayDateKey(dateKey) && !holidayDateKey(dateKey)));
+
+    row.workedDays = workedDateKeys.size;
     row.deductedDays = row.restAssignments.filter((rest) => rest.dayAdjustment === -1).length;
     row.netWorkedDays = row.workedDays - row.deductedDays;
+    row.remuneratedDays = remuneratedDateKeys.size;
+    row.unremuneratedDays = unremuneratedDateKeys.size;
+    row.nightShiftCount = filteredSessions.filter((session) => {
+      if (sessionWorkerId(session) !== row.workerId || !sessionStartsAtNight(session)) return false;
+      const dateKey = sessionScheduledDateKey(session);
+      return Boolean(dateKey && dateKey >= period.from && dateKey <= period.to);
+    }).length;
+    row.sundayCount = sundayDateKeys.size;
+    row.holidayCount = holidayDateKeys.size;
     row.daily = row.daily.map((day) => ({
       ...day,
       markings: markingsByWorkerDate.get(`${row.workerId}|${day.dateKey}`) || [],
@@ -669,6 +775,11 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions) 
   report.totals.workedDays = report.rows.reduce((sum, row) => sum + row.workedDays, 0);
   report.totals.deductedDays = report.rows.reduce((sum, row) => sum + row.deductedDays, 0);
   report.totals.netWorkedDays = report.rows.reduce((sum, row) => sum + row.netWorkedDays, 0);
+  report.totals.remuneratedDays = report.rows.reduce((sum, row) => sum + row.remuneratedDays, 0);
+  report.totals.unremuneratedDays = report.rows.reduce((sum, row) => sum + row.unremuneratedDays, 0);
+  report.totals.nightShiftCount = report.rows.reduce((sum, row) => sum + row.nightShiftCount, 0);
+  report.totals.sundayCount = report.rows.reduce((sum, row) => sum + row.sundayCount, 0);
+  report.totals.holidayCount = report.rows.reduce((sum, row) => sum + row.holidayCount, 0);
   return report;
 }
 
@@ -677,13 +788,24 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
   const filters = normalizedFilters(query, options);
   const expandedFrom = addDateKeyDays(period.from, -6);
   const start = bogotaDayStart(expandedFrom);
+  const periodStart = bogotaDayStart(period.from);
   const end = bogotaDayStart(addDateKeyDays(period.to, 1));
 
   const [sessions, clients, workers, periodRests] = await Promise.all([
     prisma.dispatchAttendanceSession.findMany({
       where: {
-        arrivalReportedAt: { gte: start, lt: end },
-        departureReportedAt: { not: null }
+        OR: [
+          {
+            arrivalReportedAt: { gte: start, lt: end },
+            departureReportedAt: { not: null }
+          },
+          {
+            attendanceStatus: 'ABSENT',
+            expectedStartAt: { gte: periodStart, lt: end },
+            arrivalReportedAt: null,
+            departureReportedAt: null
+          }
+        ]
       },
       include: {
         marks: { orderBy: { serverReceivedAt: 'asc' } },
@@ -721,7 +843,9 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
     loadWorkerRestAssignments(prisma, { from: period.from, to: period.to, ...(filters.workerId ? { workerIds: [filters.workerId] } : {}) })
   ]);
 
-  const filteredSessions = sessions.filter((session) => sessionMatchesFilters(session, filters));
+  const matchedSessions = sessions.filter((session) => sessionMatchesFilters(session, filters));
+  const filteredSessions = matchedSessions.filter(sessionHasCompletedWorkday);
+  const absentSessions = matchedSessions.filter(sessionIsPersistedAbsence);
   const clientIds = [...new Set(filteredSessions.map((session) => session.assignment?.serviceRequest?.operationPoint?.clientId).filter(Boolean))];
   const workerIds = [...new Set(filteredSessions.map((session) => session.assignment?.workerId).filter(Boolean))];
   const compensationRange = { from: period.from, to: addDateKeyDays(period.to, 1) };
@@ -736,7 +860,7 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
     compensationByWorkerDate,
     range: { from: period.from, to: period.to }
   });
-  decoratePayrollRows(report, workers, periodRests, filters, filteredSessions);
+  decoratePayrollRows(report, workers, periodRests, filters, filteredSessions, absentSessions, period);
 
   return {
     ...report,
