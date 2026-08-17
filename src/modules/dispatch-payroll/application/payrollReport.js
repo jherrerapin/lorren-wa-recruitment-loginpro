@@ -555,12 +555,6 @@ function sessionScheduledDateKey(session) {
   return bogotaDateKey(dateValue(session?.expectedStartAt) || dateValue(session?.arrivalReportedAt));
 }
 
-function sessionHasCompletedWorkday(session) {
-  const arrivalAt = dateValue(session?.arrivalReportedAt);
-  const departureAt = dateValue(session?.departureReportedAt);
-  return Boolean(arrivalAt && departureAt && departureAt > arrivalAt);
-}
-
 function sessionIsPersistedAbsence(session) {
   return String(session?.attendanceStatus || '').toUpperCase() === 'ABSENT'
     && !dateValue(session?.arrivalReportedAt)
@@ -874,8 +868,8 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
   ]);
 
   const matchedSessions = sessions.filter((session) => sessionMatchesFilters(session, filters));
-  const filteredSessions = matchedSessions.filter(sessionHasCompletedWorkday);
   const absentSessions = matchedSessions.filter(sessionIsPersistedAbsence);
+  const filteredSessions = matchedSessions.filter((session) => !sessionIsPersistedAbsence(session));
   const clientIds = [...new Set(filteredSessions.map((session) => session.assignment?.serviceRequest?.operationPoint?.clientId).filter(Boolean))];
   const workerIds = [...new Set(filteredSessions.map((session) => session.assignment?.workerId).filter(Boolean))];
   const compensationRange = { from: period.from, to: addDateKeyDays(period.to, 1) };
