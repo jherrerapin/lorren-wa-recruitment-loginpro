@@ -158,14 +158,14 @@ test('Suspensión y No remunerada descuentan un día; los demás motivos no', ()
   assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.COMPENSATORIO), 0);
 });
 
-test('el backend guarda descanso para ambos contratos y solo exige motivo a Directo en día hábil', async () => {
+test('el backend guarda descanso para ambos contratos y la justificación es opcional para Directo', async () => {
   const direct = makePrisma();
   const savedDirect = await saveWorkerRestAssignment(direct.prisma, {
     workerId: 'TEST-WORKER-1', restDate: '2026-08-11', reason: WORKER_REST_REASONS.SUSPENSION,
     actorUsername: 'TEST-ADMIN'
   });
   assert.equal(savedDirect.dayAdjustment, -1);
-  assert.equal(savedDirect.requiresJustification, true);
+  assert.equal(savedDirect.requiresJustification, false);
   const activeDirect = await loadWorkerRestAssignments(direct.prisma, {
     workerIds: ['TEST-WORKER-1'], from: '2026-08-11', to: '2026-08-11'
   });
@@ -176,13 +176,39 @@ test('el backend guarda descanso para ambos contratos y solo exige motivo a Dire
   )));
 
   const directWithoutReason = makePrisma();
-  await assert.rejects(
-    saveWorkerRestAssignment(directWithoutReason.prisma, {
-      workerId: 'TEST-WORKER-1', restDate: '2026-08-11'
-    }),
-    /worker_rest_invalid/
-  );
-  assert.equal(directWithoutReason.events.length, 0);
+  const savedDirectWithoutReason = await saveWorkerRestAssignment(directWithoutReason.prisma, {
+    workerId: 'TEST-WORKER-1', restDate: '2026-08-11'
+  });
+  assert.equal(savedDirectWithoutReason.reason, null);
+  assert.equal(savedDirectWithoutReason.originSundayDate, null);
+  assert.equal(savedDirectWithoutReason.dayAdjustment, 0);
+  assert.equal(savedDirectWithoutReason.requiresJustification, false);
+  assert.equal(directWithoutReason.events.length, 1);
+
+  const remunerated = await loadPayrollReport(directWithoutReason.prisma, {
+    periodType: 'CUSTOM', from: '2026-08-11', to: '2026-08-11'
+  }, { now: new Date('2026-08-11T18:00:00.000Z') });
+  assert.equal(remunerated.rows.length, 1);
+  assert.equal(remunerated.rows[0].workedDays, 0);
+  assert.equal(remunerated.rows[0].remuneratedDays, 1);
+  assert.equal(remunerated.rows[0].unremuneratedDays, 0);
+
+  const workedSameDate = payrollSession({
+    id: 'TEST-WORKED-REST-DATE',
+    arrivalAt: '2026-08-11T13:00:00.000Z',
+    departureAt: '2026-08-11T20:00:00.000Z',
+    workedMinutes: 420
+  });
+  const directWorked = makePrisma({
+    sessions: [workedSameDate],
+    auditEvents: [restAudit({ restDate: '2026-08-11', reason: null })]
+  });
+  const workedReport = await loadPayrollReport(directWorked.prisma, {
+    periodType: 'CUSTOM', from: '2026-08-11', to: '2026-08-11'
+  }, { now: new Date('2026-08-11T21:00:00.000Z') });
+  assert.equal(workedReport.rows.length, 1);
+  assert.equal(workedReport.rows[0].workedDays, 1);
+  assert.equal(workedReport.rows[0].remuneratedDays, 1, 'el descanso no duplica un día ya trabajado');
 
   const contractor = makePrisma({ contractType: 'CONTRATISTA' });
   const savedContractor = await saveWorkerRestAssignment(contractor.prisma, {
@@ -200,6 +226,11 @@ test('el backend guarda descanso para ambos contratos y solo exige motivo a Dire
   assert.equal(activeContractor[0].reason, null);
   assert.equal(activeContractor[0].originSundayDate, null);
   assert.equal(activeContractor[0].dayAdjustment, 0);
+  const contractorReport = await loadPayrollReport(contractor.prisma, {
+    periodType: 'CUSTOM', from: '2026-08-11', to: '2026-08-11'
+  }, { now: new Date('2026-08-11T18:00:00.000Z') });
+  assert.equal(contractorReport.rows.length, 1);
+  assert.equal(contractorReport.rows[0].remuneratedDays, 0);
 });
 
 test('un descanso con solicitud activa exige confirmación explícita sin desasignar al auxiliar', async () => {
@@ -529,7 +560,8 @@ test('Asignaciones usa la política canónica de fecha para motivo, compensatori
   assert.match(view, /type="hidden" name="restDate" id="restDateValue" value="<%= safeAssignmentDate %>"/);
   assert.match(view, /id="restReasonField"/);
   assert.match(view, />Justificación<\/label>/);
-  assert.match(view, /en domingos y festivos es opcional/);
+  assert.match(view, /justificación es opcional/);
+  assert.doesNotMatch(view, /en días hábiles es obligatoria/);
   assert.match(view, /COMPENSATORIO:'Compensatorio'/);
   assert.match(view, /id="originSundayDateInput"/);
   assert.match(view, /Domingo que generó el compensatorio/);
@@ -542,13 +574,14 @@ test('Asignaciones usa la política canónica de fecha para motivo, compensatori
   assert.match(boardUi, /const sundayRestDay = restDatePolicy\.isSunday === true/);
   assert.match(boardUi, /const holidayRestDay = restDatePolicy\.isHoliday === true/);
   assert.match(boardUi, /const reasonAvailable = restBatchHasDirect/);
-  assert.match(boardUi, /const reasonRequired = restBatchHasDirect && !naturalRestDay/);
+  assert.match(boardUi, /const reasonRequired = false/);
   assert.match(boardUi, /reasonField\.hidden = !reasonAvailable/);
   assert.match(boardUi, /reasonInput\.required = reasonRequired/);
   assert.match(boardUi, /compensatoryOption\.hidden = naturalRestDay/);
   assert.match(boardUi, /compensatoryOption\.disabled = naturalRestDay/);
   assert.match(boardUi, /Domingo: la justificación es opcional para auxiliares Directos/);
   assert.match(boardUi, /Festivo: la justificación es opcional para auxiliares Directos/);
+  assert.match(boardUi, /Día hábil: la justificación es opcional para auxiliares Directos/);
   assert.match(boardUi, /const compensatorio = reasonAvailable && !naturalRestDay/);
   assert.match(boardUi, /field\.hidden = !compensatorio \|\| bulkCompensatorio/);
   assert.match(boardUi, /origin\.required = compensatorio && !bulkCompensatorio/);
@@ -558,7 +591,8 @@ test('Asignaciones usa la política canónica de fecha para motivo, compensatori
   assert.match(boardUi, /Selecciona una fecha operativa antes de registrar un descanso/);
   assert.match(boardUi, /restDate\.value = selectedDate/);
   assert.match(boardUi, /const canSendReason = worker\.contractType === 'DIRECTO'/);
-  assert.match(boardUi, /&& !restDatePolicy\.isNaturalRestDay/);
+  assert.match(boardUi, /Descanso guardado sin justificación/);
+  assert.doesNotMatch(boardUi, /if \(!reason && !policy\.isNaturalRestDay\)/);
   assert.doesNotMatch(boardUi, /!restDatePolicy\.isHoliday \|\| restDatePolicy\.isSunday/);
   assert.doesNotMatch(boardUi, /restDate\.value = currentDateFilter\(\) \|\| todayDateInColombia\(\)/);
   assert.doesNotMatch(boardUi, /#restDateValue'\)\?\.addEventListener\('change'/);
@@ -570,11 +604,13 @@ test('Asignaciones usa la política canónica de fecha para motivo, compensatori
 
   assert.match(payroll, /COMPENSATORIO: 'COMPENSATORIO'/);
   assert.match(payroll, /rawReason === WORKER_REST_REASONS\.REMUNERADO && originSundayDate/);
-  assert.match(payroll, /const allowsOptionalNaturalRestJustification = isDirect && datePolicy\.isNaturalRestDay/);
+  assert.match(payroll, /const requiresJustification = false/);
+  assert.match(payroll, /const reason = isDirect \? \(requestedReason \|\| null\) : null/);
   assert.match(payroll, /requestedReason === WORKER_REST_REASONS\.COMPENSATORIO/);
   assert.match(payroll, /const dayAdjustment = reason \? workerRestDayAdjustment\(reason\) : 0/);
   assert.match(payroll, /rest\.reason === WORKER_REST_REASONS\.COMPENSATORIO/);
-  assert.match(payroll, /const remuneratedDateKeys = new Set\(\[\.\.\.workedDateKeys, \.\.\.compensatoryDateKeys\]\)/);
+  assert.match(payroll, /const directRestDateKeys = new Set/);
+  assert.match(payroll, /const remuneratedDateKeys = new Set\(\[\.\.\.workedDateKeys, \.\.\.compensatoryDateKeys, \.\.\.directRestDateKeys\]\)/);
   assert.match(payroll, /ACTIVE_DISPATCH_ASSIGNMENT_STATUSES/);
   assert.match(payroll, /worker_rest_active_assignment_confirmation_required/);
   assert.match(payroll, /assignmentConflictOverride/);
