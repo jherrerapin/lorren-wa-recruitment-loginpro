@@ -331,6 +331,7 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
   const workerId = normalizeString(input.workerId, 120);
   const datePolicy = resolveWorkerRestDatePolicy(input.restDate);
   const restDate = datePolicy.restDate;
+  const reasonSubmitted = typeof input.reason === 'string';
   const requestedReason = normalizeString(input.reason, 40)?.toUpperCase();
   const requestedOriginSundayDate = validDateKey(input.originSundayDate);
   const allowAssignedRest = input.allowAssignedRest === true;
@@ -344,12 +345,18 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     if (!worker) throw new Error('worker_rest_worker_not_found');
 
     const isDirect = worker.contractType === 'DIRECTO';
+    const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
+    const current = active.find((rest) => rest.restDate === restDate) || null;
+    const isJustificationUpdate = Boolean(current && isDirect && reasonSubmitted);
+    const isDeferredInitial = Boolean(!current && isDirect && reasonSubmitted && !requestedReason);
+    if (current && !isJustificationUpdate) throw new Error('worker_rest_date_already_assigned');
+
     const requiresJustification = isDirect && !datePolicy.isNaturalRestDay;
     const allowsOptionalNaturalRestJustification = isDirect && datePolicy.isNaturalRestDay;
-    if (requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (allowsOptionalNaturalRestJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (allowsOptionalNaturalRestJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
-    const reason = isDirect && (requiresJustification || allowsOptionalNaturalRestJustification)
+    if (!isDeferredInitial && requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    if (!isDeferredInitial && allowsOptionalNaturalRestJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    if (!isDeferredInitial && allowsOptionalNaturalRestJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
+    const reason = isDirect && !isDeferredInitial && (requiresJustification || allowsOptionalNaturalRestJustification)
       ? (requestedReason || null)
       : null;
     const originSundayDate = reason === WORKER_REST_REASONS.COMPENSATORIO ? requestedOriginSundayDate : null;
@@ -359,17 +366,18 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       }
     }
 
-    const assignmentConflicts = await findWorkerRestAssignmentConflicts(tx, { workerIds: [worker.id], restDate });
+    const assignmentConflicts = isJustificationUpdate
+      ? []
+      : await findWorkerRestAssignmentConflicts(tx, { workerIds: [worker.id], restDate });
     if (assignmentConflicts.length && !allowAssignedRest) {
       throw new Error('worker_rest_active_assignment_confirmation_required');
     }
 
-    const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
-    if (active.some((rest) => rest.restDate === restDate)) throw new Error('worker_rest_date_already_assigned');
-
     if (reason === WORKER_REST_REASONS.COMPENSATORIO) {
       const originAlreadyUsed = active.some((rest) => (
-        rest.reason === WORKER_REST_REASONS.COMPENSATORIO && rest.originSundayDate === originSundayDate
+        rest.restDate !== restDate
+        && rest.reason === WORKER_REST_REASONS.COMPENSATORIO
+        && rest.originSundayDate === originSundayDate
       ));
       if (originAlreadyUsed) throw new Error('worker_rest_origin_sunday_used');
     }
@@ -384,7 +392,9 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       originSundayDate,
       dayAdjustment,
       requiresJustification,
-      assignmentConflictOverride: assignmentConflicts.length > 0 && allowAssignedRest
+      assignmentConflictOverride: isJustificationUpdate
+        ? current.assignmentConflictOverride === true
+        : assignmentConflicts.length > 0 && allowAssignedRest
     };
     await tx.devAuditEvent.create({
       data: {

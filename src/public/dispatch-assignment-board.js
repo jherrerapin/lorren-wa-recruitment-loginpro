@@ -512,8 +512,8 @@
         : holidayRestDay && restBatchHasDirect
           ? 'Festivo: la justificación es opcional para auxiliares Directos.'
           : reasonRequired
-            ? 'Incluye contrato Directo: selecciona la justificación del descanso.'
-            : 'Solo Contratistas: el descanso usa la fecha operativa seleccionada.';
+            ? 'Día hábil: selecciona la justificación del descanso.'
+            : 'La justificación es opcional para esta fecha.';
     }
 
     const compensatorio = reasonAvailable && !naturalRestDay && reasonInput?.value === 'COMPENSATORIO';
@@ -552,11 +552,7 @@
       return;
     }
 
-    const dialog = qs('#restAssignmentDialog');
     const workerInput = qs('#restWorkerId');
-    const workerName = qs('#restWorkerName');
-    const reasonInput = qs('#restReasonInput');
-    const originInput = qs('#originSundayDateInput');
     const restDate = qs('#restDateValue');
     const allowAssignedRestInput = qs('#allowAssignedRestInput');
 
@@ -569,35 +565,72 @@
     restBatchHasDirect = cards.some((card) => card.dataset.contractType === 'DIRECTO');
 
     if (workerInput) workerInput.value = cards.map((card) => card.dataset.workerId).join(',');
-    if (workerName) {
-      const names = restBatchWorkers.map((worker) => worker.workerName);
-      workerName.textContent = names.length === 1
-        ? names[0]
-        : `${names.length} auxiliares: ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}`;
-    }
-    if (reasonInput) reasonInput.value = '';
-    if (originInput) originInput.value = '';
     if (restDate) restDate.value = selectedDate;
     if (allowAssignedRestInput) allowAssignedRestInput.value = 'false';
-    restDatePolicy = { valid: false, restDate: null, isSunday: false, isHoliday: false, isNaturalRestDay: false };
-    syncRestFields();
-    refreshRestDatePolicy(selectedDate).catch((error) => {
-      console.error(error);
-      showToast(error.message || 'No fue posible validar la fecha de descanso.');
-    });
 
     const assignedWorkers = restBatchWorkers.filter((worker) => worker.sameDayAssignment);
     if (assignedWorkers.length) {
       const conflictMessage = qs('#restConflictMessage');
       const names = assignedWorkers.map((worker) => worker.workerName).join(', ');
       if (conflictMessage) {
-        conflictMessage.textContent = `${names} ${assignedWorkers.length === 1 ? 'ya está asignado a una solicitud activa' : 'ya están asignados a solicitudes activas'} en la fecha mostrada. Si deseas continuar, pulsa “Dar descanso”; se usará la fecha operativa seleccionada y podrás elegir la justificación cuando corresponda.`;
+        conflictMessage.textContent = `${names} ${assignedWorkers.length === 1 ? 'ya está asignado a una solicitud activa' : 'ya están asignados a solicitudes activas'} en la fecha mostrada. Si deseas continuar, pulsa “Dar descanso”. La justificación de los Directos se gestiona después desde su tarjeta.`;
       }
       qs('#restConflictDialog')?.showModal();
       return;
     }
 
-    dialog?.showModal();
+    assignRestBatchWithoutJustification().catch((error) => {
+      console.error(error);
+      showToast(error.message || 'No fue posible asignar los descansos.');
+    });
+  }
+
+  function openRestJustificationDialog(button) {
+    const workerId = button?.dataset.workerId || '';
+    const workerNameValue = button?.dataset.workerName || 'Auxiliar';
+    const restDateValue = button?.dataset.restDate || '';
+    if (!workerId || !/^\d{4}-\d{2}-\d{2}$/.test(restDateValue)) {
+      showToast('No se pudo identificar el descanso seleccionado.');
+      return;
+    }
+
+    restBatchWorkers = [{
+      workerId,
+      workerName: workerNameValue,
+      contractType: 'DIRECTO',
+      sameDayAssignment: false
+    }];
+    restBatchHasDirect = true;
+
+    const dialog = qs('#restAssignmentDialog');
+    const title = dialog?.querySelector('h3');
+    const workerInput = qs('#restWorkerId');
+    const workerName = qs('#restWorkerName');
+    const reasonInput = qs('#restReasonInput');
+    const originInput = qs('#originSundayDateInput');
+    const restDate = qs('#restDateValue');
+    const allowAssignedRestInput = qs('#allowAssignedRestInput');
+    const existingReason = button.dataset.restReason || '';
+
+    if (title) title.textContent = existingReason ? 'Editar justificación' : 'Asignar justificación';
+    if (workerInput) workerInput.value = workerId;
+    if (workerName) workerName.textContent = workerNameValue;
+    if (reasonInput) reasonInput.value = existingReason;
+    if (originInput) originInput.value = button.dataset.originSundayDate || '';
+    if (restDate) restDate.value = restDateValue;
+    if (allowAssignedRestInput) allowAssignedRestInput.value = 'false';
+
+    restDatePolicy = { valid: false, restDate: null, isSunday: false, isHoliday: false, isNaturalRestDay: false };
+    syncRestFields();
+    refreshRestDatePolicy(restDateValue)
+      .then((policy) => {
+        if (!policy.valid) throw new Error('La fecha del descanso no es válida.');
+        dialog?.showModal();
+      })
+      .catch((error) => {
+        console.error(error);
+        showToast(error.message || 'No fue posible abrir la justificación.');
+      });
   }
 
   function renderRestOriginBatchDialog() {
@@ -631,7 +664,7 @@
     qs('#restOriginBatchDialog')?.showModal();
   }
 
-  async function postRestWorker(worker, originSundayDate) {
+  async function postRestWorker(worker, originSundayDate, options = {}) {
     const form = qs('#restAssignmentForm');
     if (!form) throw new Error('No se encontró el formulario de descanso.');
 
@@ -639,10 +672,11 @@
     payload.set('workerId', worker.workerId);
     payload.set('restDate', qs('#restDateValue')?.value || '');
     if (qs('#allowAssignedRestInput')?.value === 'true') payload.set('allowAssignedRest', 'true');
+    if (options.deferJustification === true) payload.set('reason', '');
     const serviceRequestId = form.querySelector('input[name="serviceRequestId"]')?.value;
     if (serviceRequestId) payload.set('serviceRequestId', serviceRequestId);
     const canSendReason = worker.contractType === 'DIRECTO';
-    if (canSendReason) {
+    if (options.includeReason === true && canSendReason) {
       payload.set('reason', qs('#restReasonInput')?.value || '');
       if (originSundayDate) payload.set('originSundayDate', originSundayDate);
     }
@@ -663,6 +697,36 @@
       throw new Error(message || 'No fue posible guardar el descanso.');
     }
     return message;
+  }
+
+  async function assignRestBatchWithoutJustification() {
+    if (!restBatchWorkers.length) return;
+    const workers = [...restBatchWorkers];
+    showToast(`Asignando ${workers.length} descanso${workers.length !== 1 ? 's' : ''}...`);
+
+    let saved = 0;
+    const failures = [];
+    for (const worker of workers) {
+      try {
+        await postRestWorker(worker, '', { includeReason: false, deferJustification: true });
+        saved += 1;
+      } catch (error) {
+        failures.push(`${worker.workerName}: ${error.message || 'No fue posible guardar.'}`);
+      }
+    }
+
+    clearWorkerSelection();
+    const url = buildBoardUrl({
+      date: currentDateFilter(),
+      serviceRequestId: qs('#selectedRequestSummary')?.dataset.serviceRequestId || null,
+      allDates: !currentDateFilter()
+    });
+    await loadBoard(url, { date: currentDateFilter(), updateHistory: false });
+
+    const parts = [];
+    if (saved) parts.push(`${saved} descanso${saved !== 1 ? 's asignados' : ' asignado'}`);
+    if (failures.length) parts.push(`${failures.length} no guardado${failures.length !== 1 ? 's' : ''}: ${failures.join(' · ')}`);
+    showToast(parts.join('. ') || 'No fue posible guardar los descansos.');
   }
 
   async function submitRestBatchWithOrigins(event) {
@@ -700,7 +764,7 @@
           const originSundayDate = worker.contractType === 'DIRECTO'
             ? (originByWorker.get(worker.workerId) || '')
             : '';
-          await postRestWorker(worker, originSundayDate);
+          await postRestWorker(worker, originSundayDate, { includeReason: true });
           saved += 1;
         } catch (error) {
           failures.push(`${worker.workerName}: ${error.message || 'No fue posible guardar.'}`);
@@ -744,13 +808,20 @@
       });
     }
 
+    qsa('[data-rest-justification]').forEach((button) => {
+      button.addEventListener('click', () => openRestJustificationDialog(button));
+    });
+
     qs('#cancelRestConflict')?.addEventListener('click', () => qs('#restConflictDialog')?.close());
     qs('#confirmAssignedRest')?.addEventListener('click', () => {
       const conflictDialog = qs('#restConflictDialog');
       if (conflictDialog?.open) conflictDialog.close();
       const allowAssignedRestInput = qs('#allowAssignedRestInput');
       if (allowAssignedRestInput) allowAssignedRestInput.value = 'true';
-      qs('#restAssignmentDialog')?.showModal();
+      assignRestBatchWithoutJustification().catch((error) => {
+        console.error(error);
+        showToast(error.message || 'No fue posible asignar los descansos.');
+      });
     });
     qs('#restReasonInput')?.addEventListener('change', syncRestFields);
     qs('#cancelRestDialog')?.addEventListener('click', () => qs('#restAssignmentDialog')?.close());
@@ -761,10 +832,10 @@
     qs('#restOriginBatchForm')?.addEventListener('submit', submitRestBatchWithOrigins);
     qs('#restAssignmentForm')?.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const form = event.currentTarget;
       const restDateValue = qs('#restDateValue')?.value || '';
+      let policy;
       try {
-        const policy = await refreshRestDatePolicy(restDateValue);
+        policy = await refreshRestDatePolicy(restDateValue);
         if (!policy.valid) {
           showToast('La fecha operativa seleccionada no es válida.');
           return;
@@ -775,26 +846,44 @@
         return;
       }
 
-      const compensatorio = restBatchHasDirect
-        && !restDatePolicy.isNaturalRestDay
-        && qs('#restReasonInput')?.value === 'COMPENSATORIO';
-      if (compensatorio && restBatchWorkers.length > 1) {
-        renderRestOriginBatchDialog();
+      const worker = restBatchWorkers[0];
+      if (!worker || worker.contractType !== 'DIRECTO') {
+        showToast('La justificación solo aplica a auxiliares Directos.');
         return;
       }
-      if (!compensatorio) {
-        form.submit();
+
+      const reason = qs('#restReasonInput')?.value || '';
+      if (!reason && !policy.isNaturalRestDay) {
+        showToast('Selecciona la justificación del descanso.');
         return;
       }
-      const origin = qs('#originSundayDateInput')?.value;
-      const originDate = /^\d{4}-\d{2}-\d{2}$/.test(String(origin || ''))
-        ? new Date(`${origin}T12:00:00.000Z`)
-        : null;
-      if (!originDate || originDate.getUTCDay() !== 0) {
-        showToast('Selecciona un domingo válido para asociar al compensatorio.');
-        return;
+
+      let origin = '';
+      if (reason === 'COMPENSATORIO' && !restDatePolicy.isNaturalRestDay) {
+        origin = qs('#originSundayDateInput')?.value || '';
+        const originDate = /^\d{4}-\d{2}-\d{2}$/.test(String(origin || ''))
+          ? new Date(`${origin}T12:00:00.000Z`)
+          : null;
+        if (!originDate || originDate.getUTCDay() !== 0) {
+          showToast('Selecciona un domingo válido para asociar al compensatorio.');
+          return;
+        }
       }
-      form.submit();
+
+      try {
+        await postRestWorker(worker, origin, { includeReason: true });
+        qs('#restAssignmentDialog')?.close();
+        const url = buildBoardUrl({
+          date: currentDateFilter(),
+          serviceRequestId: qs('#selectedRequestSummary')?.dataset.serviceRequestId || null,
+          allDates: !currentDateFilter()
+        });
+        await loadBoard(url, { date: currentDateFilter(), updateHistory: false });
+        showToast('Justificación guardada.');
+      } catch (error) {
+        console.error(error);
+        showToast(error.message || 'No fue posible guardar la justificación.');
+      }
     });
     syncRestFields();
   }
