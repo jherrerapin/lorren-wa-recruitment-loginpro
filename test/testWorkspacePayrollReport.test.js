@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadTestWorkspacePayrollReport } from '../src/services/testWorkspacePayrollReport.js';
 
-test('calcula únicamente la jornada DEV_TEST_MANUAL del auxiliar seleccionado sin inventar extra semanal', async () => {
+test('calcula únicamente la jornada DEV_TEST_MANUAL y reconoce su exceso diario nocturno', async () => {
   const request = {
     id: 'TEST-REQUEST-PAYROLL',
     source: 'DEV_TEST',
@@ -63,10 +63,10 @@ test('calcula únicamente la jornada DEV_TEST_MANUAL del auxiliar seleccionado s
   assert.equal(report.rows.length, 1);
   assert.equal(report.rows[0].workerId, 'TEST-WORKER');
   assert.equal(report.rows[0].totalMinutes, 480);
-  assert.equal(report.rows[0].ordinaryMinutes, 480);
-  assert.equal(report.rows[0].overtimeMinutes, 0);
-  assert.equal(report.rows[0].conceptMinutes.RNO, 480);
-  assert.equal(report.rows[0].conceptMinutes.HENO, 0);
+  assert.equal(report.rows[0].ordinaryMinutes, 420);
+  assert.equal(report.rows[0].overtimeMinutes, 60);
+  assert.equal(report.rows[0].conceptMinutes.RNO, 420);
+  assert.equal(report.rows[0].conceptMinutes.HENO, 60);
   assert.equal(report.totals.workers, 1);
 });
 
