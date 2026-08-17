@@ -185,6 +185,24 @@ test('Nómina cuenta días remunerados/no remunerados, permisos, incapacidades y
   assert.equal(report.totals.holidayCount, 1);
 });
 
+test('una jornada inválida mantiene su novedad bloqueante en vez de desaparecer del reporte', async () => {
+  const prisma = makePrisma();
+  prisma.dispatchAttendanceSession.findMany = async () => [session({
+    id: 'TEST-INVALID-TIMELINE',
+    start: '2026-08-15T20:00:00.000Z',
+    end: '2026-08-15T19:00:00.000Z'
+  })];
+  const report = await loadPayrollReport(prisma, {
+    periodType: 'CUSTOM',
+    from: '2026-08-15',
+    to: '2026-08-15'
+  }, { now: new Date('2026-08-16T12:00:00.000Z') });
+
+  assert.equal(report.rows.length, 1);
+  assert.ok(report.rows[0].novelties.some((item) => item.code === 'INCOMPLETE_SESSION' && item.blocking === true));
+  assert.equal(report.rows[0].totalMinutes, 0);
+});
+
 test('el XLSX usa las nuevas columnas, elimina Días netos y el CSV heredado conserva su contrato', async () => {
   const report = await loadPayrollReport(makePrisma(), {
     periodType: 'CUSTOM',
