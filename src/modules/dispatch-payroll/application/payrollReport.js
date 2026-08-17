@@ -348,17 +348,12 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
     const current = active.find((rest) => rest.restDate === restDate) || null;
     const isJustificationUpdate = Boolean(current && isDirect && reasonSubmitted);
-    const isDeferredInitial = Boolean(!current && isDirect && reasonSubmitted && !requestedReason);
     if (current && !isJustificationUpdate) throw new Error('worker_rest_date_already_assigned');
 
-    const requiresJustification = isDirect && !datePolicy.isNaturalRestDay;
-    const allowsOptionalNaturalRestJustification = isDirect && datePolicy.isNaturalRestDay;
-    if (!isDeferredInitial && requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (!isDeferredInitial && allowsOptionalNaturalRestJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (!isDeferredInitial && allowsOptionalNaturalRestJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
-    const reason = isDirect && !isDeferredInitial && (requiresJustification || allowsOptionalNaturalRestJustification)
-      ? (requestedReason || null)
-      : null;
+    const requiresJustification = false;
+    if (isDirect && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    if (isDirect && datePolicy.isNaturalRestDay && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
+    const reason = isDirect ? (requestedReason || null) : null;
     const originSundayDate = reason === WORKER_REST_REASONS.COMPENSATORIO ? requestedOriginSundayDate : null;
     if (reason === WORKER_REST_REASONS.COMPENSATORIO) {
       if (!originSundayDate || !isSundayDateKey(originSundayDate) || holidayDateKey(originSundayDate)) {
@@ -762,7 +757,13 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
         .map((rest) => rest.restDate)
         .filter((dateKey) => !workedDateKeys.has(dateKey))
     );
-    const remuneratedDateKeys = new Set([...workedDateKeys, ...compensatoryDateKeys]);
+    const directRestDateKeys = new Set(
+      row.restAssignments
+        .filter((rest) => worker?.contractType === 'DIRECTO' && !rest.reason && rest.dayAdjustment === 0)
+        .map((rest) => rest.restDate)
+        .filter((dateKey) => !workedDateKeys.has(dateKey))
+    );
+    const remuneratedDateKeys = new Set([...workedDateKeys, ...compensatoryDateKeys, ...directRestDateKeys]);
 
     const paidPermissionDateKeys = new Set(
       row.restAssignments
