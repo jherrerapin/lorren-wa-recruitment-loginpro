@@ -44,7 +44,7 @@
   <% const safeRestReasons = typeof restReasons !== 'undefined' && Array.isArray(restReasons) ? restReasons : []; %>
   <% const requestLabel=(v)=>({PENDING_ASSIGNMENT:'Pendiente de asignación',ASSIGNMENT_PARTIAL:'Asignación parcial',PENDING_CONFIRMATION:'Pendiente de confirmación',ASSIGNMENT_COMPLETE:'Asignación completa',CANCELLED:'Cancelada'}[v]||v||'Pendiente'); %>
   <% const assignmentLabel=(v)=>({ASSIGNED:'Asignado',CONFIRMATION_PENDING:'Pendiente de confirmación',CONFIRMED:'Confirmado',NO_CONFIRMO:'No confirmó',CANCELLED:'Cancelado'}[v]||v||'Asignado'); %>
-  <% const restLabel=(v)=>({VACACIONES:'Vacaciones',INCAPACIDAD_EPS:'Incapacidad EPS',SUSPENSION:'Suspensión',INCAPACIDAD_ARL:'Incapacidad ARL',NO_REMUNERADA:'No remunerada',REMUNERADO:'Remunerado'}[v]||v); %>
+  <% const restLabel=(v)=>({VACACIONES:'Vacaciones',INCAPACIDAD_EPS:'Incapacidad EPS',SUSPENSION:'Suspensión',INCAPACIDAD_ARL:'Incapacidad ARL',NO_REMUNERADA:'No remunerada',REMUNERADO:'Remunerado',COMPENSATORIO:'Compensatorio'}[v]||v); %>
   <% const contractLabel=(v)=>v==='CONTRATISTA'?'Contratista':'Directo'; %>
   <% const cleanGroup=(value)=>String(value||'').replace(/\s*·\s*Grupo\s+GRP-[A-Z0-9-]+/i,'').trim(); %>
   <% const dateKey=(value)=>value?new Date(value).toISOString().slice(0,10):''; %>
@@ -114,7 +114,7 @@ Hora : *{{horaInicio}} por favor.*
     </section>
 
     <section class="rest-panel" id="workerRestPanel">
-      <div class="rest-head"><div><h2>Descansos</h2><p>Selecciona o arrastra uno o varios auxiliares. Los Directos requieren motivo en días hábiles; los Contratistas solo requieren la fecha. Los domingos y festivos se registran como descanso sin justificación.</p></div><span class="rest-date-chip">Fecha mostrada: <%= safeRestDate || 'hoy' %></span></div>
+      <div class="rest-head"><div><h2>Descansos</h2><p>Selecciona o arrastra uno o varios auxiliares. Los Directos requieren justificación en días hábiles; en domingo es opcional. Los festivos se registran sin justificación y los Contratistas no requieren motivo.</p></div><span class="rest-date-chip">Fecha mostrada: <%= safeRestDate || 'hoy' %></span></div>
       <div id="restDropZone" class="drop-zone rest-drop-zone">Arrastra uno o varios auxiliares para asignarles descanso.</div>
       <div class="rest-list">
         <% if (!safeRestAssignments.length) { %><div class="rest-empty">No hay descansos asignados para esta fecha.</div><% } %>
@@ -136,9 +136,9 @@ Hora : *{{horaInicio}} por favor.*
           <input type="hidden" name="workerId" id="restWorkerId" />
           <input type="hidden" name="allowAssignedRest" id="allowAssignedRestInput" value="false" />
           <input type="hidden" name="serviceRequestId" value="<%= selectedServiceRequestId %>" />
-          <div class="field"><label for="restDateValue">Fecha de descanso</label><input type="date" name="restDate" id="restDateValue" value="<%= safeRestDate %>" required /></div>
-          <div class="field" id="restReasonField"><label for="restReasonInput">Motivo</label><select name="reason" id="restReasonInput"><option value="">Selecciona</option><% safeRestReasons.forEach((reason)=>{ %><option value="<%= reason %>"><%= restLabel(reason) %></option><% }) %></select></div>
-          <div class="field" id="originSundayField" hidden><label for="originSundayDateInput">Domingo asociado al descanso remunerado</label><input type="date" name="originSundayDate" id="originSundayDateInput" /></div>
+          <input type="hidden" name="restDate" id="restDateValue" value="<%= safeAssignmentDate %>" />
+          <div class="field" id="restReasonField"><label for="restReasonInput">Justificación</label><select name="reason" id="restReasonInput"><option value="">Sin justificación</option><% safeRestReasons.forEach((reason)=>{ %><option value="<%= reason %>"><%= restLabel(reason) %></option><% }) %></select></div>
+          <div class="field" id="originSundayField" hidden><label for="originSundayDateInput">Domingo que generó el compensatorio</label><input type="date" name="originSundayDate" id="originSundayDateInput" /></div>
           <div class="dialog-actions"><button class="btn" type="button" id="cancelRestDialog">Cancelar</button><button class="btn btn-primary" type="submit">Asignar descanso</button></div>
         </form>
       </dialog>
