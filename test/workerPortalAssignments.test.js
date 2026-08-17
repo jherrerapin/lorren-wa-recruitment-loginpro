@@ -120,7 +120,8 @@ test('distingue configuración del punto y hora de inicio de la asignación', as
   assert.equal(today.canRegisterArrival, false);
   assert.equal(today.actionLabel, 'Marcación no habilitada');
   assert.equal(tomorrowBeforeItsDay.canRegisterArrival, false);
-  assert.equal(tomorrowBeforeItsDay.actionLabel, 'Disponible el día de la asignación');
+  assert.match(tomorrowBeforeItsDay.actionLabel, /^Disponible desde /);
+  assert.match(tomorrowBeforeItsDay.actionLabel, /8:30/);
 
   const tomorrowAssignments = await loadWorkerPortalAssignments(prisma, {
     workerId: 'worker-1',
@@ -219,7 +220,8 @@ test('habilita llegada desde el inicio hasta +8 horas y vence después', async (
 
   assert.equal(beforeStart.canRegisterArrival, false);
   assert.equal(beforeStart.arrivalWindowExpired, false);
-  assert.equal(beforeStart.actionLabel, 'Disponible el día de la asignación');
+  assert.match(beforeStart.actionLabel, /^Disponible desde /);
+  assert.match(beforeStart.actionLabel, /8:30/);
   assert.equal(atStart.canRegisterArrival, true);
   assert.equal(atStart.actionLabel, 'Registrar llegada');
   assert.equal(atClose.canRegisterArrival, true);
