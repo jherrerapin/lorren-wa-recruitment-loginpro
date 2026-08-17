@@ -494,6 +494,8 @@
     if (reasonInput) {
       reasonInput.disabled = !direct;
       reasonInput.required = direct;
+      const compensatoryOption = reasonInput.querySelector('option[value="COMPENSATORIO"]');
+      if (compensatoryOption) compensatoryOption.textContent = 'Compensatorio';
       if (!direct) reasonInput.value = '';
     }
     if (rule) {
@@ -504,18 +506,22 @@
           : 'Solo Contratistas: el descanso requiere únicamente la fecha.';
     }
 
-    const remunerado = direct && reasonInput?.value === 'REMUNERADO';
-    const bulkRemunerado = remunerado && restBatchWorkers.length > 1;
+    const compensatorio = direct && reasonInput?.value === 'COMPENSATORIO';
+    const bulkCompensatorio = compensatorio && restBatchWorkers.length > 1;
     const field = qs('#originSundayField');
     const origin = qs('#originSundayDateInput');
-    if (field) field.hidden = !remunerado || bulkRemunerado;
-    if (origin) {
-      origin.required = remunerado && !bulkRemunerado;
-      origin.disabled = !remunerado || bulkRemunerado;
-      if (!remunerado || bulkRemunerado) origin.value = '';
+    if (field) {
+      field.hidden = !compensatorio || bulkCompensatorio;
+      const label = field.querySelector('label');
+      if (label) label.textContent = 'Domingo que generó el compensatorio';
     }
-    if (rule && bulkRemunerado) {
-      rule.textContent = `${directWorkers.length} Directo${directWorkers.length !== 1 ? 's' : ''}: al continuar asignarás el domingo correspondiente a cada uno.`;
+    if (origin) {
+      origin.required = compensatorio && !bulkCompensatorio;
+      origin.disabled = !compensatorio || bulkCompensatorio;
+      if (!compensatorio || bulkCompensatorio) origin.value = '';
+    }
+    if (rule && bulkCompensatorio) {
+      rule.textContent = `${directWorkers.length} Directo${directWorkers.length !== 1 ? 's' : ''}: al continuar asignarás el domingo que generó el compensatorio de cada uno.`;
     }
   }
 
@@ -594,7 +600,7 @@
       const name = document.createElement('strong');
       name.textContent = worker.workerName;
       const contract = document.createElement('span');
-      contract.textContent = 'Contrato Directo · selecciona el domingo que generó este descanso';
+      contract.textContent = 'Contrato Directo · selecciona el domingo que generó este compensatorio';
       details.append(name, contract);
       const input = document.createElement('input');
       input.type = 'date';
@@ -758,12 +764,12 @@
         return;
       }
 
-      const remunerado = restBatchHasDirect && !restDatePolicy.isNaturalRestDay && qs('#restReasonInput')?.value === 'REMUNERADO';
-      if (remunerado && restBatchWorkers.length > 1) {
+      const compensatorio = restBatchHasDirect && !restDatePolicy.isNaturalRestDay && qs('#restReasonInput')?.value === 'COMPENSATORIO';
+      if (compensatorio && restBatchWorkers.length > 1) {
         renderRestOriginBatchDialog();
         return;
       }
-      if (!remunerado) {
+      if (!compensatorio) {
         form.submit();
         return;
       }
@@ -772,7 +778,7 @@
         ? new Date(`${origin}T12:00:00.000Z`)
         : null;
       if (!originDate || originDate.getUTCDay() !== 0) {
-        showToast('Selecciona un domingo válido para asociar al descanso remunerado.');
+        showToast('Selecciona un domingo válido para asociar al compensatorio.');
         return;
       }
       form.submit();
