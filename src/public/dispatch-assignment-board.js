@@ -672,8 +672,7 @@
     payload.set('workerId', worker.workerId);
     payload.set('restDate', qs('#restDateValue')?.value || '');
     if (qs('#allowAssignedRestInput')?.value === 'true') payload.set('allowAssignedRest', 'true');
-    if (options.deferJustification === true) payload.set('deferJustification', 'true');
-    if (options.updateJustification === true) payload.set('updateJustification', 'true');
+    if (options.deferJustification === true) payload.set('reason', '');
     const serviceRequestId = form.querySelector('input[name="serviceRequestId"]')?.value;
     if (serviceRequestId) payload.set('serviceRequestId', serviceRequestId);
     const canSendReason = worker.contractType === 'DIRECTO';
@@ -765,7 +764,7 @@
           const originSundayDate = worker.contractType === 'DIRECTO'
             ? (originByWorker.get(worker.workerId) || '')
             : '';
-          await postRestWorker(worker, originSundayDate, { includeReason: true, updateJustification: true });
+          await postRestWorker(worker, originSundayDate, { includeReason: true });
           saved += 1;
         } catch (error) {
           failures.push(`${worker.workerName}: ${error.message || 'No fue posible guardar.'}`);
@@ -872,7 +871,7 @@
       }
 
       try {
-        await postRestWorker(worker, origin, { includeReason: true, updateJustification: true });
+        await postRestWorker(worker, origin, { includeReason: true });
         qs('#restAssignmentDialog')?.close();
         const url = buildBoardUrl({
           date: currentDateFilter(),
