@@ -345,13 +345,11 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
 
     const isDirect = worker.contractType === 'DIRECTO';
     const requiresJustification = isDirect && !datePolicy.isNaturalRestDay;
-    const allowsOptionalNaturalRestJustification = isDirect && datePolicy.isNaturalRestDay;
-    if (requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (allowsOptionalNaturalRestJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (allowsOptionalNaturalRestJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
-    const reason = isDirect && (requiresJustification || allowsOptionalNaturalRestJustification)
-      ? (requestedReason || null)
-      : null;
+    if (requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    if (isDirect && datePolicy.isNaturalRestDay && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) {
+      throw new Error('worker_rest_invalid');
+    }
+    const reason = isDirect ? (requestedReason || null) : null;
     const originSundayDate = reason === WORKER_REST_REASONS.COMPENSATORIO ? requestedOriginSundayDate : null;
     if (reason === WORKER_REST_REASONS.COMPENSATORIO) {
       if (!originSundayDate || !isSundayDateKey(originSundayDate) || holidayDateKey(originSundayDate)) {
@@ -359,17 +357,23 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       }
     }
 
-    const assignmentConflicts = await findWorkerRestAssignmentConflicts(tx, { workerIds: [worker.id], restDate });
+    const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
+    const current = active.find((rest) => rest.restDate === restDate) || null;
+    const isJustificationUpdate = Boolean(current && isDirect && requestedReason);
+    if (current && !isJustificationUpdate) throw new Error('worker_rest_date_already_assigned');
+
+    const assignmentConflicts = current
+      ? []
+      : await findWorkerRestAssignmentConflicts(tx, { workerIds: [worker.id], restDate });
     if (assignmentConflicts.length && !allowAssignedRest) {
       throw new Error('worker_rest_active_assignment_confirmation_required');
     }
 
-    const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
-    if (active.some((rest) => rest.restDate === restDate)) throw new Error('worker_rest_date_already_assigned');
-
     if (reason === WORKER_REST_REASONS.COMPENSATORIO) {
       const originAlreadyUsed = active.some((rest) => (
-        rest.reason === WORKER_REST_REASONS.COMPENSATORIO && rest.originSundayDate === originSundayDate
+        rest.restDate !== restDate
+        && rest.reason === WORKER_REST_REASONS.COMPENSATORIO
+        && rest.originSundayDate === originSundayDate
       ));
       if (originAlreadyUsed) throw new Error('worker_rest_origin_sunday_used');
     }
@@ -384,7 +388,9 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       originSundayDate,
       dayAdjustment,
       requiresJustification,
-      assignmentConflictOverride: assignmentConflicts.length > 0 && allowAssignedRest
+      assignmentConflictOverride: current
+        ? current.assignmentConflictOverride === true
+        : assignmentConflicts.length > 0 && allowAssignedRest
     };
     await tx.devAuditEvent.create({
       data: {
