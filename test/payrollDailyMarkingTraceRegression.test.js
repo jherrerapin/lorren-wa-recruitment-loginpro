@@ -24,10 +24,10 @@ function sessionFixture(overrides = {}) {
     marks,
     assignment: {
       workerId: 'TEST-WORKER-TRACE',
-      worker: { id: 'TEST-WORKER-TRACE', fullName: 'Auxiliar Prueba Trazabilidad', isTestProfile: false },
+      worker: { id: 'TEST-WORKER-TRACE', fullName: 'TEST Auxiliar trazabilidad', isTestProfile: false },
       serviceRequest: {
-        source: 'INTERNAL', clientName: 'Cliente Prueba', operationPointName: 'Operación Prueba',
-        operationPoint: { id: 'TEST-POINT-TRACE', clientId: 'TEST-CLIENT-TRACE', name: 'Operación Prueba', client: { id: 'TEST-CLIENT-TRACE', name: 'Cliente Prueba' } }
+        source: 'INTERNAL', clientName: 'TEST Cliente', operationPointName: 'TEST Operación',
+        operationPoint: { id: 'TEST-POINT-TRACE', clientId: 'TEST-CLIENT-TRACE', name: 'TEST Operación', client: { id: 'TEST-CLIENT-TRACE', name: 'TEST Cliente' } }
       }
     }
   };
@@ -37,7 +37,7 @@ function prismaFixture(sessions) {
   return {
     dispatchAttendanceSession: { async findMany() { return sessions; } },
     dispatchClient: { async findMany() { return []; } },
-    dispatchWorker: { async findMany() { return [{ id: 'TEST-WORKER-TRACE', fullName: 'Auxiliar Prueba Trazabilidad', isTestProfile: false }]; } },
+    dispatchWorker: { async findMany() { return [{ id: 'TEST-WORKER-TRACE', fullName: 'TEST Auxiliar trazabilidad', isTestProfile: false }]; } },
     devAuditEvent: { async findMany() { return []; } }
   };
 }
@@ -49,7 +49,7 @@ function reportFor(sessions) {
 function workerRow(id, { totalMinutes, ordinaryMinutes, overtimeMinutes, workedDays = 1, exportable = true, hedo = 0 } = {}) {
   return {
     workerId: id,
-    fullName: `Auxiliar ${id}`,
+    fullName: `TEST Auxiliar ${id}`,
     documentType: 'CC',
     documentNumber: `TEST-${id}`,
     phone: '',
@@ -66,11 +66,11 @@ function workerRow(id, { totalMinutes, ordinaryMinutes, overtimeMinutes, workedD
   };
 }
 
-test('muestra marcaciones por día sin alterar ordinarias y extras', async () => {
+test('muestra marcaciones por día sin convertir 7.5 h aisladas en hora extra', async () => {
   const report = await reportFor([sessionFixture()]);
   const day = report.rows[0].daily[0];
-  assert.equal(day.ordinaryHours, 7);
-  assert.equal(day.overtimeHours, 0.5);
+  assert.equal(day.ordinaryHours, 7.5);
+  assert.equal(day.overtimeHours, 0);
   assert.equal(day.totalHours, 7.5);
   assert.equal(day.markings.length, 1);
   const marking = day.markings[0];

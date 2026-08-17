@@ -10,42 +10,42 @@ import { calculatePayrollConceptReport } from '../src/modules/dispatch-payroll/d
 
 function eightHourSessionWithoutBreak() {
   return {
-    id: 'session-9-to-5',
-    arrivalReportedAt: new Date('2026-07-27T14:00:00.000Z'),
-    departureReportedAt: new Date('2026-07-27T22:00:00.000Z'),
-    expectedStartAt: new Date('2026-07-27T14:00:00.000Z'),
-    expectedEndAt: new Date('2026-07-27T22:00:00.000Z'),
+    id: 'TEST-SESSION-8H',
+    arrivalReportedAt: new Date('2026-07-27T13:00:00.000Z'),
+    departureReportedAt: new Date('2026-07-27T21:00:00.000Z'),
+    expectedStartAt: new Date('2026-07-27T13:00:00.000Z'),
+    expectedEndAt: new Date('2026-07-27T21:00:00.000Z'),
     workedMinutes: 480,
     validationStatus: 'MANUAL_VALIDATED',
     marks: [],
     assignment: {
-      workerId: 'worker-test',
+      workerId: 'TEST-WORKER-FLEX',
       worker: {
-        id: 'worker-test',
-        fullName: 'Sujeto de prueba',
+        id: 'TEST-WORKER-FLEX',
+        fullName: 'TEST Auxiliar flexible',
         documentType: 'CC',
-        documentNumber: '1000000000',
-        phone: '3000000000'
+        documentNumber: 'TEST-DOC-FLEX',
+        phone: 'TEST-PHONE-FLEX'
       },
       serviceRequest: {
-        clientName: 'Cliente prueba',
-        operationPointName: 'Operación prueba',
+        clientName: 'TEST Cliente',
+        operationPointName: 'TEST Operación',
         operationPoint: {
-          id: 'point-test',
-          clientId: 'client-test',
-          name: 'Operación prueba',
-          client: { id: 'client-test', name: 'Cliente prueba' }
+          id: 'TEST-POINT-FLEX',
+          clientId: 'TEST-CLIENT-FLEX',
+          name: 'TEST Operación',
+          client: { id: 'TEST-CLIENT-FLEX', name: 'TEST Cliente' }
         }
       }
     }
   };
 }
 
-test('una política histórica de ocho horas no convierte todo el turno 9 a 5 en ordinario', async () => {
+test('una política histórica no cambia la referencia fija 42 h semanales / 7 h diarias', async () => {
   const prisma = {
     devAuditEvent: {
       findMany: async () => [{
-        entityId: 'client-test',
+        entityId: 'TEST-CLIENT-FLEX',
         metadata: {
           policy: {
             weeklyOrdinaryMinutes: 48 * 60,
@@ -57,17 +57,15 @@ test('una política histórica de ocho horas no convierte todo el turno 9 a 5 en
             weekStartsOn: 1,
             restDay: 0,
             recognizeEarlyArrival: false,
-            incompleteBreakPenaltyMinutes: 90,
-            holidaySundayPriority: 'HOLIDAY'
+            incompleteBreakPenaltyMinutes: 90
           }
         }
       }]
     }
   };
 
-  const policiesByClientId = await loadPayrollPolicies(prisma, ['client-test']);
-  const policy = policiesByClientId.get('client-test');
-
+  const policiesByClientId = await loadPayrollPolicies(prisma, ['TEST-CLIENT-FLEX']);
+  const policy = policiesByClientId.get('TEST-CLIENT-FLEX');
   assert.equal(policy.dailyOrdinaryMinutes, MAX_DAILY_ORDINARY_MINUTES);
   assert.equal(policy.weeklyOrdinaryMinutes, MAX_WEEKLY_ORDINARY_MINUTES);
 
@@ -78,20 +76,20 @@ test('una política histórica de ocho horas no convierte todo el turno 9 a 5 en
     range: { from: '2026-07-27', to: '2026-07-27' }
   });
 
-  assert.equal(report.rows.length, 1);
-  assert.equal(report.rows[0].totalMinutes, 480);
-  assert.equal(report.rows[0].ordinaryMinutes, 420);
-  assert.equal(report.rows[0].overtimeMinutes, 60);
-  assert.equal(report.rows[0].conceptMinutes.HEDO, 60);
-  assert.equal(report.rows[0].daily[0].ordinaryMinutes, 420);
-  assert.equal(report.rows[0].daily[0].overtimeMinutes, 60);
+  const row = report.rows[0];
+  assert.equal(row.totalMinutes, 480);
+  assert.equal(row.ordinaryMinutes, 480, 'superar 7 h en un día no dispara extra por sí solo');
+  assert.equal(row.overtimeMinutes, 0);
+  assert.equal(row.conceptMinutes.HEDO, 0);
+  assert.equal(row.daily[0].ordinaryMinutes, 480);
+  assert.equal(row.daily[0].overtimeMinutes, 0);
 });
 
-test('guardar una política de ocho horas persiste el máximo de siete horas', async () => {
+test('guardar una política persiste 42 h / 7 h aunque el formulario envíe otros valores', async () => {
   let createdEvent = null;
   const prisma = {
     dispatchClient: {
-      findUnique: async () => ({ id: 'client-test', name: 'Cliente prueba' })
+      findUnique: async () => ({ id: 'TEST-CLIENT-FLEX', name: 'TEST Cliente' })
     },
     devAuditEvent: {
       create: async ({ data }) => {
@@ -102,20 +100,18 @@ test('guardar una política de ocho horas persiste el máximo de siete horas', a
   };
 
   const policy = await savePayrollPolicy(prisma, {
-    clientId: 'client-test',
+    clientId: 'TEST-CLIENT-FLEX',
     actorRole: 'dev',
-    actorUsername: 'devloginpro',
+    actorUsername: 'TEST-DEV',
     weeklyOrdinaryHours: 48,
     dailyOrdinaryHours: 8,
     maxDailyOvertimeHours: 2,
     maxWeeklyOvertimeHours: 12,
     nightStartHour: 19,
     nightEndHour: 6,
-    weekStartsOn: 1,
     restDay: 0,
     recognizeEarlyArrival: false,
-    incompleteBreakPenaltyMinutes: 90,
-    holidaySundayPriority: 'HOLIDAY'
+    incompleteBreakPenaltyMinutes: 90
   });
 
   assert.equal(policy.dailyOrdinaryMinutes, MAX_DAILY_ORDINARY_MINUTES);

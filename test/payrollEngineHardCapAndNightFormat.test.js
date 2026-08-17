@@ -9,72 +9,72 @@ import {
   normalizePayrollPolicy
 } from '../src/modules/dispatch-payroll/domain/payrollConceptEngine.js';
 
-function sessionFromNineToFive() {
+function isolatedEightHourSession() {
   return {
-    id: 'session-direct-policy',
-    arrivalReportedAt: new Date('2026-07-27T14:00:00.000Z'),
-    departureReportedAt: new Date('2026-07-27T22:00:00.000Z'),
-    expectedStartAt: new Date('2026-07-27T14:00:00.000Z'),
-    expectedEndAt: new Date('2026-07-27T22:00:00.000Z'),
+    id: 'TEST-SESSION-DIRECT-POLICY',
+    arrivalReportedAt: new Date('2026-07-27T13:00:00.000Z'),
+    departureReportedAt: new Date('2026-07-27T21:00:00.000Z'),
+    expectedStartAt: new Date('2026-07-27T13:00:00.000Z'),
+    expectedEndAt: new Date('2026-07-27T21:00:00.000Z'),
     workedMinutes: 480,
     validationStatus: 'MANUAL_VALIDATED',
     marks: [],
     assignment: {
-      workerId: 'worker-test',
+      workerId: 'TEST-WORKER-POLICY',
       worker: {
-        id: 'worker-test',
-        fullName: 'Sujeto de prueba',
+        id: 'TEST-WORKER-POLICY',
+        fullName: 'TEST Auxiliar',
         documentType: 'CC',
-        documentNumber: '1000000000',
-        phone: '3000000000'
+        documentNumber: 'TEST-DOC-POLICY',
+        phone: 'TEST-PHONE-POLICY'
       },
       serviceRequest: {
-        clientName: 'Cliente prueba',
-        operationPointName: 'Operación prueba',
+        clientName: 'TEST Cliente',
+        operationPointName: 'TEST Operación',
         operationPoint: {
-          id: 'point-test',
-          clientId: 'client-test',
-          name: 'Operación prueba',
-          client: { id: 'client-test', name: 'Cliente prueba' }
+          id: 'TEST-POINT-POLICY',
+          clientId: 'TEST-CLIENT-POLICY',
+          name: 'TEST Operación',
+          client: { id: 'TEST-CLIENT-POLICY', name: 'TEST Cliente' }
         }
       }
     }
   };
 }
 
-test('el motor limita directamente una política de ocho horas y genera una hora extra', () => {
-  const directEightHourPolicy = {
+test('el motor fija 42 h / 7 h pero una jornada aislada de 8 h sigue siendo ordinaria mientras la semana no supere 42 h', () => {
+  const historicalPolicy = {
     weeklyOrdinaryMinutes: 48 * 60,
     dailyOrdinaryMinutes: 8 * 60,
     maxDailyOvertimeMinutes: 2 * 60,
     maxWeeklyOvertimeMinutes: 12 * 60,
     nightStartMinute: 19 * 60,
     nightEndMinute: 6 * 60,
-    weekStartsOn: 1,
+    weekStartsOn: 0,
     restDay: 0,
     recognizeEarlyArrival: false,
-    incompleteBreakPenaltyMinutes: 90,
-    holidaySundayPriority: 'HOLIDAY'
+    incompleteBreakPenaltyMinutes: 90
   };
 
-  const normalized = normalizePayrollPolicy(directEightHourPolicy);
+  const normalized = normalizePayrollPolicy(historicalPolicy);
   assert.equal(normalized.dailyOrdinaryMinutes, 420);
   assert.equal(normalized.weeklyOrdinaryMinutes, 2520);
+  assert.equal(normalized.weekStartsOn, 1);
 
   const report = calculatePayrollConceptReport({
-    sessions: [sessionFromNineToFive()],
-    policiesByClientId: new Map([['client-test', directEightHourPolicy]]),
+    sessions: [isolatedEightHourSession()],
+    policiesByClientId: new Map([['TEST-CLIENT-POLICY', historicalPolicy]]),
     compensationByWorkerDate: new Map(),
     range: { from: '2026-07-27', to: '2026-07-27' }
   });
 
   assert.equal(report.rows.length, 1);
   assert.equal(report.rows[0].totalMinutes, 480);
-  assert.equal(report.rows[0].ordinaryMinutes, 420);
-  assert.equal(report.rows[0].overtimeMinutes, 60);
-  assert.equal(report.rows[0].conceptMinutes.HEDO, 60);
-  assert.equal(report.totals.ordinaryMinutes, 420);
-  assert.equal(report.totals.overtimeMinutes, 60);
+  assert.equal(report.rows[0].ordinaryMinutes, 480);
+  assert.equal(report.rows[0].overtimeMinutes, 0);
+  assert.equal(report.rows[0].conceptMinutes.HEDO, 0);
+  assert.equal(report.totals.ordinaryMinutes, 480);
+  assert.equal(report.totals.overtimeMinutes, 0);
 });
 
 test('la política nocturna se muestra como 19:00 y 06:00, no como números aislados', async () => {
@@ -84,8 +84,8 @@ test('la política nocturna se muestra como 19:00 y 06:00, no como números aisl
     role: 'dev',
     report: {
       period: { periodType: 'CUSTOM', from: '2026-07-27', to: '2026-07-27', anchor: '2026-07-27' },
-      filters: { clientId: 'client-test', operationPointId: '', workerId: '', search: '', includeTest: true },
-      clients: [{ id: 'client-test', name: 'Cliente prueba', operationPoints: [] }],
+      filters: { clientId: 'TEST-CLIENT-POLICY', operationPointId: '', workerId: '', search: '', includeTest: true },
+      clients: [{ id: 'TEST-CLIENT-POLICY', name: 'TEST Cliente', operationPoints: [] }],
       workers: [],
       rows: [],
       totals: { workers: 0, totalMinutes: 0, ordinaryHours: 0, overtimeHours: 0, workersWithNovelties: 0 }

@@ -7,8 +7,13 @@ import {
   calculatePayrollConceptReport
 } from '../src/modules/dispatch-payroll/domain/payrollConceptEngine.js';
 
-function session({ minutes, arrivalAt = '2026-07-27T13:00:00.000Z', id = `session-${minutes}` }) {
-  const arrival = new Date(arrivalAt);
+function bogotaDateTime(dateKey, hour, minute = 0) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day, hour + 5, minute));
+}
+
+function session({ id, dateKey, startHour = 8, minutes }) {
+  const arrival = bogotaDateTime(dateKey, startHour);
   const departure = new Date(arrival.getTime() + minutes * 60_000);
   return {
     id,
@@ -20,73 +25,106 @@ function session({ minutes, arrivalAt = '2026-07-27T13:00:00.000Z', id = `sessio
     validationStatus: 'MANUAL_VALIDATED',
     marks: [],
     assignment: {
-      workerId: 'worker-test',
+      workerId: 'TEST-WORKER-THRESHOLD',
       worker: {
-        id: 'worker-test',
-        fullName: 'Sujeto de prueba',
+        id: 'TEST-WORKER-THRESHOLD',
+        fullName: 'TEST Auxiliar umbral',
         documentType: 'CC',
-        documentNumber: 'TEST-DOC-1',
-        phone: 'TEST-PHONE-1'
+        documentNumber: 'TEST-DOC-THRESHOLD',
+        phone: 'TEST-PHONE-THRESHOLD'
       },
       serviceRequest: {
-        clientName: 'Cliente prueba',
-        operationPointName: 'Operación prueba',
+        clientName: 'TEST Cliente',
+        operationPointName: 'TEST Operación',
         operationPoint: {
-          id: 'point-test',
-          clientId: 'client-test',
-          name: 'Operación prueba',
-          client: { id: 'client-test', name: 'Cliente prueba' }
+          id: 'TEST-POINT-THRESHOLD',
+          clientId: 'TEST-CLIENT-THRESHOLD',
+          name: 'TEST Operación',
+          client: { id: 'TEST-CLIENT-THRESHOLD', name: 'TEST Cliente' }
         }
       }
     }
   };
 }
 
-function reportFor(sessionValue, range, compensationByWorkerDate = new Map()) {
+function calculate(sessions, compensation = new Map()) {
   return calculatePayrollConceptReport({
-    sessions: [sessionValue],
+    sessions,
     policiesByClientId: new Map(),
-    compensationByWorkerDate,
-    range
+    compensationByWorkerDate: compensation,
+    range: { from: '2026-08-03', to: '2026-08-09' }
   }).rows[0];
 }
 
-const overtimeCases = [
-  { code: 'HEDO', arrivalAt: '2026-07-27T13:00:00.000Z', range: { from: '2026-07-27', to: '2026-07-27' } },
-  { code: 'HENO', arrivalAt: '2026-07-27T17:00:00.000Z', range: { from: '2026-07-27', to: '2026-07-27' } },
-  { code: 'HEDD', arrivalAt: '2026-08-02T13:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' } },
-  { code: 'HEND', arrivalAt: '2026-08-02T17:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' } },
-  { code: 'HEDF', arrivalAt: '2026-07-20T13:00:00.000Z', range: { from: '2026-07-20', to: '2026-07-20' } },
-  { code: 'HENF', arrivalAt: '2026-07-20T17:00:00.000Z', range: { from: '2026-07-20', to: '2026-07-20' } }
+const cases = [
+  {
+    code: 'HEDO', dateKey: '2026-08-03', startHour: 8,
+    baseline: ['2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08'],
+    fallbackRecargo: null
+  },
+  {
+    code: 'HENO', dateKey: '2026-08-03', startHour: 12,
+    baseline: ['2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08'],
+    fallbackRecargo: 'RNO'
+  },
+  {
+    code: 'HEDD', dateKey: '2026-08-09', startHour: 8,
+    baseline: ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
+    fallbackRecargo: 'RDD'
+  },
+  {
+    code: 'HEND', dateKey: '2026-08-09', startHour: 12,
+    baseline: ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
+    fallbackRecargo: 'RND'
+  },
+  {
+    code: 'HEDF', dateKey: '2026-08-07', startHour: 8,
+    baseline: ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-08'],
+    fallbackRecargo: 'RDF'
+  },
+  {
+    code: 'HENF', dateKey: '2026-08-07', startHour: 12,
+    baseline: ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-08'],
+    fallbackRecargo: 'RNF'
+  }
 ];
 
-test('las horas extra conservan un mínimo de 30 minutos', () => {
+function weeklyScenario(item, extraMinutes) {
+  const sessions = item.baseline.map((dateKey, index) => session({
+    id: `TEST-BASE-${item.code}-${index}`,
+    dateKey,
+    minutes: 7 * 60
+  }));
+  sessions.push(session({
+    id: `TEST-TARGET-${item.code}-${extraMinutes}`,
+    dateKey: item.dateKey,
+    startHour: item.startHour,
+    minutes: (7 * 60) + extraMinutes
+  }));
+  const compensation = item.code === 'HEDD' || item.code === 'HEND'
+    ? new Map([['TEST-WORKER-THRESHOLD|2026-08-09', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]])
+    : new Map();
+  return calculate(sessions, compensation);
+}
+
+test('las horas extra conservan un mínimo de 30 minutos después del balance semanal', () => {
   assert.equal(MIN_OVERTIME_RECOGNITION_MINUTES, 30);
 });
 
-test('29 minutos de exceso no se suman a ninguno de los seis conceptos de hora extra', () => {
-  for (const item of overtimeCases) {
-    const row = reportFor(session({
-      minutes: 7 * 60 + 29,
-      arrivalAt: item.arrivalAt,
-      id: `under-threshold-${item.code}`
-    }), item.range);
-    assert.equal(row.ordinaryMinutes, 420, item.code);
+test('42 h 29 min no reconoce H* y conserva el recargo ordinario correspondiente', () => {
+  for (const item of cases) {
+    const row = weeklyScenario(item, 29);
     assert.equal(row.overtimeMinutes, 0, item.code);
     assert.equal(row.unrecognizedOvertimeMinutes, 29, item.code);
     assert.equal(row.conceptMinutes[item.code], 0, item.code);
+    if (item.fallbackRecargo) assert.equal(row.conceptMinutes[item.fallbackRecargo], 29, `${item.code} conserva ${item.fallbackRecargo}`);
     assert.ok(row.novelties.some((novelty) => novelty.code === 'OVERTIME_BELOW_MINIMUM'), item.code);
   }
 });
 
-test('exactamente 30 minutos de exceso sí se reconocen en cada concepto de hora extra', () => {
-  for (const item of overtimeCases) {
-    const row = reportFor(session({
-      minutes: 7 * 60 + 30,
-      arrivalAt: item.arrivalAt,
-      id: `at-threshold-${item.code}`
-    }), item.range);
-    assert.equal(row.ordinaryMinutes, 420, item.code);
+test('42 h 30 min reconoce exactamente 30 minutos en cada concepto H*', () => {
+  for (const item of cases) {
+    const row = weeklyScenario(item, 30);
     assert.equal(row.overtimeMinutes, 30, item.code);
     assert.equal(row.unrecognizedOvertimeMinutes, 0, item.code);
     assert.equal(row.conceptMinutes[item.code], 30, item.code);
@@ -96,23 +134,25 @@ test('exactamente 30 minutos de exceso sí se reconocen en cada concepto de hora
 
 test('un solo minuto de cualquiera de los siete recargos se suma sin umbral mínimo', () => {
   const sundayNotCompensated = new Map([
-    ['worker-test|2026-08-02', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]
+    ['TEST-WORKER-THRESHOLD|2026-08-09', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]
   ]);
   const sundayCompensated = new Map([
-    ['worker-test|2026-08-02', PAYROLL_COMPENSATION_STATUS.COMPENSATED]
+    ['TEST-WORKER-THRESHOLD|2026-08-09', PAYROLL_COMPENSATION_STATUS.COMPENSATED]
   ]);
-  const cases = [
-    { code: 'RNO', arrivalAt: '2026-07-28T00:00:00.000Z', range: { from: '2026-07-27', to: '2026-07-27' }, compensation: new Map() },
-    { code: 'RDD', arrivalAt: '2026-08-02T15:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' }, compensation: sundayNotCompensated },
-    { code: 'RND', arrivalAt: '2026-08-03T00:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' }, compensation: sundayNotCompensated },
-    { code: 'RDF', arrivalAt: '2026-07-20T15:00:00.000Z', range: { from: '2026-07-20', to: '2026-07-20' }, compensation: new Map() },
-    { code: 'RNF', arrivalAt: '2026-07-21T00:00:00.000Z', range: { from: '2026-07-20', to: '2026-07-20' }, compensation: new Map() },
-    { code: 'RDDC', arrivalAt: '2026-08-02T15:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' }, compensation: sundayCompensated },
-    { code: 'RNDC', arrivalAt: '2026-08-03T00:00:00.000Z', range: { from: '2026-08-02', to: '2026-08-02' }, compensation: sundayCompensated }
+  const recargoCases = [
+    { code: 'RNO', dateKey: '2026-08-03', startHour: 19, compensation: new Map() },
+    { code: 'RDD', dateKey: '2026-08-09', startHour: 8, compensation: sundayNotCompensated },
+    { code: 'RND', dateKey: '2026-08-09', startHour: 19, compensation: sundayNotCompensated },
+    { code: 'RDF', dateKey: '2026-08-07', startHour: 8, compensation: new Map() },
+    { code: 'RNF', dateKey: '2026-08-07', startHour: 19, compensation: new Map() },
+    { code: 'RDDC', dateKey: '2026-08-09', startHour: 8, compensation: sundayCompensated },
+    { code: 'RNDC', dateKey: '2026-08-09', startHour: 19, compensation: sundayCompensated }
   ];
 
-  for (const item of cases) {
-    const row = reportFor(session({ minutes: 1, arrivalAt: item.arrivalAt, id: `recargo-${item.code}` }), item.range, item.compensation);
+  for (const item of recargoCases) {
+    const row = calculate([
+      session({ id: `TEST-RECARGO-${item.code}`, dateKey: item.dateKey, startHour: item.startHour, minutes: 1 })
+    ], item.compensation);
     assert.equal(row.totalMinutes, 1, item.code);
     assert.equal(row.overtimeMinutes, 0, item.code);
     assert.equal(row.unrecognizedOvertimeMinutes, 0, item.code);

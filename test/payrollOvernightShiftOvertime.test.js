@@ -25,19 +25,19 @@ function overnightSession({
       workerId: 'TEST-WORKER-OVERNIGHT',
       worker: {
         id: 'TEST-WORKER-OVERNIGHT',
-        fullName: 'Auxiliar de prueba',
+        fullName: 'TEST Auxiliar nocturno',
         documentType: 'CC',
         documentNumber: 'TEST-DOC-OVERNIGHT',
         phone: 'TEST-PHONE-OVERNIGHT'
       },
       serviceRequest: {
-        clientName: 'Cliente de prueba',
-        operationPointName: 'Operación de prueba',
+        clientName: 'TEST Cliente',
+        operationPointName: 'TEST Operación',
         operationPoint: {
           id: 'TEST-POINT-OVERNIGHT',
           clientId: 'TEST-CLIENT-OVERNIGHT',
-          name: 'Operación de prueba',
-          client: { id: 'TEST-CLIENT-OVERNIGHT', name: 'Cliente de prueba' }
+          name: 'TEST Operación',
+          client: { id: 'TEST-CLIENT-OVERNIGHT', name: 'TEST Cliente' }
         }
       }
     }
@@ -78,23 +78,23 @@ function calculate(sessions, range) {
   });
 }
 
-test('turno nocturno 21:00 a 05:00 se agrupa una sola vez por la fecha de entrada', () => {
+test('turno nocturno aislado 21:00 a 05:00 conserva todo RNO y no genera extra antes de 42 h semanales', () => {
   const report = calculate(overnightSession(), { from: '2026-07-28', to: '2026-07-28' });
 
   assert.equal(report.rows.length, 1);
   const row = report.rows[0];
   assert.equal(row.totalMinutes, 480);
-  assert.equal(row.ordinaryMinutes, 420);
-  assert.equal(row.overtimeMinutes, 60);
-  assert.equal(row.conceptMinutes.RNO, 420);
-  assert.equal(row.conceptMinutes.HENO, 60);
+  assert.equal(row.ordinaryMinutes, 480);
+  assert.equal(row.overtimeMinutes, 0);
+  assert.equal(row.conceptMinutes.RNO, 480);
+  assert.equal(row.conceptMinutes.HENO, 0);
   assert.equal(row.conceptMinutes.HEDO, 0);
 
   assert.equal(row.daily.length, 1);
   assert.equal(row.daily[0].dateKey, '2026-07-28');
   assert.equal(row.daily[0].totalMinutes, 480);
-  assert.equal(row.daily[0].ordinaryMinutes, 420);
-  assert.equal(row.daily[0].overtimeMinutes, 60);
+  assert.equal(row.daily[0].ordinaryMinutes, 480);
+  assert.equal(row.daily[0].overtimeMinutes, 0);
   assert.deepEqual(row.daily[0].civilDateKeys, ['2026-07-28', '2026-07-29']);
 });
 
@@ -161,7 +161,7 @@ test('una sesión superpuesta que comienza dentro del almuerzo tampoco puede rel
   assert.equal(row.exportable, false);
 });
 
-test('la política de nómina no muestra bloques explicativos de semana ni de festivo', async () => {
+test('la política de nómina no muestra bloques explicativos heredados de semana ni festivo', async () => {
   const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
   assert.doesNotMatch(template, /El acumulado semanal ya no es configurable desde domingo/);
   assert.doesNotMatch(template, /Indicativo Festivo/);

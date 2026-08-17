@@ -5,7 +5,7 @@ import {
   minutesToDecimalHours
 } from '../src/modules/dispatch-payroll/domain/payrollConceptEngine.js';
 
-function session({ minutes, id = `session-${minutes}` }) {
+function session({ minutes, id = `TEST-SESSION-${minutes}` }) {
   const arrival = new Date('2026-07-27T13:00:00.000Z');
   const departure = new Date(arrival.getTime() + minutes * 60_000);
   return {
@@ -18,22 +18,22 @@ function session({ minutes, id = `session-${minutes}` }) {
     validationStatus: 'MANUAL_VALIDATED',
     marks: [],
     assignment: {
-      workerId: 'worker-decimals',
+      workerId: 'TEST-WORKER-DECIMALS',
       worker: {
-        id: 'worker-decimals',
-        fullName: 'Auxiliar Decimales',
+        id: 'TEST-WORKER-DECIMALS',
+        fullName: 'TEST Auxiliar decimales',
         documentType: 'CC',
-        documentNumber: '1000000001',
-        phone: '3000000001'
+        documentNumber: 'TEST-DOC-DECIMALS',
+        phone: 'TEST-PHONE-DECIMALS'
       },
       serviceRequest: {
-        clientName: 'Cliente prueba',
-        operationPointName: 'Operación prueba',
+        clientName: 'TEST Cliente',
+        operationPointName: 'TEST Operación',
         operationPoint: {
-          id: 'point-decimals',
-          clientId: 'client-decimals',
-          name: 'Operación prueba',
-          client: { id: 'client-decimals', name: 'Cliente prueba' }
+          id: 'TEST-POINT-DECIMALS',
+          clientId: 'TEST-CLIENT-DECIMALS',
+          name: 'TEST Operación',
+          client: { id: 'TEST-CLIENT-DECIMALS', name: 'TEST Cliente' }
         }
       }
     }
@@ -47,7 +47,7 @@ test('convierte minutos a horas con máximo un decimal', () => {
   assert.equal(minutesToDecimalHours(480), 8);
 });
 
-test('el reporte usa un decimal sin alterar los minutos originales', () => {
+test('el reporte conserva el redondeo aunque 500 minutos aislados no sean hora extra semanal', () => {
   const report = calculatePayrollConceptReport({
     sessions: [session({ minutes: 500 })],
     policiesByClientId: new Map(),
@@ -58,11 +58,11 @@ test('el reporte usa un decimal sin alterar los minutos originales', () => {
 
   assert.equal(row.totalMinutes, 500);
   assert.equal(row.totalHours, 8.3);
-  assert.equal(row.ordinaryMinutes, 420);
-  assert.equal(row.ordinaryHours, 7);
-  assert.equal(row.overtimeMinutes, 80);
-  assert.equal(row.overtimeHours, 1.3);
-  assert.equal(row.conceptMinutes.HEDO, 80);
-  assert.equal(row.conceptHours.HEDO, 1.3);
+  assert.equal(row.ordinaryMinutes, 500);
+  assert.equal(row.ordinaryHours, 8.3);
+  assert.equal(row.overtimeMinutes, 0);
+  assert.equal(row.overtimeHours, 0);
+  assert.equal(row.conceptMinutes.HEDO, 0);
+  assert.equal(row.conceptHours.HEDO, 0);
   assert.equal(report.totals.totalHours, 8.3);
 });
