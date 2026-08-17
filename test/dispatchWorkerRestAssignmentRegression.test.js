@@ -155,6 +155,7 @@ test('Suspensión y No remunerada descuentan un día; los demás motivos no', ()
   assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.INCAPACIDAD_EPS), 0);
   assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.INCAPACIDAD_ARL), 0);
   assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.REMUNERADO), 0);
+  assert.equal(workerRestDayAdjustment(WORKER_REST_REASONS.COMPENSATORIO), 0);
 });
 
 test('el backend guarda descanso para ambos contratos y solo exige motivo a Directo en día hábil', async () => {
@@ -186,7 +187,7 @@ test('el backend guarda descanso para ambos contratos y solo exige motivo a Dire
   const contractor = makePrisma({ contractType: 'CONTRATISTA' });
   const savedContractor = await saveWorkerRestAssignment(contractor.prisma, {
     workerId: 'TEST-WORKER-1', restDate: '2026-08-11',
-    reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-16'
+    reason: WORKER_REST_REASONS.COMPENSATORIO, originSundayDate: '2026-08-16'
   });
   assert.equal(savedContractor.reason, null);
   assert.equal(savedContractor.originSundayDate, null);
@@ -296,20 +297,21 @@ test('un descanso natural conserva la confirmación si ya existe asignación act
   assert.equal(approved.events.length, 1);
 });
 
-test('Remunerado permite domingo futuro no trabajado, mantiene domingo/no festivo y no permite reutilizarlo', async () => {
+test('Compensatorio permite domingo futuro no trabajado, mantiene domingo/no festivo y no permite reutilizarlo', async () => {
   const sessions = [];
   const state = makePrisma({ sessions });
   const saved = await saveWorkerRestAssignment(state.prisma, {
     workerId: 'TEST-WORKER-1', restDate: '2026-08-11',
-    reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-16'
+    reason: WORKER_REST_REASONS.COMPENSATORIO, originSundayDate: '2026-08-16'
   });
+  assert.equal(saved.reason, WORKER_REST_REASONS.COMPENSATORIO);
   assert.equal(saved.originSundayDate, '2026-08-16');
   assert.equal(state.events.length, 1);
 
   await assert.rejects(
     saveWorkerRestAssignment(state.prisma, {
       workerId: 'TEST-WORKER-1', restDate: '2026-08-12',
-      reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-16'
+      reason: WORKER_REST_REASONS.COMPENSATORIO, originSundayDate: '2026-08-16'
     }),
     /worker_rest_origin_sunday_used/
   );
@@ -318,7 +320,7 @@ test('Remunerado permite domingo futuro no trabajado, mantiene domingo/no festiv
   await assert.rejects(
     saveWorkerRestAssignment(invalidWeekday.prisma, {
       workerId: 'TEST-WORKER-1', restDate: '2026-08-11',
-      reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-15'
+      reason: WORKER_REST_REASONS.COMPENSATORIO, originSundayDate: '2026-08-15'
     }),
     /worker_rest_origin_sunday_invalid/
   );
@@ -329,7 +331,7 @@ test('Remunerado permite domingo futuro no trabajado, mantiene domingo/no festiv
   await assert.rejects(
     saveWorkerRestAssignment(holidaySunday.prisma, {
       workerId: 'TEST-WORKER-1', restDate: '2030-12-09',
-      reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2030-12-08'
+      reason: WORKER_REST_REASONS.COMPENSATORIO, originSundayDate: '2030-12-08'
     }),
     /worker_rest_origin_sunday_invalid/
   );
@@ -346,7 +348,20 @@ test('Remunerado permite domingo futuro no trabajado, mantiene domingo/no festiv
   assert.equal(report.rows[0].conceptMinutes.RDDC, 240);
 });
 
-test('el descanso remunerado gobierna el domingo: sin vínculo no compensa, con vínculo sí y al cancelar vuelve a no compensado', async () => {
+test('Remunerado es permiso remunerado y no conserva un domingo asociado', async () => {
+  const state = makePrisma();
+  const saved = await saveWorkerRestAssignment(state.prisma, {
+    workerId: 'TEST-WORKER-1', restDate: '2026-08-11',
+    reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-16'
+  });
+  assert.equal(saved.reason, WORKER_REST_REASONS.REMUNERADO);
+  assert.equal(saved.originSundayDate, null);
+  const active = await loadWorkerRestAssignments(state.prisma, { workerIds: ['TEST-WORKER-1'] });
+  assert.equal(active[0].reason, WORKER_REST_REASONS.REMUNERADO);
+  assert.equal(active[0].originSundayDate, null);
+});
+
+test('el descanso compensatorio gobierna el domingo: sin vínculo no compensa, con vínculo sí y al cancelar vuelve a no compensado', async () => {
   const sundaySession = payrollSession({
     id: 'TEST-WORKED-SUNDAY-AUTHORITY',
     arrivalAt: '2026-08-09T23:00:00.000Z',
@@ -371,7 +386,7 @@ test('el descanso remunerado gobierna el domingo: sin vínculo no compensa, con 
 
   await saveWorkerRestAssignment(state.prisma, {
     workerId: 'TEST-WORKER-1', restDate: '2026-08-12',
-    reason: WORKER_REST_REASONS.REMUNERADO, originSundayDate: '2026-08-09'
+    reason: WORKER_REST_REASONS.COMPENSATORIO, originSundayDate: '2026-08-09'
   });
   map = await loadPayrollCompensationMap(state.prisma, ['TEST-WORKER-1'], {
     from: '2026-08-09', to: '2026-08-09'
@@ -401,7 +416,7 @@ test('un POST manual no puede volver a crear autoridad de compensatorio en domin
   assert.equal(workerLookupCalled, false);
 });
 
-test('Nómina refleja días trabajados, descontados y netos', async () => {
+test('Nómina conserva los contadores internos de compatibilidad de días', async () => {
   const mondaySession = payrollSession({
     id: 'TEST-MONDAY-WORKDAY',
     arrivalAt: '2026-08-03T13:00:00.000Z',
@@ -426,7 +441,7 @@ test('Nómina refleja días trabajados, descontados y netos', async () => {
   assert.equal(report.totals.netWorkedDays, 0);
 });
 
-test('Asignaciones usa la política canónica de fecha para motivo, descanso múltiple y conflictos', async () => {
+test('Asignaciones usa la política canónica de fecha para motivo, compensatorio, descanso múltiple y conflictos', async () => {
   const [route, view, payroll, confirmUi, boardUi] = await Promise.all([
     readFile('src/routes/dispatchOpsExtras.js', 'utf8'),
     readFile('src/views/operacionesAsignacionesConfirmacion.ejs', 'utf8'),
@@ -467,9 +482,11 @@ test('Asignaciones usa la política canónica de fecha para motivo, descanso mú
   assert.match(boardUi, /reasonField\.hidden = !direct/);
   assert.match(boardUi, /reasonInput\.required = direct/);
   assert.match(boardUi, /el descanso se registra sin justificación/);
-  assert.match(boardUi, /const remunerado = restBatchHasDirect && !restDatePolicy\.isNaturalRestDay/);
-  assert.match(boardUi, /field\.hidden = !remunerado \|\| bulkRemunerado/);
-  assert.match(boardUi, /origin\.required = remunerado && !bulkRemunerado/);
+  assert.match(boardUi, /reasonInput\?\.value === 'COMPENSATORIO'/);
+  assert.match(boardUi, /const compensatorio = restBatchHasDirect && !restDatePolicy\.isNaturalRestDay/);
+  assert.match(boardUi, /field\.hidden = !compensatorio \|\| bulkCompensatorio/);
+  assert.match(boardUi, /origin\.required = compensatorio && !bulkCompensatorio/);
+  assert.match(boardUi, /Domingo que generó el compensatorio/);
   assert.match(boardUi, /workerInput\.value = cards\.map\(\(card\) => card\.dataset\.workerId\)\.join\(','\)/);
   assert.match(boardUi, /openRestDialog\(ids\)/);
   assert.doesNotMatch(boardUi, /fecha de descanso válida que no sea domingo/);
@@ -477,7 +494,9 @@ test('Asignaciones usa la política canónica de fecha para motivo, descanso mú
   assert.doesNotMatch(boardUi, /Debe ser un domingo anterior, trabajado por este auxiliar y no festivo/);
   assert.doesNotMatch(boardUi, /dateBefore\(|origin\.max=|origin>=restDateValue/);
 
-  assert.match(payroll, /resolveWorkerRestDatePolicy/);
+  assert.match(payroll, /COMPENSATORIO: 'COMPENSATORIO'/);
+  assert.match(payroll, /rawReason === WORKER_REST_REASONS\.REMUNERADO && originSundayDate/);
+  assert.match(payroll, /reason === WORKER_REST_REASONS\.COMPENSATORIO/);
   assert.match(payroll, /worker\.contractType === 'DIRECTO' && !datePolicy\.isNaturalRestDay/);
   assert.match(payroll, /ACTIVE_DISPATCH_ASSIGNMENT_STATUSES/);
   assert.match(payroll, /worker_rest_active_assignment_confirmation_required/);
@@ -496,7 +515,7 @@ test('Asignaciones usa la política canónica de fecha para motivo, descanso mú
   assert.doesNotMatch(confirmUi, /window\.confirm\s*=/);
 });
 
-test('la vista de Nómina muestra descanso, descuento y domingo sin selector manual', async () => {
+test('la vista de Nómina muestra nuevos contadores, descanso y domingo sin selector manual', async () => {
   const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
   const emptyConcepts = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, 0]));
   const html = ejs.render(template, {
@@ -509,6 +528,8 @@ test('la vista de Nómina muestra descanso, descuento y domingo sin selector man
       rows: [{
         workerId: 'TEST-WORKER-1', fullName: 'Auxiliar de prueba', documentType: 'CC', documentNumber: 'TEST-DOC-1',
         exportable: true, status: 'CALCULADO', workedDays: 2, deductedDays: 1, netWorkedDays: 1,
+        remuneratedDays: 2, unremuneratedDays: 1, paidPermissionDays: 0, incapacityDays: 0,
+        nightShiftCount: 0, sundayCount: 1, holidayCount: 1,
         restAssignments: [{
           restDate: '2026-08-20', reason: WORKER_REST_REASONS.SUSPENSION,
           dayAdjustment: -1, originSundayDate: null
@@ -528,6 +549,8 @@ test('la vista de Nómina muestra descanso, descuento y domingo sin selector man
       }],
       totals: {
         workers: 1, workedDays: 2, deductedDays: 1, netWorkedDays: 1,
+        remuneratedDays: 2, unremuneratedDays: 1, paidPermissionDays: 0, incapacityDays: 0,
+        nightShiftCount: 0, sundayCount: 1, holidayCount: 1,
         totalMinutes: 360, ordinaryHours: 6, overtimeHours: 0, unrecognizedOvertimeMinutes: 0, workersWithNovelties: 0
       }
     },
@@ -538,10 +561,14 @@ test('la vista de Nómina muestra descanso, descuento y domingo sin selector man
     error: null
   });
 
-  assert.match(html, /Días descontados/);
+  assert.match(html, /Días remunerados/);
+  assert.match(html, /Días no remunerados/);
+  assert.match(html, /Permisos remunerados/);
+  assert.match(html, /Incapacidades/);
+  assert.doesNotMatch(html, /Días netos/);
   assert.match(html, /Suspensión/);
   assert.match(html, /Descuenta 1 día laborado/);
-  assert.match(html, /No compensado · sin descanso remunerado asignado/);
+  assert.match(html, /No compensado · sin descanso compensatorio asignado/);
   assert.match(html, />Festivo<\/span>/);
   assert.doesNotMatch(html, /action="\/admin\/operaciones\/asistencia\/nomina\/compensation"/);
 });
