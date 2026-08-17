@@ -520,9 +520,7 @@ function markProviderFailure(name, now) {
 async function reserveNominatimRequestSlot(nowFn, sleepFn, options = {}) {
   const now = nowFn();
   const scheduledAt = Math.max(now, nextNominatimRequestAt);
-  nextNominatimRequestAt = scheduledAt + NOMINATIM_MIN_INTERVAL_MS;
   const waitMs = scheduledAt - now;
-  if (waitMs <= 0) return;
   const clockFn = options.clockFn || Date.now;
   const remaining = Number.isFinite(options.deadlineAt)
     ? options.deadlineAt - clockFn()
@@ -530,7 +528,8 @@ async function reserveNominatimRequestSlot(nowFn, sleepFn, options = {}) {
   if (waitMs > remaining) {
     throw providerError('attendance_geocoding_nominatim_budget_exhausted', { retryable: false });
   }
-  await sleepFn(waitMs);
+  nextNominatimRequestAt = scheduledAt + NOMINATIM_MIN_INTERVAL_MS;
+  if (waitMs > 0) await sleepFn(waitMs);
 }
 
 function identifyingOrigin(value) {
