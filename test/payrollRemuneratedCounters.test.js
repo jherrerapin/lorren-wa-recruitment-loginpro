@@ -60,11 +60,11 @@ function session({ id, start, end, attendanceStatus = 'ON_TIME' }) {
   };
 }
 
-function absenceSession() {
+function absenceSession(dateKey = '2026-08-14') {
   return {
-    ...session({ id: 'TEST-ABSENCE', start: null, end: null, attendanceStatus: 'ABSENT' }),
-    expectedStartAt: new Date('2026-08-14T13:00:00.000Z'),
-    expectedEndAt: new Date('2026-08-14T20:00:00.000Z'),
+    ...session({ id: `TEST-ABSENCE-${dateKey}`, start: null, end: null, attendanceStatus: 'ABSENT' }),
+    expectedStartAt: new Date(`${dateKey}T13:00:00.000Z`),
+    expectedEndAt: new Date(`${dateKey}T20:00:00.000Z`),
     arrivalReportedAt: null,
     departureReportedAt: null,
     attendanceStatus: 'ABSENT'
@@ -89,7 +89,7 @@ function restEvent(restDate, reason, originSundayDate = null) {
   };
 }
 
-function makePrisma() {
+function makePrisma({ extraAbsenceDates = [] } = {}) {
   const sessions = [
     // Empieza el sábado a las 21:00 Bogotá y termina el domingo a las 05:00: un solo turno nocturno.
     session({
@@ -109,7 +109,8 @@ function makePrisma() {
       start: '2026-08-17T13:00:00.000Z',
       end: '2026-08-17T20:00:00.000Z'
     }),
-    absenceSession()
+    absenceSession(),
+    ...extraAbsenceDates.map((dateKey) => absenceSession(dateKey))
   ];
   const events = [
     // Legado: antes REMUNERADO + originSundayDate significaba compensatorio.
@@ -157,7 +158,7 @@ test('el legado REMUNERADO con domingo asociado se interpreta como COMPENSATORIO
   assert.equal(paidPermission.originSundayDate, null);
 });
 
-test('Nómina cuenta días remunerados/no remunerados, permisos, incapacidades y jornadas especiales sin duplicar fechas', async () => {
+test('Nómina separa días remunerados de permisos e incapacidades y conserva jornadas especiales', async () => {
   const report = await loadPayrollReport(makePrisma(), {
     periodType: 'CUSTOM',
     from: '2026-08-11',
@@ -168,7 +169,7 @@ test('Nómina cuenta días remunerados/no remunerados, permisos, incapacidades y
   const row = report.rows[0];
 
   assert.equal(row.workedDays, 3, 'compatibilidad: conserva tres fechas operativas trabajadas');
-  assert.equal(row.remuneratedDays, 6, '3 trabajadas + compensatorio + permiso remunerado + incapacidad');
+  assert.equal(row.remuneratedDays, 4, '3 trabajadas + 1 compensatorio; permiso e incapacidad quedan en sus columnas');
   assert.equal(row.unremuneratedDays, 1, 'descanso no remunerado y ausencia en la misma fecha se deduplican');
   assert.equal(row.paidPermissionDays, 1, 'solo REMUNERADO sin domingo es permiso remunerado');
   assert.equal(row.incapacityDays, 1, 'EPS/ARL alimentan el contador de incapacidades');
@@ -176,7 +177,7 @@ test('Nómina cuenta días remunerados/no remunerados, permisos, incapacidades y
   assert.equal(row.sundayCount, 1, 'dos sesiones que tocan el mismo domingo cuentan una sola fecha dominical');
   assert.equal(row.holidayCount, 1, 'el festivo trabajado cuenta una sola fecha');
 
-  assert.equal(report.totals.remuneratedDays, 6);
+  assert.equal(report.totals.remuneratedDays, 4);
   assert.equal(report.totals.unremuneratedDays, 1);
   assert.equal(report.totals.paidPermissionDays, 1);
   assert.equal(report.totals.incapacityDays, 1);
@@ -185,12 +186,28 @@ test('Nómina cuenta días remunerados/no remunerados, permisos, incapacidades y
   assert.equal(report.totals.holidayCount, 1);
 });
 
-test('una jornada inválida mantiene su novedad bloqueante en vez de desaparecer del reporte', async () => {
+test('una ausencia no duplica día no remunerado cuando la fecha tiene trabajo o justificación pagada', async () => {
+  const report = await loadPayrollReport(makePrisma({
+    extraAbsenceDates: ['2026-08-11', '2026-08-12', '2026-08-13', '2026-08-15']
+  }), {
+    periodType: 'CUSTOM',
+    from: '2026-08-11',
+    to: '2026-08-17'
+  }, { now: new Date('2026-08-18T12:00:00.000Z') });
+
+  const row = report.rows[0];
+  assert.equal(row.remuneratedDays, 4, 'la ausencia no elimina trabajo ni compensatorio');
+  assert.equal(row.paidPermissionDays, 1, 'el permiso remunerado reemplaza la ausencia de esa fecha');
+  assert.equal(row.incapacityDays, 1, 'la incapacidad reemplaza la ausencia de esa fecha');
+  assert.equal(row.unremuneratedDays, 1, 'solo permanece la fecha realmente no remunerada');
+});
+
+test('una jornada nocturna inválida mantiene su novedad y no suma turno nocturno', async () => {
   const prisma = makePrisma();
   prisma.dispatchAttendanceSession.findMany = async () => [session({
-    id: 'TEST-INVALID-TIMELINE',
-    start: '2026-08-15T20:00:00.000Z',
-    end: '2026-08-15T19:00:00.000Z'
+    id: 'TEST-INVALID-NIGHT-TIMELINE',
+    start: '2026-08-16T02:00:00.000Z',
+    end: '2026-08-16T01:00:00.000Z'
   })];
   const report = await loadPayrollReport(prisma, {
     periodType: 'CUSTOM',
@@ -201,9 +218,10 @@ test('una jornada inválida mantiene su novedad bloqueante en vez de desaparecer
   assert.equal(report.rows.length, 1);
   assert.ok(report.rows[0].novelties.some((item) => item.code === 'INCOMPLETE_SESSION' && item.blocking === true));
   assert.equal(report.rows[0].totalMinutes, 0);
+  assert.equal(report.rows[0].nightShiftCount, 0);
 });
 
-test('el XLSX usa las nuevas columnas, elimina Días netos y el CSV heredado conserva su contrato', async () => {
+test('el XLSX usa los contadores reconciliados, elimina Días netos y el CSV heredado conserva su contrato', async () => {
   const report = await loadPayrollReport(makePrisma(), {
     periodType: 'CUSTOM',
     from: '2026-08-11',
@@ -231,7 +249,7 @@ test('el XLSX usa las nuevas columnas, elimina Días netos y el CSV heredado con
   assert.equal(headers.includes('DiasLaboradosNetos'), false);
 
   const valueFor = (header) => sheet.getCell(5, headers.indexOf(header) + 1).value;
-  assert.equal(valueFor('DiasRemunerados'), 6);
+  assert.equal(valueFor('DiasRemunerados'), 4);
   assert.equal(valueFor('DiasNoRemunerados'), 1);
   assert.equal(valueFor('PermisosRemunerados'), 1);
   assert.equal(valueFor('Incapacidades'), 1);
