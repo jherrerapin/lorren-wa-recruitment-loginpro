@@ -114,7 +114,7 @@ Hora : *{{horaInicio}} por favor.*
     </section>
 
     <section class="rest-panel" id="workerRestPanel">
-      <div class="rest-head"><div><h2>Descansos</h2><p>Selecciona o arrastra uno o varios auxiliares para asignar el descanso. En los Directos, la justificación se gestiona después desde cada tarjeta.</p></div><span class="rest-date-chip">Fecha mostrada: <%= safeRestDate || 'hoy' %></span></div>
+      <div class="rest-head"><div><h2>Descansos</h2><p>Selecciona o arrastra uno o varios auxiliares para asignar el descanso. En los Directos, la justificación se gestiona después desde cada tarjeta: en días hábiles es obligatoria y en domingos y festivos es opcional.</p></div><span class="rest-date-chip">Fecha mostrada: <%= safeRestDate || 'hoy' %></span></div>
       <div id="restDropZone" class="drop-zone rest-drop-zone">Arrastra uno o varios auxiliares para asignarles descanso.</div>
       <div class="rest-list">
         <% if (!safeRestAssignments.length) { %><div class="rest-empty">No hay descansos asignados para esta fecha.</div><% } %>
