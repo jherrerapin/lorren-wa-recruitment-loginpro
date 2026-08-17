@@ -485,8 +485,8 @@
   function syncRestFields() {
     const naturalRestDay = restDatePolicy.isNaturalRestDay === true;
     const sundayRestDay = restDatePolicy.isSunday === true;
-    const holidayOnlyRestDay = restDatePolicy.isHoliday === true && !sundayRestDay;
-    const reasonAvailable = restBatchHasDirect && !holidayOnlyRestDay;
+    const holidayRestDay = restDatePolicy.isHoliday === true;
+    const reasonAvailable = restBatchHasDirect;
     const reasonRequired = restBatchHasDirect && !naturalRestDay;
     const directWorkers = restBatchWorkers.filter((worker) => worker.contractType === 'DIRECTO');
     const reasonField = qs('#restReasonField');
@@ -500,23 +500,23 @@
       const compensatoryOption = reasonInput.querySelector('option[value="COMPENSATORIO"]');
       if (compensatoryOption) {
         compensatoryOption.textContent = 'Compensatorio';
-        compensatoryOption.hidden = sundayRestDay;
-        compensatoryOption.disabled = sundayRestDay;
+        compensatoryOption.hidden = naturalRestDay;
+        compensatoryOption.disabled = naturalRestDay;
       }
-      if (sundayRestDay && reasonInput.value === 'COMPENSATORIO') reasonInput.value = '';
+      if (naturalRestDay && reasonInput.value === 'COMPENSATORIO') reasonInput.value = '';
       if (!reasonAvailable) reasonInput.value = '';
     }
     if (rule) {
       rule.textContent = sundayRestDay && restBatchHasDirect
         ? 'Domingo: la justificación es opcional para auxiliares Directos.'
-        : holidayOnlyRestDay
-          ? 'Festivo: el descanso se registra sin justificación.'
+        : holidayRestDay && restBatchHasDirect
+          ? 'Festivo: la justificación es opcional para auxiliares Directos.'
           : reasonRequired
             ? 'Incluye contrato Directo: selecciona la justificación del descanso.'
             : 'Solo Contratistas: el descanso usa la fecha operativa seleccionada.';
     }
 
-    const compensatorio = reasonAvailable && !sundayRestDay && reasonInput?.value === 'COMPENSATORIO';
+    const compensatorio = reasonAvailable && !naturalRestDay && reasonInput?.value === 'COMPENSATORIO';
     const bulkCompensatorio = compensatorio && restBatchWorkers.length > 1;
     const field = qs('#originSundayField');
     const origin = qs('#originSundayDateInput');
@@ -641,8 +641,7 @@
     if (qs('#allowAssignedRestInput')?.value === 'true') payload.set('allowAssignedRest', 'true');
     const serviceRequestId = form.querySelector('input[name="serviceRequestId"]')?.value;
     if (serviceRequestId) payload.set('serviceRequestId', serviceRequestId);
-    const canSendReason = worker.contractType === 'DIRECTO'
-      && (!restDatePolicy.isHoliday || restDatePolicy.isSunday);
+    const canSendReason = worker.contractType === 'DIRECTO';
     if (canSendReason) {
       payload.set('reason', qs('#restReasonInput')?.value || '');
       if (originSundayDate) payload.set('originSundayDate', originSundayDate);
@@ -777,8 +776,7 @@
       }
 
       const compensatorio = restBatchHasDirect
-        && !restDatePolicy.isSunday
-        && !restDatePolicy.isHoliday
+        && !restDatePolicy.isNaturalRestDay
         && qs('#restReasonInput')?.value === 'COMPENSATORIO';
       if (compensatorio && restBatchWorkers.length > 1) {
         renderRestOriginBatchDialog();
