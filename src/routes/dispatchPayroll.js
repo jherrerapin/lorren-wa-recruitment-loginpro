@@ -46,9 +46,11 @@ const PAYROLL_EXCEL_COLUMN_WIDTHS = Object.freeze({
   Nombre: 30,
   FechaInicial: 13,
   FechaFinal: 13,
-  DiasTrabajados: 14,
-  DiasDescontados: 16,
-  DiasLaboradosNetos: 18,
+  DiasRemunerados: 17,
+  DiasNoRemunerados: 19,
+  TurnosNocturnos: 17,
+  Domingos: 12,
+  Festivos: 12,
   Descansos: 32,
   HorasOrdinarias: 16,
   TotalTrabajado: 16,
@@ -172,6 +174,26 @@ function sumRows(rows, field) {
   return rows.reduce((sum, row) => sum + Number(row?.[field] || 0), 0);
 }
 
+function payrollExcelRows(report) {
+  return buildPayrollExportRows(report).map((sourceRow, index) => {
+    const reportRow = report.rows[index] || {};
+    const row = {};
+    for (const [header, value] of Object.entries(sourceRow)) {
+      if (header === 'DiasTrabajados') {
+        row.DiasRemunerados = Number(reportRow.remuneratedDays || 0);
+        row.DiasNoRemunerados = Number(reportRow.unremuneratedDays || 0);
+        row.TurnosNocturnos = Number(reportRow.nightShiftCount || 0);
+        row.Domingos = Number(reportRow.sundayCount || 0);
+        row.Festivos = Number(reportRow.holidayCount || 0);
+        continue;
+      }
+      if (header === 'DiasDescontados' || header === 'DiasLaboradosNetos') continue;
+      row[header] = value;
+    }
+    return row;
+  });
+}
+
 function payrollExcelHeaders(rows) {
   return rows.length
     ? Object.keys(rows[0]).filter((header) => header !== 'Novedades' && header !== 'Estado')
@@ -190,7 +212,7 @@ function isPayrollHourHeader(header) {
 }
 
 export function buildPayrollExcelWorkbook(report) {
-  const rows = buildPayrollExportRows(report);
+  const rows = payrollExcelRows(report);
   const headers = payrollExcelHeaders(rows);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Lórren · LoginPro';
@@ -239,7 +261,10 @@ export function buildPayrollExcelWorkbook(report) {
   headerRow.height = 32;
 
   const wrapHeaders = new Set(['Nombre', 'Descansos']);
-  const centeredHeaders = new Set(['TipoDocumento', 'FechaInicial', 'FechaFinal', 'DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos']);
+  const centeredHeaders = new Set([
+    'TipoDocumento', 'FechaInicial', 'FechaFinal', 'DiasRemunerados', 'DiasNoRemunerados',
+    'TurnosNocturnos', 'Domingos', 'Festivos'
+  ]);
 
   rows.forEach((sourceRow, rowIndex) => {
     const row = sheet.addRow(Object.fromEntries(headers.map((header) => [header, sourceRow[header] ?? ''])));
@@ -261,7 +286,7 @@ export function buildPayrollExcelWorkbook(report) {
         wrapText: wrapHeaders.has(header)
       };
       if (isPayrollHourHeader(header)) cell.numFmt = '0.0';
-      if (['DiasTrabajados', 'DiasDescontados', 'DiasLaboradosNetos'].includes(header)) cell.numFmt = '0.##';
+      if (['DiasRemunerados', 'DiasNoRemunerados', 'TurnosNocturnos', 'Domingos', 'Festivos'].includes(header)) cell.numFmt = '0';
     });
   });
 
@@ -303,6 +328,11 @@ export function applyPayrollWorkerSelection(report, requestedWorkerIds = []) {
     workedDays: sumRows(rows, 'workedDays'),
     deductedDays: sumRows(rows, 'deductedDays'),
     netWorkedDays: sumRows(rows, 'netWorkedDays'),
+    remuneratedDays: sumRows(rows, 'remuneratedDays'),
+    unremuneratedDays: sumRows(rows, 'unremuneratedDays'),
+    nightShiftCount: sumRows(rows, 'nightShiftCount'),
+    sundayCount: sumRows(rows, 'sundayCount'),
+    holidayCount: sumRows(rows, 'holidayCount'),
     conceptMinutes
   };
   totals.totalHours = minutesToDecimalHours(totals.totalMinutes);
@@ -442,7 +472,12 @@ export function dispatchPayrollRouter(prisma) {
           period: { periodType: 'WEEKLY', from: '', to: '', anchor: '' },
           filters: { clientId: '', operationPointId: '', workerId: '', search: '', includeTest: false },
           clients: [], workers: [], rows: [], conceptCodes: PAYROLL_CONCEPT_CODES,
-          totals: { workers: 0, totalMinutes: 0, ordinaryMinutes: 0, overtimeMinutes: 0, exportableWorkers: 0, workersWithNovelties: 0, conceptMinutes: {}, conceptHours: {} }
+          totals: {
+            workers: 0, totalMinutes: 0, ordinaryMinutes: 0, overtimeMinutes: 0,
+            exportableWorkers: 0, workersWithNovelties: 0,
+            remuneratedDays: 0, unremuneratedDays: 0, nightShiftCount: 0, sundayCount: 0, holidayCount: 0,
+            conceptMinutes: {}, conceptHours: {}
+          }
         },
         selectedPolicy: DEFAULT_PAYROLL_POLICY, conceptCodes: PAYROLL_CONCEPT_CODES, formatPayrollMinutes,
         success: null, error: publicError(error)
