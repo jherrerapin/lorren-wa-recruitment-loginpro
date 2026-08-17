@@ -25,6 +25,7 @@ const MAX_OFFLINE_CAPTURE_AGE_MS = 72 * 60 * 60 * 1000;
 const MAX_CLIENT_CLOCK_FUTURE_SKEW_MS = 5 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
 const OPERATIONAL_DAY_MS = 24 * 60 * MINUTE_MS;
+const ARRIVAL_WINDOW_MS = 8 * 60 * MINUTE_MS;
 const DEFAULT_OPERATIONAL_SPAN_MS = (
   STANDARD_DISPATCH_WORKDAY_MINUTES + STANDARD_DISPATCH_BREAK_MINUTES
 ) * MINUTE_MS;
@@ -249,15 +250,14 @@ export function isDispatchDepartureWithinOperationalWindow(window, value) {
 export function getDispatchArrivalWindowState(input = {}) {
   const now = requiredTimestamp(input.now, 'attendance_window_now');
   const expectedStartAt = requiredTimestamp(input.expectedStartAt, 'attendance_expected_start');
-  const serviceDateKey = instantDateKeyInBogota(expectedStartAt, 'attendance_expected_start');
-  const opensAt = new Date(`${serviceDateKey}T00:00:00-05:00`);
-  const closesAt = new Date(opensAt.getTime() + OPERATIONAL_DAY_MS);
-  const open = now >= opensAt && now < closesAt;
+  const opensAt = new Date(expectedStartAt.getTime());
+  const closesAt = new Date(expectedStartAt.getTime() + ARRIVAL_WINDOW_MS);
+  const open = now >= opensAt && now <= closesAt;
   return {
     open,
     opensAt,
     closesAt,
-    expired: now >= closesAt
+    expired: now > closesAt
   };
 }
 
