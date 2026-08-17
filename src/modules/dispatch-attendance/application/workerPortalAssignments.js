@@ -221,7 +221,7 @@ function buildPortalAssignment(assignment, now) {
   } else if (!expectedStartAt) actionLabel = 'Horario pendiente';
   else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
   else if (!arrivalWindow.open) {
-    actionLabel = arrivalWindow.expired ? 'Jornada vencida' : 'Disponible el día de la asignación';
+    actionLabel = arrivalWindow.expired ? 'Jornada vencida' : `Disponible desde ${formatTime(expectedStartAt)}`;
   }
 
   let breakActionType = null;
