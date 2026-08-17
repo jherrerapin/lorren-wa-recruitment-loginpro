@@ -22,26 +22,39 @@ test('sucursales reemplaza la clasificación funcional de ciudades sin contrato 
   assert.doesNotMatch(view, /href="\/admin\/vacancies"/);
 });
 
-test('sucursal contiene operación y configuración consumida por Lórren', () => {
+test('Sucursales es superficie única y delega Vacancy/InterviewSlot a admin.js', () => {
   const route = fs.readFileSync('src/routes/locations.js', 'utf8');
+  const adminRoute = fs.readFileSync('src/routes/admin.js', 'utf8');
   const view = fs.readFileSync('src/views/locations.ejs', 'utf8');
   const fields = fs.readFileSync('src/views/partials/locationOperationConfigFields.ejs', 'utf8');
 
-  assert.match(route, /buildRecruitmentConfigData/);
-  assert.match(route, /tx\.operation\.create/);
-  assert.match(route, /tx\.vacancy\.create/);
-  assert.match(route, /operationId: operation\.id/);
-  assert.match(route, /operations\/:operationId\/recruitment\/:vacancyId\/edit/);
+  assert.match(route, /prisma\.operation\.create/);
+  assert.doesNotMatch(route, /(?:prisma|tx)\.vacancy\.(?:create|update|updateMany|delete|deleteMany|upsert)/);
+  assert.doesNotMatch(route, /(?:prisma|tx)\.interviewSlot\.(?:create|createMany|update|updateMany|delete|deleteMany|upsert)/);
 
-  assert.match(view, /Cada sucursal contiene sus operaciones/);
+  assert.match(adminRoute, /router\.post\('\/vacancies\/create'/);
+  assert.match(adminRoute, /tx\.vacancy\.create/);
+  assert.match(adminRoute, /router\.post\('\/vacancies\/:id\/edit'/);
+  assert.match(adminRoute, /tx\.vacancy\.update/);
+  assert.match(adminRoute, /syncVacancyInterviewSlots/);
+
+  assert.match(view, /action="\/admin\/vacancies\/create"/);
+  assert.match(view, /action="\/admin\/vacancies\/<%= config\.id %>\/edit"/);
+  assert.match(view, /data-create-operation-form/);
+  assert.match(view, /postCanonicalVacancy/);
   assert.match(view, /Editar información/);
   assert.match(view, /configuraciones históricas/);
+
+  assert.match(fields, /name="operationId"/);
   assert.match(fields, /name="title"/);
+  assert.match(fields, /name="description"/);
   assert.match(fields, /name="requirements"/);
   assert.match(fields, /name="conditions"/);
   assert.match(fields, /name="isActive"/);
   assert.match(fields, /name="acceptingApplications"/);
   assert.match(fields, /name="schedulingEnabled"/);
+  assert.match(fields, /name="slotDays"/);
+  assert.match(fields, /name="slotStartTime"/);
 });
 
 test('migración consolida Siberia en Bogotá y preserva autoridad territorial de auxiliares', () => {
