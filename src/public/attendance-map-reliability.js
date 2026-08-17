@@ -9,7 +9,9 @@
   const GEOCODING_ENDPOINT = '/admin/operaciones/asistencia/geocodificar';
   const TARGET_ACCURACY_METERS = 20;
   const LOCATION_SAMPLE_TIMEOUT_MS = 15_000;
+  const GEOCODING_REQUEST_TIMEOUT_MS = 8_000;
   const TILE_ERROR_THRESHOLD = 2;
+  const TILE_LOAD_TIMEOUT_MS = 4_500;
   const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   const IDECA_TILE_URL = 'https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/mapa_base_3857/MapServer/tile/{z}/{y}/{x}';
   const BOGOTA_BOUNDS = Object.freeze({ south: 4.45, north: 4.86, west: -74.32, east: -73.90 });
@@ -258,32 +260,48 @@
       state.activeLayer = layer;
       state.activeProvider = providerName;
       let errors = 0;
+      let failed = false;
+      let loadTimeoutId = null;
 
-      setProviderMessage(map, `Fondo cartográfico: ${definition.label}.`);
-      setTileWarning(map, '', false);
-
-      layer.on('tileload', () => {
-        if (state.activeLayer !== layer) return;
-        errors = 0;
-        setProviderMessage(map, `Fondo cartográfico activo: ${definition.label}.`);
-        setTileWarning(map, '', false);
-      });
-      layer.on('tileerror', () => {
-        if (state.activeLayer !== layer) return;
-        errors += 1;
-        if (errors < TILE_ERROR_THRESHOLD) return;
+      const failProvider = (reason) => {
+        if (failed || state.activeLayer !== layer) return;
+        failed = true;
+        if (loadTimeoutId !== null) window.clearTimeout(loadTimeoutId);
         const nextProvider = state.order.find((name) => !state.attempted.has(name));
         if (nextProvider) {
-          setProviderMessage(map, `${definition.label} no respondió. Cambiando automáticamente de fondo…`);
+          setProviderMessage(map, `${definition.label} ${reason}. Cambiando automáticamente de fondo…`);
           activateProvider(map, nextProvider);
           return;
         }
         setProviderMessage(map, 'Los proveedores de fondo no respondieron.');
         setTileWarning(
           map,
-          'No fue posible cargar el fondo cartográfico. Los marcadores, la geocerca y las coordenadas siguen siendo válidos; vuelve a intentar más tarde.',
+          'No fue posible cargar el fondo cartográfico. El mapa sigue aceptando clics y las coordenadas siguen siendo válidas; puedes seleccionar el punto manualmente y volver a intentar el fondo más tarde.',
           true
         );
+      };
+
+      setProviderMessage(map, `Fondo cartográfico: ${definition.label}.`);
+      setTileWarning(map, '', false);
+      loadTimeoutId = window.setTimeout(
+        () => failProvider('no respondió a tiempo'),
+        TILE_LOAD_TIMEOUT_MS
+      );
+
+      layer.on('tileload', () => {
+        if (failed || state.activeLayer !== layer) return;
+        errors = 0;
+        if (loadTimeoutId !== null) {
+          window.clearTimeout(loadTimeoutId);
+          loadTimeoutId = null;
+        }
+        setProviderMessage(map, `Fondo cartográfico activo: ${definition.label}.`);
+        setTileWarning(map, '', false);
+      });
+      layer.on('tileerror', () => {
+        if (failed || state.activeLayer !== layer) return;
+        errors += 1;
+        if (errors >= TILE_ERROR_THRESHOLD) failProvider('falló al cargar las teselas');
       });
 
       layer.addTo(map);
@@ -334,7 +352,9 @@
           button.textContent = 'Copiadas';
           window.setTimeout(() => { button.textContent = 'Copiar coordenadas'; }, 1600);
         } catch {
-          window.prompt('Copia estas coordenadas:', coordinates);
+          button.textContent = 'Selecciona el texto de coordenadas';
+          button.title = coordinates;
+          window.setTimeout(() => { button.textContent = 'Copiar coordenadas'; }, 2200);
         }
       });
       return button;
@@ -491,12 +511,15 @@
       button.disabled = true;
       removeGeocodingResults(form);
       setStatus(form, `Buscando “${rawQuery}”${city ? ` en ${city}` : ''}…`);
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), GEOCODING_REQUEST_TIMEOUT_MS);
       try {
         const params = new URLSearchParams({ q: query });
         if (city) params.set('city', city);
         const response = await fetch(`${GEOCODING_ENDPOINT}?${params.toString()}`, {
           cache: 'no-store',
-          headers: { Accept: 'application/json' }
+          headers: { Accept: 'application/json' },
+          signal: controller.signal
         });
         if (!response.ok) throw new Error('attendance_geocoding_unavailable');
         const payload = await response.json();
@@ -507,9 +530,16 @@
         }
         renderGeocodingResults(form, input, results);
         setStatus(form, 'Selecciona una coincidencia. Lórren agrega automáticamente ciudad y país y nunca guardará el primer resultado sin confirmación.');
-      } catch {
-        setStatus(form, 'La búsqueda no está disponible. Usa tu ubicación o selecciona el punto directamente en el mapa.', true);
+      } catch (error) {
+        setStatus(
+          form,
+          error?.name === 'AbortError'
+            ? 'La búsqueda tardó más de lo esperado. Intenta de nuevo o selecciona el punto directamente en el mapa.'
+            : 'La búsqueda no está disponible. Usa tu ubicación o selecciona el punto directamente en el mapa.',
+          true
+        );
       } finally {
+        window.clearTimeout(timeoutId);
         button.disabled = false;
       }
     }
@@ -650,6 +680,7 @@
       installSearchContext();
       installDetailsRefresh();
       refreshAllMaps();
+      document.dispatchEvent(new CustomEvent('lorren:attendance-map-ready'));
     }
 
     window.LorrenAttendanceMaps = Object.freeze({ refreshAll: refreshAllMaps, refreshMapViewport });

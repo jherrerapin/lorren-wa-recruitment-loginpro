@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>Operaciones de cliente — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
@@ -120,6 +121,7 @@
                       method="post"
                       action="/admin/operaciones/clientes/<%= client.id %>/operaciones/<%= op.id %>/asistencia"
                       class="form-grid compact-form attendance-map-form"
+                      data-attendance-search-city="<%= op.cityName || '' %>"
                       autocomplete="off"
                     >
                       <input type="hidden" name="attendanceEnabledFallback" value="false" />
@@ -223,14 +225,14 @@
 
   <script
     src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-    integrity="sha256-20nQCchB9coqIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
     crossorigin=""
   ></script>
+  <script src="/public/attendance-map-reliability.js"></script>
   <script>
     const ATTENDANCE_GEOFENCE_RADIUS_METERS = 100;
     const DEFAULT_ATTENDANCE_MAP_CENTER = [4.570868, -74.297333];
     const attendanceMaps = new WeakMap();
-    let nextNominatimSearchAt = 0;
 
     function refreshSelectState(select) { select.classList.toggle('has-selection', Boolean(select.value)); }
 
@@ -312,14 +314,6 @@
       setAttendanceMapStatus(form, message || 'Punto seleccionado. Guarda la configuración para habilitar la marcación.');
     }
 
-    async function reserveNominatimSearchSlot() {
-      const now = Date.now();
-      const scheduledAt = Math.max(now, nextNominatimSearchAt);
-      nextNominatimSearchAt = scheduledAt + 1100;
-      const waitMs = scheduledAt - now;
-      if (waitMs > 0) await new Promise((resolve) => window.setTimeout(resolve, waitMs));
-    }
-
     function initializeAttendanceMap(form) {
       if (!form) return;
       const existingState = attendanceMaps.get(form);
@@ -328,7 +322,7 @@
         return;
       }
       if (!window.L) {
-        setAttendanceMapStatus(form, 'No fue posible cargar el mapa. Recarga la página e inténtalo nuevamente.', true);
+        setAttendanceMapStatus(form, 'Cargando el componente cartográfico…');
         return;
       }
 
@@ -356,83 +350,6 @@
         setAttendancePoint(form, state, savedLatitude, savedLongitude, 'Ubicación guardada. Puedes tocar el mapa o arrastrar el marcador para ajustarla.');
       }
 
-      form.querySelector('.attendance-search-button')?.addEventListener('click', async () => {
-        const searchInput = form.querySelector('.attendance-address-search');
-        const query = String(searchInput?.value || '').trim();
-        if (query.length < 4) {
-          setAttendanceMapStatus(form, 'Escribe una dirección o nombre de lugar más específico.', true);
-          searchInput?.focus();
-          return;
-        }
-
-        const button = form.querySelector('.attendance-search-button');
-        button.disabled = true;
-        setAttendanceMapStatus(form, 'Buscando la dirección…');
-        try {
-          await reserveNominatimSearchSlot();
-          const params = new URLSearchParams({
-            q: query,
-            format: 'jsonv2',
-            limit: '1',
-            countrycodes: 'co',
-            'accept-language': 'es'
-          });
-          const controller = new AbortController();
-          const timeoutId = window.setTimeout(() => controller.abort(), 8000);
-          let response;
-          try {
-            response = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
-              headers: { Accept: 'application/json' },
-              signal: controller.signal
-            });
-          } finally {
-            window.clearTimeout(timeoutId);
-          }
-          if (!response.ok) throw new Error('geocoding_unavailable');
-          const results = await response.json();
-          const first = Array.isArray(results) ? results[0] : null;
-          if (!first) {
-            setAttendanceMapStatus(form, 'No encontramos esa dirección. Prueba con barrio, ciudad o selecciona el punto directamente en el mapa.', true);
-            return;
-          }
-          setAttendancePoint(form, state, first.lat, first.lon, 'Dirección encontrada. Ajusta el marcador si la entrada real está en otro lugar.');
-        } catch (_error) {
-          setAttendanceMapStatus(form, 'La búsqueda de direcciones no está disponible. Usa tu ubicación o selecciona el punto directamente en el mapa.', true);
-        } finally {
-          button.disabled = false;
-        }
-      });
-
-      form.querySelector('.attendance-current-location')?.addEventListener('click', () => {
-        if (!navigator.geolocation) {
-          setAttendanceMapStatus(form, 'Este navegador no permite obtener la ubicación. Selecciona el punto directamente en el mapa.', true);
-          return;
-        }
-        const button = form.querySelector('.attendance-current-location');
-        button.disabled = true;
-        setAttendanceMapStatus(form, 'Obteniendo tu ubicación actual…');
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            const accuracy = Math.round(position.coords.accuracy || 0);
-            setAttendancePoint(
-              form,
-              state,
-              position.coords.latitude,
-              position.coords.longitude,
-              accuracy > 50
-                ? `Ubicación obtenida con una precisión aproximada de ${accuracy} m. Ajusta el marcador hasta la entrada exacta.`
-                : `Ubicación actual seleccionada con una precisión aproximada de ${accuracy} m.`
-            );
-            button.disabled = false;
-          },
-          () => {
-            setAttendanceMapStatus(form, 'No fue posible obtener tu ubicación. Revisa el permiso del navegador o selecciona el punto en el mapa.', true);
-            button.disabled = false;
-          },
-          { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-        );
-      });
-
       form.addEventListener('submit', (event) => {
         const enabled = form.querySelector('[name="attendanceEnabled"]')?.checked === true;
         const hasCoordinates = Boolean(latitudeInput?.value && longitudeInput?.value);
@@ -446,28 +363,39 @@
       window.setTimeout(() => map.invalidateSize(), 0);
     }
 
+    function initializeOpenAttendanceMaps() {
+      document.querySelectorAll('details.attendance-config[open]').forEach((details) => {
+        initializeAttendanceMap(details.querySelector('.attendance-map-form'));
+      });
+    }
+
     document.querySelectorAll('details.attendance-config').forEach((details) => {
       details.addEventListener('toggle', () => {
         if (details.open) initializeAttendanceMap(details.querySelector('.attendance-map-form'));
       });
       if (details.open) initializeAttendanceMap(details.querySelector('.attendance-map-form'));
     });
+    document.addEventListener('lorren:attendance-map-ready', initializeOpenAttendanceMaps);
 
     document.querySelectorAll('.copy-client-link').forEach((button) => {
       button.addEventListener('click', async () => {
         const value = button.dataset.copyValue || '';
+        const input = button.parentElement?.querySelector('.copy-input');
         try {
           if (navigator.clipboard?.writeText) {
             await navigator.clipboard.writeText(value);
-          } else {
-            const input = button.parentElement?.querySelector('.copy-input');
-            input?.select();
+          } else if (input) {
+            input.focus();
+            input.select();
             document.execCommand('copy');
           }
           button.textContent = 'Link copiado';
           window.setTimeout(() => { button.textContent = 'Copiar link del cliente'; }, 1800);
         } catch (_error) {
-          window.prompt('Copia el link del cliente:', value);
+          input?.focus();
+          input?.select();
+          button.textContent = 'Selecciona y copia el link';
+          window.setTimeout(() => { button.textContent = 'Copiar link del cliente'; }, 2200);
         }
       });
     });

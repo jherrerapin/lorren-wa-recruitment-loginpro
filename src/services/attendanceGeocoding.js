@@ -3,7 +3,8 @@ const IDECA_LEGACY_SEARCH_URL = 'https://catalogopmb.catastrobogota.gov.co/PMBWe
 const IDECA_PLATE_QUERY_URL = 'https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/catastro/placadomiciliaria/MapServer/0/query';
 const ARCGIS_GEOCODING_URL = 'https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates';
 const NOMINATIM_MIN_INTERVAL_MS = 1_100;
-const PROVIDER_TIMEOUT_MS = 7_000;
+const PROVIDER_TIMEOUT_MS = 2_000;
+const GEOCODING_TOTAL_BUDGET_MS = 6_500;
 const PROVIDER_RETRY_DELAY_MS = 180;
 const PROVIDER_MAX_ATTEMPTS = 2;
 const PROVIDER_FAILURE_THRESHOLD = 2;
@@ -516,11 +517,18 @@ function markProviderFailure(name, now) {
   });
 }
 
-async function reserveNominatimRequestSlot(nowFn, sleepFn) {
+async function reserveNominatimRequestSlot(nowFn, sleepFn, options = {}) {
   const now = nowFn();
   const scheduledAt = Math.max(now, nextNominatimRequestAt);
-  nextNominatimRequestAt = scheduledAt + NOMINATIM_MIN_INTERVAL_MS;
   const waitMs = scheduledAt - now;
+  const clockFn = options.clockFn || Date.now;
+  const remaining = Number.isFinite(options.deadlineAt)
+    ? options.deadlineAt - clockFn()
+    : Number.POSITIVE_INFINITY;
+  if (waitMs > remaining) {
+    throw providerError('attendance_geocoding_nominatim_budget_exhausted', { retryable: false });
+  }
+  nextNominatimRequestAt = scheduledAt + NOMINATIM_MIN_INTERVAL_MS;
   if (waitMs > 0) await sleepFn(waitMs);
 }
 
@@ -535,11 +543,26 @@ function identifyingOrigin(value) {
   }
 }
 
+function effectiveProviderTimeout(options, errorCode) {
+  const requestedTimeout = Number(options.timeoutMs || PROVIDER_TIMEOUT_MS);
+  const baseTimeout = Number.isFinite(requestedTimeout) && requestedTimeout > 0
+    ? requestedTimeout
+    : PROVIDER_TIMEOUT_MS;
+  if (!Number.isFinite(options.deadlineAt)) return baseTimeout;
+  const clockFn = options.clockFn || Date.now;
+  const remaining = options.deadlineAt - clockFn();
+  if (remaining <= 0) {
+    throw providerError(`${errorCode}_budget_exhausted`, { retryable: false });
+  }
+  return Math.max(1, Math.min(baseTimeout, remaining));
+}
+
 async function fetchJson(url, options, errorCode) {
   const fetchFn = options.fetchFn || globalThis.fetch;
   if (typeof fetchFn !== 'function') throw providerError('attendance_geocoding_fetch_unavailable');
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || PROVIDER_TIMEOUT_MS);
+  const timeoutMs = effectiveProviderTimeout(options, errorCode);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetchFn(url, { ...options.requestOptions, signal: controller.signal });
     if (!response?.ok) {
@@ -553,7 +576,9 @@ async function fetchJson(url, options, errorCode) {
     }
     return payload;
   } catch (error) {
-    if (error?.name === 'AbortError') throw providerError(`${errorCode}_timeout`);
+    if (error?.name === 'AbortError') {
+      throw providerError(`${errorCode}_timeout`, { retryable: false });
+    }
     throw error;
   } finally {
     clearTimeout(timeoutId);
@@ -562,12 +587,17 @@ async function fetchJson(url, options, errorCode) {
 
 async function runProvider(name, requestFn, options) {
   const nowFn = options.nowFn || Date.now;
+  const clockFn = options.clockFn || Date.now;
   const sleepFn = options.sleepFn || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   if (!providerIsAvailable(name, nowFn())) {
     throw providerError(`attendance_geocoding_${name}_circuit_open`, { retryable: false });
   }
   let lastError = null;
   for (let attempt = 1; attempt <= PROVIDER_MAX_ATTEMPTS; attempt += 1) {
+    if (Number.isFinite(options.deadlineAt) && clockFn() >= options.deadlineAt) {
+      lastError = providerError(`attendance_geocoding_${name}_budget_exhausted`, { retryable: false });
+      break;
+    }
     try {
       const results = await requestFn();
       markProviderSuccess(name);
@@ -575,7 +605,12 @@ async function runProvider(name, requestFn, options) {
     } catch (error) {
       lastError = error;
       if (error?.retryable === false || attempt === PROVIDER_MAX_ATTEMPTS) break;
-      await sleepFn(PROVIDER_RETRY_DELAY_MS * attempt);
+      const requestedDelay = PROVIDER_RETRY_DELAY_MS * attempt;
+      const remaining = Number.isFinite(options.deadlineAt)
+        ? Math.max(0, options.deadlineAt - clockFn())
+        : requestedDelay;
+      const delay = Math.min(requestedDelay, remaining);
+      if (delay > 0) await sleepFn(delay);
     }
   }
   markProviderFailure(name, nowFn());
@@ -648,7 +683,7 @@ async function requestNominatim(query, options, precision = 'approximate') {
   const nowFn = options.nowFn || Date.now;
   const sleepFn = options.sleepFn || ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
   const origin = identifyingOrigin(options.origin);
-  await reserveNominatimRequestSlot(nowFn, sleepFn);
+  await reserveNominatimRequestSlot(nowFn, sleepFn, options);
   const params = new URLSearchParams({
     q: query,
     format: 'jsonv2',
@@ -681,18 +716,36 @@ function appendResults(target, incoming) {
   return sortAndDeduplicate(target);
 }
 
+function resolveTotalBudgetMs(options) {
+  const configured = Number(options.totalBudgetMs);
+  return Number.isFinite(configured) && configured > 0 ? configured : GEOCODING_TOTAL_BUDGET_MS;
+}
+
 export async function geocodeAttendanceAddress(rawQuery, options = {}) {
   const query = buildContextualAttendanceQuery(rawQuery, options.city);
   const nowFn = options.nowFn || Date.now;
+  const clockFn = options.clockFn || Date.now;
   const cached = options.disableCache ? null : readCache(query, nowFn());
   if (cached) return cached;
 
+  const deadlineAt = clockFn() + resolveTotalBudgetMs(options);
+  const providerOptions = { ...options, clockFn, deadlineAt };
   const collected = [];
   const errors = [];
   let successfulProviders = 0;
+  const hasBudget = () => clockFn() < deadlineAt;
+  const finish = () => {
+    const result = sortAndDeduplicate(collected);
+    if (result.length && !options.disableCache) writeCache(query, result, nowFn());
+    return result;
+  };
   const useProvider = async (name, requestFn) => {
+    if (!hasBudget()) {
+      errors.push(providerError(`attendance_geocoding_${name}_budget_exhausted`, { retryable: false }));
+      return;
+    }
     try {
-      const results = await runProvider(name, requestFn, options);
+      const results = await runProvider(name, () => requestFn(providerOptions), providerOptions);
       successfulProviders += 1;
       appendResults(collected, results);
     } catch (error) {
@@ -701,51 +754,57 @@ export async function geocodeAttendanceAddress(rawQuery, options = {}) {
   };
 
   if (isBogotaQuery(query) && buildBogotaPlateQuery(query)) {
-    await useProvider('ideca_placa', () => requestBogotaPlate(query, options));
-    if (hasStrongAddressResult(collected)) {
-      const result = sortAndDeduplicate(collected);
-      if (!options.disableCache) writeCache(query, result, nowFn());
-      return result;
-    }
+    await useProvider('ideca_placa', (activeOptions) => requestBogotaPlate(query, activeOptions));
+    if (hasStrongAddressResult(collected)) return finish();
   }
 
   const arcgisToken = normalizeWhitespace(options.arcgisToken ?? process.env.ATTENDANCE_ARCGIS_GEOCODING_TOKEN);
-  if (arcgisToken) {
-    await useProvider('arcgis', () => requestArcgis(query, options));
-    if (hasStrongAddressResult(collected)) {
-      const result = sortAndDeduplicate(collected);
-      if (!options.disableCache) writeCache(query, result, nowFn());
-      return result;
-    }
+  if (arcgisToken && hasBudget()) {
+    await useProvider('arcgis', (activeOptions) => requestArcgis(query, activeOptions));
+    if (hasStrongAddressResult(collected)) return finish();
   }
 
-  if (isBogotaQuery(query)) {
-    const idecaQueries = buildIdecaGeocodingQueries(query);
-    for (const idecaQuery of idecaQueries.slice(0, 3)) {
-      await useProvider('ideca_legacy', () => requestIdecaLegacy(idecaQuery, query, options));
-      if (collected.length) break;
-      if (!providerIsAvailable('ideca_legacy', nowFn())) break;
-    }
+  const idecaQueries = isBogotaQuery(query) ? buildIdecaGeocodingQueries(query).slice(0, 3) : [];
+  const nominatimQueries = buildAttendanceGeocodingQueries(query).slice(0, 4);
+  const fallbackTasks = [];
+  if (idecaQueries[0] && hasBudget()) {
+    fallbackTasks.push(useProvider(
+      'ideca_legacy',
+      (activeOptions) => requestIdecaLegacy(idecaQueries[0], query, activeOptions)
+    ));
   }
+  if (nominatimQueries[0] && hasBudget()) {
+    fallbackTasks.push(useProvider(
+      'nominatim',
+      (activeOptions) => requestNominatim(nominatimQueries[0], activeOptions, 'address')
+    ));
+  }
+  if (fallbackTasks.length) await Promise.all(fallbackTasks);
+  if (collected.length) return finish();
 
-  if (!hasStrongAddressResult(collected)) {
-    const nominatimQueries = buildAttendanceGeocodingQueries(query);
-    for (let index = 0; index < Math.min(4, nominatimQueries.length); index += 1) {
-      await useProvider('nominatim', () => requestNominatim(
+  for (let index = 1; index < idecaQueries.length && hasBudget(); index += 1) {
+    await useProvider(
+      'ideca_legacy',
+      (activeOptions) => requestIdecaLegacy(idecaQueries[index], query, activeOptions)
+    );
+    if (collected.length || !providerIsAvailable('ideca_legacy', nowFn())) break;
+  }
+  if (collected.length) return finish();
+
+  for (let index = 1; index < nominatimQueries.length && hasBudget(); index += 1) {
+    await useProvider(
+      'nominatim',
+      (activeOptions) => requestNominatim(
         nominatimQueries[index],
-        options,
-        index <= 1 ? 'address' : 'approximate'
-      ));
-      if (hasStrongAddressResult(collected) || collected.length >= MAX_PUBLIC_RESULTS) break;
-      if (!providerIsAvailable('nominatim', nowFn())) break;
-    }
+        activeOptions,
+        index === 1 ? 'address' : 'approximate'
+      )
+    );
+    if (collected.length || !providerIsAvailable('nominatim', nowFn())) break;
   }
 
-  const results = sortAndDeduplicate(collected);
-  if (results.length) {
-    if (!options.disableCache) writeCache(query, results, nowFn());
-    return results;
-  }
+  const results = finish();
+  if (results.length) return results;
   if (!successfulProviders && errors.length) throw errors.at(-1);
   return [];
 }
