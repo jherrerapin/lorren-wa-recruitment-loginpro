@@ -231,7 +231,8 @@
   <script src="/public/attendance-map-reliability.js"></script>
   <script>
     const ATTENDANCE_GEOFENCE_RADIUS_METERS = 100;
-    const DEFAULT_ATTENDANCE_MAP_CENTER = [4.570868, -74.297333];
+    const DEFAULT_ATTENDANCE_MAP_CENTER = [4.0, -73.5];
+    const DEFAULT_ATTENDANCE_MAP_ZOOM = 5;
     const attendanceMaps = new WeakMap();
 
     function refreshSelectState(select) { select.classList.toggle('has-selection', Boolean(select.value)); }
@@ -333,7 +334,7 @@
       const savedLongitude = finiteCoordinate(longitudeInput?.value, -180, 180);
       const hasSavedPoint = savedLatitude !== null && savedLongitude !== null;
       const initialCenter = hasSavedPoint ? [savedLatitude, savedLongitude] : DEFAULT_ATTENDANCE_MAP_CENTER;
-      const map = window.L.map(mapContainer, { scrollWheelZoom: false }).setView(initialCenter, hasSavedPoint ? 18 : 6);
+      const map = window.L.map(mapContainer, { scrollWheelZoom: false }).setView(initialCenter, hasSavedPoint ? 18 : DEFAULT_ATTENDANCE_MAP_ZOOM);
       const state = { map, marker: null, circle: null };
       attendanceMaps.set(form, state);
 
