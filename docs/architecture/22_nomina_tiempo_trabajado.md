@@ -28,15 +28,26 @@ No se redondea cada jornada antes de consolidar. Primero se suman los minutos de
 
 ## Periodos
 
-El portal permite:
+Nómina combina dos ventanas independientes en un único resultado.
 
-- semanal: lunes a domingo;
-- quincenal: días 1 a 15 o 16 al último día del mes;
-- personalizado: máximo 62 días.
+El **periodo general** ofrece:
+
+- primera quincena: días 1 a 15;
+- segunda quincena: día 16 al último día del mes;
+- personalizado: un día o un rango de máximo 62 días.
+
+El **periodo de horas extras** ofrece:
+
+- semanal: lunes a domingo a partir de la fecha seleccionada;
+- personalizado: un día o un rango de máximo 62 días.
+
+Cambiar una ventana no modifica la otra. La fila final por auxiliar conserva días remunerados/no remunerados, permisos, incapacidades, turnos, domingos, festivos, total trabajado, ordinarias y recargos `R*` del periodo general, mientras `Horas extra` y `HEDO`, `HENO`, `HEDD`, `HEND`, `HEDF`, `HENF` provienen exclusivamente del periodo de horas extras. Un auxiliar con actividad relevante solo en la ventana de extras puede aparecer una vez con métricas generales en cero y sus `H*` correspondientes.
 
 La semana de Nómina es una regla fija de lunes a domingo. Las políticas históricas que hayan guardado domingo como inicio se normalizan a lunes al leerse, sin migración de datos.
 
-Para conciliar correctamente un corte quincenal o personalizado, la consulta carga la semana completa de lunes a domingo que toque cada extremo del rango visible. Los días fuera del corte no se muestran ni se exportan, pero sí participan en el balance entre excesos diarios y faltantes diarios de esa misma semana. La semana es una **ventana de conciliación**; no existe un umbral de 42 horas que por sí solo cree o elimine horas extra.
+Para conciliar correctamente cada una de las dos ventanas, `loadPayrollReport()` carga la semana completa de lunes a domingo que toque cada extremo del rango solicitado. Los días fuera de la ventana visible no se muestran ni se exportan como parte de esa ventana, pero sí participan en el balance entre excesos diarios y faltantes diarios de la misma semana. La semana es una **ventana de conciliación**; no existe un umbral de 42 horas que por sí solo cree o elimine horas extra.
+
+La composición de ambos resultados no reclasifica minutos. El motor canónico se ejecuta con cada rango y el adaptador de Nómina sustituye únicamente los campos `H*` y el total de extras por los calculados para la ventana de horas extras; los `R*` y los contadores generales permanecen en su corte original. Las novedades del periodo de extras también se conservan para no ocultar un bloqueo de esa ventana.
 
 ## Política por cliente
 
@@ -143,7 +154,9 @@ Los festivos no usan este flujo: se muestran con el indicativo `Festivo`, sus mi
 
 ## Calendario
 
-Los selectores de fecha del módulo usan un calendario propio sin dependencias externas. La cabecera siempre se ordena:
+Los rangos personalizados del periodo general y de horas extras usan un **solo calendario por selección**, sin campos visibles separados `Desde` / `Hasta`. Un primer día puede aplicarse como fecha única; una segunda selección define el rango. El modo semanal de extras toma la fecha elegida y resuelve la semana completa lunes–domingo.
+
+El calendario no depende de librerías externas. La cabecera siempre se ordena:
 
 `Lun · Mar · Mié · Jue · Vie · Sáb · Dom`
 
@@ -156,7 +169,7 @@ Se ofrecen:
 - CSV separado por punto y coma y codificado para Excel;
 - Excel `.xlsx` con encabezados, filtro y horas decimales.
 
-El reporte conserva identificación, rango, horas ordinarias, total trabajado, horas extra y los códigos canónicos de conceptos. El XLSX descargable omite las columnas de presentación `Estado` y `Novedades`; el endpoint CSV heredado conserva su contrato actual.
+La exportación usa exactamente el mismo resultado combinado que la tabla: rango general para contadores, ordinarias y `R*`, y rango independiente de extras para `HorasExtraTotal` y `H*`. El encabezado del XLSX identifica ambos rangos. El XLSX descargable omite las columnas de presentación `Estado` y `Novedades`; el endpoint CSV heredado conserva su contrato actual.
 
 ## Alcance de esta entrega
 
