@@ -29,7 +29,6 @@
     .alert { padding:10px 14px; border-radius:var(--radius); margin-bottom:16px; font-weight:700; }
     .alert-success { background:var(--green-light); color:var(--green); }
     .alert-error { background:var(--red-light); color:var(--red); }
-    .notice { margin:0 0 18px; padding:12px 14px; border:1px solid #bae6fd; background:#f0f9ff; color:#075985; border-radius:10px; font-size:12px; }
     .branch-list { display:grid; gap:18px; }
     .branch-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow); overflow:hidden; }
     .branch-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; background:var(--surface-2); border-bottom:1px solid var(--border); }
@@ -56,7 +55,6 @@
     .operation-card { border:1px solid #e7eaee; border-radius:12px; background:var(--surface-2); overflow:hidden; }
     .operation-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; }
     .operation-name { font-weight:800; color:var(--navy); font-size:14px; }
-    .operation-meta { color:var(--muted); font-size:11px; margin-top:2px; }
     .operation-body { padding:0 14px 14px; display:grid; gap:10px; }
     .config-card { border:1px solid var(--border); border-radius:10px; background:#fff; overflow:hidden; }
     .config-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:11px 12px; border-bottom:1px solid #eef0f3; }
@@ -99,10 +97,8 @@
 <main class="page">
   <header class="page-header">
     <h1>Sucursales</h1>
-    <p>Esta es la superficie única de configuración territorial. Cada sucursal contiene sus operaciones; la información de reclutamiento se edita aquí, pero la persistencia de vacantes y horarios sigue delegada a la autoridad administrativa existente.</p>
+    <p>Administra las sucursales disponibles.</p>
   </header>
-
-  <div class="notice"><strong>Bogotá incluye Siberia.</strong> Siberia se maneja como zona u operación de la sucursal Bogotá y no como una sucursal independiente.</div>
 
   <% if (successMsg) { %><div class="alert alert-success"><%= successMsg %></div><% } %>
   <% if (errorMsg) { %><div class="alert alert-error"><%= errorMsg %></div><% } %>
@@ -140,10 +136,7 @@
           <% for (const op of city.operations) { %>
             <section class="operation-card">
               <div class="operation-head">
-                <div>
-                  <div class="operation-name"><%= op.name %></div>
-                  <div class="operation-meta"><%= op.vacancies.length %> configuración<%= op.vacancies.length === 1 ? '' : 'es' %> de Lórren · la sucursal se hereda automáticamente</div>
-                </div>
+                <div class="operation-name"><%= op.name %></div>
                 <div class="actions">
                   <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-op-<%= op.id %>">Renombrar</button>
                   <% if (op.vacancies.length === 0) { %>
@@ -163,10 +156,6 @@
               </div>
 
               <div class="operation-body">
-                <% if (op.vacancies.length > 1) { %>
-                  <div class="config-note"><strong>Dato heredado:</strong> esta operación tiene varias configuraciones históricas. Se conservan separadas para no mezclar candidatos, campañas o agendas; todas se administran aquí.</div>
-                <% } %>
-
                 <% if (op.vacancies.length === 0) { %>
                   <div class="config-note">Esta operación todavía no tiene información para Lórren. Complétala aquí para activarla.</div>
                   <form method="post" action="/admin/vacancies/create" class="config-grid" data-vacancy-config-form>
