@@ -16,6 +16,8 @@ test('sucursales reemplaza la clasificación funcional de ciudades sin contrato 
   assert.doesNotMatch(route, /CITY_USAGE_ORDER|resolveCityUsage|groupCitiesByUsage|cityUsageBadges/);
   assert.match(route, /unifiedBranchCompatibilityData/);
   assert.match(route, /Siberia pertenece a la sucursal Bogotá/);
+  assert.match(route, /isSiberiaName\(name\) && !isBogotaName\(city\.name\)/);
+  assert.match(route, /La operación Siberia solo puede pertenecer a la sucursal Bogotá/);
   assert.doesNotMatch(view, /name="usedForRecruitment"|name="usedForDispatch"|Bot \/ Reclutamiento.*Despacho o ambos/);
   assert.match(view, /<h1>Sucursales<\/h1>/);
   assert.match(view, /Bogotá incluye Siberia/);
