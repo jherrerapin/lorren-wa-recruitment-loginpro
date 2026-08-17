@@ -168,6 +168,35 @@ test('los faltantes consumen HEDO antes que HENO y el HENO retirado conserva RNO
   assert.equal(row.conceptMinutes.RNO, 30, 'los 30 minutos HENO retirados vuelven a ordinario con RNO');
 });
 
+test('la compensación completa recorre HEDO, HENO, HEDD, HEND, HEDF y deja HENF al final', () => {
+  const row = report([
+    session({ id: 'TEST-ORDER-WEEKDAY', dateKey: '2026-08-03', startHour: 11, minutes: 9 * 60 }),
+    session({ id: 'TEST-ORDER-SHORT-TUE', dateKey: '2026-08-04', minutes: 5 * 60 }),
+    session({ id: 'TEST-ORDER-SHORT-WED', dateKey: '2026-08-05', minutes: 5.5 * 60 }),
+    session({ id: 'TEST-ORDER-SHORT-THU', dateKey: '2026-08-06', minutes: 5.5 * 60 }),
+    session({ id: 'TEST-ORDER-HOLIDAY', dateKey: '2026-08-07', startHour: 11, minutes: 9 * 60 }),
+    session({ id: 'TEST-ORDER-SAT', dateKey: '2026-08-08', minutes: 7 * 60 }),
+    session({ id: 'TEST-ORDER-SUNDAY', dateKey: '2026-08-09', startHour: 11, minutes: 9 * 60 })
+  ], {
+    compensationByWorkerDate: new Map([
+      ['TEST-WORKER-1|2026-08-09', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]
+    ])
+  }).rows[0];
+
+  assert.equal(row.overtimeMinutes, 60);
+  assert.equal(row.conceptMinutes.HEDO, 0);
+  assert.equal(row.conceptMinutes.HENO, 0);
+  assert.equal(row.conceptMinutes.HEDD, 0);
+  assert.equal(row.conceptMinutes.HEND, 0);
+  assert.equal(row.conceptMinutes.HEDF, 0);
+  assert.equal(row.conceptMinutes.HENF, 60, 'solo queda HENF después de consumir 300 minutos en el orden canónico');
+  assert.equal(row.conceptMinutes.RNO, 60, 'HENO retirada conserva RNO');
+  assert.equal(row.conceptMinutes.RDD, 8 * 60, 'HEDD retirada vuelve al recargo dominical diurno');
+  assert.equal(row.conceptMinutes.RND, 60, 'HEND retirada vuelve al recargo dominical nocturno');
+  assert.equal(row.conceptMinutes.RDF, 8 * 60, 'HEDF retirada vuelve al recargo festivo diurno');
+  assert.equal(row.conceptMinutes.RNF, 0, 'HENF queda como extra y no se duplica como recargo');
+});
+
 test('el valor histórico de 42 h queda como compatibilidad y no decide las horas extra', () => {
   const historical = normalizePayrollPolicy({ weeklyOrdinaryMinutes: 120, dailyOrdinaryMinutes: 60 });
   assert.equal(historical.weeklyOrdinaryMinutes, 42 * 60);
