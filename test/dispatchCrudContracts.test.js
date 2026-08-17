@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
-test('dispatch CRUD contracts for clients operations services and every worker source', () => {
+test('dispatch CRUD conserva clientes y personal con sucursal como autoridad territorial', () => {
   const route = fs.readFileSync('src/routes/dispatchBridge.js', 'utf8');
   const coreRoute = fs.readFileSync('src/routes/dispatchBridgeCore.js', 'utf8');
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
@@ -29,7 +29,7 @@ test('dispatch CRUD contracts for clients operations services and every worker s
     "post('/personal/:workerId/editar'",
     "post('/personal/:workerId/toggle'",
     "post('/personal/:workerId/eliminar'"
-  ].forEach((s) => assert.match(coreRoute, new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
+  ].forEach((value) => assert.match(coreRoute, new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))));
 
   assert.match(coreRoute, /source:\s*'MANUAL'/);
   assert.match(coreRoute, /findWorkerOr404/);
@@ -38,24 +38,28 @@ test('dispatch CRUD contracts for clients operations services and every worker s
   assert.match(coreRoute, /regenerar-link/);
 
   ['Editar', 'Desactivar', 'Reactivar', 'Regenerar link', 'Eliminar'].forEach((label) => assert.match(clientsView, new RegExp(label)));
-  assert.doesNotMatch(clientsView, /Acciones CRUD/);
+  assert.doesNotMatch(clientsView, /Configurar ciudades|Bot y Despacho|Bot \/ Reclutamiento/);
+  assert.match(clientsView, /href="\/admin\/locations">Sucursales/);
   ['Editar operación', 'Editar servicio', 'Guardar operación', 'Guardar servicio', 'Eliminar'].forEach((label) => assert.match(clientOpsView, new RegExp(label)));
-  ['Editar', 'Desactivar', 'Reactivar', 'Eliminar', 'MANUAL'].forEach((label) => assert.match(personalView, new RegExp(label)));
+
+  ['Editar', 'Desactivar', 'Eliminar'].forEach((label) => assert.match(personalView, new RegExp(label)));
   assert.doesNotMatch(personalView, /if \(w\.source === 'MANUAL'\)/);
   assert.match(personalView, /\/operaciones\/admin-worker\/<%= w\.id %>\/editar/);
-  ['mode ===', 'formAction', 'selectedCityIds', 'selectedVacancyIds', 'operationalStatus', 'Datos del panel del bot', 'medicalRestrictions', 'experienceInfo', 'experienceTime', 'experienceSummary'].forEach((label) => assert.match(workerFormView, new RegExp(label)));
-  assert.match(workerFormView, /Hoja de vida, medio de transporte y notas operativas son opcionales/);
+  assert.match(personalView, /\/operaciones\/admin-worker\/nuevo/);
+  assert.doesNotMatch(personalView, /Vacantes \/ perfiles|name="vacancyId"/);
+
+  ['mode ===', 'formAction', 'selectedCityIds', 'operationalStatus', 'Datos del panel del bot', 'medicalRestrictions', 'experienceInfo', 'experienceTime', 'experienceSummary'].forEach((label) => assert.match(workerFormView, new RegExp(label)));
+  assert.match(workerFormView, /Sucursales habilitadas/);
   assert.match(workerFormView, /<select id="residenceCity" name="residenceCity" required>/);
-  assert.match(workerFormView, /cities\.forEach\(\(city\) =>/);
+  assert.doesNotMatch(workerFormView, /selectedVacancyIds|name="vacancyIds"|Vacantes \/ perfiles/);
   assert.doesNotMatch(workerFormView, /<input id="residenceCity"/);
 
+  // El CRUD público conserva compatibilidad interna mientras la UI deja de enviar vacantes.
   assert.match(publicRoute, /findWorkerOr404/);
-  assert.match(publicRoute, /include: \{ cities: true, vacancies: true, candidate: true \}/);
   assert.match(publicRoute, /buildCandidateProfileData/);
   assert.match(publicRoute, /prisma\.candidate\.update/);
   assert.doesNotMatch(publicRoute, /where: \{ id: workerId, source: 'MANUAL' \}/);
   assert.match(opsExtrasRoute, /DISPATCH_OWNED_SOURCES = \['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'\]/);
-  assert.doesNotMatch(opsExtrasRoute, /findManualWorkerOr404|Auxiliar manual no encontrado|Auxiliar manual actualizado/);
   assert.doesNotMatch(deleteRoute, /source: 'MANUAL'|Auxiliar manual no encontrado|Auxiliar manual eliminado/);
 
   assert.doesNotMatch(route, /DISPATCH_MODULE_URL/);
