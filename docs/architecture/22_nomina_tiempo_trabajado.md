@@ -49,6 +49,8 @@ Para conciliar correctamente cada una de las dos ventanas, `loadPayrollReport()`
 
 La composición de ambos resultados no reclasifica minutos. El motor canónico se ejecuta con cada rango y el adaptador de Nómina sustituye únicamente los campos `H*` y el total de extras por los calculados para la ventana de horas extras; los `R*` y los contadores generales permanecen en su corte original. Las novedades del periodo de extras también se conservan para no ocultar un bloqueo de esa ventana.
 
+El detalle diario sigue exactamente la misma propiedad de métricas que la fila consolidada. Para una fecha presente en ambos resultados existe una sola fila diaria: `Total`, `Ordinarias`, contexto general y `R*` provienen del periodo general, mientras `Extra`, extra no reconocida y `H*` provienen del periodo de extras. Una fecha que solo pertenezca al periodo general conserva sus datos generales y muestra en cero los `H*` que queden fuera del filtro de extras. Una fecha relevante únicamente por extras puede aparecer para explicar esos `H*` y conservar la trazabilidad de marcaciones, pero sus métricas generales y `R*` quedan en cero y no habilita una acción de compensatorio fuera del periodo general. Las novedades fechadas del periodo de extras se asocian a esa misma fecha cuando corresponda. Esta composición es deliberadamente por familias de campos: no debe interpretarse como si `Total` y `Extra` pertenecieran necesariamente a la misma ventana de fechas.
+
 ## Política por cliente
 
 La referencia operativa de jornada es fija en **7 horas diarias** para el balance de extras. Los valores históricos de horas ordinarias semanales pueden seguir leídos/persistidos por compatibilidad, pero no gobiernan la clasificación de horas extra.
