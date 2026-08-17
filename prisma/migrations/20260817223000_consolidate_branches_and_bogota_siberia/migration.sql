@@ -7,6 +7,37 @@ SET
   "usedForDispatch" = TRUE,
   "sourceModule" = 'RECRUITMENT';
 
+-- Expand/migrate before contract: DispatchWorkerVacancy is no longer the authority for
+-- territorial availability, but it may contain historical information not yet present
+-- in DispatchWorkerCity. Project every operation-backed legacy assignment to its branch
+-- before the UI stops asking for a vacancy/profile.
+INSERT INTO "DispatchWorkerCity" ("id", "workerId", "cityId", "createdAt")
+SELECT
+  'branch_' || md5(dwv."workerId" || ':' || operation."cityId"),
+  dwv."workerId",
+  operation."cityId",
+  NOW()
+FROM "DispatchWorkerVacancy" AS dwv
+JOIN "Vacancy" AS vacancy ON vacancy."id" = dwv."vacancyId"
+JOIN "Operation" AS operation ON operation."id" = vacancy."operationId"
+WHERE operation."cityId" IS NOT NULL
+ON CONFLICT ("workerId", "cityId") DO NOTHING;
+
+-- Compatibility for historical vacancies that predate Operation.cityId linkage.
+INSERT INTO "DispatchWorkerCity" ("id", "workerId", "cityId", "createdAt")
+SELECT
+  'branch_' || md5(dwv."workerId" || ':' || city."id"),
+  dwv."workerId",
+  city."id",
+  NOW()
+FROM "DispatchWorkerVacancy" AS dwv
+JOIN "Vacancy" AS vacancy ON vacancy."id" = dwv."vacancyId"
+JOIN "City" AS city
+  ON translate(lower(trim(city."name")), 'áéíóúüñ', 'aeiouun')
+   = translate(lower(trim(vacancy."city")), 'áéíóúüñ', 'aeiouun')
+WHERE vacancy."operationId" IS NULL
+ON CONFLICT ("workerId", "cityId") DO NOTHING;
+
 -- Siberia is no longer an independent branch. It belongs to the Bogotá branch.
 -- The migration preserves operations, vacancy links and worker assignments.
 DO $$
