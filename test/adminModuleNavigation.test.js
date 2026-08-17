@@ -33,16 +33,19 @@ test('los modulos comparten un grupo exclusivo y Usuarios queda independiente', 
   assert.doesNotMatch(html, /data-module-cards=|admin-module-switcher|admin-module-card-grid/);
 });
 
-test('cada desplegable conserva sus opciones y permisos existentes', () => {
+test('Reclutamiento expone Sucursales como único acceso de configuración territorial', () => {
   const recruitment = nav(injectAdminModuleNavigation(baseHtml, req('/admin', { canAccessStatistics: true })));
   const recruitmentMenu = moduleMenu(recruitment, 'recruitment');
   assert.match(recruitmentMenu, /href="\/admin">Panel de candidatos<\/a>/);
-  assert.match(recruitmentMenu, /href="\/admin\/vacancies">Vacantes<\/a>/);
+  assert.match(recruitmentMenu, /href="\/admin\/locations">Sucursales<\/a>/);
+  assert.doesNotMatch(recruitmentMenu, /href="\/admin\/vacancies"|>Vacantes<\/a>|>Ciudades<\/a>/);
   assert.match(recruitmentMenu, /href="\/admin\/estadisticas">Estadísticas<\/a>/);
   assert.doesNotMatch(recruitmentMenu, /Usuarios/);
   assert.match(recruitment, /admin-module-standalone-link[^>]*href="\/admin\/users"/);
   assert.doesNotMatch(recruitment, /data-module-menu="operations"|data-module-menu="payroll"/);
+});
 
+test('cada desplegable conserva opciones y permisos de Operaciones y Nómina', () => {
   const operations = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones', { canAccessDispatch: true, canAccessAttendance: true })));
   for (const href of ['/admin/operaciones/clientes', '/admin/operaciones/solicitudes', '/admin/operaciones/asignaciones', '/admin/operaciones/personal', '/admin/operaciones/portal-activaciones', '/admin/operaciones/asistencia', '/admin/operaciones/whatsapp']) {
     assert.ok(operations.includes(`href="${href}"`), `Falta ${href} en Operaciones`);

@@ -3,243 +3,341 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Ciudades y Operaciones — LoginPro</title>
+  <title>Sucursales — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
     :root {
-      --bg: #f4f5f7; --surface: #ffffff; --surface-2: #f9fafb;
-      --border: #e1e4e8; --border-soft: #eaecef;
-      --text: #1a1d23; --text-muted: #6b7280; --text-faint: #9ca3af;
-      --navy: #1e2d3d; --teal: #0d7a6b; --teal-light: #e6f4f1; --teal-hover: #0a5f53;
-      --red: #dc2626; --red-light: #fee2e2;
-      --green: #16a34a; --green-light: #dcfce7;
-      --amber: #b45309; --amber-light: #fef3c7;
-      --blue: #2563eb; --blue-light: #dbeafe;
-      --gray-light: #f3f4f6;
-      --shadow-sm: 0 1px 3px rgba(0,0,0,.08);
-      --radius: 8px; --radius-lg: 12px;
-      --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --bg:#f4f5f7; --surface:#fff; --surface-2:#f9fafb; --border:#e1e4e8;
+      --text:#1a1d23; --muted:#6b7280; --navy:#1e2d3d; --teal:#0d7a6b;
+      --teal-hover:#0a5f53; --teal-light:#e6f4f1; --red:#dc2626; --red-light:#fee2e2;
+      --green:#16a34a; --green-light:#dcfce7; --amber:#b45309; --amber-light:#fef3c7;
+      --blue:#1d4ed8; --blue-light:#dbeafe; --shadow:0 1px 3px rgba(0,0,0,.08);
+      --radius:10px; --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
     }
-    body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
-    .navbar { background: var(--navy); padding: 0 24px; display: flex; align-items: center; gap: 20px; height: 52px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
-    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 500; padding: 4px 2px; border-bottom: 2px solid transparent; transition: color .15s, border-color .15s; }
-    .navbar a:hover { color: #fff; border-bottom-color: rgba(255,255,255,.3); }
-    .navbar a.nav-active { color: #fff; border-bottom-color: #4fd1c5; }
-    .navbar .brand img { height: 28px; display: block; }
-    .navbar .spacer { flex: 1; }
-    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 5px 12px !important; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 500; }
-    .btn-logout:hover { border-color: rgba(255,255,255,.6) !important; color: #fff !important; }
-    .page { max-width: 980px; margin: 0 auto; padding: 28px 20px 60px; }
-    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
-    .page-header h1 { font-size: 20px; font-weight: 700; color: var(--navy); }
-    .page-header .sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
-    .alert { padding: 10px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 600; margin-bottom: 20px; }
-    .alert-success { background: var(--green-light); color: var(--green); border: 1px solid #86efac; }
-    .alert-error   { background: var(--red-light);   color: var(--red);   border: 1px solid #fca5a5; }
-    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 600; cursor: pointer; border: none; text-decoration: none; transition: all .15s; }
-    .btn-primary   { background: var(--teal); color: #fff; }
-    .btn-primary:hover { background: var(--teal-hover); }
-    .btn-secondary { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
-    .btn-secondary:hover { background: var(--gray-light); color: var(--navy); }
-    .btn-danger    { background: var(--red-light); color: var(--red); border: 1px solid #fca5a5; }
-    .btn-danger:hover { background: #fecaca; }
-    .btn-sm { padding: 5px 11px; font-size: 12px; }
-    .btn-xs { padding: 3px 9px; font-size: 11px; }
-    .source-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 18px; }
-    .source-tab { border: 1px solid var(--border); color: var(--text-muted); background: var(--surface); border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 700; text-decoration: none; }
-    .source-tab:hover { color: var(--navy); background: var(--surface-2); }
-    .source-section { margin-bottom: 24px; }
-    .source-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin: 8px 0 12px; }
-    .source-title { font-size: 16px; font-weight: 800; color: var(--navy); display: flex; align-items: center; gap: 8px; }
-    .source-description { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-    .source-count { color: var(--text-muted); background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 11px; font-weight: 800; white-space: nowrap; }
-    .city-list { display: flex; flex-direction: column; gap: 16px; }
-    .city-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
-    .city-card[data-dispatch="true"] { border-left: 5px solid var(--amber); }
-    .city-card[data-recruitment="true"][data-dispatch="false"] { border-left: 5px solid var(--teal); }
-    .city-card[data-recruitment="true"][data-dispatch="true"] { border-left: 5px solid var(--green); }
-    .city-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: var(--surface-2); border-bottom: 1px solid var(--border-soft); }
-    .city-name { font-size: 15px; font-weight: 700; color: var(--navy); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .city-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    .source-badge { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 3px 8px; font-size: 11px; font-weight: 800; }
-    .source-badge.RECRUITMENT { background: var(--teal-light); color: var(--teal); }
-    .source-badge.DISPATCH { background: var(--amber-light); color: var(--amber); }
-    .ops-list { padding: 12px 18px; display: flex; flex-direction: column; gap: 8px; }
-    .op-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 12px; border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--border-soft); }
-    .op-name { font-size: 13px; font-weight: 600; color: var(--text); }
-    .op-sub  { font-size: 11px; color: var(--text-faint); margin-top: 1px; }
-    .op-actions { display: flex; gap: 5px; }
-    .add-op-row { padding: 8px 18px 14px; }
-    .inline-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .inline-form input, .inline-form select { border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px; font-size: 13px; font-family: var(--font); color: var(--text); background: var(--surface); outline: none; flex: 1; min-width: 160px; transition: border-color .15s, box-shadow .15s; }
-    .inline-form input:focus, .inline-form select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12); }
-    .usage-checks { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-    .usage-check { position: relative; display: inline-flex; align-items: center; cursor: pointer; user-select: none; flex: 0 0 auto; min-width: 0; }
-    .usage-check input { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; min-width: 0; flex: 0 0 auto; }
-    .usage-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 13px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--navy); font-size: 12px; font-weight: 900; line-height: 1; transition: background .15s, border-color .15s, color .15s, box-shadow .15s, transform .15s; }
-    .usage-chip::before { content: ''; width: 17px; height: 17px; border: 2px solid #b6c2d2; border-radius: 6px; background: #fff; display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 11px; font-weight: 900; line-height: 1; transition: background .15s, border-color .15s, color .15s; }
-    .usage-check input:focus-visible + .usage-chip { box-shadow: 0 0 0 3px rgba(37,99,235,.22); }
-    .usage-check input:checked + .usage-chip { transform: translateY(-1px); }
-    .usage-check input:checked + .usage-chip::before { content: '✓'; color: #fff; }
-    .usage-check.recruitment input:checked + .usage-chip { border-color: var(--teal); background: var(--teal-light); color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.10); }
-    .usage-check.recruitment input:checked + .usage-chip::before { border-color: var(--teal); background: var(--teal); }
-    .usage-check.dispatch input:checked + .usage-chip { border-color: var(--amber); background: var(--amber-light); color: var(--amber); box-shadow: 0 0 0 3px rgba(180,83,9,.10); }
-    .usage-check.dispatch input:checked + .usage-chip::before { border-color: var(--amber); background: var(--amber); }
-    .usage-check input:not(:checked) + .usage-chip:hover { border-color: #b6c2d2; background: var(--surface-2); }
-    .add-city-card { background: var(--surface); border: 2px dashed var(--border); border-radius: var(--radius-lg); padding: 16px 18px; }
-    .add-city-title { font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 10px; }
-    .empty-ops { font-size: 12px; color: var(--text-faint); padding: 8px 0 0 2px; font-style: italic; }
-    .empty-section { background: var(--surface); border: 1px dashed var(--border); color: var(--text-muted); border-radius: var(--radius-lg); padding: 18px; font-size: 13px; }
-    .badge-count { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: var(--teal-light); color: var(--teal); font-size: 11px; font-weight: 700; }
-    @media (max-width: 600px) {
-      .city-header, .source-header { flex-direction: column; align-items: flex-start; gap: 8px; }
-      .inline-form { flex-direction: column; align-items: stretch; }
-      .inline-form input, .inline-form select { width: 100%; }
-      .usage-checks { width: 100%; }
+    body { font-family:var(--font); background:var(--bg); color:var(--text); font-size:14px; line-height:1.5; }
+    .navbar { background:var(--navy); padding:0 24px; display:flex; align-items:center; gap:20px; min-height:52px; position:sticky; top:0; z-index:100; }
+    .navbar a { color:#cbd5e0; text-decoration:none; font-size:13px; font-weight:600; padding:4px 2px; border-bottom:2px solid transparent; }
+    .navbar a:hover,.navbar a.nav-active { color:#fff; border-bottom-color:#4fd1c5; }
+    .navbar .brand img { height:28px; display:block; }
+    .navbar .spacer { flex:1; }
+    .btn-logout { background:transparent; border:1px solid rgba(255,255,255,.25); color:#cbd5e0; padding:6px 12px; border-radius:7px; cursor:pointer; }
+    .page { max-width:1180px; margin:0 auto; padding:28px 20px 60px; }
+    .page-header { margin-bottom:22px; }
+    .page-header h1 { color:var(--navy); font-size:24px; margin-bottom:4px; }
+    .page-header p { color:var(--muted); font-size:13px; max-width:900px; }
+    .alert { padding:10px 14px; border-radius:var(--radius); margin-bottom:16px; font-weight:700; }
+    .alert-success { background:var(--green-light); color:var(--green); }
+    .alert-error { background:var(--red-light); color:var(--red); }
+    .notice { margin:0 0 18px; padding:12px 14px; border:1px solid #bae6fd; background:#f0f9ff; color:#075985; border-radius:10px; font-size:12px; }
+    .branch-list { display:grid; gap:18px; }
+    .branch-card { background:var(--surface); border:1px solid var(--border); border-radius:16px; box-shadow:var(--shadow); overflow:hidden; }
+    .branch-header { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; background:var(--surface-2); border-bottom:1px solid var(--border); }
+    .branch-title { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+    .branch-name { color:var(--navy); font-size:17px; font-weight:850; }
+    .count,.pill { display:inline-flex; align-items:center; border-radius:999px; padding:3px 9px; font-size:11px; font-weight:800; }
+    .count { background:var(--teal-light); color:var(--teal); }
+    .pill-open { background:var(--green-light); color:var(--green); }
+    .pill-paused { background:var(--amber-light); color:var(--amber); }
+    .pill-closed { background:var(--red-light); color:var(--red); }
+    .pill-info { background:var(--blue-light); color:var(--blue); }
+    .actions,.inline-form,.toggle-row { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; border:0; border-radius:8px; padding:8px 12px; font-size:12px; font-weight:750; cursor:pointer; text-decoration:none; }
+    .btn-primary { background:var(--teal); color:#fff; }
+    .btn-primary:hover { background:var(--teal-hover); }
+    .btn-secondary { background:#fff; color:var(--navy); border:1px solid var(--border); }
+    .btn-danger { background:var(--red-light); color:var(--red); border:1px solid #fecaca; }
+    .btn-sm { padding:5px 9px; font-size:11px; }
+    .edit-panel { display:none; padding:12px 18px; background:var(--teal-light); border-bottom:1px solid var(--border); }
+    input,select,textarea { width:100%; border:1px solid var(--border); border-radius:8px; padding:9px 10px; font:inherit; background:#fff; color:var(--text); }
+    textarea { min-height:88px; resize:vertical; }
+    input:focus,select:focus,textarea:focus { outline:none; border-color:var(--teal); box-shadow:0 0 0 3px rgba(13,122,107,.12); }
+    .operations { padding:14px 18px; display:grid; gap:12px; }
+    .operation-card { border:1px solid #e7eaee; border-radius:12px; background:var(--surface-2); overflow:hidden; }
+    .operation-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; }
+    .operation-name { font-weight:800; color:var(--navy); font-size:14px; }
+    .operation-meta { color:var(--muted); font-size:11px; margin-top:2px; }
+    .operation-body { padding:0 14px 14px; display:grid; gap:10px; }
+    .config-card { border:1px solid var(--border); border-radius:10px; background:#fff; overflow:hidden; }
+    .config-head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:11px 12px; border-bottom:1px solid #eef0f3; }
+    .config-title { font-weight:800; color:var(--navy); }
+    .config-sub { color:var(--muted); font-size:11px; margin-top:2px; }
+    .config-editor { display:none; padding:14px; }
+    .config-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+    .field { display:grid; gap:5px; }
+    .field.full { grid-column:1 / -1; }
+    .field label { font-size:11px; color:var(--muted); font-weight:800; text-transform:uppercase; letter-spacing:.03em; }
+    .checkbox { display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700; color:var(--navy); text-transform:none!important; letter-spacing:0!important; }
+    .checkbox input { width:16px; height:16px; margin:0; accent-color:var(--teal); }
+    .config-note { padding:10px 12px; border-radius:8px; background:#fff7ed; color:#9a3412; font-size:11px; }
+    .schedule-summary { margin-top:8px; color:var(--muted); font-size:11px; }
+    details.create-operation { margin:4px 18px 16px; border:1px dashed #9bb9b4; border-radius:10px; background:#f8fffd; }
+    details.create-operation summary { cursor:pointer; padding:11px 13px; color:var(--teal); font-weight:800; }
+    .create-operation-body { padding:4px 13px 14px; }
+    .new-branch { margin-top:20px; padding:18px; border:2px dashed var(--border); border-radius:14px; background:var(--surface); }
+    .new-branch h2 { font-size:14px; color:var(--navy); margin-bottom:10px; }
+    .empty { color:var(--muted); font-size:12px; padding:5px 0; }
+    .help { color:var(--muted); font-size:11px; }
+    .saving { opacity:.62; pointer-events:none; }
+    @media(max-width:760px){
+      .navbar{flex-wrap:wrap;padding:10px 14px;gap:10px 14px}.navbar .spacer{display:none}.navbar form{width:100%}.btn-logout{width:100%}
+      .page{padding:20px 12px 40px}.branch-header,.operation-head,.config-head{align-items:flex-start;flex-direction:column}.actions{width:100%}.inline-form{align-items:stretch;flex-direction:column}.inline-form .btn{width:100%}.config-grid{grid-template-columns:1fr}.field.full{grid-column:1}
     }
   </style>
 </head>
 <body>
-
 <nav class="navbar">
   <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
   <a href="/admin">Panel</a>
-  <a href="/admin/vacancies">Vacantes</a>
-  <a href="/admin/locations" class="nav-active">Ciudades</a>
-  <% if (role === 'dev' || canAccessDispatch) { %><a href="/admin/operaciones">Operaciones / Despacho</a><% } %>
+  <a href="/admin/locations" class="nav-active">Sucursales</a>
+  <% if (role === 'dev' || (typeof canAccessDispatch !== 'undefined' && canAccessDispatch)) { %><a href="/admin/operaciones">Operaciones / Despacho</a><% } %>
   <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
   <span class="spacer"></span>
   <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
 </nav>
 
-<div class="page">
-  <div class="page-header">
-    <div>
-      <h1>🏙️ Ciudades y Operaciones</h1>
-      <p class="sub">Gestiona ciudades desde un solo lugar. Una misma ciudad puede servir para Bot / Reclutamiento, Despacho o ambos usos.</p>
-    </div>
-  </div>
+<main class="page">
+  <header class="page-header">
+    <h1>Sucursales</h1>
+    <p>Esta es la superficie única de configuración territorial. Cada sucursal contiene sus operaciones; la información de reclutamiento se edita aquí, pero la persistencia de vacantes y horarios sigue delegada a la autoridad administrativa existente.</p>
+  </header>
 
-  <% if (successMsg) { %><div class="alert alert-success">✅ <%= successMsg %></div><% } %>
-  <% if (errorMsg) { %><div class="alert alert-error">⚠️ <%= errorMsg %></div><% } %>
+  <div class="notice"><strong>Bogotá incluye Siberia.</strong> Siberia se maneja como zona u operación de la sucursal Bogotá y no como una sucursal independiente.</div>
 
-  <div class="source-tabs">
-    <% for (const section of citySections) { %>
-      <a class="source-tab" href="#section-<%= section.usage %>"><%= section.label %> · <%= section.cities.length %></a>
-    <% } %>
-  </div>
+  <% if (successMsg) { %><div class="alert alert-success"><%= successMsg %></div><% } %>
+  <% if (errorMsg) { %><div class="alert alert-error"><%= errorMsg %></div><% } %>
 
-  <% for (const section of citySections) { %>
-    <section class="source-section" id="section-<%= section.usage %>">
-      <div class="source-header">
-        <div>
-          <div class="source-title"><%= section.usage === 'DISPATCH' ? '🚚' : '🤖' %> <%= section.label %></div>
-          <p class="source-description"><%= section.description %></p>
-        </div>
-        <span class="source-count"><%= section.cities.length %> ciudad<%= section.cities.length !== 1 ? 'es' : '' %></span>
-      </div>
-
-      <div class="city-list">
-        <% if (section.cities.length === 0) { %><div class="empty-section">No hay ciudades habilitadas para este uso.</div><% } %>
-        <% for (const city of section.cities) { const badges = cityUsageBadges(city); %>
-        <div class="city-card" data-recruitment="<%= cityHasUsage(city, 'RECRUITMENT') %>" data-dispatch="<%= cityHasUsage(city, 'DISPATCH') %>">
-          <div class="city-header">
-            <div class="city-name">
-              🏙️ <%= city.name %>
-              <% badges.forEach((badge)=>{ %><span class="source-badge <%= badge.usage %>"><%= badge.label %></span><% }) %>
-              <span class="badge-count" title="Operaciones"><%= city.operations.length %></span>
-            </div>
-            <div class="city-actions">
-              <button class="btn btn-secondary btn-sm" onclick="toggleEditCity('<%= city.id %>')">✏️ Editar</button>
-              <% if (city.operations.length === 0) { %>
-              <form method="post" action="/admin/locations/cities/<%= city.id %>/delete" onsubmit="return confirm('¿Eliminar ciudad <%= city.name %>? Esta acción no se puede deshacer.')">
-                <button type="submit" class="btn btn-danger btn-sm">🗑️ Eliminar</button>
-              </form>
-              <% } %>
-            </div>
+  <section class="branch-list">
+    <% if (!cities.length) { %><div class="empty">No hay sucursales registradas.</div><% } %>
+    <% for (const city of cities) { %>
+      <article class="branch-card">
+        <div class="branch-header">
+          <div class="branch-title">
+            <span class="branch-name"><%= city.name %></span>
+            <span class="count"><%= city.operations.length %> operación<%= city.operations.length === 1 ? '' : 'es' %></span>
           </div>
-
-          <div id="edit-city-<%= city.id %>" style="display:none; padding: 10px 18px; border-bottom: 1px solid var(--border-soft); background: var(--teal-light);">
-            <form method="post" action="/admin/locations/cities/<%= city.id %>/edit" class="inline-form">
-              <input type="text" name="name" value="<%= city.name %>" required placeholder="Nombre ciudad" />
-              <div class="usage-checks">
-                <label class="usage-check recruitment"><input type="checkbox" name="usedForRecruitment" value="true" <%= cityHasUsage(city, 'RECRUITMENT') ? 'checked' : '' %> /><span class="usage-chip">Bot / Reclutamiento</span></label>
-                <label class="usage-check dispatch"><input type="checkbox" name="usedForDispatch" value="true" <%= cityHasUsage(city, 'DISPATCH') ? 'checked' : '' %> /><span class="usage-chip">Despacho</span></label>
-              </div>
-              <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditCity('<%= city.id %>')">Cancelar</button>
-            </form>
-          </div>
-
-          <div class="ops-list">
-            <% if (city.operations.length === 0) { %><p class="empty-ops">Sin operaciones. Agrega la primera abajo.</p><% } %>
-            <% for (const op of city.operations) { %>
-            <div class="op-row">
-              <div>
-                <div class="op-name">📍 <%= op.name %></div>
-                <div class="op-sub"><%= op._count?.vacancies || 0 %> vacante<%= (op._count?.vacancies || 0) !== 1 ? 's' : '' %> asociada<%= (op._count?.vacancies || 0) !== 1 ? 's' : '' %></div>
-              </div>
-              <div class="op-actions">
-                <button class="btn btn-secondary btn-xs" onclick="toggleEditOp('<%= op.id %>')">✏️</button>
-                <% if ((op._count?.vacancies || 0) === 0) { %>
-                <form method="post" action="/admin/locations/operations/<%= op.id %>/delete" style="display:inline;" onsubmit="return confirm('¿Eliminar operación <%= op.name %>?')">
-                  <button type="submit" class="btn btn-danger btn-xs">🗑️</button>
-                </form>
-                <% } %>
-              </div>
-            </div>
-            <div id="edit-op-<%= op.id %>" style="display:none; padding: 6px 0;">
-              <form method="post" action="/admin/locations/operations/<%= op.id %>/edit" class="inline-form">
-                <input type="text" name="name" value="<%= op.name %>" required placeholder="Nombre operación" />
-                <button type="submit" class="btn btn-primary btn-xs">Guardar</button>
-                <button type="button" class="btn btn-secondary btn-xs" onclick="toggleEditOp('<%= op.id %>')">✕</button>
+          <div class="actions">
+            <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-branch-<%= city.id %>">Editar sucursal</button>
+            <% if (city.operations.length === 0) { %>
+              <form method="post" action="/admin/locations/cities/<%= city.id %>/delete" data-confirm-title="Eliminar sucursal" data-confirm-text="Se eliminará la sucursal <%= city.name %>. Esta acción solo está disponible si no tiene operaciones.">
+                <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
               </form>
-            </div>
             <% } %>
           </div>
+        </div>
 
-          <div class="add-op-row">
-            <form method="post" action="/admin/locations/cities/<%= city.id %>/operations" class="inline-form">
-              <input type="text" name="name" required placeholder="Nueva operación / zona (ej: Siberia)" />
-              <button type="submit" class="btn btn-primary btn-sm">➕ Agregar</button>
+        <div class="edit-panel" id="edit-branch-<%= city.id %>">
+          <form method="post" action="/admin/locations/cities/<%= city.id %>/edit" class="inline-form">
+            <input type="text" name="name" value="<%= city.name %>" required placeholder="Nombre de la sucursal" />
+            <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+            <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-branch-<%= city.id %>">Cancelar</button>
+          </form>
+          <% if (city.operations.length) { %><div class="help" style="margin-top:8px;">Por seguridad de referencias históricas, una sucursal con operaciones no se renombra directamente.</div><% } %>
+        </div>
+
+        <div class="operations">
+          <% if (!city.operations.length) { %><div class="empty">Sin operaciones configuradas.</div><% } %>
+          <% for (const op of city.operations) { %>
+            <section class="operation-card">
+              <div class="operation-head">
+                <div>
+                  <div class="operation-name"><%= op.name %></div>
+                  <div class="operation-meta"><%= op.vacancies.length %> configuración<%= op.vacancies.length === 1 ? '' : 'es' %> de Lórren · la sucursal se hereda automáticamente</div>
+                </div>
+                <div class="actions">
+                  <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-op-<%= op.id %>">Renombrar</button>
+                  <% if (op.vacancies.length === 0) { %>
+                    <form method="post" action="/admin/locations/operations/<%= op.id %>/delete" data-confirm-title="Eliminar operación" data-confirm-text="Se eliminará la operación <%= op.name %>.">
+                      <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
+                    </form>
+                  <% } %>
+                </div>
+              </div>
+
+              <div class="edit-panel" id="edit-op-<%= op.id %>">
+                <form method="post" action="/admin/locations/operations/<%= op.id %>/edit" class="inline-form">
+                  <input type="text" name="name" value="<%= op.name %>" required placeholder="Nombre de la operación" />
+                  <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
+                  <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-op-<%= op.id %>">Cancelar</button>
+                </form>
+              </div>
+
+              <div class="operation-body">
+                <% if (op.vacancies.length > 1) { %>
+                  <div class="config-note"><strong>Dato heredado:</strong> esta operación tiene varias configuraciones históricas. Se conservan separadas para no mezclar candidatos, campañas o agendas; todas se administran aquí.</div>
+                <% } %>
+
+                <% if (op.vacancies.length === 0) { %>
+                  <div class="config-note">Esta operación todavía no tiene información para Lórren. Complétala aquí para activarla.</div>
+                  <form method="post" action="/admin/vacancies/create" class="config-grid" data-vacancy-config-form>
+                    <%- include('partials/locationOperationConfigFields', { prefix: 'legacy-' + op.id, config: null, defaultTitle: op.name, operationId: op.id }) %>
+                    <div class="field full"><button type="submit" class="btn btn-primary">Guardar configuración de Lórren</button></div>
+                  </form>
+                <% } %>
+
+                <% for (const config of op.vacancies) { %>
+                  <% const statusClass = !config.isActive ? 'pill-closed' : (config.acceptingApplications ? 'pill-open' : 'pill-paused'); %>
+                  <% const statusLabel = !config.isActive ? 'Inactiva' : (config.acceptingApplications ? 'Activa' : 'Pausada'); %>
+                  <article class="config-card">
+                    <div class="config-head">
+                      <div>
+                        <div class="config-title"><%= config.title %></div>
+                        <div class="config-sub"><%= config.role %> · <%= config.operationAddress %></div>
+                        <div class="schedule-summary"><%= config._count?.candidates || 0 %> candidato<%= (config._count?.candidates || 0) === 1 ? '' : 's' %> · <%= config.interviewSlots?.length || 0 %> horario<%= (config.interviewSlots?.length || 0) === 1 ? '' : 's' %> activo<%= (config.interviewSlots?.length || 0) === 1 ? '' : 's' %></div>
+                      </div>
+                      <div class="actions">
+                        <span class="pill <%= statusClass %>"><%= statusLabel %></span>
+                        <% if (config.schedulingEnabled) { %><span class="pill pill-info">Con agenda</span><% } %>
+                        <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="config-<%= config.id %>">Editar información</button>
+                      </div>
+                    </div>
+                    <div class="config-editor" id="config-<%= config.id %>">
+                      <form method="post" action="/admin/vacancies/<%= config.id %>/edit" class="config-grid" data-vacancy-config-form>
+                        <%- include('partials/locationOperationConfigFields', { prefix: config.id, config, defaultTitle: op.name, operationId: op.id }) %>
+                        <div class="field full"><div class="help">Identificador técnico: <strong><%= config.key %></strong>. Se conserva para campañas, candidatos y referencias existentes.</div></div>
+                        <div class="field full"><button type="submit" class="btn btn-primary">Guardar operación</button></div>
+                      </form>
+                    </div>
+                  </article>
+                <% } %>
+              </div>
+            </section>
+          <% } %>
+        </div>
+
+        <details class="create-operation">
+          <summary>+ Crear operación en <%= city.name %></summary>
+          <div class="create-operation-body">
+            <form method="post" action="/admin/locations/cities/<%= city.id %>/operations" class="config-grid" data-create-operation-form>
+              <div class="field full">
+                <label for="op-name-<%= city.id %>">Nombre de la operación</label>
+                <input id="op-name-<%= city.id %>" type="text" name="name" required placeholder="Ej: Siberia, Montevideo, Zona industrial" />
+              </div>
+              <%- include('partials/locationOperationConfigFields', { prefix: 'new-' + city.id, config: null, defaultTitle: '', operationId: '' }) %>
+              <div class="field full"><button type="submit" class="btn btn-primary">Crear operación</button></div>
             </form>
           </div>
-        </div>
-        <% } %>
-      </div>
-    </section>
-  <% } %>
+        </details>
+      </article>
+    <% } %>
+  </section>
 
-  <div class="add-city-card">
-    <div class="add-city-title">➕ Nueva ciudad</div>
+  <section class="new-branch">
+    <h2>Nueva sucursal</h2>
     <form method="post" action="/admin/locations/cities" class="inline-form">
       <input type="text" name="name" required placeholder="Ej: Bogotá, Cali, Barranquilla" />
-      <div class="usage-checks">
-        <label class="usage-check recruitment"><input type="checkbox" name="usedForRecruitment" value="true" checked /><span class="usage-chip">Bot / Reclutamiento</span></label>
-        <label class="usage-check dispatch"><input type="checkbox" name="usedForDispatch" value="true" /><span class="usage-chip">Despacho</span></label>
-      </div>
-      <button type="submit" class="btn btn-primary">Crear ciudad</button>
+      <button type="submit" class="btn btn-primary">Crear sucursal</button>
     </form>
-  </div>
-</div>
-
+  </section>
+</main>
+<script src="/public/lorren-dialog.js"></script>
 <script>
-  function toggleEditCity(id) {
-    const el = document.getElementById('edit-city-' + id);
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-  }
-  function toggleEditOp(id) {
-    const el = document.getElementById('edit-op-' + id);
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-  }
-  setTimeout(() => {
-    document.querySelectorAll('.alert').forEach(a => {
-      a.style.transition = 'opacity .4s';
-      a.style.opacity = '0';
-      setTimeout(() => a.remove(), 400);
+  document.querySelectorAll('[data-toggle-target]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = document.getElementById(button.dataset.toggleTarget);
+      if (!target) return;
+      const isOpen = target.style.display === 'block';
+      target.style.display = isOpen ? 'none' : 'block';
     });
-  }, 5000);
+  });
+
+  document.querySelectorAll('form[data-confirm-title]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      if (form.dataset.confirmed === 'true') return;
+      event.preventDefault();
+      const accepted = await window.LorrenDialog.confirm({
+        title: form.dataset.confirmTitle || 'Confirmar acción',
+        text: form.dataset.confirmText || '¿Deseas continuar?',
+        tone: 'danger',
+        confirmLabel: 'Sí, eliminar'
+      });
+      if (!accepted) return;
+      form.dataset.confirmed = 'true';
+      form.requestSubmit();
+    });
+  });
+
+  function formParams(form) {
+    const params = new URLSearchParams();
+    for (const [key, value] of new FormData(form).entries()) params.append(key, value);
+    return params;
+  }
+
+  function locationsUrlFromAdminResponse(response, fallbackSuccess) {
+    const finalUrl = new URL(response.url || '/admin/vacancies', window.location.origin);
+    const params = new URLSearchParams();
+    const error = finalUrl.searchParams.get('error');
+    const success = finalUrl.searchParams.get('success');
+    if (error) params.set('error', error);
+    else params.set('success', success || fallbackSuccess);
+    return `/admin/locations?${params.toString()}`;
+  }
+
+  async function postCanonicalVacancy(action, params, fallbackSuccess) {
+    const response = await fetch(action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: params,
+      credentials: 'same-origin',
+      redirect: 'follow'
+    });
+    if (!response.ok && !response.redirected) {
+      return `/admin/locations?error=${encodeURIComponent('No fue posible guardar la configuración de la operación.')}`;
+    }
+    return locationsUrlFromAdminResponse(response, fallbackSuccess);
+  }
+
+  document.querySelectorAll('form[data-vacancy-config-form]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (form.classList.contains('saving')) return;
+      form.classList.add('saving');
+      try {
+        const nextUrl = await postCanonicalVacancy(form.action, formParams(form), 'Configuración de la operación guardada.');
+        window.location.assign(nextUrl);
+      } catch (_error) {
+        window.location.assign('/admin/locations?error=' + encodeURIComponent('No fue posible guardar la configuración de la operación.'));
+      }
+    });
+  });
+
+  document.querySelectorAll('form[data-create-operation-form]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (form.classList.contains('saving')) return;
+      form.classList.add('saving');
+      try {
+        const allParams = formParams(form);
+        const operationParams = new URLSearchParams();
+        operationParams.set('name', allParams.get('name') || '');
+        operationParams.set('returnJson', 'true');
+        const operationResponse = await fetch(form.action, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+            'Accept': 'application/json'
+          },
+          body: operationParams,
+          credentials: 'same-origin'
+        });
+        const operationPayload = await operationResponse.json().catch(() => ({}));
+        if (!operationResponse.ok || !operationPayload?.operation?.id) {
+          const message = operationPayload?.error || 'No fue posible crear la operación.';
+          window.location.assign('/admin/locations?error=' + encodeURIComponent(message));
+          return;
+        }
+
+        allParams.delete('name');
+        allParams.set('operationId', operationPayload.operation.id);
+        const nextUrl = await postCanonicalVacancy('/admin/vacancies/create', allParams, `Operación "${operationPayload.operation.name}" creada correctamente.`);
+        window.location.assign(nextUrl);
+      } catch (_error) {
+        window.location.assign('/admin/locations?error=' + encodeURIComponent('La operación no pudo completarse. Si la operación quedó creada, puedes abrirla y completar su configuración.'));
+      }
+    });
+  });
+
+  setTimeout(() => document.querySelectorAll('.alert').forEach((item) => item.remove()), 5000);
 </script>
 </body>
 </html>

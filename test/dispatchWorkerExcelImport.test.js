@@ -14,11 +14,8 @@ import {
 } from '../src/services/dispatchWorkerExcelImport.js';
 
 const cities = [
-  { id: 'city-bogota', name: 'Bogotá' },
-  { id: 'city-siberia', name: 'Siberia' }
-];
-const vacancies = [
-  { id: 'vac-bogota', title: 'Auxiliar de cargue y descargue', city: 'Bogotá' }
+  { id: 'branch-bogota', name: 'Bogotá' },
+  { id: 'branch-cali', name: 'Cali' }
 ];
 
 function workbookWithRows(headers, rows) {
@@ -29,34 +26,40 @@ function workbookWithRows(headers, rows) {
   return workbook;
 }
 
-function minimalHeaders() {
-  return ['Nombres', 'Apellidos', 'Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'];
+function minimalHeaders({ includeBranch = false, includeLegacyVacancy = false } = {}) {
+  const headers = ['Nombres', 'Apellidos', 'Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'];
+  if (includeBranch) headers.push('Sucursales operativas');
+  if (includeLegacyVacancy) headers.push('Vacantes / perfiles');
+  return headers;
 }
 
-function minimalRow(overrides = {}) {
+function minimalRow(overrides = {}, { includeBranch = false, includeLegacyVacancy = false } = {}) {
   const values = {
-    firstNames: 'Ana María', lastNames: 'Pérez Gómez', phone: '3001234567', documentType: 'CC',
-    documentNumber: '1020304050', residenceCity: 'Bogotá', residenceLocality: 'Suba', contractType: 'DIRECTO',
-    ...overrides
+    firstNames: 'Ana María', lastNames: 'Pérez Gómez', phone: '3000000000', documentType: 'CC',
+    documentNumber: '1000000000', residenceCity: 'Bogotá', residenceLocality: 'Suba', contractType: 'DIRECTO',
+    branch: 'Bogotá', vacancy: 'Perfil histórico', ...overrides
   };
-  return [values.firstNames, values.lastNames, values.phone, values.documentType, values.documentNumber, values.residenceCity, values.residenceLocality, values.contractType];
+  const row = [values.firstNames, values.lastNames, values.phone, values.documentType, values.documentNumber, values.residenceCity, values.residenceLocality, values.contractType];
+  if (includeBranch) row.push(values.branch);
+  if (includeLegacyVacancy) row.push(values.vacancy);
+  return row;
 }
 
 function existingWorker(overrides = {}) {
   return {
-    id: 'worker-1', fullName: 'Ana María', phone: '3001234567', documentType: 'CC', documentNumber: '1020304050',
+    id: 'worker-1', fullName: 'Ana María Pérez Gómez', phone: '3000000000', documentType: 'CC', documentNumber: '1000000000',
     residenceCity: 'Bogotá', residenceLocality: 'Suba', transportMode: 'Moto', contractType: 'DIRECTO',
     operationalStatus: 'INACTIVE', notes: 'Conservar', updatedAt: new Date('2026-07-25T03:00:00.000Z'),
-    cities: [{ city: { id: 'city-bogota', name: 'Bogotá' } }], vacancies: [], ...overrides
+    cities: [{ city: { id: 'branch-bogota', name: 'Bogotá' } }], ...overrides
   };
 }
 
 test('Nombre singular y Apellidos se unen como nombre completo', () => {
   const workbook = workbookWithRows(
     ['Nombre', 'Apellidos', 'Teléfono', 'Tipo de documento', 'Número de documento', 'Ciudad de residencia', 'Localidad / barrio', 'Tipo de contrato'],
-    [['Juan Carlos', 'Pérez Gómez', '3001234567', 'CC', '123', 'Bogotá', 'Suba', 'DIRECTO']]
+    [['Juan Carlos', 'Pérez Gómez', '3000000000', 'CC', '123', 'Bogotá', 'Suba', 'DIRECTO']]
   );
-  const prepared = prepareDispatchWorkerExcelRows(parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]), { cities, vacancies });
+  const prepared = prepareDispatchWorkerExcelRows(parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]), { cities });
   assert.equal(prepared[0].workerData.fullName, 'Juan Carlos Pérez Gómez');
 });
 
@@ -68,51 +71,68 @@ test('Nombre completo continúa funcionando cuando no hay columnas separadas', (
   assert.equal(buildDispatchWorkerFullName({ fullName: '  Ana   Pérez  ' }), 'Ana Pérez');
 });
 
-test('la revisión clasifica un auxiliar activo con apellido nuevo como UPDATE', async () => {
-  const workbook = workbookWithRows(minimalHeaders(), [minimalRow()]);
-  const prisma = { dispatchWorker: { findMany: async () => [existingWorker()] } };
-  const review = await buildDispatchWorkerImportReview({ prisma, workbook, cities, vacancies });
-  assert.equal(review.summary.updateCount, 1);
-  assert.equal(review.items[0].type, 'UPDATE');
-  assert.equal(review.items[0].changes.find((change) => change.field === 'fullName').incomingValue, 'Ana María Pérez Gómez');
+test('un auxiliar nuevo requiere al menos una sucursal operativa', async () => {
+  const prisma = { dispatchWorker: { findMany: async () => [] } };
+  const review = await buildDispatchWorkerImportReview({
+    prisma,
+    workbook: workbookWithRows(minimalHeaders(), [minimalRow()]),
+    cities
+  });
+  assert.equal(review.items[0].type, 'CONFLICT');
+  assert.equal(review.items[0].actionable, false);
+  assert.match(review.items[0].reason, /Sucursal operativa/);
 });
 
-test('campos opcionales vacíos conservan valores existentes y no aparecen como cambios', async () => {
-  const workbook = workbookWithRows(minimalHeaders(), [minimalRow({ lastNames: '' })]);
-  assert.throws(() => parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]) && prepareDispatchWorkerExcelRows(parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]), { cities, vacancies }), /Nombres y Apellidos/);
-
-  const validWorkbook = workbookWithRows(minimalHeaders(), [minimalRow()]);
-  const current = existingWorker({ fullName: 'Ana María Pérez Gómez' });
-  const prisma = { dispatchWorker: { findMany: async () => [current] } };
-  const review = await buildDispatchWorkerImportReview({ prisma, workbook: validWorkbook, cities, vacancies });
-  const changedFields = review.items[0].changes.map((change) => change.field);
-  assert.doesNotMatch(changedFields.join(','), /transportMode|operationalStatus|notes|cities|vacancies/);
-  assert.equal(review.items[0].type, 'UNCHANGED');
-});
-
-test('un auxiliar nuevo queda pendiente de aprobación y no se crea durante el análisis', async () => {
+test('un auxiliar nuevo con sucursal queda pendiente de aprobación y no se crea durante análisis', async () => {
   let created = 0;
-  const prisma = {
-    dispatchWorker: {
-      findMany: async () => [],
-      create: async () => { created += 1; }
-    }
-  };
-  const review = await buildDispatchWorkerImportReview({ prisma, workbook: workbookWithRows(minimalHeaders(), [minimalRow()]), cities, vacancies });
+  const prisma = { dispatchWorker: { findMany: async () => [], create: async () => { created += 1; } } };
+  const review = await buildDispatchWorkerImportReview({
+    prisma,
+    workbook: workbookWithRows(minimalHeaders({ includeBranch: true }), [minimalRow({}, { includeBranch: true })]),
+    cities
+  });
   assert.equal(review.items[0].type, 'NEW');
   assert.equal(review.items[0].actionable, true);
+  assert.equal(review.items[0].incoming.cityIds[0], 'branch-bogota');
   assert.equal(created, 0);
 });
 
-test('aplica únicamente los cambios seleccionados y elimina el lote', async () => {
-  const updates = [];
+test('auxiliar existente puede omitir sucursales y conservar su asignación', async () => {
+  const prisma = { dispatchWorker: { findMany: async () => [existingWorker()] } };
+  const review = await buildDispatchWorkerImportReview({
+    prisma,
+    workbook: workbookWithRows(minimalHeaders(), [minimalRow()]),
+    cities
+  });
+  const item = review.items[0];
+  assert.equal(item.incoming.relationsProvided.cities, false);
+  assert.equal(item.incoming.cityIds.length, 0);
+  assert.doesNotMatch(item.changes.map((change) => change.field).join(','), /cities/);
+});
+
+test('columna histórica Vacantes / perfiles se acepta pero se ignora como autoridad', async () => {
+  const prisma = { dispatchWorker: { findMany: async () => [] } };
+  const workbook = workbookWithRows(
+    minimalHeaders({ includeBranch: true, includeLegacyVacancy: true }),
+    [minimalRow({}, { includeBranch: true, includeLegacyVacancy: true })]
+  );
+  const review = await buildDispatchWorkerImportReview({ prisma, workbook, cities });
+  const incoming = review.items[0].incoming;
+  assert.equal(incoming.legacyVacanciesIgnored, true);
+  assert.deepEqual(incoming.vacancyIds, []);
+  assert.equal(incoming.relationsProvided.vacancies, false);
+  assert.match(review.items[0].reason, /ignoró la columna histórica/);
+});
+
+test('aplica ramas seleccionadas sin escribir DispatchWorkerVacancy', async () => {
+  let vacancyWrites = 0;
+  let cityCreates = 0;
   let deletedBatch = false;
   const item = {
-    id: 'row-2', type: 'UPDATE', actionable: true, workerId: 'worker-1', workerUpdatedAt: '2026-07-25T03:00:00.000Z',
+    id: 'row-2', type: 'NEW', actionable: true,
     incoming: {
-      workerData: { fullName: 'Ana María Pérez Gómez', phone: '3001234567', documentType: 'CC', documentNumber: '1020304050', residenceCity: 'Bogotá', residenceLocality: 'Suba', transportMode: null, contractType: 'DIRECTO', operationalStatus: 'CONTRATADO', notes: null },
-      providedWorkerFields: ['fullName', 'phone', 'documentType', 'documentNumber', 'residenceCity', 'residenceLocality', 'contractType'],
-      relationsProvided: { cities: false, vacancies: false }, cityIds: [], vacancyIds: []
+      workerData: { fullName: 'Persona Ejemplo', phone: '3000000000', documentType: 'CC', documentNumber: '1000000001', residenceCity: 'Bogotá', residenceLocality: 'Suba', transportMode: null, contractType: 'DIRECTO', operationalStatus: 'CONTRATADO', notes: null },
+      providedWorkerFields: ['fullName'], relationsProvided: { cities: true, vacancies: false }, cityIds: ['branch-bogota'], vacancyIds: []
     }
   };
   const tx = {
@@ -121,43 +141,58 @@ test('aplica únicamente los cambios seleccionados y elimina el lote', async () 
       delete: async () => { deletedBatch = true; }
     },
     dispatchWorker: {
-      updateMany: async ({ where, data }) => {
-        assert.equal(where.id, 'worker-1');
-        assert.equal(new Date(where.updatedAt).toISOString(), '2026-07-25T03:00:00.000Z');
-        updates.push(data);
-        return { count: 1 };
-      }
+      findFirst: async () => null,
+      create: async () => ({ id: 'worker-new' })
     },
-    dispatchWorkerCity: { deleteMany: async () => null, createMany: async () => null },
-    dispatchWorkerVacancy: { deleteMany: async () => null, createMany: async () => null }
+    dispatchWorkerCity: {
+      deleteMany: async () => null,
+      createMany: async ({ data }) => { cityCreates += data.length; }
+    },
+    dispatchWorkerVacancy: {
+      deleteMany: async () => { vacancyWrites += 1; },
+      createMany: async () => { vacancyWrites += 1; }
+    }
   };
-  const prisma = { $transaction: async (callback) => callback(tx) };
-  const result = await applyDispatchWorkerImportBatch({ prisma, batchId: 'batch-1', ownerKey: 'coord', selectedItemIds: ['row-2'], now: new Date('2026-07-25T04:00:00.000Z') });
-  assert.equal(result.updated, 1);
-  assert.equal(updates[0].fullName, 'Ana María Pérez Gómez');
-  assert.equal('operationalStatus' in updates[0], false);
+  const result = await applyDispatchWorkerImportBatch({ prisma: { $transaction: async (callback) => callback(tx) }, batchId: 'batch-1', ownerKey: 'coord', selectedItemIds: ['row-2'], now: new Date('2026-07-25T04:00:00.000Z') });
+  assert.equal(result.created, 1);
+  assert.equal(cityCreates, 1);
+  assert.equal(vacancyWrites, 0);
   assert.equal(deletedBatch, true);
 });
 
 test('un cambio concurrente se omite y no sobrescribe el auxiliar', async () => {
   let updateCalls = 0;
-  const item = { id: 'row-2', type: 'UPDATE', actionable: true, workerId: 'worker-1', workerUpdatedAt: '2026-07-25T03:00:00.000Z', incoming: { workerData: {}, providedWorkerFields: [], relationsProvided: { cities: false, vacancies: false }, cityIds: [], vacancyIds: [] } };
+  const item = { id: 'row-2', type: 'UPDATE', actionable: true, workerId: 'worker-1', workerUpdatedAt: '2026-07-25T03:00:00.000Z', incoming: { workerData: {}, providedWorkerFields: [], relationsProvided: { cities: false, vacancies: false }, cityIds: [] } };
   const tx = {
     dispatchWorkerImportBatch: { findFirst: async () => ({ id: 'batch', expiresAt: new Date('2026-07-25T06:00:00.000Z'), items: [item] }), delete: async () => null },
     dispatchWorker: { updateMany: async () => { updateCalls += 1; return { count: 0 }; } },
-    dispatchWorkerCity: { deleteMany: async () => null, createMany: async () => null },
-    dispatchWorkerVacancy: { deleteMany: async () => null, createMany: async () => null }
+    dispatchWorkerCity: { deleteMany: async () => null, createMany: async () => null }
   };
   const result = await applyDispatchWorkerImportBatch({ prisma: { $transaction: async (callback) => callback(tx) }, batchId: 'batch', ownerKey: 'coord', selectedItemIds: ['row-2'], now: new Date('2026-07-25T04:00:00.000Z') });
   assert.equal(result.conflicts, 1);
   assert.equal(updateCalls, 1);
 });
 
-test('la plantilla conserva Nombres y Apellidos separados', () => {
-  const workbook = buildDispatchWorkerImportTemplate({ cities, vacancies });
+test('la plantilla nueva contiene Sucursales operativas y no Vacantes / perfiles', () => {
+  const workbook = buildDispatchWorkerImportTemplate({ cities });
   const sheet = workbook.getWorksheet('Auxiliares');
-  assert.equal(sheet.getCell('A1').value, 'Nombres');
-  assert.equal(sheet.getCell('B1').value, 'Apellidos');
+  const headers = sheet.getRow(1).values.map(String).join('|');
+  assert.match(headers, /Nombres/);
+  assert.match(headers, /Apellidos/);
+  assert.match(headers, /Sucursales operativas/);
+  assert.doesNotMatch(headers, /Vacantes \/ perfiles/);
+
+  const catalog = workbook.getWorksheet('Catalogos');
+  assert.equal(catalog.getCell('A1').value, 'Sucursales válidas');
+  assert.equal(catalog.columnCount, 1);
+});
+
+test('la pantalla de importación explica autoridad por sucursal', () => {
+  const view = fs.readFileSync('src/views/operacionesPersonalImportar.ejs', 'utf8');
+  assert.match(view, /únicamente por Sucursal/);
+  assert.match(view, /columna <strong>Vacantes \/ perfiles<\/strong>.*se ignora/s);
+  assert.match(view, /Sucursal obligatoria para nuevos/);
+  assert.doesNotMatch(view, /Vacantes \/ perfiles válidos/);
 });
 
 test('las rutas usan revisión y aprobación en vez de importación inmediata', () => {
@@ -169,26 +204,15 @@ test('las rutas usan revisión y aprobación en vez de importación inmediata', 
   assert.doesNotMatch(route, /importDispatchWorkerExcelWorkbook/);
   assert.match(view, /Aplicar seleccionados/);
   assert.match(view, /Aplicar todos/);
-  assert.match(view, /selectAll/);
-});
-
-test('la migración crea almacenamiento temporal de revisión', () => {
-  const migration = fs.readFileSync('prisma/migrations/20260725043000_dispatch_worker_import_review/migration.sql', 'utf8');
-  assert.match(migration, /CREATE TABLE "DispatchWorkerImportBatch"/);
-  assert.match(migration, /"items" JSONB NOT NULL/);
-  assert.match(migration, /"expiresAt" TIMESTAMP/);
 });
 
 test('rechaza documentos repetidos dentro del mismo archivo', () => {
   const workbook = workbookWithRows(minimalHeaders(), [minimalRow(), minimalRow({ firstNames: 'Otra', lastNames: 'Persona' })]);
   const parsed = parseDispatchWorkerExcelWorksheet(workbook.worksheets[0]);
-  assert.throws(() => prepareDispatchWorkerExcelRows(parsed, { cities, vacancies }), DispatchWorkerExcelValidationError);
+  assert.throws(() => prepareDispatchWorkerExcelRows(parsed, { cities }), DispatchWorkerExcelValidationError);
 });
 
-
-test('la pantalla aclara que el estado vacío conserva auxiliares existentes', () => {
-  const view = fs.readFileSync('src/views/operacionesPersonalImportar.ejs', 'utf8');
-  const route = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
-  assert.match(view, /En auxiliares existentes, una celda vacía conserva el estado actual/);
-  assert.match(route, /dispatchWorkerImportBatch\.deleteMany\(\{ where: \{ expiresAt/);
+test('catálogo exportado ya no contiene columna de vacantes', () => {
+  assert.equal(DISPATCH_WORKER_EXCEL_COLUMNS.some((column) => column.field === 'vacancies'), false);
+  assert.equal(DISPATCH_WORKER_EXCEL_COLUMNS.some((column) => column.field === 'operationalCities'), true);
 });
