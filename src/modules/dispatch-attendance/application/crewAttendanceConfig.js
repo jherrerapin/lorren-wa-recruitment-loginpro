@@ -405,6 +405,10 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
         select: {
           id: true,
           operationPointId: true,
+          operationPointName: true,
+          serviceDate: true,
+          startTime: true,
+          endTime: true,
           createdAt: true,
           operationPoint: {
             select: { id: true, isActive: true, attendanceEnabled: true }
@@ -481,6 +485,10 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
       assignmentId: assignment.id,
       serviceRequestId: service?.id || null,
       operationPointId,
+      operationPointName: normalizeString(service?.operationPointName, 160) || 'Servicio de cuadrilla',
+      serviceDate: serviceDateKey(service?.serviceDate),
+      startTime: normalizeString(service?.startTime, 16) || '',
+      endTime: normalizeString(service?.endTime, 16) || '',
       mode: configuration.mode,
       crewEnabledAtCreation: eligibility.crewEnabledAtCreation,
       crewEligible: eligibility.crewEligible,
