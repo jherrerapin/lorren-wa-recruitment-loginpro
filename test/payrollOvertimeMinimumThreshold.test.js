@@ -56,78 +56,52 @@ function calculate(sessions, compensation = new Map()) {
   }).rows[0];
 }
 
-const cases = [
-  {
-    code: 'HEDO', dateKey: '2026-08-03', startHour: 8,
-    baseline: ['2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08'],
-    fallbackRecargo: null
-  },
-  {
-    code: 'HENO', dateKey: '2026-08-03', startHour: 12,
-    baseline: ['2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08'],
-    fallbackRecargo: 'RNO'
-  },
-  {
-    code: 'HEDD', dateKey: '2026-08-09', startHour: 8,
-    baseline: ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
-    fallbackRecargo: 'RDD'
-  },
-  {
-    code: 'HEND', dateKey: '2026-08-09', startHour: 12,
-    baseline: ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07'],
-    fallbackRecargo: 'RND'
-  },
-  {
-    code: 'HEDF', dateKey: '2026-08-07', startHour: 8,
-    baseline: ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-08'],
-    fallbackRecargo: 'RDF'
-  },
-  {
-    code: 'HENF', dateKey: '2026-08-07', startHour: 12,
-    baseline: ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-08'],
-    fallbackRecargo: 'RNF'
-  }
+const overtimeCases = [
+  { code: 'HEDO', dateKey: '2026-08-03', startHour: 8, fallbackRecargo: null },
+  { code: 'HENO', dateKey: '2026-08-03', startHour: 12, fallbackRecargo: 'RNO' },
+  { code: 'HEDD', dateKey: '2026-08-09', startHour: 8, fallbackRecargo: 'RDD' },
+  { code: 'HEND', dateKey: '2026-08-09', startHour: 12, fallbackRecargo: 'RND' },
+  { code: 'HEDF', dateKey: '2026-08-07', startHour: 8, fallbackRecargo: 'RDF' },
+  { code: 'HENF', dateKey: '2026-08-07', startHour: 12, fallbackRecargo: 'RNF' }
 ];
 
-function weeklyScenario(item, extraMinutes) {
-  const sessions = item.baseline.map((dateKey, index) => session({
-    id: `TEST-BASE-${item.code}-${index}`,
-    dateKey,
-    minutes: 7 * 60
-  }));
-  sessions.push(session({
-    id: `TEST-TARGET-${item.code}-${extraMinutes}`,
-    dateKey: item.dateKey,
-    startHour: item.startHour,
-    minutes: (7 * 60) + extraMinutes
-  }));
+function dailyExcessScenario(item, extraMinutes) {
   const compensation = item.code === 'HEDD' || item.code === 'HEND'
     ? new Map([['TEST-WORKER-THRESHOLD|2026-08-09', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]])
     : new Map();
-  return calculate(sessions, compensation);
+  return calculate([
+    session({
+      id: `TEST-TARGET-${item.code}-${extraMinutes}`,
+      dateKey: item.dateKey,
+      startHour: item.startHour,
+      minutes: (7 * 60) + extraMinutes
+    })
+  ], compensation);
 }
 
-test('las horas extra conservan un mínimo de 30 minutos después del balance semanal', () => {
+test('el umbral de referencia se conserva en treinta minutos pero debe superarse', () => {
   assert.equal(MIN_OVERTIME_RECOGNITION_MINUTES, 30);
 });
 
-test('42 h 29 min no reconoce H* y conserva el recargo ordinario correspondiente', () => {
-  for (const item of cases) {
-    const row = weeklyScenario(item, 29);
+test('exactamente treinta minutos de remanente no reconoce ninguno de los seis conceptos H*', () => {
+  for (const item of overtimeCases) {
+    const row = dailyExcessScenario(item, 30);
     assert.equal(row.overtimeMinutes, 0, item.code);
-    assert.equal(row.unrecognizedOvertimeMinutes, 29, item.code);
+    assert.equal(row.unrecognizedOvertimeMinutes, 30, item.code);
     assert.equal(row.conceptMinutes[item.code], 0, item.code);
-    if (item.fallbackRecargo) assert.equal(row.conceptMinutes[item.fallbackRecargo], 29, `${item.code} conserva ${item.fallbackRecargo}`);
+    if (item.fallbackRecargo) {
+      assert.equal(row.conceptMinutes[item.fallbackRecargo], 30, `${item.code} conserva ${item.fallbackRecargo}`);
+    }
     assert.ok(row.novelties.some((novelty) => novelty.code === 'OVERTIME_BELOW_MINIMUM'), item.code);
   }
 });
 
-test('42 h 30 min reconoce exactamente 30 minutos en cada concepto H*', () => {
-  for (const item of cases) {
-    const row = weeklyScenario(item, 30);
-    assert.equal(row.overtimeMinutes, 30, item.code);
+test('treinta y un minutos de remanente sí se reconocen en cada concepto H*', () => {
+  for (const item of overtimeCases) {
+    const row = dailyExcessScenario(item, 31);
+    assert.equal(row.overtimeMinutes, 31, item.code);
     assert.equal(row.unrecognizedOvertimeMinutes, 0, item.code);
-    assert.equal(row.conceptMinutes[item.code], 30, item.code);
+    assert.equal(row.conceptMinutes[item.code], 31, item.code);
     assert.ok(!row.novelties.some((novelty) => novelty.code === 'OVERTIME_BELOW_MINIMUM'), item.code);
   }
 });
