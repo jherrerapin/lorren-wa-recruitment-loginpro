@@ -215,8 +215,8 @@ final class PresenceBridge {
         boolean deliveredRecent = recent != null;
         if (deliveredRecent) sink.onLocation(recent);
 
-        String provider = preferredProvider();
-        if (provider == null) {
+        String[] providers = enabledLocationProviders();
+        if (providers.length == 0) {
             if (!deliveredRecent) sink.onError("native_location_unavailable");
             return;
         }
@@ -225,6 +225,9 @@ final class PresenceBridge {
         LocationListener listener = new LocationListener() {
             @Override
             public void onLocationChanged(Location location) {
+                synchronized (PresenceBridge.this) {
+                    if (pendingLocationListener != this) return;
+                }
                 cancelPendingLocation();
                 sink.onLocation(location);
             }
@@ -251,20 +254,28 @@ final class PresenceBridge {
         }
         try {
             activity.runOnUiThread(() -> {
-                try {
-                    locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper());
-                    Runnable timeout;
-                    synchronized (PresenceBridge.this) {
-                        timeout = pendingLocationTimeout;
+                int requestedProviders = 0;
+                for (String provider : providers) {
+                    try {
+                        locationManager.requestSingleUpdate(provider, listener, Looper.getMainLooper());
+                        requestedProviders += 1;
+                    } catch (SecurityException error) {
+                        cancelPendingLocation();
+                        sink.onError("permissions_required");
+                        return;
+                    } catch (Exception ignored) {
                     }
-                    if (timeout != null) mainHandler.postDelayed(timeout, LOCATION_TIMEOUT_MS);
-                } catch (SecurityException error) {
-                    cancelPendingLocation();
-                    sink.onError("permissions_required");
-                } catch (Exception error) {
-                    cancelPendingLocation();
-                    sink.onError("native_location_unavailable");
                 }
+                if (requestedProviders == 0) {
+                    cancelPendingLocation();
+                    if (!deliveredRecent) sink.onError("native_location_unavailable");
+                    return;
+                }
+                Runnable timeout;
+                synchronized (PresenceBridge.this) {
+                    timeout = pendingLocationTimeout;
+                }
+                if (timeout != null) mainHandler.postDelayed(timeout, LOCATION_TIMEOUT_MS);
             });
         } catch (Exception error) {
             cancelPendingLocation();
@@ -288,13 +299,20 @@ final class PresenceBridge {
         return best;
     }
 
-    private String preferredProvider() {
+    private String[] enabledLocationProviders() {
+        boolean gpsEnabled = false;
+        boolean networkEnabled = false;
         try {
-            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) return LocationManager.GPS_PROVIDER;
-            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) return LocationManager.NETWORK_PROVIDER;
+            gpsEnabled = locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER);
+            networkEnabled = locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER);
         } catch (Exception ignored) {
         }
-        return null;
+        if (gpsEnabled && networkEnabled) {
+            return new String[] { LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER };
+        }
+        if (gpsEnabled) return new String[] { LocationManager.GPS_PROVIDER };
+        if (networkEnabled) return new String[] { LocationManager.NETWORK_PROVIDER };
+        return new String[0];
     }
 
     private static long locationAgeMs(Location location) {
