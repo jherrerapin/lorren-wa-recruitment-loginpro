@@ -17,7 +17,7 @@ function moduleMenu(html, key) {
   return html.match(new RegExp(`<details[^>]*data-module-menu="${key}"[\\s\\S]*?<\\/details>`))?.[0] || '';
 }
 
-test('los modulos comparten un grupo exclusivo y Usuarios queda independiente', () => {
+test('los modulos comparten un grupo exclusivo y Sucursales/Usuarios quedan independientes', () => {
   const html = injectAdminModuleNavigation(baseHtml, req('/admin', {}, 'dev'));
   const navbar = nav(html);
 
@@ -25,24 +25,28 @@ test('los modulos comparten un grupo exclusivo y Usuarios queda independiente', 
   assert.match(navbar, /data-module-menu="recruitment"/);
   assert.match(navbar, /data-module-menu="operations"/);
   assert.match(navbar, /data-module-menu="payroll"/);
+  assert.match(navbar, /class="admin-module-standalone-link" href="\/admin\/locations">Sucursales<\/a>/);
   assert.match(navbar, /class="admin-module-standalone-link" href="\/admin\/users">Usuarios<\/a>/);
-  assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /href="\/admin\/users"/);
+  assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /href="\/admin\/locations"|href="\/admin\/users"/);
   assert.match(navbar, /href="\/admin\/monitor"/);
   assert.match(navbar, /href="\/admin\/bot-knowledge"/);
   assert.match(navbar, /href="\/admin\/operaciones\/pruebas"/);
   assert.doesNotMatch(html, /data-module-cards=|admin-module-switcher|admin-module-card-grid/);
 });
 
-test('Reclutamiento expone Sucursales como único acceso de configuración territorial', () => {
+test('Sucursales queda fuera de Reclutamiento y se marca activo como enlace independiente', () => {
   const recruitment = nav(injectAdminModuleNavigation(baseHtml, req('/admin', { canAccessStatistics: true })));
   const recruitmentMenu = moduleMenu(recruitment, 'recruitment');
   assert.match(recruitmentMenu, /href="\/admin">Panel de candidatos<\/a>/);
-  assert.match(recruitmentMenu, /href="\/admin\/locations">Sucursales<\/a>/);
-  assert.doesNotMatch(recruitmentMenu, /href="\/admin\/vacancies"|>Vacantes<\/a>|>Ciudades<\/a>/);
+  assert.doesNotMatch(recruitmentMenu, /href="\/admin\/locations"|>Sucursales<\/a>|href="\/admin\/vacancies"|>Vacantes<\/a>|>Ciudades<\/a>/);
   assert.match(recruitmentMenu, /href="\/admin\/estadisticas">Estadísticas<\/a>/);
-  assert.doesNotMatch(recruitmentMenu, /Usuarios/);
+  assert.match(recruitment, /class="admin-module-standalone-link" href="\/admin\/locations">Sucursales<\/a>/);
   assert.match(recruitment, /admin-module-standalone-link[^>]*href="\/admin\/users"/);
   assert.doesNotMatch(recruitment, /data-module-menu="operations"|data-module-menu="payroll"/);
+
+  const branches = nav(injectAdminModuleNavigation(baseHtml, req('/admin/locations')));
+  assert.match(branches, /class="admin-module-standalone-link is-active" href="\/admin\/locations">Sucursales<\/a>/);
+  assert.doesNotMatch(moduleMenu(branches, 'recruitment'), /admin-module-menu is-active/);
 });
 
 test('cada desplegable conserva opciones y permisos de Operaciones y Nómina', () => {

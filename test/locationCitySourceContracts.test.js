@@ -20,7 +20,7 @@ test('sucursales reemplaza la clasificación funcional de ciudades sin contrato 
   assert.match(route, /La operación Siberia solo puede pertenecer a la sucursal Bogotá/);
   assert.doesNotMatch(view, /name="usedForRecruitment"|name="usedForDispatch"|Bot \/ Reclutamiento.*Despacho o ambos/);
   assert.match(view, /<h1>Sucursales<\/h1>/);
-  assert.match(view, /Bogotá incluye Siberia/);
+  assert.doesNotMatch(view, /Bogotá incluye Siberia|la sucursal se hereda automáticamente|Dato heredado:|configuraciones históricas|persistencia de vacantes y horarios/);
   assert.doesNotMatch(view, /href="\/admin\/vacancies"/);
 });
 
@@ -45,7 +45,7 @@ test('Sucursales es superficie única y delega Vacancy/InterviewSlot a admin.js'
   assert.match(view, /data-create-operation-form/);
   assert.match(view, /postCanonicalVacancy/);
   assert.match(view, /Editar información/);
-  assert.match(view, /configuraciones históricas/);
+  assert.doesNotMatch(view, /Dato heredado:|configuraciones históricas|la sucursal se hereda automáticamente/);
 
   assert.match(fields, /name="operationId"/);
   assert.match(fields, /name="title"/);
