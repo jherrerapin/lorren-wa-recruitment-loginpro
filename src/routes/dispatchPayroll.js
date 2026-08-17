@@ -404,6 +404,82 @@ function cloneConceptValues(source = {}) {
   return Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, Number(source?.[code] || 0)]));
 }
 
+function cloneDailyPayrollRow(source = {}) {
+  const conceptMinutes = cloneConceptValues(source.conceptMinutes);
+  return {
+    ...source,
+    conceptMinutes,
+    conceptHours: Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, minutesToDecimalHours(conceptMinutes[code])])),
+    clientNames: [...(source.clientNames || [])],
+    operationNames: [...(source.operationNames || [])],
+    civilDateKeys: [...(source.civilDateKeys || [])],
+    holidayDateKeys: [...(source.holidayDateKeys || [])],
+    restDateKeys: [...(source.restDateKeys || [])],
+    markings: [...(source.markings || [])]
+  };
+}
+
+function recalculateDailyPayrollRow(day) {
+  day.totalMinutes = Number(day.totalMinutes || 0);
+  day.ordinaryMinutes = Number(day.ordinaryMinutes || 0);
+  day.overtimeMinutes = Number(day.overtimeMinutes || 0);
+  day.unrecognizedOvertimeMinutes = Number(day.unrecognizedOvertimeMinutes || 0);
+  day.conceptMinutes = cloneConceptValues(day.conceptMinutes);
+  day.totalHours = minutesToDecimalHours(day.totalMinutes);
+  day.ordinaryHours = minutesToDecimalHours(day.ordinaryMinutes);
+  day.overtimeHours = minutesToDecimalHours(day.overtimeMinutes);
+  day.unrecognizedOvertimeHours = minutesToDecimalHours(day.unrecognizedOvertimeMinutes);
+  day.conceptHours = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, minutesToDecimalHours(day.conceptMinutes[code])]));
+  return day;
+}
+
+function hasOvertimeDailySignal(day, novelties = []) {
+  if (Number(day?.overtimeMinutes || 0) > 0 || Number(day?.unrecognizedOvertimeMinutes || 0) > 0) return true;
+  if (PAYROLL_OVERTIME_CONCEPT_CODES.some((code) => Number(day?.conceptMinutes?.[code] || 0) > 0)) return true;
+  const dateKeys = new Set([day?.dateKey, ...(day?.civilDateKeys || [])].filter(Boolean));
+  return novelties.some((novelty) => novelty?.dateKey && dateKeys.has(novelty.dateKey));
+}
+
+function composePayrollDailyRows(generalDaily = [], overtimeDaily = [], overtimeNovelties = []) {
+  const overtimeByDate = new Map(
+    (Array.isArray(overtimeDaily) ? overtimeDaily : [])
+      .filter((day) => day?.dateKey)
+      .map((day) => [day.dateKey, day])
+  );
+  const rows = [];
+
+  for (const generalDay of Array.isArray(generalDaily) ? generalDaily : []) {
+    const day = cloneDailyPayrollRow(generalDay);
+    const overtimeDay = overtimeByDate.get(day.dateKey);
+    day.overtimeMinutes = Number(overtimeDay?.overtimeMinutes || 0);
+    day.unrecognizedOvertimeMinutes = Number(overtimeDay?.unrecognizedOvertimeMinutes || 0);
+    for (const code of PAYROLL_OVERTIME_CONCEPT_CODES) {
+      day.conceptMinutes[code] = Number(overtimeDay?.conceptMinutes?.[code] || 0);
+    }
+    rows.push(recalculateDailyPayrollRow(day));
+    overtimeByDate.delete(day.dateKey);
+  }
+
+  for (const overtimeDay of overtimeByDate.values()) {
+    if (!hasOvertimeDailySignal(overtimeDay, overtimeNovelties)) continue;
+    const day = cloneDailyPayrollRow(overtimeDay);
+    day.totalMinutes = 0;
+    day.ordinaryMinutes = 0;
+    day.overtimeMinutes = Number(overtimeDay.overtimeMinutes || 0);
+    day.unrecognizedOvertimeMinutes = Number(overtimeDay.unrecognizedOvertimeMinutes || 0);
+    day.conceptMinutes = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [
+      code,
+      PAYROLL_OVERTIME_CONCEPT_CODES.includes(code) ? Number(overtimeDay.conceptMinutes?.[code] || 0) : 0
+    ]));
+    day.compensationDateKey = null;
+    day.compensationStatus = null;
+    day.compensationManagedByRestAssignment = false;
+    rows.push(recalculateDailyPayrollRow(day));
+  }
+
+  return rows.sort((left, right) => String(left.dateKey || '').localeCompare(String(right.dateKey || '')));
+}
+
 function noveltyIdentity(novelty = {}) {
   return [
     novelty.code || '', novelty.dateKey || '', novelty.sessionId || '', novelty.message || '', novelty.blocking === false ? '0' : '1'
@@ -504,6 +580,7 @@ export function combinePayrollPeriodReports(generalReport, overtimeReport) {
     ...row,
     conceptMinutes: cloneConceptValues(row.conceptMinutes),
     conceptHours: cloneConceptValues(row.conceptHours),
+    daily: (row.daily || []).map(cloneDailyPayrollRow),
     novelties: [...(row.novelties || [])]
   }));
   const rowByWorker = new Map(rows.map((row) => [row.workerId, row]));
@@ -524,6 +601,7 @@ export function combinePayrollPeriodReports(generalReport, overtimeReport) {
       target.conceptMinutes[code] = Number(overtimeRow.conceptMinutes?.[code] || 0);
       target.conceptHours[code] = minutesToDecimalHours(target.conceptMinutes[code]);
     }
+    target.daily = composePayrollDailyRows(target.daily, overtimeRow.daily || [], overtimeRow.novelties || []);
     target.novelties = mergeNovelties(target.novelties, overtimeRow.novelties || []);
     target.exportable = !target.novelties.some((novelty) => novelty?.blocking !== false);
     target.status = target.exportable ? 'CALCULADO' : 'CON_NOVEDADES';
@@ -539,6 +617,7 @@ export function combinePayrollPeriodReports(generalReport, overtimeReport) {
       target.conceptMinutes[code] = 0;
       target.conceptHours[code] = 0;
     }
+    target.daily = composePayrollDailyRows(target.daily, [], []);
   }
 
   rows.sort((left, right) => left.fullName.localeCompare(right.fullName, 'es'));
