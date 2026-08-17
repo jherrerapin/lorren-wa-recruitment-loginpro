@@ -39,6 +39,7 @@ const PAYROLL_EXCEL_COLORS = Object.freeze({
   muted: 'FF64748B',
   white: 'FFFFFFFF'
 });
+const PAYROLL_OVERTIME_CONCEPT_CODES = Object.freeze(['HEDO', 'HENO', 'HEDD', 'HEND', 'HEDF', 'HENF']);
 
 const PAYROLL_EXCEL_COLUMN_WIDTHS = Object.freeze({
   Documento: 17,
@@ -107,7 +108,11 @@ function noStore(res) {
 
 function safeQuery(source = {}) {
   const params = new URLSearchParams();
-  ['periodType', 'from', 'to', 'anchor', 'clientId', 'operationPointId', 'search', 'includeTest'].forEach((key) => {
+  [
+    'periodType', 'from', 'to', 'anchor',
+    'extraPeriodType', 'extraFrom', 'extraTo', 'extraAnchor',
+    'clientId', 'operationPointId', 'search', 'includeTest'
+  ].forEach((key) => {
     const value = normalizeString(source[key], 180);
     if (value) params.set(key, value);
   });
@@ -241,7 +246,8 @@ export function buildPayrollExcelWorkbook(report) {
   sheet.getRow(1).height = 30;
 
   const subtitleCell = sheet.getCell('A2');
-  subtitleCell.value = `Corte ${report.period.from} a ${report.period.to} · ${rows.length} auxiliar(es)`;
+  const overtimePeriod = report.overtimePeriod || report.period;
+  subtitleCell.value = `Corte ${report.period.from} a ${report.period.to} · Extras ${overtimePeriod.from} a ${overtimePeriod.to} · ${rows.length} auxiliar(es)`;
   subtitleCell.font = { bold: true, size: 11, color: { argb: PAYROLL_EXCEL_COLORS.teal } };
   subtitleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PAYROLL_EXCEL_COLORS.tealSoft } };
   subtitleCell.alignment = { vertical: 'middle', horizontal: 'left' };
@@ -304,6 +310,193 @@ export function buildPayrollExcelWorkbook(report) {
   return workbook;
 }
 
+function cloneConceptValues(source = {}) {
+  return Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, Number(source?.[code] || 0)]));
+}
+
+function noveltyIdentity(novelty = {}) {
+  return [
+    novelty.code || '', novelty.dateKey || '', novelty.sessionId || '', novelty.message || '', novelty.blocking === false ? '0' : '1'
+  ].join('|');
+}
+
+function mergeNovelties(general = [], overtime = []) {
+  const seen = new Set();
+  const merged = [];
+  for (const novelty of [...general, ...overtime]) {
+    const key = noveltyIdentity(novelty);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push(novelty);
+  }
+  return merged;
+}
+
+function neutralGeneralRowFromOvertime(row) {
+  const conceptMinutes = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, 0]));
+  const conceptHours = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, 0]));
+  return {
+    ...row,
+    totalMinutes: 0,
+    ordinaryMinutes: 0,
+    overtimeMinutes: 0,
+    unrecognizedOvertimeMinutes: 0,
+    totalHours: 0,
+    ordinaryHours: 0,
+    overtimeHours: 0,
+    unrecognizedOvertimeHours: 0,
+    conceptMinutes,
+    conceptHours,
+    workedDays: 0,
+    deductedDays: 0,
+    netWorkedDays: 0,
+    remuneratedDays: 0,
+    unremuneratedDays: 0,
+    paidPermissionDays: 0,
+    incapacityDays: 0,
+    nightShiftCount: 0,
+    sundayCount: 0,
+    holidayCount: 0,
+    restAssignments: [],
+    daily: [],
+    novelties: [],
+    status: 'CALCULADO',
+    exportable: true
+  };
+}
+
+function recalculateCombinedTotals(report) {
+  const rows = report.rows || [];
+  const conceptMinutes = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [
+    code,
+    rows.reduce((sum, row) => sum + Number(row?.conceptMinutes?.[code] || 0), 0)
+  ]));
+  const totals = {
+    ...(report.totals || {}),
+    workers: rows.length,
+    totalMinutes: sumRows(rows, 'totalMinutes'),
+    ordinaryMinutes: sumRows(rows, 'ordinaryMinutes'),
+    overtimeMinutes: sumRows(rows, 'overtimeMinutes'),
+    unrecognizedOvertimeMinutes: sumRows(rows, 'unrecognizedOvertimeMinutes'),
+    exportableWorkers: rows.filter((row) => row.exportable).length,
+    workersWithNovelties: rows.filter((row) => !row.exportable).length,
+    workedDays: sumRows(rows, 'workedDays'),
+    deductedDays: sumRows(rows, 'deductedDays'),
+    netWorkedDays: sumRows(rows, 'netWorkedDays'),
+    remuneratedDays: sumRows(rows, 'remuneratedDays'),
+    unremuneratedDays: sumRows(rows, 'unremuneratedDays'),
+    paidPermissionDays: sumRows(rows, 'paidPermissionDays'),
+    incapacityDays: sumRows(rows, 'incapacityDays'),
+    nightShiftCount: sumRows(rows, 'nightShiftCount'),
+    sundayCount: sumRows(rows, 'sundayCount'),
+    holidayCount: sumRows(rows, 'holidayCount'),
+    conceptMinutes
+  };
+  totals.totalHours = minutesToDecimalHours(totals.totalMinutes);
+  totals.ordinaryHours = minutesToDecimalHours(totals.ordinaryMinutes);
+  totals.overtimeHours = minutesToDecimalHours(totals.overtimeMinutes);
+  totals.unrecognizedOvertimeHours = minutesToDecimalHours(totals.unrecognizedOvertimeMinutes);
+  totals.conceptHours = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, minutesToDecimalHours(conceptMinutes[code])]));
+  return totals;
+}
+
+function hasOvertimePeriodSignal(row) {
+  return Number(row?.overtimeMinutes || 0) > 0
+    || Number(row?.unrecognizedOvertimeMinutes || 0) > 0
+    || PAYROLL_OVERTIME_CONCEPT_CODES.some((code) => Number(row?.conceptMinutes?.[code] || 0) > 0)
+    || (Array.isArray(row?.novelties) && row.novelties.length > 0);
+}
+
+export function combinePayrollPeriodReports(generalReport, overtimeReport) {
+  const generalRows = Array.isArray(generalReport?.rows) ? generalReport.rows : [];
+  const overtimeRows = Array.isArray(overtimeReport?.rows) ? overtimeReport.rows : [];
+  const rows = generalRows.map((row) => ({
+    ...row,
+    conceptMinutes: cloneConceptValues(row.conceptMinutes),
+    conceptHours: cloneConceptValues(row.conceptHours),
+    novelties: [...(row.novelties || [])]
+  }));
+  const rowByWorker = new Map(rows.map((row) => [row.workerId, row]));
+
+  for (const overtimeRow of overtimeRows) {
+    let target = rowByWorker.get(overtimeRow.workerId);
+    if (!target) {
+      if (!hasOvertimePeriodSignal(overtimeRow)) continue;
+      target = neutralGeneralRowFromOvertime(overtimeRow);
+      rows.push(target);
+      rowByWorker.set(target.workerId, target);
+    }
+    target.overtimeMinutes = Number(overtimeRow.overtimeMinutes || 0);
+    target.unrecognizedOvertimeMinutes = Number(overtimeRow.unrecognizedOvertimeMinutes || 0);
+    target.overtimeHours = minutesToDecimalHours(target.overtimeMinutes);
+    target.unrecognizedOvertimeHours = minutesToDecimalHours(target.unrecognizedOvertimeMinutes);
+    for (const code of PAYROLL_OVERTIME_CONCEPT_CODES) {
+      target.conceptMinutes[code] = Number(overtimeRow.conceptMinutes?.[code] || 0);
+      target.conceptHours[code] = minutesToDecimalHours(target.conceptMinutes[code]);
+    }
+    target.novelties = mergeNovelties(target.novelties, overtimeRow.novelties || []);
+    target.exportable = !target.novelties.some((novelty) => novelty?.blocking !== false);
+    target.status = target.exportable ? 'CALCULADO' : 'CON_NOVEDADES';
+  }
+
+  for (const target of rows) {
+    if (overtimeRows.some((row) => row.workerId === target.workerId)) continue;
+    target.overtimeMinutes = 0;
+    target.unrecognizedOvertimeMinutes = 0;
+    target.overtimeHours = 0;
+    target.unrecognizedOvertimeHours = 0;
+    for (const code of PAYROLL_OVERTIME_CONCEPT_CODES) {
+      target.conceptMinutes[code] = 0;
+      target.conceptHours[code] = 0;
+    }
+  }
+
+  rows.sort((left, right) => left.fullName.localeCompare(right.fullName, 'es'));
+  const report = {
+    ...generalReport,
+    rows,
+    overtimePeriod: overtimeReport?.period || generalReport?.period
+  };
+  report.totals = recalculateCombinedTotals(report);
+  return report;
+}
+
+export function buildOvertimeReportInput(source = {}, generalPeriod = {}) {
+  const input = { ...(source || {}) };
+  const requestedType = normalizeString(input.extraPeriodType, 20)?.toUpperCase();
+  const hasExplicitOvertimePeriod = Boolean(
+    requestedType || input.extraAnchor || input.extraFrom || input.extraTo
+  );
+
+  if (!hasExplicitOvertimePeriod) {
+    return {
+      ...input,
+      periodType: 'CUSTOM',
+      from: generalPeriod.from,
+      to: generalPeriod.to,
+      anchor: generalPeriod.from
+    };
+  }
+
+  if (!['WEEKLY', 'CUSTOM'].includes(requestedType)) throw new Error('payroll_range_invalid');
+  if (requestedType === 'WEEKLY') {
+    return {
+      ...input,
+      periodType: 'WEEKLY',
+      anchor: input.extraAnchor || input.extraFrom || generalPeriod.from,
+      from: undefined,
+      to: undefined
+    };
+  }
+  return {
+    ...input,
+    periodType: 'CUSTOM',
+    from: input.extraFrom || input.extraAnchor || generalPeriod.from,
+    to: input.extraTo || input.extraFrom || input.extraAnchor || generalPeriod.to,
+    anchor: input.extraFrom || input.extraAnchor || generalPeriod.from
+  };
+}
+
 export function applyPayrollWorkerSelection(report, requestedWorkerIds = []) {
   const workerIds = normalizeWorkerIds(requestedWorkerIds);
   const sourceRows = Array.isArray(report?.rows) ? report.rows : [];
@@ -360,7 +553,18 @@ async function reportForRequest(prisma, req, source) {
   const workerIds = normalizeWorkerIds(input.workerId);
   delete input.workerId;
   delete input.filterWorkerId;
-  const report = await loadPayrollReport(prisma, input, { allowTestData: allowTestData(req) });
+  if (!normalizeString(input.periodType, 20)) input.periodType = 'BIWEEKLY';
+
+  const options = { allowTestData: allowTestData(req) };
+  const generalReport = await loadPayrollReport(prisma, input, options);
+  const overtimeInput = buildOvertimeReportInput(input, generalReport.period);
+  const sameResolvedRange = overtimeInput.periodType === 'CUSTOM'
+    && String(overtimeInput.from || '') === String(generalReport.period.from || '')
+    && String(overtimeInput.to || '') === String(generalReport.period.to || '');
+  const overtimeReport = sameResolvedRange
+    ? { ...generalReport, period: { periodType: 'CUSTOM', from: generalReport.period.from, to: generalReport.period.to, anchor: generalReport.period.from, spanDays: generalReport.period.spanDays } }
+    : await loadPayrollReport(prisma, overtimeInput, options);
+  const report = combinePayrollPeriodReports(generalReport, overtimeReport);
   return applyPayrollWorkerSelection(report, workerIds);
 }
 
@@ -475,7 +679,8 @@ export function dispatchPayrollRouter(prisma) {
       return res.status(500).render('operacionesNomina', {
         pageTitle: 'Nómina y tiempo trabajado', role: roleFromRequest(req), recentImports: [],
         report: {
-          period: { periodType: 'WEEKLY', from: '', to: '', anchor: '' },
+          period: { periodType: 'BIWEEKLY', from: '', to: '', anchor: '' },
+          overtimePeriod: { periodType: 'CUSTOM', from: '', to: '', anchor: '' },
           filters: { clientId: '', operationPointId: '', workerId: '', search: '', includeTest: false },
           clients: [], workers: [], rows: [], conceptCodes: PAYROLL_CONCEPT_CODES,
           totals: {
