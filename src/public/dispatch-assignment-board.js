@@ -672,10 +672,12 @@
     payload.set('workerId', worker.workerId);
     payload.set('restDate', qs('#restDateValue')?.value || '');
     if (qs('#allowAssignedRestInput')?.value === 'true') payload.set('allowAssignedRest', 'true');
+    if (options.deferJustification === true) payload.set('deferJustification', 'true');
+    if (options.updateJustification === true) payload.set('updateJustification', 'true');
     const serviceRequestId = form.querySelector('input[name="serviceRequestId"]')?.value;
     if (serviceRequestId) payload.set('serviceRequestId', serviceRequestId);
-    const canSendReason = options.includeReason === true && worker.contractType === 'DIRECTO';
-    if (canSendReason) {
+    const canSendReason = worker.contractType === 'DIRECTO';
+    if (options.includeReason === true && canSendReason) {
       payload.set('reason', qs('#restReasonInput')?.value || '');
       if (originSundayDate) payload.set('originSundayDate', originSundayDate);
     }
@@ -707,7 +709,7 @@
     const failures = [];
     for (const worker of workers) {
       try {
-        await postRestWorker(worker, '', { includeReason: false });
+        await postRestWorker(worker, '', { includeReason: false, deferJustification: true });
         saved += 1;
       } catch (error) {
         failures.push(`${worker.workerName}: ${error.message || 'No fue posible guardar.'}`);
@@ -763,7 +765,7 @@
           const originSundayDate = worker.contractType === 'DIRECTO'
             ? (originByWorker.get(worker.workerId) || '')
             : '';
-          await postRestWorker(worker, originSundayDate, { includeReason: true });
+          await postRestWorker(worker, originSundayDate, { includeReason: true, updateJustification: true });
           saved += 1;
         } catch (error) {
           failures.push(`${worker.workerName}: ${error.message || 'No fue posible guardar.'}`);
@@ -852,18 +854,13 @@
       }
 
       const reason = qs('#restReasonInput')?.value || '';
-      if (!reason) {
-        if (!policy.isNaturalRestDay) {
-          showToast('Selecciona la justificación del descanso.');
-          return;
-        }
-        qs('#restAssignmentDialog')?.close();
-        showToast('No se realizaron cambios en la justificación.');
+      if (!reason && !policy.isNaturalRestDay) {
+        showToast('Selecciona la justificación del descanso.');
         return;
       }
 
       let origin = '';
-      if (reason === 'COMPENSATORIO') {
+      if (reason === 'COMPENSATORIO' && !restDatePolicy.isNaturalRestDay) {
         origin = qs('#originSundayDateInput')?.value || '';
         const originDate = /^\d{4}-\d{2}-\d{2}$/.test(String(origin || ''))
           ? new Date(`${origin}T12:00:00.000Z`)
@@ -875,7 +872,7 @@
       }
 
       try {
-        await postRestWorker(worker, origin, { includeReason: true });
+        await postRestWorker(worker, origin, { includeReason: true, updateJustification: true });
         qs('#restAssignmentDialog')?.close();
         const url = buildBoardUrl({
           date: currentDateFilter(),
