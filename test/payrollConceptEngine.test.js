@@ -156,6 +156,38 @@ test('los faltantes diarios compensan horas extra de izquierda a derecha HEDO y 
   assert.equal(row.conceptMinutes.RNO, 30, 'el HENO compensado vuelve a ordinario pero conserva RNO');
 });
 
+test('la compensación recorre HEDO, HENO, HEDD, HEND, HEDF y HENF sin descontar recargos', () => {
+  const sessions = [
+    session({ id: 'TEST-ORDER-WEEKDAY', dateKey: '2026-08-03', startHour: 11, minutes: 9 * 60 }),
+    session({ id: 'TEST-ORDER-TUE', dateKey: '2026-08-04', minutes: 4 * 60 }),
+    session({ id: 'TEST-ORDER-WED', dateKey: '2026-08-05', minutes: 4 * 60 }),
+    session({ id: 'TEST-ORDER-THU', dateKey: '2026-08-06', minutes: 4 * 60 }),
+    session({ id: 'TEST-ORDER-HOLIDAY', dateKey: '2026-08-07', startHour: 11, minutes: 9 * 60 }),
+    session({ id: 'TEST-ORDER-SAT', dateKey: '2026-08-08', minutes: 4 * 60 }),
+    session({ id: 'TEST-ORDER-SUNDAY', dateKey: '2026-08-09', startHour: 11, minutes: 9 * 60 })
+  ];
+  const result = report(sessions, {
+    compensationByWorkerDate: new Map([
+      ['TEST-WORKER-1|2026-08-09', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]
+    ])
+  });
+  const row = result.rows[0];
+
+  assert.equal(row.totalMinutes, 43 * 60);
+  assert.equal(row.overtimeMinutes, 60);
+  assert.equal(row.conceptMinutes.HEDO, 0);
+  assert.equal(row.conceptMinutes.HENO, 0);
+  assert.equal(row.conceptMinutes.HEDD, 0);
+  assert.equal(row.conceptMinutes.HEND, 0);
+  assert.equal(row.conceptMinutes.HEDF, 0);
+  assert.equal(row.conceptMinutes.HENF, 60, 'solo queda HENF después de descontar cinco horas de izquierda a derecha');
+  assert.equal(row.conceptMinutes.RNO, 60, 'HENO descontada conserva RNO');
+  assert.equal(row.conceptMinutes.RDD, 60, 'HEDD descontada conserva RDD');
+  assert.equal(row.conceptMinutes.RND, 60, 'HEND descontada conserva RND');
+  assert.equal(row.conceptMinutes.RDF, 60, 'HEDF descontada conserva RDF');
+  assert.equal(row.conceptMinutes.RNF, 60, 'HENF ordinaria previa a las 7 h conserva RNF');
+});
+
 test('el motor fija 42 h semanales y 7 h como referencia aunque una política histórica diga otra cosa', () => {
   const historical = normalizePayrollPolicy({ weeklyOrdinaryMinutes: 120, dailyOrdinaryMinutes: 60 });
   assert.equal(historical.weeklyOrdinaryMinutes, 42 * 60);
