@@ -6,7 +6,7 @@ import {
   loadWorkerPortalAssignments
 } from '../src/modules/dispatch-attendance/application/workerPortalAssignments.js';
 
-const NOW = new Date('2026-07-22T13:00:00.000Z');
+const NOW = new Date('2026-07-22T14:00:00.000Z');
 
 function assignmentFixture(overrides = {}) {
   const { serviceRequest: serviceRequestOverrides = {}, ...assignmentOverrides } = overrides;
@@ -65,7 +65,7 @@ function prismaWithAssignments(methods, worker = {}) {
   };
 }
 
-test('lista asignaciones activas y permite llegada durante el día operativo', async () => {
+test('lista asignaciones activas y permite llegada dentro de las ocho horas desde el inicio', async () => {
   let observedQuery;
   const prisma = prismaWithAssignments({ async findMany(query) { observedQuery = query; return [assignmentFixture()]; } });
   const assignments = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: NOW });
@@ -74,8 +74,8 @@ test('lista asignaciones activas y permite llegada durante el día operativo', a
   assert.equal(assignments[0].canRegisterArrival, true);
   assert.equal(assignments[0].arrivalWindowOpen, true);
   assert.equal(assignments[0].arrivalWindowExpired, false);
-  assert.equal(assignments[0].arrivalWindowOpensAt, '2026-07-22T05:00:00.000Z');
-  assert.equal(assignments[0].arrivalWindowClosesAt, '2026-07-23T05:00:00.000Z');
+  assert.equal(assignments[0].arrivalWindowOpensAt, '2026-07-22T13:30:00.000Z');
+  assert.equal(assignments[0].arrivalWindowClosesAt, '2026-07-22T21:30:00.000Z');
   assert.match(assignments[0].breakLabel, /si no toma almuerzo/i);
   assert.equal(assignments[0].photoRequired, false);
   assert.equal(assignments[0].workerId, undefined);
@@ -85,7 +85,7 @@ test('lista asignaciones activas y permite llegada durante el día operativo', a
   });
 });
 
-test('distingue configuración del punto y frontera del día operativo', async () => {
+test('distingue configuración del punto y hora de inicio de la asignación', async () => {
   const disabledToday = assignmentFixture({
     id: 'disabled-today',
     serviceRequest: {
@@ -124,7 +124,7 @@ test('distingue configuración del punto y frontera del día operativo', async (
 
   const tomorrowAssignments = await loadWorkerPortalAssignments(prisma, {
     workerId: 'worker-1',
-    now: new Date('2026-07-23T05:00:00.000Z')
+    now: new Date('2026-07-23T13:30:00.000Z')
   });
   const tomorrow = tomorrowAssignments.find((assignment) => assignment.id === 'enabled-tomorrow');
   assert.equal(tomorrow.canRegisterArrival, true);
@@ -193,7 +193,7 @@ test('conserva una jornada finalizada aunque haya pasado más de un día', async
 
   const assignments = await loadWorkerPortalAssignments(prisma, {
     workerId: 'worker-1',
-    now: new Date('2026-07-22T13:00:00.000Z')
+    now: new Date('2026-07-22T14:00:00.000Z')
   });
 
   assert.equal(assignments.length, 1);
@@ -210,21 +210,54 @@ test('la consulta puntual exige assignmentId y workerId', async () => {
   assert.equal(assignment.id, 'assignment-1');
 });
 
-test('permite entrada anticipada y tardía solo dentro de la misma fecha operativa', async () => {
+test('habilita llegada desde el inicio hasta +8 horas y vence después', async () => {
   const prisma = prismaWithAssignments({ async findMany() { return [assignmentFixture()]; } });
-  const [dayBefore] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T04:59:59.999Z') });
-  const [early] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T05:00:00.000Z') });
-  const [late] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-23T04:59:59.999Z') });
-  const [nextDay] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-23T05:00:00.000Z') });
+  const [beforeStart] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T13:29:59.999Z') });
+  const [atStart] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T13:30:00.000Z') });
+  const [atClose] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T21:30:00.000Z') });
+  const [afterClose] = await loadWorkerPortalAssignments(prisma, { workerId: 'worker-1', now: new Date('2026-07-22T21:30:00.001Z') });
 
-  assert.equal(dayBefore.canRegisterArrival, false);
-  assert.equal(dayBefore.actionLabel, 'Disponible el día de la asignación');
-  assert.equal(early.canRegisterArrival, true);
-  assert.equal(late.canRegisterArrival, true);
-  assert.equal(late.actionLabel, 'Registrar llegada');
-  assert.equal(nextDay.canRegisterArrival, false);
-  assert.equal(nextDay.arrivalWindowExpired, true);
-  assert.equal(nextDay.actionLabel, 'Jornada vencida');
+  assert.equal(beforeStart.canRegisterArrival, false);
+  assert.equal(beforeStart.arrivalWindowExpired, false);
+  assert.equal(beforeStart.actionLabel, 'Disponible el día de la asignación');
+  assert.equal(atStart.canRegisterArrival, true);
+  assert.equal(atStart.actionLabel, 'Registrar llegada');
+  assert.equal(atClose.canRegisterArrival, true);
+  assert.equal(atClose.arrivalWindowExpired, false);
+  assert.equal(afterClose.canRegisterArrival, false);
+  assert.equal(afterClose.arrivalWindowExpired, true);
+  assert.equal(afterClose.actionLabel, 'Jornada vencida');
+});
+
+test('un turno nocturno permite llegada en X+1 dentro de la ventana de ocho horas', async () => {
+  const prisma = prismaWithAssignments({
+    async findMany() {
+      return [assignmentFixture({
+        serviceRequest: {
+          serviceDate: new Date('2026-07-22T00:00:00.000Z'),
+          startTime: '21:00',
+          endTime: '06:00'
+        }
+      })];
+    }
+  });
+
+  const [duringNextDay] = await loadWorkerPortalAssignments(prisma, {
+    workerId: 'worker-1',
+    now: new Date('2026-07-23T06:30:00.000Z')
+  });
+  const [afterWindow] = await loadWorkerPortalAssignments(prisma, {
+    workerId: 'worker-1',
+    now: new Date('2026-07-23T10:00:00.001Z')
+  });
+
+  assert.equal(duringNextDay.expectedStartAt, '2026-07-23T02:00:00.000Z');
+  assert.equal(duringNextDay.arrivalWindowClosesAt, '2026-07-23T10:00:00.000Z');
+  assert.equal(duringNextDay.canRegisterArrival, true);
+  assert.equal(duringNextDay.actionLabel, 'Registrar llegada');
+  assert.equal(afterWindow.canRegisterArrival, false);
+  assert.equal(afterWindow.arrivalWindowExpired, true);
+  assert.equal(afterWindow.actionLabel, 'Jornada vencida');
 });
 
 test('después de la llegada ofrece almuerzo opcional y salida', async () => {
