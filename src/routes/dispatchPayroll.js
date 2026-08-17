@@ -41,6 +41,77 @@ const PAYROLL_EXCEL_COLORS = Object.freeze({
 });
 const PAYROLL_OVERTIME_CONCEPT_CODES = Object.freeze(['HEDO', 'HENO', 'HEDD', 'HEND', 'HEDF', 'HENF']);
 
+export const PAYROLL_EXCEL_COLUMN_GROUPS = Object.freeze([
+  Object.freeze({
+    key: 'identity',
+    label: 'Identificación',
+    columns: Object.freeze([
+      Object.freeze({ key: 'Documento', label: 'Documento' }),
+      Object.freeze({ key: 'TipoDocumento', label: 'Tipo de documento' }),
+      Object.freeze({ key: 'Nombre', label: 'Nombre' })
+    ])
+  }),
+  Object.freeze({
+    key: 'period',
+    label: 'Corte',
+    columns: Object.freeze([
+      Object.freeze({ key: 'FechaInicial', label: 'Fecha inicial' }),
+      Object.freeze({ key: 'FechaFinal', label: 'Fecha final' })
+    ])
+  }),
+  Object.freeze({
+    key: 'days',
+    label: 'Días y turnos',
+    columns: Object.freeze([
+      Object.freeze({ key: 'DiasRemunerados', label: 'Días remunerados' }),
+      Object.freeze({ key: 'DiasNoRemunerados', label: 'Días no remunerados' }),
+      Object.freeze({ key: 'PermisosRemunerados', label: 'Permisos remunerados' }),
+      Object.freeze({ key: 'Incapacidades', label: 'Incapacidades' }),
+      Object.freeze({ key: 'TurnosNocturnos', label: 'Turnos nocturnos' }),
+      Object.freeze({ key: 'Domingos', label: 'Domingos' }),
+      Object.freeze({ key: 'Festivos', label: 'Festivos' }),
+      Object.freeze({ key: 'Descansos', label: 'Descansos' })
+    ])
+  }),
+  Object.freeze({
+    key: 'hours',
+    label: 'Horas generales',
+    columns: Object.freeze([
+      Object.freeze({ key: 'HorasOrdinarias', label: 'Horas ordinarias' }),
+      Object.freeze({ key: 'TotalTrabajado', label: 'Total trabajado' }),
+      Object.freeze({ key: 'HorasExtraTotal', label: 'Horas extra total' })
+    ])
+  }),
+  Object.freeze({
+    key: 'overtime',
+    label: 'Horas extra',
+    columns: Object.freeze([
+      Object.freeze({ key: 'HEDO', label: 'Extra diurna ordinaria' }),
+      Object.freeze({ key: 'HENO', label: 'Extra nocturna ordinaria' }),
+      Object.freeze({ key: 'HEDD', label: 'Extra diurna dominical' }),
+      Object.freeze({ key: 'HEND', label: 'Extra nocturna dominical' }),
+      Object.freeze({ key: 'HEDF', label: 'Extra diurna festiva' }),
+      Object.freeze({ key: 'HENF', label: 'Extra nocturna festiva' })
+    ])
+  }),
+  Object.freeze({
+    key: 'surcharges',
+    label: 'Recargos',
+    columns: Object.freeze([
+      Object.freeze({ key: 'RNO', label: 'Recargo nocturno ordinario' }),
+      Object.freeze({ key: 'RDD', label: 'Recargo diurno dominical no compensado' }),
+      Object.freeze({ key: 'RND', label: 'Recargo nocturno dominical no compensado' }),
+      Object.freeze({ key: 'RDF', label: 'Recargo diurno festivo' }),
+      Object.freeze({ key: 'RNF', label: 'Recargo nocturno festivo' }),
+      Object.freeze({ key: 'RDDC', label: 'Recargo diurno dominical compensado' }),
+      Object.freeze({ key: 'RNDC', label: 'Recargo nocturno dominical compensado' })
+    ])
+  })
+]);
+
+const PAYROLL_EXCEL_COLUMNS = Object.freeze(PAYROLL_EXCEL_COLUMN_GROUPS.flatMap((group) => group.columns));
+const PAYROLL_EXCEL_COLUMN_KEYS = new Set(PAYROLL_EXCEL_COLUMNS.map((column) => column.key));
+
 const PAYROLL_EXCEL_COLUMN_WIDTHS = Object.freeze({
   Documento: 17,
   TipoDocumento: 15,
@@ -72,6 +143,15 @@ function normalizeWorkerIds(value) {
     .flatMap((item) => (typeof item === 'string' ? item.split(',') : []))
     .map((item) => normalizeString(item, 120))
     .filter(Boolean))];
+}
+
+export function normalizePayrollExcelColumns(value) {
+  const source = Array.isArray(value) ? value : [value];
+  const requested = new Set(source
+    .flatMap((item) => (typeof item === 'string' ? item.split(',') : []))
+    .map((item) => normalizeString(item, 80))
+    .filter((item) => item && PAYROLL_EXCEL_COLUMN_KEYS.has(item)));
+  return PAYROLL_EXCEL_COLUMNS.map((column) => column.key).filter((key) => requested.has(key));
 }
 
 function actor(req) {
@@ -139,7 +219,9 @@ function publicError(error) {
     payroll_compensation_invalid: 'Selecciona un estado de compensatorio válido.',
     payroll_compensation_worker_not_found: 'El auxiliar ya no existe.',
     payroll_access_dev_required: 'Solo DEV puede cambiar este permiso.',
-    payroll_access_user_not_found: 'El usuario ya no existe.'
+    payroll_access_user_not_found: 'El usuario ya no existe.',
+    payroll_export_columns_required: 'Selecciona al menos una columna para descargar el Excel.',
+    payroll_export_workers_required: 'Selecciona al menos un auxiliar para descargar el Excel.'
   };
   return messages[code] || payrollAttendanceImportErrorMessage(code) || 'No fue posible completar la operación de nómina.';
 }
@@ -203,10 +285,9 @@ function payrollExcelRows(report) {
   });
 }
 
-function payrollExcelHeaders(rows) {
-  return rows.length
-    ? Object.keys(rows[0]).filter((header) => header !== 'Novedades' && header !== 'Estado')
-    : ['Documento', 'Nombre', 'FechaInicial', 'FechaFinal', ...PAYROLL_CONCEPT_CODES];
+function payrollExcelHeaders(requestedColumns) {
+  const selected = normalizePayrollExcelColumns(requestedColumns);
+  return selected.length ? selected : PAYROLL_EXCEL_COLUMNS.map((column) => column.key);
 }
 
 function payrollExcelColumnWidth(header) {
@@ -220,9 +301,9 @@ function isPayrollHourHeader(header) {
     || header === 'TotalTrabajado';
 }
 
-export function buildPayrollExcelWorkbook(report) {
+export function buildPayrollExcelWorkbook(report, options = {}) {
   const rows = payrollExcelRows(report);
-  const headers = payrollExcelHeaders(rows);
+  const headers = payrollExcelHeaders(options.columns);
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Lórren · LoginPro';
   workbook.company = 'LoginPro Service';
@@ -300,7 +381,16 @@ export function buildPayrollExcelWorkbook(report) {
     });
   });
 
-  sheet.views = [{ state: 'frozen', xSplit: 3, ySplit: PAYROLL_EXCEL_HEADER_ROW, topLeftCell: 'D5', activeCell: 'D5', showGridLines: false }];
+  const frozenColumns = Math.min(3, Math.max(0, headers.length - 1));
+  const topLeftColumn = sheet.getColumn(frozenColumns + 1).letter;
+  sheet.views = [{
+    state: 'frozen',
+    xSplit: frozenColumns,
+    ySplit: PAYROLL_EXCEL_HEADER_ROW,
+    topLeftCell: `${topLeftColumn}5`,
+    activeCell: `${topLeftColumn}5`,
+    showGridLines: false
+  }];
   sheet.autoFilter = { from: `A${PAYROLL_EXCEL_HEADER_ROW}`, to: `${lastColumnLetter}${PAYROLL_EXCEL_HEADER_ROW}` };
   sheet.pageSetup = {
     orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
@@ -568,6 +658,21 @@ async function reportForRequest(prisma, req, source) {
   return applyPayrollWorkerSelection(report, workerIds);
 }
 
+function renderPayrollExcelCustomizer(res, req, report, options = {}) {
+  const selectedColumns = options.selectedColumns ?? PAYROLL_EXCEL_COLUMNS.map((column) => column.key);
+  const selectedWorkerIds = options.selectedWorkerIds ?? (report.rows || []).map((row) => row.workerId);
+  return res.render('operacionesNominaExport', {
+    pageTitle: 'Personalizar Excel de nómina',
+    role: roleFromRequest(req),
+    report,
+    payrollExcelColumnGroups: PAYROLL_EXCEL_COLUMN_GROUPS,
+    selectedColumns: new Set(selectedColumns),
+    selectedWorkerIds: new Set(selectedWorkerIds),
+    exportParams: [...safeQuery(req.query || {}).entries()],
+    error: options.error || null
+  });
+}
+
 export function dispatchPayrollRouter(prisma) {
   const router = express.Router();
   const formParser = express.urlencoded({ extended: false, limit: '24kb' });
@@ -733,10 +838,41 @@ export function dispatchPayrollRouter(prisma) {
   router.get('/export.xlsx', async (req, res) => {
     try {
       const report = await reportForRequest(prisma, req, req.query || {});
-      const workbook = buildPayrollExcelWorkbook(report);
+      const downloadRequested = normalizeString(req.query?.download, 10) === '1';
+      if (!downloadRequested) return renderPayrollExcelCustomizer(res, req, report);
+
+      const selectedColumns = normalizePayrollExcelColumns(req.query?.columns);
+      const selectedWorkerIds = normalizeWorkerIds(req.query?.exportWorkerId);
+      if (!selectedColumns.length) {
+        return renderPayrollExcelCustomizer(res, req, report, {
+          error: publicError(new Error('payroll_export_columns_required')),
+          selectedColumns,
+          selectedWorkerIds
+        });
+      }
+      if ((report.rows || []).length && !selectedWorkerIds.length) {
+        return renderPayrollExcelCustomizer(res, req, report, {
+          error: publicError(new Error('payroll_export_workers_required')),
+          selectedColumns,
+          selectedWorkerIds
+        });
+      }
+
+      const exportReport = selectedWorkerIds.length
+        ? applyPayrollWorkerSelection(report, selectedWorkerIds)
+        : report;
+      if ((report.rows || []).length && !(exportReport.rows || []).length) {
+        return renderPayrollExcelCustomizer(res, req, report, {
+          error: publicError(new Error('payroll_export_workers_required')),
+          selectedColumns,
+          selectedWorkerIds
+        });
+      }
+
+      const workbook = buildPayrollExcelWorkbook(exportReport, { columns: selectedColumns });
       const buffer = await workbook.xlsx.writeBuffer();
       res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.set('Content-Disposition', `attachment; filename="${reportFilename(report, 'xlsx')}"`);
+      res.set('Content-Disposition', `attachment; filename="${reportFilename(exportReport, 'xlsx')}"`);
       return res.send(Buffer.from(buffer));
     } catch (error) {
       return redirectToPayroll(res, sanitizedPayrollInput(req, req.query), { error: publicError(error) });
