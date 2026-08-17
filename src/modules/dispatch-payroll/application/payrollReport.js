@@ -28,7 +28,8 @@ export const WORKER_REST_REASONS = Object.freeze({
   SUSPENSION: 'SUSPENSION',
   INCAPACIDAD_ARL: 'INCAPACIDAD_ARL',
   NO_REMUNERADA: 'NO_REMUNERADA',
-  REMUNERADO: 'REMUNERADO'
+  REMUNERADO: 'REMUNERADO',
+  COMPENSATORIO: 'COMPENSATORIO'
 });
 export const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 export const MAX_WEEKLY_ORDINARY_MINUTES = DEFAULT_PAYROLL_POLICY.weeklyOrdinaryMinutes;
@@ -38,6 +39,16 @@ const WORKER_REST_REASON_VALUES = new Set(Object.values(WORKER_REST_REASONS));
 const REST_DAY_DEDUCTION_REASONS = new Set([
   WORKER_REST_REASONS.SUSPENSION,
   WORKER_REST_REASONS.NO_REMUNERADA
+]);
+const REMUNERATED_REST_REASONS = new Set([
+  WORKER_REST_REASONS.COMPENSATORIO,
+  WORKER_REST_REASONS.REMUNERADO,
+  WORKER_REST_REASONS.INCAPACIDAD_EPS,
+  WORKER_REST_REASONS.INCAPACIDAD_ARL
+]);
+const INCAPACITY_REASONS = new Set([
+  WORKER_REST_REASONS.INCAPACIDAD_EPS,
+  WORKER_REST_REASONS.INCAPACIDAD_ARL
 ]);
 const PAYROLL_MARK_TIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
   timeZone: 'America/Bogota',
@@ -105,9 +116,12 @@ function normalizeWorkerRestEvent(event) {
   const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
   const workerId = normalizeString(metadata.workerId, 120);
   const restDate = validDateKey(metadata.restDate);
-  const reason = normalizeString(metadata.reason, 40)?.toUpperCase();
+  const rawReason = normalizeString(metadata.reason, 40)?.toUpperCase();
   const status = normalizeString(metadata.status, 40)?.toUpperCase();
   const originSundayDate = validDateKey(metadata.originSundayDate);
+  const reason = rawReason === WORKER_REST_REASONS.REMUNERADO && originSundayDate
+    ? WORKER_REST_REASONS.COMPENSATORIO
+    : rawReason;
   if (!workerId || !restDate || (reason && !WORKER_REST_REASON_VALUES.has(reason)) || !Object.values(WORKER_REST_STATUS).includes(status)) return null;
   return {
     entityId: event.entityId || workerRestKey(workerId, restDate),
@@ -115,7 +129,7 @@ function normalizeWorkerRestEvent(event) {
     restDate,
     reason: reason || null,
     status,
-    originSundayDate: reason === WORKER_REST_REASONS.REMUNERADO ? originSundayDate : null,
+    originSundayDate: reason === WORKER_REST_REASONS.COMPENSATORIO ? originSundayDate : null,
     dayAdjustment: workerRestDayAdjustment(reason),
     requiresJustification: metadata.requiresJustification === true || Boolean(reason),
     assignmentConflictOverride: metadata.assignmentConflictOverride === true,
@@ -330,8 +344,8 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     const requiresJustification = worker.contractType === 'DIRECTO' && !datePolicy.isNaturalRestDay;
     if (requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
     const reason = requiresJustification ? requestedReason : null;
-    const originSundayDate = reason === WORKER_REST_REASONS.REMUNERADO ? requestedOriginSundayDate : null;
-    if (reason === WORKER_REST_REASONS.REMUNERADO) {
+    const originSundayDate = reason === WORKER_REST_REASONS.COMPENSATORIO ? requestedOriginSundayDate : null;
+    if (reason === WORKER_REST_REASONS.COMPENSATORIO) {
       if (!originSundayDate || !isSundayDateKey(originSundayDate) || holidayDateKey(originSundayDate)) {
         throw new Error('worker_rest_origin_sunday_invalid');
       }
@@ -345,9 +359,9 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
     if (active.some((rest) => rest.restDate === restDate)) throw new Error('worker_rest_date_already_assigned');
 
-    if (reason === WORKER_REST_REASONS.REMUNERADO) {
+    if (reason === WORKER_REST_REASONS.COMPENSATORIO) {
       const originAlreadyUsed = active.some((rest) => (
-        rest.reason === WORKER_REST_REASONS.REMUNERADO && rest.originSundayDate === originSundayDate
+        rest.reason === WORKER_REST_REASONS.COMPENSATORIO && rest.originSundayDate === originSundayDate
       ));
       if (originAlreadyUsed) throw new Error('worker_rest_origin_sunday_used');
     }
@@ -449,7 +463,7 @@ export async function loadPayrollCompensationMap(prisma, workerIds = [], range =
 
   const rests = await loadWorkerRestAssignments(prisma, { workerIds: uniqueIds });
   for (const rest of rests) {
-    if (rest.reason !== WORKER_REST_REASONS.REMUNERADO) continue;
+    if (rest.reason !== WORKER_REST_REASONS.COMPENSATORIO) continue;
     const origin = rest.originSundayDate;
     if (!origin || origin < rangeFrom || origin > rangeTo || holidayDateKey(origin)) continue;
     map.set(`${rest.workerId}|${origin}`, PAYROLL_COMPENSATION_STATUS.COMPENSATED);
@@ -664,6 +678,8 @@ function emptyPayrollRow(worker) {
     netWorkedDays: 0,
     remuneratedDays: 0,
     unremuneratedDays: 0,
+    paidPermissionDays: 0,
+    incapacityDays: 0,
     nightShiftCount: 0,
     sundayCount: 0,
     holidayCount: 0,
@@ -725,10 +741,20 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
     const remuneratedDateKeys = new Set(workedDateKeys);
     if (worker?.contractType === 'DIRECTO') {
       row.restAssignments
-        .filter((rest) => rest.reason === WORKER_REST_REASONS.REMUNERADO)
+        .filter((rest) => REMUNERATED_REST_REASONS.has(rest.reason))
         .forEach((rest) => remuneratedDateKeys.add(rest.restDate));
     }
 
+    const paidPermissionDateKeys = new Set(
+      row.restAssignments
+        .filter((rest) => rest.reason === WORKER_REST_REASONS.REMUNERADO)
+        .map((rest) => rest.restDate)
+    );
+    const incapacityDateKeys = new Set(
+      row.restAssignments
+        .filter((rest) => INCAPACITY_REASONS.has(rest.reason))
+        .map((rest) => rest.restDate)
+    );
     const unremuneratedDateKeys = new Set(
       row.restAssignments
         .filter((rest) => rest.dayAdjustment === -1)
@@ -754,6 +780,8 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
     row.netWorkedDays = row.workedDays - row.deductedDays;
     row.remuneratedDays = remuneratedDateKeys.size;
     row.unremuneratedDays = unremuneratedDateKeys.size;
+    row.paidPermissionDays = paidPermissionDateKeys.size;
+    row.incapacityDays = incapacityDateKeys.size;
     row.nightShiftCount = filteredSessions.filter((session) => {
       if (sessionWorkerId(session) !== row.workerId || !sessionStartsAtNight(session)) return false;
       const dateKey = sessionScheduledDateKey(session);
@@ -777,6 +805,8 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
   report.totals.netWorkedDays = report.rows.reduce((sum, row) => sum + row.netWorkedDays, 0);
   report.totals.remuneratedDays = report.rows.reduce((sum, row) => sum + row.remuneratedDays, 0);
   report.totals.unremuneratedDays = report.rows.reduce((sum, row) => sum + row.unremuneratedDays, 0);
+  report.totals.paidPermissionDays = report.rows.reduce((sum, row) => sum + row.paidPermissionDays, 0);
+  report.totals.incapacityDays = report.rows.reduce((sum, row) => sum + row.incapacityDays, 0);
   report.totals.nightShiftCount = report.rows.reduce((sum, row) => sum + row.nightShiftCount, 0);
   report.totals.sundayCount = report.rows.reduce((sum, row) => sum + row.sundayCount, 0);
   report.totals.holidayCount = report.rows.reduce((sum, row) => sum + row.holidayCount, 0);
