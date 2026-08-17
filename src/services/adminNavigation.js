@@ -1,4 +1,5 @@
 const RECRUITMENT_PATH = '/admin';
+const BRANCHES_PATH = '/admin/locations';
 const USERS_PATH = '/admin/users';
 const OPERATIONS_PATH = '/admin/operaciones';
 const ATTENDANCE_PATH = '/admin/operaciones/asistencia';
@@ -57,7 +58,7 @@ function menuLink(href, label) {
 function recruitmentMenuItems(access) {
   const items = [
     menuLink(RECRUITMENT_PATH, 'Panel de candidatos'),
-    menuLink('/admin/vacancies', 'Vacantes')
+    menuLink(BRANCHES_PATH, 'Sucursales')
   ];
   if (access.statistics) items.push(menuLink('/admin/estadisticas', 'Estadísticas'));
   if (access.isDev) {
@@ -247,6 +248,7 @@ export function injectAdminModuleNavigation(html, req = {}) {
 
 export const ADMIN_MODULE_PATHS = Object.freeze({
   recruitment: RECRUITMENT_PATH,
+  branches: BRANCHES_PATH,
   operations: OPERATIONS_PATH,
   attendance: ATTENDANCE_PATH,
   payroll: PAYROLL_PATH,
