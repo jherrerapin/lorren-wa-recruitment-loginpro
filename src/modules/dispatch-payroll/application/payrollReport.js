@@ -131,9 +131,7 @@ function normalizeWorkerRestEvent(event) {
     status,
     originSundayDate: reason === WORKER_REST_REASONS.COMPENSATORIO ? originSundayDate : null,
     dayAdjustment: workerRestDayAdjustment(reason),
-    requiresJustification: typeof metadata.requiresJustification === 'boolean'
-      ? metadata.requiresJustification
-      : Boolean(reason),
+    requiresJustification: false,
     assignmentConflictOverride: metadata.assignmentConflictOverride === true,
     createdAt: event.createdAt || null
   };
@@ -797,6 +795,7 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
         && dateKey <= period.to
         && !workedDateKeys.has(dateKey)
         && !paidJustificationDateKeys.has(dateKey)
+        && !directRestDateKeys.has(dateKey)
       ))
       .forEach((dateKey) => unremuneratedDateKeys.add(dateKey));
 
