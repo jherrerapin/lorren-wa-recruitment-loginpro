@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es-CO">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title><%= pageTitle %> — LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg"/>
+  <link rel="stylesheet" href="/public/operaciones-nomina.css"/>
+  <style>
+    .export-layout{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(420px,1.4fr);gap:16px;align-items:start}.export-panel{display:grid;gap:12px}.export-panel h2{margin:0}.export-panel p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.export-toolbar{display:flex;gap:8px;flex-wrap:wrap}.export-toolbar .btn{padding:7px 10px;font-size:11px}.export-counter{font-size:11px;font-weight:800;color:var(--teal)}.export-workers{max-height:430px;overflow:auto;border:1px solid var(--border);border-radius:9px;background:#fff}.export-worker{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer}.export-worker:last-child{border-bottom:0}.export-worker:hover{background:var(--soft)}.export-worker input,.export-column input{width:auto;margin:1px 0 0;flex:0 0 auto}.export-worker strong{display:block;color:var(--navy)}.export-worker small{display:block;margin-top:2px;color:var(--muted)}.export-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.export-group{border:1px solid var(--border);border-radius:9px;padding:10px;background:#fff}.export-group h3{margin:0 0 8px;font-size:12px;color:var(--navy)}.export-column{display:flex;gap:8px;align-items:flex-start;padding:6px 4px;font-size:12px;cursor:pointer;border-radius:6px}.export-column:hover{background:var(--soft)}.export-column span{display:grid;gap:1px}.export-column small{color:var(--muted);font-size:9px}.export-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:16px}.export-error{margin:0 0 14px;padding:10px 12px;border-radius:8px;background:#fff1f2;color:#9f1239;font-size:12px;font-weight:700}.export-empty{padding:18px;color:var(--muted);font-size:12px;text-align:center}.export-search{display:grid;gap:5px}.export-search label{font-size:11px;font-weight:800;color:var(--navy)}.export-search input{width:100%}.export-summary{padding:10px 12px;border-radius:8px;background:var(--teal2);color:#14574f;font-size:12px;line-height:1.45}.export-summary strong{color:var(--navy)}
+    @media(max-width:900px){.export-layout{grid-template-columns:1fr}.export-groups{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<% const overtimePeriod=report.overtimePeriod||report.period; const returnParams=new URLSearchParams(exportParams); %>
+<nav class="navbar"><a href="/admin" class="brand"><img src="/public/loginpro.png" alt="LoginPro"/></a><a href="/admin">Panel</a><a href="/admin/operaciones">Operaciones / Despacho</a><a href="/admin/operaciones/asistencia">Asistencia</a><a href="/admin/operaciones/asistencia/nomina?<%= returnParams.toString() %>" class="active">Nómina</a><span class="spacer"></span><a href="/logout">Cerrar sesión</a></nav>
+<main class="page">
+  <header class="header">
+    <div><h1><%= pageTitle %></h1><p class="sub">General <%= report.period.from||'—' %> a <%= report.period.to||'—' %> · Extras <%= overtimePeriod.from||'—' %> a <%= overtimePeriod.to||'—' %></p></div>
+    <div class="actions"><a class="btn" href="/admin/operaciones/asistencia/nomina?<%= returnParams.toString() %>">Volver a nómina</a></div>
+  </header>
+
+  <% if(error){ %><div class="export-error" id="server-export-error"><%= error %></div><% } %>
+  <div class="export-error" id="client-export-error" hidden></div>
+
+  <form method="get" action="/admin/operaciones/asistencia/nomina/export.xlsx" id="payroll-export-form">
+    <input type="hidden" name="download" value="1"/>
+    <% for(const [key,value] of exportParams){ %><input type="hidden" name="<%= key %>" value="<%= value %>"/><% } %>
+
+    <div class="export-layout">
+      <section class="panel export-panel">
+        <div>
+          <h2>Auxiliares</h2>
+          <p>Escoge qué filas del cálculo actual quieres incluir. Esta selección no cambia el cálculo de nómina.</p>
+        </div>
+        <div class="export-toolbar"><button class="btn" type="button" data-workers-action="all">Seleccionar todos</button><button class="btn" type="button" data-workers-action="none">Limpiar</button><span class="export-counter" id="worker-counter"></span></div>
+        <% if((report.rows||[]).length){ %>
+          <div class="export-search"><label for="export-worker-search">Buscar auxiliar</label><input id="export-worker-search" type="search" placeholder="Nombre o documento" autocomplete="off"/></div>
+          <div class="export-workers" id="export-workers">
+            <% for(const row of report.rows){ %><label class="export-worker" data-worker-search="<%= [row.fullName,row.documentNumber].filter(Boolean).join(' ').toLowerCase() %>"><input type="checkbox" name="exportWorkerId" value="<%= row.workerId %>" <%= selectedWorkerIds.has(row.workerId)?'checked':'' %>/><span><strong><%= row.fullName %></strong><small><%= row.documentNumber||'Sin documento visible' %></small></span></label><% } %>
+          </div>
+        <% } else { %><div class="export-empty">No hay auxiliares con datos en el cálculo actual. Puedes descargar una plantilla con las columnas seleccionadas.</div><% } %>
+      </section>
+
+      <section class="panel export-panel">
+        <div>
+          <h2>Columnas</h2>
+          <p>Marca únicamente la información que necesitas. El servidor valida la lista permitida antes de generar el archivo.</p>
+        </div>
+        <div class="export-toolbar"><button class="btn" type="button" data-columns-action="all">Seleccionar todas</button><button class="btn" type="button" data-columns-action="none">Limpiar</button><button class="btn" type="button" data-columns-action="summary">Solo resumen</button><span class="export-counter" id="column-counter"></span></div>
+        <div class="export-groups">
+          <% for(const group of payrollExcelColumnGroups){ %><section class="export-group" data-column-group="<%= group.key %>"><h3><%= group.label %></h3><% for(const column of group.columns){ %><label class="export-column"><input type="checkbox" name="columns" value="<%= column.key %>" <%= selectedColumns.has(column.key)?'checked':'' %>/><span><strong><%= column.label %></strong><small><%= column.key %></small></span></label><% } %></section><% } %>
+        </div>
+      </section>
+    </div>
+
+    <div class="export-summary"><strong>Descarga personalizada:</strong> el XLSX conservará el formato del módulo, el corte general y el periodo de horas extra, pero solo llevará los auxiliares y columnas que dejes marcados.</div>
+    <div class="export-actions"><a class="btn" href="/admin/operaciones/asistencia/nomina?<%= returnParams.toString() %>">Cancelar</a><button class="btn btn-primary" type="submit">Descargar Excel</button></div>
+  </form>
+</main>
+<script>
+(()=>{
+  const form=document.getElementById('payroll-export-form'),workerSearch=document.getElementById('export-worker-search'),clientError=document.getElementById('client-export-error'),workerCounter=document.getElementById('worker-counter'),columnCounter=document.getElementById('column-counter');
+  const workerInputs=()=>[...document.querySelectorAll('input[name="exportWorkerId"]')];
+  const columnInputs=()=>[...document.querySelectorAll('input[name="columns"]')];
+  const updateCounters=()=>{const workers=workerInputs(),columns=columnInputs();if(workerCounter)workerCounter.textContent=workers.length?`${workers.filter((item)=>item.checked).length} de ${workers.length}`:'Sin filas';if(columnCounter)columnCounter.textContent=`${columns.filter((item)=>item.checked).length} de ${columns.length}`};
+  const setChecked=(inputs,checked)=>{inputs.forEach((input)=>{input.checked=checked});updateCounters()};
+  document.querySelectorAll('[data-workers-action]').forEach((button)=>button.addEventListener('click',()=>setChecked(workerInputs(),button.dataset.workersAction==='all')));
+  document.querySelectorAll('[data-columns-action]').forEach((button)=>button.addEventListener('click',()=>{const action=button.dataset.columnsAction;if(action==='all')return setChecked(columnInputs(),true);if(action==='none')return setChecked(columnInputs(),false);const summary=new Set(['Documento','TipoDocumento','Nombre','FechaInicial','FechaFinal','DiasRemunerados','DiasNoRemunerados','HorasOrdinarias','TotalTrabajado','HorasExtraTotal']);columnInputs().forEach((input)=>{input.checked=summary.has(input.value)});updateCounters()}));
+  document.addEventListener('change',(event)=>{if(event.target?.matches?.('input[name="exportWorkerId"],input[name="columns"]'))updateCounters()});
+  workerSearch?.addEventListener('input',()=>{const query=workerSearch.value.trim().toLowerCase();document.querySelectorAll('[data-worker-search]').forEach((row)=>{row.hidden=Boolean(query&&!row.dataset.workerSearch.includes(query))})});
+  form?.addEventListener('submit',(event)=>{const workers=workerInputs(),columns=columnInputs();let message='';if(workers.length&&!workers.some((item)=>item.checked))message='Selecciona al menos un auxiliar para descargar.';else if(!columns.some((item)=>item.checked))message='Selecciona al menos una columna para descargar.';if(!message){if(clientError)clientError.hidden=true;return}event.preventDefault();if(clientError){clientError.textContent=message;clientError.hidden=false;clientError.scrollIntoView({behavior:'smooth',block:'center'})}});
+  updateCounters();
+})();
+</script>
+</body>
+</html>
