@@ -1,0 +1,68 @@
+<%
+  const value = config || {};
+  const fieldPrefix = String(prefix || 'operation');
+  const isNew = !config;
+  const active = isNew ? true : Boolean(value.isActive);
+  const accepting = isNew ? true : Boolean(value.acceptingApplications);
+  const scheduling = Boolean(value.schedulingEnabled);
+%>
+<div class="field">
+  <label for="<%= fieldPrefix %>-title">Título que verá el candidato</label>
+  <input id="<%= fieldPrefix %>-title" name="title" required value="<%= value.title || defaultTitle || '' %>" placeholder="Ej: Auxiliar de cargue y descargue" />
+</div>
+<div class="field">
+  <label for="<%= fieldPrefix %>-role">Cargo / rol</label>
+  <input id="<%= fieldPrefix %>-role" name="role" value="<%= value.role || '' %>" placeholder="Ej: Auxiliar logístico" />
+</div>
+<div class="field full">
+  <label for="<%= fieldPrefix %>-description">Descripción</label>
+  <textarea id="<%= fieldPrefix %>-description" name="roleDescription" placeholder="Qué hará la persona y contexto de la operación"><%= value.roleDescription || '' %></textarea>
+</div>
+<div class="field full">
+  <label for="<%= fieldPrefix %>-address">Zona / dirección de operación</label>
+  <input id="<%= fieldPrefix %>-address" name="operationAddress" required value="<%= value.operationAddress || '' %>" placeholder="Ej: Siberia, zona industrial" />
+</div>
+<div class="field full">
+  <label for="<%= fieldPrefix %>-requirements">Requisitos</label>
+  <textarea id="<%= fieldPrefix %>-requirements" name="requirements" required placeholder="Requisitos reales de la operación"><%= value.requirements || '' %></textarea>
+</div>
+<div class="field full">
+  <label for="<%= fieldPrefix %>-conditions">Condiciones / beneficios</label>
+  <textarea id="<%= fieldPrefix %>-conditions" name="conditions" required placeholder="Salario, horario, beneficios y condiciones confirmadas"><%= value.conditions || '' %></textarea>
+</div>
+<div class="field">
+  <label for="<%= fieldPrefix %>-min-age">Edad mínima</label>
+  <input id="<%= fieldPrefix %>-min-age" name="minAge" type="number" min="14" max="99" value="<%= value.minAge ?? '' %>" />
+</div>
+<div class="field">
+  <label for="<%= fieldPrefix %>-max-age">Edad máxima</label>
+  <input id="<%= fieldPrefix %>-max-age" name="maxAge" type="number" min="14" max="99" value="<%= value.maxAge ?? '' %>" />
+</div>
+<div class="field">
+  <label for="<%= fieldPrefix %>-experience">Experiencia</label>
+  <select id="<%= fieldPrefix %>-experience" name="experienceRequired">
+    <option value="INDIFFERENT" <%= !value.experienceRequired || value.experienceRequired === 'INDIFFERENT' ? 'selected' : '' %>>Indiferente</option>
+    <option value="YES" <%= value.experienceRequired === 'YES' ? 'selected' : '' %>>Requerida</option>
+    <option value="NO" <%= value.experienceRequired === 'NO' ? 'selected' : '' %>>No requerida</option>
+  </select>
+</div>
+<div class="field">
+  <label for="<%= fieldPrefix %>-experience-time">Tiempo de experiencia</label>
+  <input id="<%= fieldPrefix %>-experience-time" name="experienceTimeText" value="<%= value.experienceTimeText || '' %>" placeholder="Ej: 6 meses" />
+</div>
+<div class="field full">
+  <label for="<%= fieldPrefix %>-interview-address">Dirección de entrevista</label>
+  <input id="<%= fieldPrefix %>-interview-address" name="interviewAddress" value="<%= value.interviewAddress || '' %>" placeholder="Solo si la operación agenda entrevistas" />
+</div>
+<div class="field full">
+  <label for="<%= fieldPrefix %>-documents">Documentos para entrevista</label>
+  <textarea id="<%= fieldPrefix %>-documents" name="requiredDocuments" placeholder="Un documento por línea"><%= value.requiredDocuments || '' %></textarea>
+</div>
+<div class="field full">
+  <div class="toggle-row">
+    <label class="checkbox"><input type="checkbox" name="isActive" value="true" <%= active ? 'checked' : '' %> /> Operación activa en Lórren</label>
+    <label class="checkbox"><input type="checkbox" name="acceptingApplications" value="true" <%= accepting ? 'checked' : '' %> /> Recibir postulaciones</label>
+    <label class="checkbox"><input type="checkbox" name="schedulingEnabled" value="true" <%= scheduling ? 'checked' : '' %> /> Agenda de entrevista habilitada</label>
+  </div>
+  <div class="help">Lórren solo usa esta información cuando la configuración está activa. Si desmarcas “Recibir postulaciones”, la operación queda visible en histórico pero no abre procesos nuevos.</div>
+</div>
