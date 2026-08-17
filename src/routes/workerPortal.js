@@ -362,6 +362,11 @@ export function workerPortalRouter(prisma, options = {}) {
   function requireNativeAttendanceLocation(req, res, portalSession, expected, now) {
     try {
       const proof = parseNativeAttendanceLocationProof(req.body?.nativeLocationProof);
+      let verificationAt = now;
+      if (expected.captureMode === OFFLINE_WEB_CAPTURE_MODE) {
+        const proofCapturedAt = new Date(Number(proof?.capturedAt));
+        if (!Number.isNaN(proofCapturedAt.getTime())) verificationAt = proofCapturedAt;
+      }
       return verifyNativeAttendanceLocationProofFn({
         workerId: portalSession.workerId,
         deviceId: portalSession.deviceId,
@@ -369,7 +374,7 @@ export function workerPortalRouter(prisma, options = {}) {
         markType: expected.markType,
         idempotencyKey: expected.idempotencyKey,
         proof,
-        now
+        now: verificationAt
       }, {
         env: options.env || process.env,
         secret: options.crewPresenceSecret
@@ -379,6 +384,13 @@ export function workerPortalRouter(prisma, options = {}) {
       strictError(res, status, code, message);
       return null;
     }
+  }
+
+  function applyVerifiedNativeLocationToBody(req, verified) {
+    req.body.latitude = String(verified.latitude);
+    req.body.longitude = String(verified.longitude);
+    req.body.accuracyMeters = String(verified.accuracyMeters);
+    req.body.clientCapturedAt = verified.clientCapturedAt;
   }
 
   async function requireBiometricAssignment(req, res, portalSession, now) {
@@ -482,17 +494,15 @@ export function workerPortalRouter(prisma, options = {}) {
         && captureMode === ONLINE_WEB_CAPTURE_MODE
         && req.get?.('x-lorren-crew-group') === 'true';
       let locationInput = req.body;
-      if (
-        captureMode === ONLINE_WEB_CAPTURE_MODE
-        && !requestedCrewGroup
-        && isNativeAndroidRequest(req)
-      ) {
+      if (!requestedCrewGroup && isNativeAndroidRequest(req)) {
         locationInput = requireNativeAttendanceLocation(req, res, portalSession, {
           assignmentId: assignment.id,
           markType,
-          idempotencyKey
+          idempotencyKey,
+          captureMode
         }, now);
         if (!locationInput) return;
+        applyVerifiedNativeLocationToBody(req, locationInput);
       }
       const location = await requireStrictAttendanceLocation(
         prisma,
@@ -884,7 +894,8 @@ export function workerPortalRouter(prisma, options = {}) {
         locationInput = requireNativeAttendanceLocation(req, res, portalSession, {
           assignmentId: context.assignmentId,
           markType: context.markType,
-          idempotencyKey: context.idempotencyKey
+          idempotencyKey: context.idempotencyKey,
+          captureMode: ONLINE_WEB_CAPTURE_MODE
         }, now);
         if (!locationInput) return;
       }

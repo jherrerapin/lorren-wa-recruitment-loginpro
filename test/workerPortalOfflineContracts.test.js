@@ -87,6 +87,46 @@ test('la sincronización envía las cuatro marcaciones al endpoint correcto', ()
 });
 
 
+test('el APK conserva la misma proof nativa desde captura offline hasta sincronización', () => {
+  assert.match(offlineControllerSource, /nativeAttendanceLocationEnabled/);
+  assert.match(offlineControllerSource, /requestAttendanceLocation/);
+  assert.match(offlineControllerSource, /idempotencyKey = newIdempotencyKey\(\)/);
+  assert.match(offlineControllerSource, /attendance_location_ready/);
+  assert.match(offlineControllerSource, /attendance_location_error/);
+  assert.match(offlineControllerSource, /nativeLocationProof = proof/);
+  assert.match(offlineControllerSource, /offlineApi\.queueMark\(\{[\s\S]*?idempotencyKey,[\s\S]*?nativeLocationProof/s);
+
+  const requestLocation = offlineControllerSource.match(
+    /function requestLocation\(\) \{([\s\S]*?)\n  \}\n\n  function handleNativeAttendanceLocation/
+  );
+  assert.ok(requestLocation, 'falta autoridad requestLocation offline');
+  assert.match(
+    requestLocation[1],
+    /if \(nativeAttendanceLocationEnabled\) \{[\s\S]*?requestNativeLocation\(\);[\s\S]*?return;/
+  );
+  assert.match(requestLocation[1], /navigator\.geolocation\.getCurrentPosition/);
+
+  assert.match(offlineSource, /MAX_NATIVE_LOCATION_PROOF_BYTES/);
+  assert.match(offlineSource, /validateNativeLocationProof/);
+  assert.match(offlineSource, /proof\.isMock !== false/);
+  assert.match(offlineSource, /nativeLocationProof \? \{ nativeLocationProof \} : \{\}/);
+  assert.match(serviceWorkerSource, /form\.set\('nativeLocationProof', JSON\.stringify\(record\.nativeLocationProof\)\)/);
+});
+
+
+test('el backend valida ubicación nativa también al sincronizar OFFLINE_WEB desde el APK', () => {
+  assert.match(strictRouteSource, /if \(!requestedCrewGroup && isNativeAndroidRequest\(req\)\)/);
+  assert.match(strictRouteSource, /idempotencyKey,\s*captureMode/s);
+  assert.match(strictRouteSource, /expected\.captureMode === OFFLINE_WEB_CAPTURE_MODE/);
+  assert.match(strictRouteSource, /verificationAt = proofCapturedAt/);
+  assert.match(strictRouteSource, /applyVerifiedNativeLocationToBody\(req, locationInput\)/);
+  assert.match(strictRouteSource, /req\.body\.latitude = String\(verified\.latitude\)/);
+  assert.match(strictRouteSource, /req\.body\.clientCapturedAt = verified\.clientCapturedAt/);
+  assert.match(serviceWorkerSource, /attendance_mock_location_detected/);
+  assert.match(serviceWorkerSource, /attendance_native_location_identity_invalid/);
+});
+
+
 test('producción conserva biometría verificada online y admite evidencia offline para revisión', () => {
   assert.match(strictRouteSource, /captureMode === ONLINE_WEB_CAPTURE_MODE/);
   assert.match(strictRouteSource, /verifiedBiometricMetadata/);

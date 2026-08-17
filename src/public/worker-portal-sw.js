@@ -2,7 +2,7 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v15';
+const CACHE_NAME = 'lorren-worker-portal-shell-v16';
 const NETWORK_FIRST_ASSETS = new Set([
   '/public/worker-biometric.js',
   '/public/worker-biometric-core.js',
@@ -224,6 +224,9 @@ function buildMarkForm(record) {
   form.set('captureMode', 'OFFLINE_WEB');
   form.set('persistentStorageAvailable', record.persistentStorageAvailable === true ? 'true' : 'false');
   form.set('photoConsent', record.selfie && record.photoConsent ? 'true' : 'false');
+  if (record.nativeLocationProof && typeof record.nativeLocationProof === 'object') {
+    form.set('nativeLocationProof', JSON.stringify(record.nativeLocationProof));
+  }
   if (record.selfie instanceof Blob) {
     const extension = record.selfie.type === 'image/png' ? 'png' : record.selfie.type === 'image/webp' ? 'webp' : 'jpg';
     const label = MARK_ENDPOINTS[record.markType] || 'marcacion';
@@ -253,6 +256,11 @@ function terminalMarkRejection(status, error) {
     'outside_operation_range',
     'operation_geofence_required',
     'location_accuracy_insufficient',
+    'attendance_native_location_required',
+    'attendance_native_location_invalid',
+    'attendance_native_location_identity_invalid',
+    'attendance_native_location_time_mismatch',
+    'attendance_mock_location_detected',
     'biometric_verification_required'
   ].includes(error);
 }

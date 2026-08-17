@@ -6,6 +6,7 @@
   const offlineApi = window.LorrenWorkerPortalOffline;
   if (!offlineApi) return;
 
+  const nativePresenceBridge = window.LorrenAndroidPresence || null;
   const connectivityBar = document.getElementById('portal-connectivity');
   const connectivityTitle = document.getElementById('connectivity-title');
   const dialog = document.getElementById('mark-dialog');
@@ -31,9 +32,35 @@
     DEPARTURE: 'salida'
   });
 
+  function parseNativeBridgeResult(value) {
+    if (typeof value !== 'string') return null;
+    try { return JSON.parse(value); } catch (_error) { return null; }
+  }
+
+  function nativeBridgeCall(method, ...args) {
+    const fn = nativePresenceBridge?.[method];
+    if (typeof fn !== 'function') return { ok: false, error: 'native_bridge_unavailable' };
+    try {
+      return parseNativeBridgeResult(fn.apply(nativePresenceBridge, args))
+        || { ok: false, error: 'native_bridge_invalid_response' };
+    } catch (_error) {
+      return { ok: false, error: 'native_bridge_failed' };
+    }
+  }
+
+  const nativeCapabilities = nativePresenceBridge ? nativeBridgeCall('getCapabilities') : null;
+  const nativeAttendanceLocationEnabled = Boolean(
+    nativeCapabilities?.androidNative === true
+    && nativeCapabilities?.nativeAttendanceLocation === true
+    && nativeCapabilities?.mockLocationSignal === true
+    && nativeCapabilities?.attendanceWriter === false
+  );
+
   let active = false;
   let stream = null;
   let locationEvidence = null;
+  let nativeLocationProof = null;
+  let idempotencyKey = null;
   let assignmentId = null;
   let markType = null;
   let lastQueueSize = null;
@@ -72,12 +99,18 @@
     photoPreview.hidden = true;
   }
 
+  function clearLocation() {
+    locationEvidence = null;
+    nativeLocationProof = null;
+  }
+
   function closeOfflineDialog() {
     if (!active) return;
     active = false;
     stopCamera();
     resetPreview();
-    locationEvidence = null;
+    clearLocation();
+    idempotencyKey = null;
     assignmentId = null;
     markType = null;
     if (photoConsent) photoConsent.checked = false;
@@ -85,7 +118,11 @@
   }
 
   function updateSubmitState() {
-    submitButton.disabled = !active || !locationEvidence || !stream || photoConsent?.checked !== true;
+    submitButton.disabled = !active
+      || !locationEvidence
+      || (nativeAttendanceLocationEnabled && !nativeLocationProof)
+      || !stream
+      || photoConsent?.checked !== true;
   }
 
   async function startCamera() {
@@ -107,12 +144,47 @@
     updateSubmitState();
   }
 
+  function nativeLocationErrorMessage(code) {
+    const messages = {
+      permissions_required: 'Autoriza el permiso de ubicación solicitado por Android.',
+      native_location_credential_required: 'Este teléfono debe prepararse una vez con conexión antes de marcar sin internet.',
+      native_location_unavailable: 'No fue posible obtener una ubicación válida de Android.',
+      native_location_proof_failed: 'No fue posible proteger la ubicación de este intento.',
+      native_attendance_location_input_invalid: 'No fue posible preparar esta marcación.',
+      mock_location_detected: 'Android detectó una ubicación simulada. Desactiva la ubicación de prueba antes de marcar.'
+    };
+    return messages[code] || 'No fue posible obtener una ubicación segura de Android.';
+  }
+
+  function requestNativeLocation() {
+    clearLocation();
+    if (!idempotencyKey) idempotencyKey = newIdempotencyKey();
+    locationStatus.textContent = 'Solicitando ubicación segura de Android…';
+    const result = nativeBridgeCall('requestAttendanceLocation', JSON.stringify({
+      assignmentId,
+      markType,
+      idempotencyKey
+    }));
+    if (!result?.ok) {
+      const message = nativeLocationErrorMessage(String(result?.error || 'native_location_unavailable'));
+      locationStatus.textContent = message;
+      setStatus(message, String(result?.error || '').includes('mock') ? 'danger' : 'warning');
+      updateSubmitState();
+    }
+  }
+
   function requestLocation() {
+    if (!idempotencyKey) idempotencyKey = newIdempotencyKey();
+    if (nativeAttendanceLocationEnabled) {
+      requestNativeLocation();
+      return;
+    }
     if (!navigator.geolocation) {
       locationStatus.textContent = 'Este navegador no permite obtener la ubicación.';
       setStatus('No fue posible preparar la marcación sin conexión.', 'danger');
       return;
     }
+    clearLocation();
     locationStatus.textContent = 'Solicitando ubicación actual…';
     navigator.geolocation.getCurrentPosition((position) => {
       if (!active) return;
@@ -126,7 +198,7 @@
       updateSubmitState();
     }, (error) => {
       if (!active) return;
-      locationEvidence = null;
+      clearLocation();
       locationStatus.textContent = error?.code === 1
         ? 'Permiso de ubicación rechazado.'
         : 'No fue posible obtener la ubicación.';
@@ -137,6 +209,61 @@
       timeout: 20_000,
       maximumAge: 0
     });
+  }
+
+  function handleNativeAttendanceLocation(event) {
+    if (!nativeAttendanceLocationEnabled || !active) return;
+    const detail = event?.detail;
+    if (!detail || typeof detail !== 'object') return;
+    const type = String(detail.type || '');
+    if (!['attendance_location_ready', 'attendance_location_error'].includes(type)) return;
+    if (
+      String(detail.assignmentId || '') !== String(assignmentId || '')
+      || String(detail.markType || '').toUpperCase() !== String(markType || '').toUpperCase()
+      || String(detail.idempotencyKey || '') !== String(idempotencyKey || '')
+    ) return;
+
+    if (type === 'attendance_location_error') {
+      clearLocation();
+      const code = String(detail.code || 'native_location_unavailable');
+      const message = nativeLocationErrorMessage(code);
+      locationStatus.textContent = message;
+      setStatus(message, code.includes('mock') ? 'danger' : 'warning');
+      updateSubmitState();
+      return;
+    }
+
+    const proof = detail.proof;
+    const latitude = Number(proof?.latitude);
+    const longitude = Number(proof?.longitude);
+    const accuracyMeters = Number(proof?.accuracyMeters);
+    const capturedAt = Number(proof?.capturedAt);
+    if (
+      !proof || typeof proof !== 'object' || Array.isArray(proof)
+      || proof.isMock === true
+      || !Number.isFinite(latitude) || latitude < -90 || latitude > 90
+      || !Number.isFinite(longitude) || longitude < -180 || longitude > 180
+      || !Number.isFinite(accuracyMeters) || accuracyMeters < 0 || accuracyMeters > 100_000
+      || !Number.isFinite(capturedAt) || capturedAt <= 0
+    ) {
+      clearLocation();
+      const code = proof?.isMock === true ? 'mock_location_detected' : 'native_location_unavailable';
+      const message = nativeLocationErrorMessage(code);
+      locationStatus.textContent = message;
+      setStatus(message, 'danger');
+      updateSubmitState();
+      return;
+    }
+
+    nativeLocationProof = proof;
+    locationEvidence = {
+      latitude,
+      longitude,
+      accuracyMeters,
+      clientCapturedAt: new Date(capturedAt).toISOString()
+    };
+    locationStatus.textContent = `Ubicación lista · precisión ${Math.round(accuracyMeters)} m`;
+    updateSubmitState();
   }
 
   function newIdempotencyKey() {
@@ -272,7 +399,8 @@
     active = true;
     assignmentId = String(button.dataset.assignmentId || '');
     markType = String(button.dataset.markType || '').toUpperCase();
-    locationEvidence = null;
+    idempotencyKey = newIdempotencyKey();
+    clearLocation();
     stopCamera();
     resetPreview();
     if (photoConsent) photoConsent.checked = false;
@@ -282,7 +410,9 @@
     cameraStep.hidden = false;
     photoConsentWrap.hidden = false;
     dialog.dataset.flowState = 'offline';
-    locationStatus.textContent = 'Solicitando ubicación actual…';
+    locationStatus.textContent = nativeAttendanceLocationEnabled
+      ? 'Solicitando ubicación segura de Android…'
+      : 'Solicitando ubicación actual…';
     setStatus('Sin conexión: se guardarán la hora, la ubicación y una selfie para sincronizarlas después.', 'warning');
     showDialog();
     requestLocation();
@@ -314,7 +444,14 @@
     if (!active || navigator.onLine) return;
     event.preventDefault();
     event.stopImmediatePropagation();
-    if (!assignmentId || !markType || !locationEvidence || photoConsent?.checked !== true) return;
+    if (
+      !assignmentId
+      || !markType
+      || !idempotencyKey
+      || !locationEvidence
+      || (nativeAttendanceLocationEnabled && !nativeLocationProof)
+      || photoConsent?.checked !== true
+    ) return;
     submitButton.disabled = true;
     submitButton.textContent = 'Guardando…';
     try {
@@ -326,13 +463,14 @@
         photoPreview.hidden = false;
       }
       const record = await offlineApi.queueMark({
-        idempotencyKey: newIdempotencyKey(),
+        idempotencyKey,
         assignmentId,
         markType,
         latitude: locationEvidence.latitude,
         longitude: locationEvidence.longitude,
         accuracyMeters: locationEvidence.accuracyMeters,
         clientCapturedAt: locationEvidence.clientCapturedAt,
+        ...(nativeAttendanceLocationEnabled ? { nativeLocationProof } : {}),
         photoConsent: true,
         selfie
       });
@@ -378,6 +516,8 @@
     event.stopImmediatePropagation();
     closeOfflineDialog();
   }, true);
+
+  window.addEventListener('lorren-native-presence', handleNativeAttendanceLocation);
 
   const disabledObserver = new MutationObserver(() => enableOfflineButtons());
   disabledObserver.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['disabled'] });
