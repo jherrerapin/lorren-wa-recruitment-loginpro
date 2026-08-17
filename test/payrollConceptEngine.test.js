@@ -174,6 +174,7 @@ test('la compensación recorre HEDO, HENO, HEDD, HEND, HEDF y HENF sin descontar
   const row = result.rows[0];
 
   assert.equal(row.totalMinutes, 43 * 60);
+  assert.equal(row.ordinaryMinutes, 42 * 60);
   assert.equal(row.overtimeMinutes, 60);
   assert.equal(row.conceptMinutes.HEDO, 0);
   assert.equal(row.conceptMinutes.HENO, 0);
@@ -182,10 +183,10 @@ test('la compensación recorre HEDO, HENO, HEDD, HEND, HEDF y HENF sin descontar
   assert.equal(row.conceptMinutes.HEDF, 0);
   assert.equal(row.conceptMinutes.HENF, 60, 'solo queda HENF después de descontar cinco horas de izquierda a derecha');
   assert.equal(row.conceptMinutes.RNO, 60, 'HENO descontada conserva RNO');
-  assert.equal(row.conceptMinutes.RDD, 60, 'HEDD descontada conserva RDD');
+  assert.equal(row.conceptMinutes.RDD, 8 * 60, 'el domingo conserva siete horas ordinarias y recupera la HEDD descontada');
   assert.equal(row.conceptMinutes.RND, 60, 'HEND descontada conserva RND');
-  assert.equal(row.conceptMinutes.RDF, 60, 'HEDF descontada conserva RDF');
-  assert.equal(row.conceptMinutes.RNF, 60, 'HENF ordinaria previa a las 7 h conserva RNF');
+  assert.equal(row.conceptMinutes.RDF, 8 * 60, 'el festivo conserva siete horas ordinarias y recupera la HEDF descontada');
+  assert.equal(row.conceptMinutes.RNF, 0, 'HENF permanece como la única hora extra y no se duplica como recargo');
 });
 
 test('el motor fija 42 h semanales y 7 h como referencia aunque una política histórica diga otra cosa', () => {
