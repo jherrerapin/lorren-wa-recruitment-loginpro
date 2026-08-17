@@ -114,7 +114,7 @@ Hora : *{{horaInicio}} por favor.*
     </section>
 
     <section class="rest-panel" id="workerRestPanel">
-      <div class="rest-head"><div><h2>Descansos</h2><p>Selecciona o arrastra uno o varios auxiliares. Los Directos requieren justificación en días hábiles; en domingo es opcional. Los festivos se registran sin justificación y los Contratistas no requieren motivo.</p></div><span class="rest-date-chip">Fecha mostrada: <%= safeRestDate || 'hoy' %></span></div>
+      <div class="rest-head"><div><h2>Descansos</h2><p>Selecciona o arrastra uno o varios auxiliares. Los Directos requieren justificación en días hábiles; en domingos y festivos es opcional. Los Contratistas no requieren motivo.</p></div><span class="rest-date-chip">Fecha mostrada: <%= safeRestDate || 'hoy' %></span></div>
       <div id="restDropZone" class="drop-zone rest-drop-zone">Arrastra uno o varios auxiliares para asignarles descanso.</div>
       <div class="rest-list">
         <% if (!safeRestAssignments.length) { %><div class="rest-empty">No hay descansos asignados para esta fecha.</div><% } %>

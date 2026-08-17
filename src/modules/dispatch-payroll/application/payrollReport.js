@@ -345,11 +345,11 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
 
     const isDirect = worker.contractType === 'DIRECTO';
     const requiresJustification = isDirect && !datePolicy.isNaturalRestDay;
-    const allowsOptionalSundayJustification = isDirect && datePolicy.isSunday;
+    const allowsOptionalNaturalRestJustification = isDirect && datePolicy.isNaturalRestDay;
     if (requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (allowsOptionalSundayJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (allowsOptionalSundayJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
-    const reason = isDirect && (requiresJustification || allowsOptionalSundayJustification)
+    if (allowsOptionalNaturalRestJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    if (allowsOptionalNaturalRestJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
+    const reason = isDirect && (requiresJustification || allowsOptionalNaturalRestJustification)
       ? (requestedReason || null)
       : null;
     const originSundayDate = reason === WORKER_REST_REASONS.COMPENSATORIO ? requestedOriginSundayDate : null;
