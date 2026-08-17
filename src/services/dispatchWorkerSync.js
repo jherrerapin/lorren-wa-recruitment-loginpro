@@ -6,6 +6,18 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+async function resolveCandidateBranch(prisma, vacancy) {
+  const branch = vacancy?.operation?.city;
+  if (branch?.id) return branch;
+
+  const legacyCityName = normalizeString(vacancy?.city);
+  if (!legacyCityName) return null;
+  return prisma.city.findFirst({
+    where: { name: { equals: legacyCityName, mode: 'insensitive' } },
+    select: { id: true, name: true }
+  });
+}
+
 export async function upsertDispatchWorkerFromCandidate(prisma, candidateId) {
   const candidate = await prisma.candidate.findUnique({
     where: { id: candidateId },
@@ -20,13 +32,24 @@ export async function upsertDispatchWorkerFromCandidate(prisma, candidateId) {
       zone: true,
       transportMode: true,
       vacancyId: true,
-      vacancy: { select: { id: true, city: true } }
+      vacancy: {
+        select: {
+          id: true,
+          city: true,
+          operation: {
+            select: {
+              city: { select: { id: true, name: true } }
+            }
+          }
+        }
+      }
     }
   });
 
   if (!candidate) return null;
 
   const normalizedTransportMode = normalizeTransportMode(candidate.transportMode);
+  const branch = await resolveCandidateBranch(prisma, candidate.vacancy);
 
   const worker = await prisma.dispatchWorker.upsert({
     where: { candidateId: candidate.id },
@@ -55,21 +78,13 @@ export async function upsertDispatchWorkerFromCandidate(prisma, candidateId) {
     }
   });
 
-  if (candidate.vacancyId) {
-    await prisma.dispatchWorkerVacancy.upsert({
-      where: { workerId_vacancyId: { workerId: worker.id, vacancyId: candidate.vacancyId } },
-      create: { workerId: worker.id, vacancyId: candidate.vacancyId },
-      update: {}
-    });
-  }
-
-  const cityNameCandidates = [candidate.zone, candidate.locality, candidate.vacancy?.city].map(normalizeString).filter(Boolean);
-  for (const cityName of cityNameCandidates) {
-    const city = await prisma.city.findFirst({ where: { name: { equals: cityName, mode: 'insensitive' } }, select: { id: true } });
-    if (!city) continue;
+  // La vacante deja de ser autoridad de disponibilidad para Despacho. La relación
+  // DispatchWorkerVacancy se conserva en el esquema solo como legado de transición;
+  // nuevas sincronizaciones asignan exclusivamente la sucursal de la operación.
+  if (branch?.id) {
     await prisma.dispatchWorkerCity.upsert({
-      where: { workerId_cityId: { workerId: worker.id, cityId: city.id } },
-      create: { workerId: worker.id, cityId: city.id },
+      where: { workerId_cityId: { workerId: worker.id, cityId: branch.id } },
+      create: { workerId: worker.id, cityId: branch.id },
       update: {}
     });
   }
