@@ -810,22 +810,24 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
 export async function loadPayrollReport(prisma, query = {}, options = {}) {
   const period = resolvePayrollPeriod(query, options.now || new Date());
   const filters = normalizedFilters(query, options);
-  const expandedFrom = addDateKeyDays(period.from, -6);
-  const start = bogotaDayStart(expandedFrom);
+  const calculationFrom = payrollWeekStartKey(period.from, 1);
+  const calculationTo = addDateKeyDays(payrollWeekStartKey(period.to, 1), 6);
+  const calculationStart = bogotaDayStart(calculationFrom);
+  const calculationEnd = bogotaDayStart(addDateKeyDays(calculationTo, 1));
   const periodStart = bogotaDayStart(period.from);
-  const end = bogotaDayStart(addDateKeyDays(period.to, 1));
+  const periodEnd = bogotaDayStart(addDateKeyDays(period.to, 1));
 
   const [sessions, clients, workers, periodRests] = await Promise.all([
     prisma.dispatchAttendanceSession.findMany({
       where: {
         OR: [
           {
-            arrivalReportedAt: { gte: start, lt: end },
+            arrivalReportedAt: { gte: calculationStart, lt: calculationEnd },
             departureReportedAt: { not: null }
           },
           {
             attendanceStatus: 'ABSENT',
-            expectedStartAt: { gte: periodStart, lt: end },
+            expectedStartAt: { gte: periodStart, lt: periodEnd },
             arrivalReportedAt: null,
             departureReportedAt: null
           }
@@ -872,7 +874,7 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
   const filteredSessions = matchedSessions.filter((session) => !sessionIsPersistedAbsence(session));
   const clientIds = [...new Set(filteredSessions.map((session) => session.assignment?.serviceRequest?.operationPoint?.clientId).filter(Boolean))];
   const workerIds = [...new Set(filteredSessions.map((session) => session.assignment?.workerId).filter(Boolean))];
-  const compensationRange = { from: period.from, to: addDateKeyDays(period.to, 1) };
+  const compensationRange = { from: calculationFrom, to: calculationTo };
   const [policiesByClientId, compensationByWorkerDate] = await Promise.all([
     loadPayrollPolicies(prisma, clientIds),
     loadPayrollCompensationMap(prisma, workerIds, compensationRange)
