@@ -9,9 +9,18 @@ const LEGACY_FULL_NAME_COLUMN = {
   field: 'fullName',
   header: 'Nombre completo',
   required: false,
-  example: 'Oscar Antonio Montoya Hernández',
+  example: 'Persona Ejemplo',
   help: 'Formato compatible con plantillas anteriores.',
   aliases: ['nombre y apellidos', 'auxiliar', 'nombre auxiliar']
+};
+
+const LEGACY_VACANCIES_COLUMN = {
+  field: 'vacancies',
+  header: 'Vacantes / perfiles',
+  required: false,
+  example: '',
+  help: 'Columna histórica. Se acepta para compatibilidad, pero ya no asigna disponibilidad en Despacho.',
+  aliases: ['vacantes', 'vacante', 'perfiles', 'perfil', 'cargos', 'vacantes perfiles']
 };
 
 export const DISPATCH_WORKER_EXCEL_COLUMNS = [
@@ -19,7 +28,7 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
     field: 'firstNames',
     header: 'Nombres',
     required: true,
-    example: 'Oscar Antonio',
+    example: 'Ana María',
     help: 'Uno o varios nombres. Se unirán automáticamente con los apellidos.',
     aliases: ['nombre', 'nombres del auxiliar', 'primer nombre', 'segundo nombre']
   },
@@ -27,7 +36,7 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
     field: 'lastNames',
     header: 'Apellidos',
     required: true,
-    example: 'Montoya Hernández',
+    example: 'Pérez Gómez',
     help: 'Uno o varios apellidos. Se unirán automáticamente con los nombres.',
     aliases: ['apellido', 'apellidos del auxiliar', 'primer apellido', 'segundo apellido']
   },
@@ -35,7 +44,7 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
     field: 'phone',
     header: 'Teléfono',
     required: true,
-    example: '3134645409',
+    example: '3000000000',
     help: 'Número celular de contacto.',
     aliases: ['telefono', 'celular', 'numero telefono', 'numero de telefono']
   },
@@ -51,7 +60,7 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
     field: 'documentNumber',
     header: 'Número de documento',
     required: true,
-    example: '1020304050',
+    example: '1000000000',
     help: 'Se usa para detectar auxiliares duplicados.',
     aliases: ['numero documento', 'cedula', 'cédula', 'cc', 'documento']
   },
@@ -60,7 +69,7 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
     header: 'Ciudad de residencia',
     required: true,
     example: 'Bogotá',
-    help: 'Debe coincidir con una ciudad disponible en Despacho.',
+    help: 'Ciudad donde reside la persona. Debe existir en el catálogo de Sucursales.',
     aliases: ['ciudad residencia', 'ciudad']
   },
   {
@@ -92,24 +101,16 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
     header: 'Estado operativo',
     required: false,
     example: 'CONTRATADO',
-    help: 'Opcional. Si queda vacío, se guarda como CONTRATADO.',
+    help: 'Opcional. Si queda vacío, un auxiliar nuevo se guarda como CONTRATADO y uno existente conserva su estado.',
     aliases: ['estado', 'status', 'estado auxiliar']
   },
   {
     field: 'operationalCities',
-    header: 'Ciudades operativas',
+    header: 'Sucursales operativas',
     required: false,
-    example: 'Bogotá; Siberia',
-    help: 'Opcional. Puedes indicar varias ciudades separadas por coma, punto y coma, | o salto de línea.',
-    aliases: ['ciudad operativa', 'ciudades de operacion', 'ciudades operación', 'ciudades']
-  },
-  {
-    field: 'vacancies',
-    header: 'Vacantes / perfiles',
-    required: false,
-    example: 'Auxiliar de cargue y descargue — Bogotá',
-    help: 'Opcional. Puedes indicar varias vacantes separadas por coma, punto y coma, | o salto de línea.',
-    aliases: ['vacantes', 'vacante', 'perfiles', 'perfil', 'cargos', 'vacantes perfiles']
+    example: 'Bogotá',
+    help: 'Para auxiliares nuevos indica al menos una sucursal. Puedes separar varias con coma, punto y coma, | o salto de línea.',
+    aliases: ['sucursal', 'sucursales', 'sucursal operativa', 'sucursales operativas', 'ciudad operativa', 'ciudades operativas', 'ciudades de operacion', 'ciudades operación', 'ciudades']
   },
   {
     field: 'notes',
@@ -121,7 +122,7 @@ export const DISPATCH_WORKER_EXCEL_COLUMNS = [
   }
 ];
 
-const PARSABLE_EXCEL_COLUMNS = [LEGACY_FULL_NAME_COLUMN, ...DISPATCH_WORKER_EXCEL_COLUMNS];
+const PARSABLE_EXCEL_COLUMNS = [LEGACY_FULL_NAME_COLUMN, ...DISPATCH_WORKER_EXCEL_COLUMNS, LEGACY_VACANCIES_COLUMN];
 const NAME_FIELDS = new Set(['firstNames', 'lastNames']);
 
 function normalizeString(value) {
@@ -220,10 +221,6 @@ function normalizeOperationalStatus(value) {
   return null;
 }
 
-function vacancyLabel(vacancy) {
-  return `${vacancy.title || 'Vacante'} — ${vacancy.city || 'Sin ciudad'}`;
-}
-
 function addIndexValue(index, key, value) {
   if (!key) return;
   const current = index.get(key) || [];
@@ -231,18 +228,10 @@ function addIndexValue(index, key, value) {
   index.set(key, current);
 }
 
-export function buildDispatchWorkerImportCatalog({ cities = [], vacancies = [] } = {}) {
+export function buildDispatchWorkerImportCatalog({ cities = [] } = {}) {
   const cityIndex = new Map();
   for (const city of cities) addIndexValue(cityIndex, normalizeExcelLookup(city.name), city);
-
-  const vacancyIndex = new Map();
-  for (const vacancy of vacancies) {
-    addIndexValue(vacancyIndex, normalizeExcelLookup(vacancy.id), vacancy);
-    addIndexValue(vacancyIndex, normalizeExcelLookup(vacancy.title), vacancy);
-    addIndexValue(vacancyIndex, normalizeExcelLookup(vacancyLabel(vacancy)), vacancy);
-    addIndexValue(vacancyIndex, normalizeExcelLookup(`${vacancy.title || ''} ${vacancy.city || ''}`), vacancy);
-  }
-  return { cities, vacancies, cityIndex, vacancyIndex };
+  return { cities, cityIndex };
 }
 
 function resolveUnique(index, rawValue, fieldLabel, rowNumber, errors) {
@@ -254,7 +243,7 @@ function resolveUnique(index, rawValue, fieldLabel, rowNumber, errors) {
     return null;
   }
   if (unique.length > 1) {
-    errors.push(`Fila ${rowNumber}: ${fieldLabel} “${value}” es ambiguo; usa el nombre acompañado de la ciudad.`);
+    errors.push(`Fila ${rowNumber}: ${fieldLabel} “${value}” es ambiguo.`);
     return null;
   }
   return unique[0];
@@ -323,23 +312,9 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
 
     const residenceCity = resolveUnique(catalog.cityIndex, row.residenceCity, 'Ciudad de residencia', row.rowNumber, errors);
     const operationalCities = splitList(row.operationalCities)
-      .map((value) => resolveUnique(catalog.cityIndex, value, 'Ciudad operativa', row.rowNumber, errors))
+      .map((value) => resolveUnique(catalog.cityIndex, value, 'Sucursal operativa', row.rowNumber, errors))
       .filter(Boolean);
-    const vacancies = splitList(row.vacancies)
-      .map((value) => resolveUnique(catalog.vacancyIndex, value, 'Vacante / perfil', row.rowNumber, errors))
-      .filter(Boolean);
-
     const cityIds = [...new Set(operationalCities.map((city) => city.id))];
-    const vacancyIds = [...new Set(vacancies.map((vacancy) => vacancy.id))];
-
-    if (operationalCities.length && vacancies.length) {
-      const selectedCityNames = new Set(operationalCities.map((city) => normalizeExcelLookup(city.name)));
-      for (const vacancy of vacancies) {
-        if (vacancy.city && !selectedCityNames.has(normalizeExcelLookup(vacancy.city))) {
-          errors.push(`Fila ${row.rowNumber}: la vacante “${vacancyLabel(vacancy)}” no corresponde a las Ciudades operativas seleccionadas.`);
-        }
-      }
-    }
 
     const documentNumber = normalizeString(row.documentNumber);
     const documentKey = documentNumber?.toUpperCase();
@@ -379,12 +354,13 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
       providedWorkerFields: [...providedWorkerFields],
       relationsProvided: {
         cities: providedFields.has('operationalCities'),
-        vacancies: providedFields.has('vacancies')
+        vacancies: false
       },
       cityIds,
       cityLabels: operationalCities.map((city) => city.name),
-      vacancyIds,
-      vacancyLabels: vacancies.map(vacancyLabel)
+      vacancyIds: [],
+      vacancyLabels: [],
+      legacyVacanciesIgnored: providedFields.has('vacancies')
     });
   }
 
@@ -402,8 +378,7 @@ export const DISPATCH_WORKER_IMPORT_FIELD_LABELS = {
   contractType: 'Tipo de contrato',
   operationalStatus: 'Estado operativo',
   notes: 'Notas operativas',
-  cities: 'Ciudades operativas',
-  vacancies: 'Vacantes / perfiles'
+  cities: 'Sucursales operativas'
 };
 
 function comparableScalar(value) {
@@ -438,16 +413,14 @@ function existingWorkerSnapshot(worker) {
     contractType: worker.contractType,
     operationalStatus: worker.operationalStatus,
     notes: worker.notes,
-    cities: (worker.cities || []).map((row) => row.city?.name).filter(Boolean),
-    vacancies: (worker.vacancies || []).map((row) => vacancyLabel(row.vacancy || {})).filter(Boolean)
+    cities: (worker.cities || []).map((row) => row.city?.name).filter(Boolean)
   };
 }
 
 function incomingWorkerSnapshot(row) {
   return {
     ...row.workerData,
-    cities: row.cityLabels,
-    vacancies: row.vacancyLabels
+    cities: row.cityLabels
   };
 }
 
@@ -473,14 +446,6 @@ function buildReviewChanges(row, existing = null) {
       incomingValue: visibleValue(incoming.cities)
     });
   }
-  if (row.relationsProvided.vacancies && (!existing || !valuesEqual(current.vacancies, incoming.vacancies))) {
-    changes.push({
-      field: 'vacancies',
-      label: DISPATCH_WORKER_IMPORT_FIELD_LABELS.vacancies,
-      currentValue: existing ? visibleValue(current.vacancies) : 'No existe',
-      incomingValue: visibleValue(incoming.vacancies)
-    });
-  }
   return changes;
 }
 
@@ -488,25 +453,22 @@ function normalizeDocumentKey(value) {
   return normalizeString(value)?.toUpperCase() || '';
 }
 
-export async function buildDispatchWorkerImportReview({ prisma, workbook, cities = [], vacancies = [] } = {}) {
+export async function buildDispatchWorkerImportReview({ prisma, workbook, cities = [] } = {}) {
   const parsedRows = parseDispatchWorkerExcelWorksheet(workbook?.worksheets?.[0]);
-  const preparedRows = prepareDispatchWorkerExcelRows(parsedRows, { cities, vacancies });
+  const preparedRows = prepareDispatchWorkerExcelRows(parsedRows, { cities });
   const documentNumbers = [...new Set(preparedRows.map((row) => row.workerData.documentNumber).filter(Boolean))];
   const existingWorkers = documentNumbers.length
     ? await prisma.dispatchWorker.findMany({
       where: { documentNumber: { in: documentNumbers } },
-      include: {
-        cities: { include: { city: true } },
-        vacancies: { include: { vacancy: true } }
-      }
+      include: { cities: { include: { city: true } } }
     })
     : [];
   const byDocument = new Map();
   for (const worker of existingWorkers) {
     const key = normalizeDocumentKey(worker.documentNumber);
-    const rows = byDocument.get(key) || [];
-    rows.push(worker);
-    byDocument.set(key, rows);
+    const matches = byDocument.get(key) || [];
+    matches.push(worker);
+    byDocument.set(key, matches);
   }
 
   const items = preparedRows.map((row) => {
@@ -524,7 +486,22 @@ export async function buildDispatchWorkerImportReview({ prisma, workbook, cities
         incoming: row
       };
     }
+
     const existing = matches[0] || null;
+    if (!existing && !row.cityIds.length) {
+      return {
+        id: `row-${row.rowNumber}`,
+        rowNumber: row.rowNumber,
+        type: 'CONFLICT',
+        actionable: false,
+        displayName: row.workerData.fullName,
+        documentNumber: row.workerData.documentNumber,
+        reason: 'Un auxiliar nuevo debe tener al menos una Sucursal operativa.',
+        changes: [],
+        incoming: row
+      };
+    }
+
     const changes = buildReviewChanges(row, existing);
     const type = !existing ? 'NEW' : (changes.length ? 'UPDATE' : 'UNCHANGED');
     return {
@@ -536,7 +513,9 @@ export async function buildDispatchWorkerImportReview({ prisma, workbook, cities
       documentNumber: row.workerData.documentNumber,
       workerId: existing?.id || null,
       workerUpdatedAt: existing?.updatedAt ? new Date(existing.updatedAt).toISOString() : null,
-      reason: type === 'UNCHANGED' ? 'El archivo coincide con la información actual.' : null,
+      reason: row.legacyVacanciesIgnored
+        ? 'Se ignoró la columna histórica Vacantes / perfiles; Despacho usa únicamente Sucursales.'
+        : (type === 'UNCHANGED' ? 'El archivo coincide con la información actual.' : null),
       changes,
       incoming: row
     };
@@ -553,24 +532,14 @@ export async function buildDispatchWorkerImportReview({ prisma, workbook, cities
   return { items, summary };
 }
 
-async function replaceWorkerRelations(prisma, workerId, cityIds, vacancyIds, relationsProvided = { cities: true, vacancies: true }) {
-  if (relationsProvided.cities) {
-    await prisma.dispatchWorkerCity.deleteMany({ where: { workerId } });
-    if (cityIds.length) {
-      await prisma.dispatchWorkerCity.createMany({
-        data: cityIds.map((cityId) => ({ workerId, cityId })),
-        skipDuplicates: true
-      });
-    }
-  }
-  if (relationsProvided.vacancies) {
-    await prisma.dispatchWorkerVacancy.deleteMany({ where: { workerId } });
-    if (vacancyIds.length) {
-      await prisma.dispatchWorkerVacancy.createMany({
-        data: vacancyIds.map((vacancyId) => ({ workerId, vacancyId })),
-        skipDuplicates: true
-      });
-    }
+async function replaceWorkerBranches(prisma, workerId, cityIds, relationsProvided = { cities: true }) {
+  if (!relationsProvided.cities) return;
+  await prisma.dispatchWorkerCity.deleteMany({ where: { workerId } });
+  if (cityIds.length) {
+    await prisma.dispatchWorkerCity.createMany({
+      data: cityIds.map((cityId) => ({ workerId, cityId })),
+      skipDuplicates: true
+    });
   }
 }
 
@@ -609,14 +578,14 @@ export async function applyDispatchWorkerImportBatch({
           where: { documentNumber: workerData.documentNumber },
           select: { id: true }
         });
-        if (existing) {
+        if (existing || !(incoming.cityIds || []).length) {
           result.conflicts += 1;
           continue;
         }
         const worker = await tx.dispatchWorker.create({
           data: { ...workerData, source: 'EXCEL_IMPORT' }
         });
-        await replaceWorkerRelations(tx, worker.id, incoming.cityIds || [], incoming.vacancyIds || [], { cities: true, vacancies: true });
+        await replaceWorkerBranches(tx, worker.id, incoming.cityIds || [], { cities: true });
         result.created += 1;
         continue;
       }
@@ -640,13 +609,7 @@ export async function applyDispatchWorkerImportBatch({
         result.conflicts += 1;
         continue;
       }
-      await replaceWorkerRelations(
-        tx,
-        item.workerId,
-        incoming.cityIds || [],
-        incoming.vacancyIds || [],
-        incoming.relationsProvided || { cities: false, vacancies: false }
-      );
+      await replaceWorkerBranches(tx, item.workerId, incoming.cityIds || [], incoming.relationsProvided || { cities: false });
       result.updated += 1;
     }
 
@@ -670,7 +633,7 @@ function templateColumnNumber(field) {
   return index + 1;
 }
 
-export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] } = {}) {
+export function buildDispatchWorkerImportTemplate({ cities = [] } = {}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Lórren Dispatch';
   workbook.created = new Date();
@@ -687,12 +650,10 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
   worksheet.autoFilter = { from: 'A1', to: `${worksheet.getColumn(DISPATCH_WORKER_EXCEL_COLUMNS.length).letter}1` };
 
   const firstCity = cities[0]?.name || 'Bogotá';
-  const matchingVacancy = vacancies.find((vacancy) => normalizeExcelLookup(vacancy.city) === normalizeExcelLookup(firstCity)) || vacancies[0];
   const example = {};
   for (const column of DISPATCH_WORKER_EXCEL_COLUMNS) example[column.field] = column.example;
   example.residenceCity = firstCity;
   example.operationalCities = firstCity;
-  example.vacancies = matchingVacancy ? vacancyLabel(matchingVacancy) : 'Nombre exacto de la vacante — Ciudad';
   worksheet.addRow(example);
   worksheet.getRow(2).alignment = { vertical: 'top', wrapText: true };
   worksheet.getRow(2).height = 36;
@@ -702,28 +663,16 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
   const statusColumn = templateColumnNumber('operationalStatus');
   for (let rowNumber = 2; rowNumber <= 1000; rowNumber += 1) {
     worksheet.getRow(rowNumber).getCell(transportColumn).dataValidation = {
-      type: 'list',
-      allowBlank: true,
-      formulae: ['"Publico,Moto,Bicicleta,Carro"'],
-      showErrorMessage: true,
-      errorTitle: 'Medio de transporte inválido',
-      error: 'Selecciona Publico, Moto, Bicicleta o Carro.'
+      type: 'list', allowBlank: true, formulae: ['"Publico,Moto,Bicicleta,Carro"'],
+      showErrorMessage: true, errorTitle: 'Medio de transporte inválido', error: 'Selecciona Publico, Moto, Bicicleta o Carro.'
     };
     worksheet.getRow(rowNumber).getCell(contractColumn).dataValidation = {
-      type: 'list',
-      allowBlank: false,
-      formulae: ['"DIRECTO,CONTRATISTA"'],
-      showErrorMessage: true,
-      errorTitle: 'Tipo de contrato inválido',
-      error: 'Selecciona DIRECTO o CONTRATISTA.'
+      type: 'list', allowBlank: false, formulae: ['"DIRECTO,CONTRATISTA"'],
+      showErrorMessage: true, errorTitle: 'Tipo de contrato inválido', error: 'Selecciona DIRECTO o CONTRATISTA.'
     };
     worksheet.getRow(rowNumber).getCell(statusColumn).dataValidation = {
-      type: 'list',
-      allowBlank: true,
-      formulae: ['"CONTRATADO,INACTIVE"'],
-      showErrorMessage: true,
-      errorTitle: 'Estado inválido',
-      error: 'Selecciona CONTRATADO o INACTIVE, o déjalo vacío para usar CONTRATADO.'
+      type: 'list', allowBlank: true, formulae: ['"CONTRATADO,INACTIVE"'],
+      showErrorMessage: true, errorTitle: 'Estado inválido', error: 'Selecciona CONTRATADO o INACTIVE, o déjalo vacío.'
     };
   }
 
@@ -738,7 +687,7 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
   for (const column of DISPATCH_WORKER_EXCEL_COLUMNS) {
     instructions.addRow({
       field: column.header,
-      required: column.required ? 'Sí' : 'No',
+      required: column.required ? 'Sí' : (column.field === 'operationalCities' ? 'Sí para nuevos' : 'No'),
       help: column.help,
       example: column.example
     });
@@ -747,7 +696,13 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
     field: 'Nombre completo (compatible)',
     required: 'Alternativa',
     help: 'Las plantillas anteriores con una sola columna Nombre completo siguen siendo válidas. No combines esa columna con Nombres y Apellidos.',
-    example: 'Oscar Antonio Montoya Hernández'
+    example: 'Persona Ejemplo'
+  });
+  instructions.addRow({
+    field: 'Vacantes / perfiles (legado)',
+    required: 'No',
+    help: 'Si una plantilla antigua conserva esta columna, el importador la acepta pero la ignora. La disponibilidad de Despacho se asigna únicamente por Sucursal.',
+    example: 'Puede dejarse vacía'
   });
   instructions.addRow({
     field: 'Hoja de vida',
@@ -760,18 +715,10 @@ export function buildDispatchWorkerImportTemplate({ cities = [], vacancies = [] 
   });
 
   const catalogs = workbook.addWorksheet('Catalogos');
-  catalogs.columns = [
-    { header: 'Ciudades válidas', key: 'city', width: 32 },
-    { header: 'Vacantes / perfiles válidos', key: 'vacancy', width: 70 }
-  ];
+  catalogs.columns = [{ header: 'Sucursales válidas', key: 'city', width: 42 }];
   styleHeader(catalogs.getRow(1));
-  const catalogLength = Math.max(cities.length, vacancies.length, 1);
-  for (let index = 0; index < catalogLength; index += 1) {
-    catalogs.addRow({
-      city: cities[index]?.name || '',
-      vacancy: vacancies[index] ? vacancyLabel(vacancies[index]) : ''
-    });
-  }
+  for (const city of cities) catalogs.addRow({ city: city.name || '' });
+  if (!cities.length) catalogs.addRow({ city: '' });
   catalogs.eachRow((row, rowNumber) => {
     if (rowNumber > 1) row.alignment = { vertical: 'top', wrapText: true };
   });
