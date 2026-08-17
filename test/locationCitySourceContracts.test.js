@@ -8,8 +8,6 @@ test('sucursales reemplaza la clasificación funcional de ciudades sin contrato 
   const view = fs.readFileSync('src/views/locations.ejs', 'utf8');
   const migration = fs.readFileSync('prisma/migrations/20260817223000_consolidate_branches_and_bogota_siberia/migration.sql', 'utf8');
 
-  // Expand/migrate/verify: los campos físicos antiguos siguen disponibles durante
-  // la transición, pero dejaron de ser una decisión de la interfaz y del CRUD.
   assert.match(schema, /usedForRecruitment\s+Boolean/);
   assert.match(schema, /usedForDispatch\s+Boolean/);
   assert.match(migration, /"usedForRecruitment" = TRUE/);
@@ -60,6 +58,8 @@ test('migración consolida Siberia en Bogotá y preserva autoridad territorial d
 });
 
 test('vistas modificadas no introducen diálogos nativos del navegador', () => {
+  const nativeBareCall = /(?<![\w$.])(?:alert|confirm|prompt)\s*\(/;
+  const nativeWindowReference = /\b(?:window|globalThis)\s*\.\s*(?:alert|confirm|prompt)\b/;
   for (const path of [
     'src/views/locations.ejs',
     'src/views/operacionesClientes.ejs',
@@ -68,7 +68,8 @@ test('vistas modificadas no introducen diálogos nativos del navegador', () => {
     'src/views/operacionesPersonalImportar.ejs'
   ]) {
     const source = fs.readFileSync(path, 'utf8');
-    assert.doesNotMatch(source, /\b(?:confirm|alert|prompt)\s*\(/, `${path} no debe usar diálogos nativos`);
+    assert.doesNotMatch(source, nativeBareCall, `${path} no debe usar diálogos nativos`);
+    assert.doesNotMatch(source, nativeWindowReference, `${path} no debe usar window.alert/confirm/prompt`);
   }
   assert.match(fs.readFileSync('src/views/locations.ejs', 'utf8'), /\/public\/lorren-dialog\.js/);
   assert.match(fs.readFileSync('src/views/operacionesClientes.ejs', 'utf8'), /\/public\/lorren-dialog\.js/);
