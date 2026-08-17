@@ -58,6 +58,12 @@ function normalizeKey(value) {
     .toLowerCase();
 }
 
+function slugify(value) {
+  return normalizeKey(value)
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function isSiberiaName(value) {
   return normalizeKey(value) === 'siberia';
 }
@@ -68,7 +74,22 @@ function normalizeMany(value) {
 }
 
 function isChecked(value) {
-  return value === 'on' || value === 'true' || value === true;
+  return value === 'on' || value === 'true' || value === true || value === '1';
+}
+
+function normalizeInteger(value, { min = null, max = null } = {}) {
+  const text = normalize(value);
+  if (text === null) return null;
+  const parsed = Number(text);
+  if (!Number.isInteger(parsed)) return null;
+  if (min !== null && parsed < min) return null;
+  if (max !== null && parsed > max) return null;
+  return parsed;
+}
+
+function normalizeExperienceRequirement(value) {
+  const normalized = normalize(value)?.toUpperCase();
+  return ['YES', 'NO', 'INDIFFERENT'].includes(normalized) ? normalized : 'INDIFFERENT';
 }
 
 function usersRedirect(type, message, username = null) {
@@ -86,6 +107,76 @@ function unifiedBranchCompatibilityData() {
     usedForDispatch: true,
     sourceModule: 'RECRUITMENT'
   };
+}
+
+function buildRecruitmentConfigData(body = {}, { cityName, operationName } = {}) {
+  const title = normalize(body.title);
+  const role = normalize(body.role) || title;
+  const operationAddress = normalize(body.operationAddress);
+  const requirements = normalize(body.requirements);
+  const conditions = normalize(body.conditions);
+
+  if (!title || !role || !operationAddress || !requirements || !conditions) {
+    return {
+      error: 'Completa título, cargo, zona de operación, requisitos y condiciones de la operación.'
+    };
+  }
+
+  const minAge = normalizeInteger(body.minAge, { min: 14, max: 99 });
+  const maxAge = normalizeInteger(body.maxAge, { min: 14, max: 99 });
+  if (minAge !== null && maxAge !== null && minAge > maxAge) {
+    return { error: 'La edad mínima no puede ser mayor que la edad máxima.' };
+  }
+
+  const isActive = isChecked(body.isActive);
+  const acceptingApplications = isChecked(body.acceptingApplications);
+
+  return {
+    data: {
+      title,
+      role,
+      roleDescription: normalize(body.roleDescription),
+      city: cityName,
+      operationAddress,
+      interviewAddress: normalize(body.interviewAddress),
+      requirements,
+      conditions,
+      requiredDocuments: normalize(body.requiredDocuments),
+      minAge,
+      maxAge,
+      experienceRequired: normalizeExperienceRequirement(body.experienceRequired),
+      experienceTimeText: normalize(body.experienceTimeText),
+      schedulingEnabled: isChecked(body.schedulingEnabled),
+      acceptingApplications: isActive && acceptingApplications,
+      isActive
+    },
+    label: `${operationName || 'Operación'} · ${title}`
+  };
+}
+
+async function buildUniqueVacancyKey(prisma, cityName, operationName, title) {
+  const base = [cityName, operationName, title]
+    .map(slugify)
+    .filter(Boolean)
+    .join('-')
+    .slice(0, 80) || 'operacion';
+
+  for (let suffix = 0; suffix < 1000; suffix += 1) {
+    const key = suffix === 0 ? base : `${base}-${suffix + 1}`;
+    const exists = await prisma.vacancy.findUnique({ where: { key }, select: { id: true } });
+    if (!exists) return key;
+  }
+  throw new Error('No fue posible generar un identificador único para la operación.');
+}
+
+async function loadOperationWithBranch(prisma, operationId) {
+  return prisma.operation.findUnique({
+    where: { id: operationId },
+    include: {
+      city: { select: { id: true, name: true } },
+      _count: { select: { vacancies: true } }
+    }
+  });
 }
 
 /**
@@ -112,10 +203,10 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
   const requestedVacancyIds = normalizeMany(body.scopeVacancyIds);
 
   if (!requestedCities.length) {
-    return { error: 'Selecciona al menos una sucursal para filtrar sus vacantes.' };
+    return { error: 'Selecciona al menos una sucursal para filtrar sus operaciones.' };
   }
   if (!requestedVacancyIds.length) {
-    return { error: 'Selecciona al menos una vacante para este usuario.' };
+    return { error: 'Selecciona al menos una operación para este usuario.' };
   }
 
   const selectedVacancies = await prisma.vacancy.findMany({
@@ -131,13 +222,13 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
   const foundIds = new Set(selectedVacancies.map((vacancy) => vacancy.id));
   const missingVacancyIds = requestedVacancyIds.filter((id) => !foundIds.has(id));
   if (missingVacancyIds.length) {
-    return { error: 'Una o varias vacantes seleccionadas ya no existen.' };
+    return { error: 'Una o varias operaciones seleccionadas ya no existen.' };
   }
 
   const requestedCitySet = new Set(requestedCities);
   const outsideSelectedCities = selectedVacancies.filter((vacancy) => !requestedCitySet.has(vacancy.city));
   if (outsideSelectedCities.length) {
-    return { error: 'Solo puedes asignar vacantes pertenecientes a las sucursales seleccionadas.' };
+    return { error: 'Solo puedes asignar operaciones pertenecientes a las sucursales seleccionadas.' };
   }
 
   const selectedCities = [...new Set(selectedVacancies.map((vacancy) => vacancy.city).filter(Boolean))]
@@ -166,7 +257,15 @@ export function locationsRouter(prisma) {
       include: {
         operations: {
           orderBy: { name: 'asc' },
-          include: { _count: { select: { vacancies: true } } }
+          include: {
+            vacancies: {
+              orderBy: { createdAt: 'asc' },
+              include: {
+                interviewSlots: { orderBy: [{ dayOfWeek: 'asc' }, { specificDate: 'asc' }, { startTime: 'asc' }] },
+                _count: { select: { candidates: true, interviewBookings: true } }
+              }
+            }
+          }
         }
       }
     });
@@ -226,6 +325,10 @@ export function locationsRouter(prisma) {
         where: { id: req.params.id },
         data: { name, ...unifiedBranchCompatibilityData() }
       });
+      await prisma.vacancy.updateMany({
+        where: { operation: { cityId: req.params.id } },
+        data: { city: name }
+      });
       flash(res, 'success', `Sucursal "${name}" actualizada correctamente.`);
     } catch (error) {
       if (error.code === 'P2002') {
@@ -261,13 +364,29 @@ export function locationsRouter(prisma) {
 
   router.post('/cities/:cityId/operations', async (req, res) => {
     const name = normalize(req.body.name);
+    const city = await prisma.city.findUnique({ where: { id: req.params.cityId }, select: { id: true, name: true } });
+    if (!city) {
+      flash(res, 'error', 'Sucursal no encontrada.');
+      return res.redirect('/admin/locations');
+    }
     if (!name) {
       flash(res, 'error', 'El nombre de la operación no puede estar vacío.');
       return res.redirect('/admin/locations');
     }
+
+    const config = buildRecruitmentConfigData(req.body, { cityName: city.name, operationName: name });
+    if (config.error) {
+      flash(res, 'error', config.error);
+      return res.redirect('/admin/locations');
+    }
+
     try {
-      await prisma.operation.create({ data: { name, cityId: req.params.cityId } });
-      flash(res, 'success', `Operación "${name}" creada.`);
+      const key = await buildUniqueVacancyKey(prisma, city.name, name, config.data.title);
+      await prisma.$transaction(async (tx) => {
+        const operation = await tx.operation.create({ data: { name, cityId: city.id } });
+        await tx.vacancy.create({ data: { ...config.data, key, operationId: operation.id } });
+      });
+      flash(res, 'success', `Operación "${name}" creada con su configuración para Lórren.`);
     } catch (error) {
       if (error.code === 'P2002') {
         flash(res, 'error', `Ya existe una operación "${name}" en esta sucursal.`);
@@ -293,6 +412,64 @@ export function locationsRouter(prisma) {
       } else {
         flash(res, 'error', 'Error al renombrar la operación.');
       }
+    }
+    return res.redirect('/admin/locations');
+  });
+
+  router.post('/operations/:id/recruitment', async (req, res) => {
+    const operation = await loadOperationWithBranch(prisma, req.params.id);
+    if (!operation) {
+      flash(res, 'error', 'Operación no encontrada.');
+      return res.redirect('/admin/locations');
+    }
+    if (operation._count.vacancies > 0) {
+      flash(res, 'error', 'Esta operación ya tiene configuración para Lórren. Edita la configuración existente.');
+      return res.redirect('/admin/locations');
+    }
+
+    const config = buildRecruitmentConfigData(req.body, { cityName: operation.city.name, operationName: operation.name });
+    if (config.error) {
+      flash(res, 'error', config.error);
+      return res.redirect('/admin/locations');
+    }
+
+    try {
+      const key = await buildUniqueVacancyKey(prisma, operation.city.name, operation.name, config.data.title);
+      await prisma.vacancy.create({ data: { ...config.data, key, operationId: operation.id } });
+      flash(res, 'success', `Configuración de "${operation.name}" creada para Lórren.`);
+    } catch (_error) {
+      flash(res, 'error', 'No fue posible crear la configuración de la operación.');
+    }
+    return res.redirect('/admin/locations');
+  });
+
+  router.post('/operations/:operationId/recruitment/:vacancyId/edit', async (req, res) => {
+    const vacancy = await prisma.vacancy.findFirst({
+      where: { id: req.params.vacancyId, operationId: req.params.operationId },
+      include: { operation: { include: { city: { select: { name: true } } } } }
+    });
+    if (!vacancy?.operation?.city) {
+      flash(res, 'error', 'Configuración de operación no encontrada.');
+      return res.redirect('/admin/locations');
+    }
+
+    const config = buildRecruitmentConfigData(req.body, {
+      cityName: vacancy.operation.city.name,
+      operationName: vacancy.operation.name
+    });
+    if (config.error) {
+      flash(res, 'error', config.error);
+      return res.redirect('/admin/locations');
+    }
+
+    try {
+      await prisma.vacancy.update({
+        where: { id: vacancy.id },
+        data: config.data
+      });
+      flash(res, 'success', `Configuración de "${vacancy.operation.name}" actualizada.`);
+    } catch (_error) {
+      flash(res, 'error', 'No fue posible actualizar la configuración de la operación.');
     }
     return res.redirect('/admin/locations');
   });
@@ -370,8 +547,8 @@ export function locationsRouter(prisma) {
     });
 
     const accessDescription = accessUpdate.accessScope === 'ALL'
-      ? 'todas las sucursales y vacantes'
-      : `${accessUpdate.selectedVacancyIds.length} vacante(s) de ${accessUpdate.selectedCities.join(', ')}`;
+      ? 'todas las sucursales y operaciones'
+      : `${accessUpdate.selectedVacancyIds.length} operación(es) de ${accessUpdate.selectedCities.join(', ')}`;
 
     return res.redirect(usersRedirect(
       'success',
