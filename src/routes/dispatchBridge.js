@@ -18,7 +18,7 @@ export const ATTENDANCE_PORTAL_RELEASE_ID = 'attendance-portal-2026-07-27-workda
 export const WORKER_PORTAL_PUBLIC_PATH = '/operaciones/portal';
 
 const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9coqIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
 const ATTENDANCE_MAP_RELIABILITY_SCRIPT = '/public/attendance-map-reliability.js';
 const ATTENDANCE_ADMIN_RUNTIME_SCRIPT = '/public/attendance-admin-runtime.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
@@ -333,6 +333,7 @@ export function dispatchBridgeRouter() {
       applyRedirectNoStore(res);
       try {
         const results = await geocodeAttendanceAddress(req.query?.q, {
+          city: normalizeString(req.query?.city),
           origin: requestOrigin(req)
         });
         return res.status(200).json(results);
