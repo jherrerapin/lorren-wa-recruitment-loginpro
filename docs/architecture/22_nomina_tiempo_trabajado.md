@@ -36,14 +36,14 @@ El portal permite:
 
 La semana de Nómina es una regla fija de lunes a domingo. Las políticas históricas que hayan guardado domingo como inicio se normalizan a lunes al leerse, sin migración de datos.
 
-Para calcular correctamente un corte quincenal o personalizado, la consulta incorpora hasta seis días anteriores al inicio visible. Esos minutos no se exportan, pero sí se utilizan para saber cuánto llevaba trabajado el auxiliar en la semana que cruza el límite del corte.
+Para conciliar correctamente un corte quincenal o personalizado, la consulta carga la semana completa de lunes a domingo que toque cada extremo del rango visible. Los días fuera del corte no se muestran ni se exportan, pero sí participan en el balance entre excesos diarios y faltantes diarios de esa misma semana. La semana es una **ventana de conciliación**; no existe un umbral de 42 horas que por sí solo cree o elimine horas extra.
 
 ## Política por cliente
 
+La referencia operativa de jornada es fija en **7 horas diarias** para el balance de extras. Los valores históricos de horas ordinarias semanales pueden seguir leídos/persistidos por compatibilidad, pero no gobiernan la clasificación de horas extra.
+
 DEV puede configurar por cliente:
 
-- horas ordinarias semanales;
-- horas ordinarias diarias;
 - máximo de horas extra diarias y semanales;
 - inicio y final de jornada nocturna;
 - día de descanso obligatorio;
@@ -52,16 +52,49 @@ DEV puede configurar por cliente:
 
 No son configurables el inicio de semana ni la prioridad entre festivo y descanso: la semana siempre inicia el lunes y un día reconocido por el calendario colombiano se presenta como festivo. La política se conserva mediante eventos auditados `DISPATCH_PAYROLL_POLICY`. La política inicial queda versionada como `CO-2026-07`.
 
-## Clasificación
+## Clasificación y balance de horas extra
 
-El motor recorre cada minuto efectivo de las jornadas y mantiene acumulados diarios y semanales. Separa:
+El motor recorre cada minuto efectivo de las jornadas. Para cada día **que sí tuvo tiempo trabajado**, usa 420 minutos como referencia:
 
-- ordinario o extra;
+```text
+exceso_día  = max(0, minutos_trabajados - 420)
+faltante_día = max(0, 420 - minutos_trabajados)
+```
+
+Un día sin jornada trabajada no inventa automáticamente siete horas de faltante. Ausencias, suspensiones, permisos, incapacidades y compensatorios conservan sus autoridades propias; no se convierten aquí en un déficit horario artificial.
+
+Dentro de cada semana lunes a domingo:
+
+1. los minutos posteriores a las primeras 7 horas de cada día forman el pool candidato de horas extra;
+2. los faltantes de los demás días trabajados por debajo de 7 horas consumen ese pool;
+3. el descuento se aplica únicamente sobre conceptos de hora extra y en este orden: `HEDO → HENO → HEDD → HEND → HEDF → HENF`;
+4. nunca se descuentan recargos `R*`;
+5. cuando un minuto candidato deja de ser extra por cubrir un faltante, vuelve a su clasificación ordinaria y conserva el recargo nocturno, dominical o festivo que corresponda;
+6. solo el remanente **mayor a 30 minutos** se reconoce como hora extra. Un remanente de 30 minutos o menos no aparece como `H*`.
+
+Ejemplos:
+
+```text
+10 h + 6 h + 6 h
+exceso: 3 h
+faltante: 2 h
+extra final: 1 h
+
+10 h + 6 h + 6 h + 6 h
+exceso: 3 h
+faltante: 3 h
+extra final: 0 h
+```
+
+Los límites configurados de extra diaria y semanal continúan siendo validaciones sobre el **resultado reconocido**; no son el criterio que origina la hora extra.
+
+Además el motor separa:
+
 - diurno o nocturno;
 - ordinario, descanso obligatorio o festivo;
 - compensado o no compensado únicamente cuando el minuto corresponde al día de descanso obligatorio.
 
-La franja nocturna del motor es 19:00–06:00. La clasificación de descanso/festivo se hace sobre la fecha y hora civil de cada minuto en `America/Bogota`; por eso un turno que cruza medianoche puede cambiar de concepto al comenzar el día siguiente.
+La franja nocturna del motor es 19:00–06:00. La clasificación de descanso/festivo se hace sobre la fecha y hora civil de cada minuto en `America/Bogota`; por eso un turno que cruza medianoche puede cambiar de concepto al comenzar el día siguiente, pero sigue perteneciendo a una sola jornada operativa para el balance de 7 horas, tomando como referencia la fecha de inicio de la jornada.
 
 Conceptos producidos:
 
@@ -76,7 +109,7 @@ Una fracción se asigna a un único concepto. Por ejemplo, una hora extra noctur
 
 ## Almuerzo
 
-- Almuerzo completo: se restan los minutos realmente transcurridos entre inicio y regreso.
+- Almuerzo completo: se restan los minutos realmente transcurridos entre inicio y regreso una sola vez; el tiempo efectivo resultante es el que se compara con la referencia diaria de 7 horas.
 - Sin almuerzo: no se descuenta tiempo.
 - Almuerzo abierto: se aplica el descuento configurado, inicialmente 90 minutos, y se crea una novedad bloqueante para revisión.
 
@@ -89,6 +122,7 @@ El módulo identifica, entre otras:
 - tiempo guardado diferente al calculado;
 - almuerzo abierto;
 - jornadas superpuestas;
+- remanente candidato que no supera el umbral mínimo de reconocimiento;
 - exceso del límite extra diario;
 - exceso del límite extra semanal;
 - compensatorio pendiente exclusivamente para el día de descanso obligatorio.
@@ -122,7 +156,7 @@ Se ofrecen:
 - CSV separado por punto y coma y codificado para Excel;
 - Excel `.xlsx` con encabezados, filtro y horas decimales.
 
-El reporte conserva identificación, rango, horas ordinarias, total trabajado, horas extra, los códigos canónicos de conceptos, estado y novedades. El XLSX descargable omite únicamente las columnas de presentación `Estado` y `Novedades`; el endpoint CSV heredado conserva su contrato actual.
+El reporte conserva identificación, rango, horas ordinarias, total trabajado, horas extra y los códigos canónicos de conceptos. El XLSX descargable omite las columnas de presentación `Estado` y `Novedades`; el endpoint CSV heredado conserva su contrato actual.
 
 ## Alcance de esta entrega
 
