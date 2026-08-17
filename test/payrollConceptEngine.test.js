@@ -65,23 +65,12 @@ function report(sessions, options = {}) {
   });
 }
 
-function sevenHours(dateKey, id = `TEST-${dateKey}`) {
-  return session({ id, dateKey, minutes: 7 * 60 });
-}
+test('un remanente exacto de 30 minutos no se reconoce como hora extra', () => {
+  const row = report([
+    session({ id: 'TEST-THRESHOLD-30', dateKey: '2026-08-03', minutes: 450 })
+  ]).rows[0];
 
-function weekBaseThroughSaturday() {
-  return ['2026-08-03', '2026-08-04', '2026-08-05', '2026-08-06', '2026-08-07', '2026-08-08']
-    .map((dateKey) => sevenHours(dateKey));
-}
-
-test('7 h es referencia flexible: una jornada aislada de 7 h 30 min no genera extra', () => {
-  const result = report([
-    session({ id: 'TEST-FLEX-450', dateKey: '2026-08-03', minutes: 450 })
-  ]);
-
-  const row = result.rows[0];
   assert.equal(row.totalMinutes, 450);
-  assert.equal(row.ordinaryMinutes, 450);
   assert.equal(row.overtimeMinutes, 0);
   assert.equal(row.conceptMinutes.HEDO, 0);
   assert.equal(row.totalHours, 7.5);
@@ -89,12 +78,10 @@ test('7 h es referencia flexible: una jornada aislada de 7 h 30 min no genera ex
 });
 
 test('separa el recargo nocturno ordinario desde las 7 p. m. sin exigir hora extra', () => {
-  const result = report([
+  const row = report([
     session({ id: 'TEST-NIGHT', dateKey: '2026-08-03', startHour: 18, minutes: 120 })
-  ]);
+  ]).rows[0];
 
-  const row = result.rows[0];
-  assert.equal(row.ordinaryMinutes, 120);
   assert.equal(row.overtimeMinutes, 0);
   assert.equal(row.conceptMinutes.RNO, 60);
   assert.equal(row.conceptMinutes.HENO, 0);
@@ -119,101 +106,84 @@ test('clasifica domingo ordinario como no compensado o compensado', () => {
   assert.equal(compensated.rows[0].conceptMinutes.RDDC, 120);
 });
 
-test('solo el exceso semanal sobre 42 h se convierte en hora extra aunque el último día sea corto', () => {
-  const sessions = [
-    ...weekBaseThroughSaturday(),
-    session({ id: 'TEST-SUNDAY-EXTRA', dateKey: '2026-08-09', minutes: 60 })
-  ];
-  const result = report(sessions, {
-    compensationByWorkerDate: new Map([
-      ['TEST-WORKER-1|2026-08-09', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]
-    ])
-  });
+test('una jornada aislada de ocho horas deja una hora extra sin depender de 42 horas semanales', () => {
+  const row = report([
+    session({ id: 'TEST-ISOLATED-8H', dateKey: '2026-08-03', minutes: 8 * 60 })
+  ]).rows[0];
 
-  const row = result.rows[0];
-  assert.equal(row.ordinaryMinutes, 42 * 60);
+  assert.equal(row.totalMinutes, 8 * 60);
+  assert.equal(row.ordinaryMinutes, 7 * 60);
   assert.equal(row.overtimeMinutes, 60);
-  assert.equal(row.conceptMinutes.HEDD, 60);
-  assert.equal(row.conceptMinutes.RDD, 0);
+  assert.equal(row.conceptMinutes.HEDO, 60);
 });
 
-test('los faltantes diarios compensan horas extra de izquierda a derecha HEDO y luego HENO', () => {
-  const sessions = [
-    session({ id: 'TEST-MONDAY-LONG', dateKey: '2026-08-03', startHour: 11, minutes: 9 * 60 }),
-    session({ id: 'TEST-TUESDAY-SHORT', dateKey: '2026-08-04', minutes: 5.5 * 60 }),
-    sevenHours('2026-08-05'),
-    sevenHours('2026-08-06'),
-    sevenHours('2026-08-07'),
-    sevenHours('2026-08-08')
-  ];
-  const result = report(sessions);
-  const row = result.rows[0];
+test('10 h + 6 h + 6 h usa dos horas del exceso para cubrir los faltantes y deja una hora extra', () => {
+  const row = report([
+    session({ id: 'TEST-BALANCE-10', dateKey: '2026-08-03', minutes: 10 * 60 }),
+    session({ id: 'TEST-BALANCE-6A', dateKey: '2026-08-04', minutes: 6 * 60 }),
+    session({ id: 'TEST-BALANCE-6B', dateKey: '2026-08-05', minutes: 6 * 60 })
+  ]).rows[0];
 
-  assert.equal(row.totalMinutes, (42 * 60) + 30);
-  assert.equal(row.overtimeMinutes, 30);
-  assert.equal(row.conceptMinutes.HEDO, 0, 'el faltante consume primero HEDO');
-  assert.equal(row.conceptMinutes.HENO, 30, 'solo queda el remanente nocturno');
-  assert.equal(row.conceptMinutes.RNO, 30, 'el HENO compensado vuelve a ordinario pero conserva RNO');
+  assert.equal(row.totalMinutes, 22 * 60);
+  assert.equal(row.ordinaryMinutes, 21 * 60);
+  assert.equal(row.overtimeMinutes, 60);
+  assert.equal(row.conceptMinutes.HEDO, 60);
 });
 
-test('la compensación recorre HEDO, HENO, HEDD, HEND, HEDF y HENF sin descontar recargos', () => {
-  const sessions = [
-    session({ id: 'TEST-ORDER-WEEKDAY', dateKey: '2026-08-03', startHour: 11, minutes: 9 * 60 }),
-    session({ id: 'TEST-ORDER-TUE', dateKey: '2026-08-04', minutes: 4 * 60 }),
-    session({ id: 'TEST-ORDER-WED', dateKey: '2026-08-05', minutes: 4 * 60 }),
-    session({ id: 'TEST-ORDER-THU', dateKey: '2026-08-06', minutes: 4 * 60 }),
-    session({ id: 'TEST-ORDER-HOLIDAY', dateKey: '2026-08-07', startHour: 11, minutes: 9 * 60 }),
-    session({ id: 'TEST-ORDER-SAT', dateKey: '2026-08-08', minutes: 4 * 60 }),
-    session({ id: 'TEST-ORDER-SUNDAY', dateKey: '2026-08-09', startHour: 11, minutes: 9 * 60 })
-  ];
-  const result = report(sessions, {
-    compensationByWorkerDate: new Map([
-      ['TEST-WORKER-1|2026-08-09', PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED]
-    ])
-  });
-  const row = result.rows[0];
+test('10 h + 6 h + 6 h + 6 h consume por completo las tres horas candidatas', () => {
+  const row = report([
+    session({ id: 'TEST-ZERO-10', dateKey: '2026-08-03', minutes: 10 * 60 }),
+    session({ id: 'TEST-ZERO-6A', dateKey: '2026-08-04', minutes: 6 * 60 }),
+    session({ id: 'TEST-ZERO-6B', dateKey: '2026-08-05', minutes: 6 * 60 }),
+    session({ id: 'TEST-ZERO-6C', dateKey: '2026-08-06', minutes: 6 * 60 })
+  ]).rows[0];
 
-  assert.equal(row.totalMinutes, 43 * 60);
-  assert.equal(row.ordinaryMinutes, 42 * 60);
-  assert.equal(row.overtimeMinutes, 60);
+  assert.equal(row.totalMinutes, 28 * 60);
+  assert.equal(row.overtimeMinutes, 0);
   assert.equal(row.conceptMinutes.HEDO, 0);
-  assert.equal(row.conceptMinutes.HENO, 0);
-  assert.equal(row.conceptMinutes.HEDD, 0);
-  assert.equal(row.conceptMinutes.HEND, 0);
-  assert.equal(row.conceptMinutes.HEDF, 0);
-  assert.equal(row.conceptMinutes.HENF, 60, 'solo queda HENF después de descontar cinco horas de izquierda a derecha');
-  assert.equal(row.conceptMinutes.RNO, 60, 'HENO descontada conserva RNO');
-  assert.equal(row.conceptMinutes.RDD, 8 * 60, 'el domingo conserva siete horas ordinarias y recupera la HEDD descontada');
-  assert.equal(row.conceptMinutes.RND, 60, 'HEND descontada conserva RND');
-  assert.equal(row.conceptMinutes.RDF, 8 * 60, 'el festivo conserva siete horas ordinarias y recupera la HEDF descontada');
-  assert.equal(row.conceptMinutes.RNF, 0, 'HENF permanece como la única hora extra y no se duplica como recargo');
 });
 
-test('el motor fija 42 h semanales y 7 h como referencia aunque una política histórica diga otra cosa', () => {
+test('un remanente de veinte minutos después del balance no se reconoce como hora extra', () => {
+  const row = report([
+    session({ id: 'TEST-SMALL-10', dateKey: '2026-08-03', minutes: 10 * 60 }),
+    session({ id: 'TEST-SMALL-6A', dateKey: '2026-08-04', minutes: 6 * 60 }),
+    session({ id: 'TEST-SMALL-6B', dateKey: '2026-08-05', minutes: 6 * 60 }),
+    session({ id: 'TEST-SMALL-620', dateKey: '2026-08-06', minutes: (6 * 60) + 20 })
+  ]).rows[0];
+
+  assert.equal(row.overtimeMinutes, 0);
+  assert.equal(row.conceptMinutes.HEDO, 0);
+  assert.ok(row.novelties.some((novelty) => novelty.code === 'OVERTIME_BELOW_MINIMUM'));
+});
+
+test('los faltantes consumen HEDO antes que HENO y el HENO retirado conserva RNO', () => {
+  const row = report([
+    session({ id: 'TEST-ORDER-LONG', dateKey: '2026-08-03', startHour: 11, minutes: 9.5 * 60 }),
+    session({ id: 'TEST-ORDER-SHORT', dateKey: '2026-08-04', minutes: 5.5 * 60 })
+  ]).rows[0];
+
+  assert.equal(row.overtimeMinutes, 60);
+  assert.equal(row.conceptMinutes.HEDO, 0, 'la primera hora retirada debe ser HEDO');
+  assert.equal(row.conceptMinutes.HENO, 60, 'queda una hora nocturna como remanente extra');
+  assert.equal(row.conceptMinutes.RNO, 30, 'los 30 minutos HENO retirados vuelven a ordinario con RNO');
+});
+
+test('el valor histórico de 42 h queda como compatibilidad y no decide las horas extra', () => {
   const historical = normalizePayrollPolicy({ weeklyOrdinaryMinutes: 120, dailyOrdinaryMinutes: 60 });
   assert.equal(historical.weeklyOrdinaryMinutes, 42 * 60);
   assert.equal(historical.dailyOrdinaryMinutes, 7 * 60);
 
-  const sessions = [
-    session({ id: 'TEST-MONDAY-9H', dateKey: '2026-08-03', minutes: 9 * 60 }),
-    session({ id: 'TEST-TUESDAY-5H', dateKey: '2026-08-04', minutes: 5 * 60 }),
-    sevenHours('2026-08-05'),
-    sevenHours('2026-08-06'),
-    sevenHours('2026-08-07'),
-    sevenHours('2026-08-08')
-  ];
-  const result = report(sessions, {
-    range: { from: '2026-08-03', to: '2026-08-05' },
+  const row = report([
+    session({ id: 'TEST-HISTORICAL-8H', dateKey: '2026-08-03', minutes: 8 * 60 })
+  ], {
     policiesByClientId: new Map([['TEST-CLIENT-1', { weeklyOrdinaryMinutes: 120, dailyOrdinaryMinutes: 60 }]])
-  });
+  }).rows[0];
 
-  const row = result.rows[0];
-  assert.equal(row.totalMinutes, 21 * 60, 'solo muestra el rango solicitado');
-  assert.equal(row.overtimeMinutes, 0, 'la semana completa suma 42 h y neutraliza el exceso del lunes');
-  assert.equal(row.conceptMinutes.HEDO, 0);
+  assert.equal(row.overtimeMinutes, 60);
+  assert.equal(row.conceptMinutes.HEDO, 60);
 });
 
-test('el almuerzo superior a una hora reduce el exceso semanal sin tocar recargos', () => {
+test('el almuerzo se descuenta una sola vez y modifica el exceso diario real', () => {
   const breakMarks = (endMinute) => [
     {
       markType: 'BREAK_START',
@@ -226,20 +196,16 @@ test('el almuerzo superior a una hora reduce el exceso semanal sin tocar recargo
       serverReceivedAt: bogotaDateTime('2026-08-03', 13, endMinute)
     }
   ];
-  const remainder = [
-    sevenHours('2026-08-04'),
-    sevenHours('2026-08-05'),
-    sevenHours('2026-08-06'),
-    sevenHours('2026-08-07'),
-    sevenHours('2026-08-08')
-  ];
-  const mondayOneHour = session({ id: 'TEST-LUNCH-60', dateKey: '2026-08-03', minutes: 10 * 60, marks: breakMarks(0) });
-  const mondayNinety = session({ id: 'TEST-LUNCH-90', dateKey: '2026-08-03', minutes: 10 * 60, marks: breakMarks(30) });
 
-  const oneHour = report([mondayOneHour, ...remainder]).rows[0];
-  const ninety = report([mondayNinety, ...remainder]).rows[0];
-  assert.equal(oneHour.totalMinutes, 44 * 60);
+  const oneHour = report([
+    session({ id: 'TEST-LUNCH-60', dateKey: '2026-08-03', minutes: 10 * 60, marks: breakMarks(0) })
+  ]).rows[0];
+  const ninety = report([
+    session({ id: 'TEST-LUNCH-90', dateKey: '2026-08-03', minutes: 10 * 60, marks: breakMarks(30) })
+  ]).rows[0];
+
+  assert.equal(oneHour.totalMinutes, 9 * 60);
   assert.equal(oneHour.overtimeMinutes, 2 * 60);
-  assert.equal(ninety.totalMinutes, (43 * 60) + 30);
+  assert.equal(ninety.totalMinutes, (8 * 60) + 30);
   assert.equal(ninety.overtimeMinutes, 90);
 });
