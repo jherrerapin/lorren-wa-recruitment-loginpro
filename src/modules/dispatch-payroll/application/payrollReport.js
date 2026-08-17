@@ -131,7 +131,9 @@ function normalizeWorkerRestEvent(event) {
     status,
     originSundayDate: reason === WORKER_REST_REASONS.COMPENSATORIO ? originSundayDate : null,
     dayAdjustment: workerRestDayAdjustment(reason),
-    requiresJustification: metadata.requiresJustification === true || Boolean(reason),
+    requiresJustification: typeof metadata.requiresJustification === 'boolean'
+      ? metadata.requiresJustification
+      : Boolean(reason),
     assignmentConflictOverride: metadata.assignmentConflictOverride === true,
     createdAt: event.createdAt || null
   };
@@ -341,9 +343,15 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     });
     if (!worker) throw new Error('worker_rest_worker_not_found');
 
-    const requiresJustification = worker.contractType === 'DIRECTO' && !datePolicy.isNaturalRestDay;
+    const isDirect = worker.contractType === 'DIRECTO';
+    const requiresJustification = isDirect && !datePolicy.isNaturalRestDay;
+    const allowsOptionalSundayJustification = isDirect && datePolicy.isSunday;
     if (requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    const reason = requiresJustification ? requestedReason : null;
+    if (allowsOptionalSundayJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    if (allowsOptionalSundayJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
+    const reason = isDirect && (requiresJustification || allowsOptionalSundayJustification)
+      ? (requestedReason || null)
+      : null;
     const originSundayDate = reason === WORKER_REST_REASONS.COMPENSATORIO ? requestedOriginSundayDate : null;
     if (reason === WORKER_REST_REASONS.COMPENSATORIO) {
       if (!originSundayDate || !isSundayDateKey(originSundayDate) || holidayDateKey(originSundayDate)) {
@@ -367,7 +375,7 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     }
 
     const status = WORKER_REST_STATUS.ACTIVE;
-    const dayAdjustment = requiresJustification ? workerRestDayAdjustment(reason) : 0;
+    const dayAdjustment = reason ? workerRestDayAdjustment(reason) : 0;
     const metadata = {
       workerId: worker.id,
       restDate,
