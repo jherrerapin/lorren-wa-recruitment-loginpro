@@ -331,12 +331,11 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
   const workerId = normalizeString(input.workerId, 120);
   const datePolicy = resolveWorkerRestDatePolicy(input.restDate);
   const restDate = datePolicy.restDate;
+  const reasonSubmitted = typeof input.reason === 'string';
   const requestedReason = normalizeString(input.reason, 40)?.toUpperCase();
   const requestedOriginSundayDate = validDateKey(input.originSundayDate);
   const allowAssignedRest = input.allowAssignedRest === true;
-  const deferJustification = input.deferJustification === true;
-  const updateJustification = input.updateJustification === true;
-  if (!workerId || !datePolicy.valid || (deferJustification && updateJustification)) throw new Error('worker_rest_invalid');
+  if (!workerId || !datePolicy.valid) throw new Error('worker_rest_invalid');
 
   return inSerializableTransaction(prisma, async (tx) => {
     const worker = await tx.dispatchWorker.findUnique({
@@ -348,19 +347,16 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
     const isDirect = worker.contractType === 'DIRECTO';
     const active = await loadWorkerRestAssignments(tx, { workerIds: [worker.id] });
     const current = active.find((rest) => rest.restDate === restDate) || null;
-    if (updateJustification) {
-      if (!current || !isDirect) throw new Error('worker_rest_invalid');
-    } else if (current) {
-      throw new Error('worker_rest_date_already_assigned');
-    }
+    const isJustificationUpdate = Boolean(current && isDirect && reasonSubmitted);
+    const isDeferredInitial = Boolean(!current && isDirect && reasonSubmitted && !requestedReason);
+    if (current && !isJustificationUpdate) throw new Error('worker_rest_date_already_assigned');
 
     const requiresJustification = isDirect && !datePolicy.isNaturalRestDay;
     const allowsOptionalNaturalRestJustification = isDirect && datePolicy.isNaturalRestDay;
-    if (deferJustification && isDirect && requestedReason) throw new Error('worker_rest_invalid');
-    if (!deferJustification && requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (!deferJustification && allowsOptionalNaturalRestJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
-    if (!deferJustification && allowsOptionalNaturalRestJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
-    const reason = isDirect && !deferJustification && (requiresJustification || allowsOptionalNaturalRestJustification)
+    if (!isDeferredInitial && requiresJustification && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    if (!isDeferredInitial && allowsOptionalNaturalRestJustification && requestedReason && !WORKER_REST_REASON_VALUES.has(requestedReason)) throw new Error('worker_rest_invalid');
+    if (!isDeferredInitial && allowsOptionalNaturalRestJustification && requestedReason === WORKER_REST_REASONS.COMPENSATORIO) throw new Error('worker_rest_invalid');
+    const reason = isDirect && !isDeferredInitial && (requiresJustification || allowsOptionalNaturalRestJustification)
       ? (requestedReason || null)
       : null;
     const originSundayDate = reason === WORKER_REST_REASONS.COMPENSATORIO ? requestedOriginSundayDate : null;
@@ -370,7 +366,7 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       }
     }
 
-    const assignmentConflicts = updateJustification
+    const assignmentConflicts = isJustificationUpdate
       ? []
       : await findWorkerRestAssignmentConflicts(tx, { workerIds: [worker.id], restDate });
     if (assignmentConflicts.length && !allowAssignedRest) {
@@ -396,7 +392,7 @@ export async function saveWorkerRestAssignment(prisma, input = {}) {
       originSundayDate,
       dayAdjustment,
       requiresJustification,
-      assignmentConflictOverride: updateJustification
+      assignmentConflictOverride: isJustificationUpdate
         ? current.assignmentConflictOverride === true
         : assignmentConflicts.length > 0 && allowAssignedRest
     };
