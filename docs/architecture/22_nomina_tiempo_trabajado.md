@@ -166,10 +166,23 @@ Esto evita depender del primer día de semana que el navegador o el sistema oper
 
 Se ofrecen:
 
-- CSV separado por punto y coma y codificado para Excel;
+- CSV separado por punto y coma y codificado para Excel mediante el endpoint heredado;
 - Excel `.xlsx` con encabezados, filtro y horas decimales.
 
-La exportación usa exactamente el mismo resultado combinado que la tabla: rango general para contadores, ordinarias y `R*`, y rango independiente de extras para `HorasExtraTotal` y `H*`. El encabezado del XLSX identifica ambos rangos. El XLSX descargable omite las columnas de presentación `Estado` y `Novedades`; el endpoint CSV heredado conserva su contrato actual.
+El botón **Excel** abre primero un personalizador. Desde allí se puede elegir:
+
+- uno o varios auxiliares que ya formen parte del cálculo visible;
+- las columnas de identificación y corte;
+- días, permisos, incapacidades, turnos y descansos;
+- horas ordinarias, total trabajado y total de extras;
+- conceptos `H*` de horas extra;
+- conceptos `R*` de recargo.
+
+Todas las opciones aparecen marcadas inicialmente, por lo que el usuario puede obtener el mismo contenido completo que antes o reducirlo a lo estrictamente necesario. La selección de auxiliares es únicamente una proyección del reporte ya calculado: no vuelve a clasificar horas ni permite incorporar una persona que esté fuera de los filtros actuales.
+
+La lista de columnas permitidas vive en la misma autoridad que construye el XLSX, `src/routes/dispatchPayroll.js`. El servidor ignora claves de columna que no estén en esa lista y no permite generar una descarga personalizada sin al menos una columna; cuando el reporte contiene filas también exige al menos un auxiliar válido. `Estado` y `Novedades` continúan fuera del XLSX y no aparecen como opciones seleccionables.
+
+La exportación usa exactamente el mismo resultado combinado que la tabla: rango general para contadores, ordinarias y `R*`, y rango independiente de extras para `HorasExtraTotal` y `H*`. El encabezado del XLSX identifica ambos rangos. El endpoint CSV heredado conserva su contrato actual y no se muestra como botón en la interfaz.
 
 ## Alcance de esta entrega
 
