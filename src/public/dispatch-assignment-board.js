@@ -285,6 +285,20 @@
     return Array.from(selectedWorkerIds).filter(Boolean);
   }
 
+  function visibleWorkerCards() {
+    return qsa('.worker-card').filter((card) => !card.hidden);
+  }
+
+  function syncSelectAllUi() {
+    const checkbox = qs('#selectAllWorkers');
+    if (!checkbox) return;
+    const visibleIds = visibleWorkerCards().map((card) => card.dataset.workerId).filter(Boolean);
+    const selectedVisible = visibleIds.filter((workerId) => selectedWorkerIds.has(workerId)).length;
+    checkbox.checked = visibleIds.length > 0 && selectedVisible === visibleIds.length;
+    checkbox.indeterminate = selectedVisible > 0 && selectedVisible < visibleIds.length;
+    checkbox.disabled = visibleIds.length === 0;
+  }
+
   function refreshSelectionUi() {
     qsa('.worker-card').forEach((card) => {
       const selected = selectedWorkerIds.has(card.dataset.workerId);
@@ -294,6 +308,7 @@
     });
     const count = qs('#selectedWorkersCount');
     if (count) count.textContent = String(selectedWorkerIds.size);
+    syncSelectAllUi();
   }
 
   function setWorkerSelection(workerId, selected) {
@@ -303,9 +318,39 @@
     refreshSelectionUi();
   }
 
+  function setVisibleWorkersSelection(selected) {
+    visibleWorkerCards().forEach((card) => {
+      const workerId = card.dataset.workerId;
+      if (!workerId) return;
+      if (selected) selectedWorkerIds.add(workerId);
+      else selectedWorkerIds.delete(workerId);
+    });
+    refreshSelectionUi();
+  }
+
   function clearWorkerSelection() {
     selectedWorkerIds.clear();
     refreshSelectionUi();
+  }
+
+  function ensureSelectAllControl() {
+    const actions = qs('.worker-toolbar-actions');
+    if (!actions || qs('#selectAllWorkers')) return;
+
+    const label = document.createElement('label');
+    label.className = 'btn';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.id = 'selectAllWorkers';
+    checkbox.className = 'worker-select';
+    checkbox.setAttribute('aria-label', 'Seleccionar todos los auxiliares visibles');
+    const text = document.createElement('span');
+    text.textContent = 'Seleccionar todos';
+    label.append(checkbox, text);
+    actions.insertBefore(label, actions.firstChild);
+
+    checkbox.addEventListener('change', () => setVisibleWorkersSelection(checkbox.checked));
+    syncSelectAllUi();
   }
 
   async function assignWorkers(workerIds) {
@@ -976,6 +1021,8 @@
   }
 
   function bindStaticBoard() {
+    ensureSelectAllControl();
+
     qs('#assignmentDateFilter')?.addEventListener('change', (event) => {
       const previousValue = currentDateFilter();
       const value = event.target.value;
