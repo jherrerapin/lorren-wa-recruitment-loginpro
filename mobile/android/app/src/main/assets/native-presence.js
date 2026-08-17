@@ -82,6 +82,10 @@
       assignmentId,
       serviceRequestId,
       operationPointId: String(value.operationPointId || '').trim(),
+      operationPointName: String(value.operationPointName || '').trim().slice(0, 160),
+      serviceDate: String(value.serviceDate || '').trim().slice(0, 10),
+      startTime: String(value.startTime || '').trim().slice(0, 16),
+      endTime: String(value.endTime || '').trim().slice(0, 16),
       mode: value.mode === 'CREW' ? 'CREW' : 'INDIVIDUAL',
       isCrewLeader,
       crewAvailable: value.crewAvailable === true,
@@ -429,9 +433,18 @@
     return messages[code] || 'La comprobación local tuvo un inconveniente. Puedes volver a intentarlo.';
   }
 
-  function serviceLabel(context, index) {
+  function displayServiceDate(value) {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim());
+    return match ? `${match[3]}/${match[2]}/${match[1]}` : '';
+  }
+
+  function serviceLabel(context) {
+    const operation = String(context?.operationPointName || '').trim() || 'Servicio de cuadrilla';
+    const date = displayServiceDate(context?.serviceDate);
+    const startTime = String(context?.startTime || '').trim();
+    const details = [operation, date, startTime].filter(Boolean).join(' · ');
     const suffix = context?.isCrewLeader ? ' · encargado' : '';
-    return `Cuadrilla ${index + 1}${suffix}`;
+    return `${details}${suffix}`;
   }
 
   function retryActionNode() {
@@ -472,10 +485,10 @@
     const label = element('label', '', 'Servicio de cuadrilla');
     const select = document.createElement('select');
     select.dataset.nativePresenceService = 'true';
-    contexts.forEach((context, index) => {
+    contexts.forEach((context) => {
       const option = document.createElement('option');
       option.value = context.serviceRequestId;
-      option.textContent = serviceLabel(context, index);
+      option.textContent = serviceLabel(context);
       option.selected = context.serviceRequestId === selectedServiceRequestId;
       select.appendChild(option);
     });
