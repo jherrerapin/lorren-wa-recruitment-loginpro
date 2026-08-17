@@ -54,11 +54,19 @@ test('dispatch CRUD conserva clientes y personal con sucursal como autoridad ter
   assert.doesNotMatch(workerFormView, /selectedVacancyIds|name="vacancyIds"|Vacantes \/ perfiles/);
   assert.doesNotMatch(workerFormView, /<input id="residenceCity"/);
 
-  // El CRUD público conserva compatibilidad interna mientras la UI deja de enviar vacantes.
-  assert.match(publicRoute, /findWorkerOr404/);
+  // El CRUD canónico de auxiliar valida y escribe exclusivamente Sucursales.
+  assert.match(publicRoute, /validateSelectedBranches/);
+  assert.match(publicRoute, /createWorkerWithBranches/);
+  assert.match(publicRoute, /updateWorkerWithBranches/);
+  assert.match(publicRoute, /dispatchWorkerCity\.createMany/);
+  assert.match(publicRoute, /loadUnifiedCityOptions/);
+  assert.doesNotMatch(publicRoute, /resolveEquivalentCityIds|validateVacanciesForSelectedCities/);
+  assert.doesNotMatch(publicRoute, /body\.vacancyIds|dispatchWorkerVacancy\.(?:create|createMany|upsert|update|updateMany|delete|deleteMany)/);
+  assert.doesNotMatch(publicRoute, /usedForDispatch/);
   assert.match(publicRoute, /buildCandidateProfileData/);
-  assert.match(publicRoute, /prisma\.candidate\.update/);
   assert.doesNotMatch(publicRoute, /where: \{ id: workerId, source: 'MANUAL' \}/);
+
+  // Las rutas legacy siguen presentes durante transición, pero ya no están enlazadas por la UI canónica.
   assert.match(opsExtrasRoute, /DISPATCH_OWNED_SOURCES = \['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'\]/);
   assert.doesNotMatch(deleteRoute, /source: 'MANUAL'|Auxiliar manual no encontrado|Auxiliar manual eliminado/);
 
