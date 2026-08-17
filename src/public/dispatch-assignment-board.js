@@ -532,7 +532,7 @@
     const sundayRestDay = restDatePolicy.isSunday === true;
     const holidayRestDay = restDatePolicy.isHoliday === true;
     const reasonAvailable = restBatchHasDirect;
-    const reasonRequired = restBatchHasDirect && !naturalRestDay;
+    const reasonRequired = false;
     const directWorkers = restBatchWorkers.filter((worker) => worker.contractType === 'DIRECTO');
     const reasonField = qs('#restReasonField');
     const reasonInput = qs('#restReasonInput');
@@ -556,8 +556,8 @@
         ? 'Domingo: la justificación es opcional para auxiliares Directos.'
         : holidayRestDay && restBatchHasDirect
           ? 'Festivo: la justificación es opcional para auxiliares Directos.'
-          : reasonRequired
-            ? 'Día hábil: selecciona la justificación del descanso.'
+          : reasonAvailable
+            ? 'Día hábil: la justificación es opcional para auxiliares Directos.'
             : 'La justificación es opcional para esta fecha.';
     }
 
@@ -898,11 +898,6 @@
       }
 
       const reason = qs('#restReasonInput')?.value || '';
-      if (!reason && !policy.isNaturalRestDay) {
-        showToast('Selecciona la justificación del descanso.');
-        return;
-      }
-
       let origin = '';
       if (reason === 'COMPENSATORIO' && !restDatePolicy.isNaturalRestDay) {
         origin = qs('#originSundayDateInput')?.value || '';
@@ -924,7 +919,7 @@
           allDates: !currentDateFilter()
         });
         await loadBoard(url, { date: currentDateFilter(), updateHistory: false });
-        showToast('Justificación guardada.');
+        showToast(reason ? 'Justificación guardada.' : 'Descanso guardado sin justificación.');
       } catch (error) {
         console.error(error);
         showToast(error.message || 'No fue posible guardar la justificación.');

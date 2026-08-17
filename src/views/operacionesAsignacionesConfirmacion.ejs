@@ -114,7 +114,7 @@ Hora : *{{horaInicio}} por favor.*
     </section>
 
     <section class="rest-panel" id="workerRestPanel">
-      <div class="rest-head"><div><h2>Descansos</h2><p>Selecciona o arrastra uno o varios auxiliares para asignar el descanso. En los Directos, la justificación se gestiona después desde cada tarjeta: en días hábiles es obligatoria y en domingos y festivos es opcional.</p></div><span class="rest-date-chip">Fecha mostrada: <%= safeRestDate || 'hoy' %></span></div>
+      <div class="rest-head"><div><h2>Descansos</h2><p>Selecciona o arrastra uno o varios auxiliares para asignar el descanso. En los Directos, la justificación es opcional y puede gestionarse después desde cada tarjeta.</p></div><span class="rest-date-chip">Fecha mostrada: <%= safeRestDate || 'hoy' %></span></div>
       <div id="restDropZone" class="drop-zone rest-drop-zone">Arrastra uno o varios auxiliares para asignarles descanso.</div>
       <div class="rest-list">
         <% if (!safeRestAssignments.length) { %><div class="rest-empty">No hay descansos asignados para esta fecha.</div><% } %>
@@ -132,7 +132,7 @@ Hora : *{{horaInicio}} por favor.*
       <dialog class="rest-dialog" id="restAssignmentDialog">
         <form method="post" action="/admin/operaciones/asignaciones/descansos" id="restAssignmentForm">
           <h3>Asignar justificación</h3>
-          <div class="meta"><span id="restWorkerName">Auxiliar</span><span id="restContractRule">Selecciona la justificación del descanso.</span></div>
+          <div class="meta"><span id="restWorkerName">Auxiliar</span><span id="restContractRule">La justificación es opcional para auxiliares Directos.</span></div>
           <input type="hidden" name="workerId" id="restWorkerId" />
           <input type="hidden" name="allowAssignedRest" id="allowAssignedRestInput" value="false" />
           <input type="hidden" name="serviceRequestId" value="<%= selectedServiceRequestId %>" />
