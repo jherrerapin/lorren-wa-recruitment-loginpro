@@ -62,16 +62,27 @@ test('el mapa invalida su tamaño antes de recalcular el encuadre y observa camb
   assert.doesNotMatch(runtimeSource, /google\.com\/maps/);
 });
 
-test('usa dos fondos independientes en Bogotá y cambia también cuando una tesela queda colgada', () => {
+test('usa OpenStreetMap como fondo nacional y deja IDECA solo como respaldo de Bogotá', () => {
   assert.match(runtimeSource, /tile\.openstreetmap\.org\/\{z\}\/\{x\}\/\{y\}\.png/);
   assert.match(runtimeSource, /Mapa_Referencia\/mapa_base_3857\/MapServer\/tile\/\{z\}\/\{y\}\/\{x\}/);
-  assert.match(runtimeSource, /\['ideca', 'osm'\]/);
+  assert.match(runtimeSource, /\['osm', 'ideca'\]/);
+  assert.doesNotMatch(runtimeSource, /\['ideca', 'osm'\]/);
+  assert.match(runtimeSource, /if \(isBogotaMap\(map\)\) return \['osm', 'ideca'\]/);
+  assert.match(runtimeSource, /return \['osm'\]/);
+  assert.doesNotMatch(runtimeSource, /maxBounds/);
   assert.match(runtimeSource, /tileerror/);
   assert.match(runtimeSource, /TILE_LOAD_TIMEOUT_MS = 4_500/);
   assert.match(runtimeSource, /no respondió a tiempo/);
   assert.match(runtimeSource, /activateProvider\(map, nextProvider\)/);
   assert.match(runtimeSource, /Fondo cartográfico activo/);
   assert.match(runtimeSource, /El mapa sigue aceptando clics y las coordenadas siguen siendo válidas/);
+});
+
+test('una operación sin punto guardado abre con vista nacional y una guardada conserva zoom exacto', () => {
+  assert.match(pointViewSource, /DEFAULT_ATTENDANCE_MAP_CENTER = \[4\.0, -73\.5\]/);
+  assert.match(pointViewSource, /DEFAULT_ATTENDANCE_MAP_ZOOM = 5/);
+  assert.match(pointViewSource, /hasSavedPoint \? 18 : DEFAULT_ATTENDANCE_MAP_ZOOM/);
+  assert.doesNotMatch(pointViewSource, /maxBounds/);
 });
 
 test('la búsqueda agrega contexto, acepta Enter y exige selección explícita', () => {
