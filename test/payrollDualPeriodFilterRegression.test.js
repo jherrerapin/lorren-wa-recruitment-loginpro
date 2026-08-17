@@ -173,8 +173,11 @@ test('un solo resultado conserva datos generales y toma únicamente H* del perio
 });
 
 test('la vista usa dos filtros independientes y un solo calendario reutilizable, sin Desde/Hasta visibles', async () => {
-  const view = await readFile('src/views/operacionesNomina.ejs', 'utf8');
-  const route = await readFile('src/routes/dispatchPayroll.js', 'utf8');
+  const [view, route, table] = await Promise.all([
+    readFile('src/views/operacionesNomina.ejs', 'utf8'),
+    readFile('src/routes/dispatchPayroll.js', 'utf8'),
+    readFile('src/views/partials/operacionesNominaTabla.ejs', 'utf8')
+  ]);
 
   assert.match(view, /Periodo general/);
   assert.match(view, /data-general-mode="FIRST">1–15/);
@@ -196,4 +199,8 @@ test('la vista usa dos filtros independientes y un solo calendario reutilizable,
   assert.match(route, /const generalReport = await loadPayrollReport/);
   assert.match(route, /const overtimeReport = sameResolvedRange[\s\S]*loadPayrollReport\(prisma, overtimeInput/);
   assert.match(route, /'extraPeriodType', 'extraFrom', 'extraTo', 'extraAnchor'/);
+
+  for (const field of ['extraPeriodType', 'extraFrom', 'extraTo', 'extraAnchor']) {
+    assert.ok((table.match(new RegExp(`name="${field}"`, 'g')) || []).length >= 2, `${field} debe conservarse en política y compensatorio`);
+  }
 });
