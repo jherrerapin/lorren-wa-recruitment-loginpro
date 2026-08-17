@@ -6,115 +6,79 @@
   <title><%= pageTitle %> — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    :root { --bg: #f4f5f7; --surface: #ffffff; --surface-2: #f9fafb; --border: #e1e4e8; --text: #1a1d23; --muted: #6b7280; --navy: #1e2d3d; --teal: #0d7a6b; --teal-hover: #0a5f53; --red: #b91c1c; --red-light: #fee2e2; --red-hover: #991b1b; --green: #166534; --green-light: #dcfce7; --blue: #1d4ed8; --blue-light: #dbeafe; --amber: #92400e; --amber-light: #fef3c7; --purple: #6b21a8; --purple-light: #f3e8ff; --shadow-sm: 0 1px 3px rgba(0,0,0,.08); --shadow-md: 0 10px 28px rgba(15,23,42,.08); --radius: 12px; --content-max: 1160px; --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; }
-    .navbar { background: var(--navy); padding: 0 24px; display: flex; align-items: center; gap: 20px; min-height: 52px; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
-    .navbar a { color: #cbd5e0; text-decoration: none; font-size: 13px; font-weight: 600; padding: 4px 2px; border-bottom: 2px solid transparent; }
-    .navbar a:hover, .navbar a.nav-active { color: #fff; border-bottom-color: #4fd1c5; }
-    .navbar .brand img { height: 28px; display: block; }
-    .navbar .spacer { flex: 1; }
-    .btn-logout { background: transparent; border: 1px solid rgba(255,255,255,.25); color: #cbd5e0 !important; padding: 6px 12px !important; border-radius: 7px; cursor: pointer; font-size: 12px; font-weight: 600; }
-    .page { width: min(var(--content-max), calc(100% - 40px)); margin: 0 auto; padding: 28px 0 60px; display: grid; gap: 18px; }
-    .hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, auto); align-items: start; gap: 22px; background: linear-gradient(135deg, #fff 0%, #f0fdfa 100%); border: 1px solid var(--border); border-radius: 18px; padding: 22px; box-shadow: var(--shadow-md); }
-    .hero > div:first-child { min-width: 0; }
-    .eyebrow { color: var(--teal); font-size: 12px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; margin-bottom: 8px; }
-    h1 { color: var(--navy); font-size: 28px; line-height: 1.15; margin-bottom: 8px; }
-    .subtitle { color: var(--muted); line-height: 1.6; max-width: 620px; }
-    .hero-actions { display: flex; gap: 9px; flex-wrap: wrap; align-items: center; justify-content: flex-end; max-width: 500px; }
-    .hero-actions form { display: flex; }
-    .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; border: 1px solid var(--border); border-radius: 8px; padding: 7px 13px; background: var(--surface); color: var(--navy); text-decoration: none; font-size: 12px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow-sm); white-space: nowrap; }
-    .btn-primary { background: var(--teal); border-color: var(--teal); color: #fff; }
-    .btn-primary:hover { background: var(--teal-hover); }
-    .btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
-    .btn-success { background: var(--green); border-color: var(--green); color: #fff; }
-    .btn-success:hover { background: #14532d; }
-    .btn-danger { background: var(--red); border-color: var(--red); color: #fff; }
-    .btn-danger:hover { background: var(--red-hover); }
-    .btn-danger-outline { border-color: var(--red); color: var(--red); background: var(--surface); }
-    .btn-danger-outline:hover { background: var(--red-light); }
-    .btn:disabled { opacity: .45; cursor: not-allowed; pointer-events: none; }
-    .alert { border: 1px solid #bfdbfe; background: var(--blue-light); color: var(--blue); border-radius: 12px; padding: 12px 14px; font-size: 13px; font-weight: 700; }
-    .filters-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow-sm); }
-    .filters-head { margin-bottom: 14px; }
-    .filters-head h2 { color: var(--navy); font-size: 16px; margin-bottom: 3px; }
-    .filters-head p { color: var(--muted); font-size: 13px; }
-    .filters-grid { display: grid; grid-template-columns: minmax(220px, .85fr) minmax(320px, 1.35fr) auto; gap: 12px; align-items: end; }
-    .filters-grid > .btn { min-width: 110px; }
-    .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-    .field label { color: var(--muted); font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
-    select { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--surface-2); color: var(--text); font-size: 14px; outline: none; text-overflow: ellipsis; }
-    select:focus { border-color: var(--teal); box-shadow: 0 0 0 3px rgba(13,122,107,.12); }
-    .panel { min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden; }
-    .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid #eaecef; flex-wrap: wrap; }
-    .panel-head h2 { color: var(--navy); font-size: 17px; }
-    .panel-head p { color: var(--muted); font-size: 13px; margin-top: 2px; }
-    .bulk-bar { display: flex; align-items: center; gap: 10px; padding: 10px 20px; background: #fff7ed; border-bottom: 1px solid #fed7aa; flex-wrap: wrap; }
-    .bulk-bar span { font-size: 13px; font-weight: 700; color: #92400e; }
-    #bulk-bar { display: none; }
-    .table-wrap { max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-gutter: stable; }
-    table { width: 100%; border-collapse: collapse; min-width: 1060px; }
-    th, td { text-align: left; padding: 11px 12px; border-bottom: 1px solid #eaecef; vertical-align: middle; }
-    th { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; letter-spacing: .06em; }
-    td { color: var(--text); font-size: 13px; }
-    #workers-table th:nth-child(4), #workers-table th:nth-child(5), #workers-table td:nth-child(4), #workers-table td:nth-child(5) { white-space: nowrap; }
-    td.actions-cell { min-width: 238px; }
-    .check-col { width: 40px; text-align: center !important; padding: 10px 8px !important; }
-    input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--teal); cursor: pointer; }
-    tr.selected-row { background: #f0fdfa; }
-    .muted { color: var(--muted); }
-    .worker-name { color: var(--navy); font-weight: 800; }
-    .pill { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 800; margin: 2px 3px 2px 0; }
-    .pill-green { color: var(--green); background: var(--green-light); }
-    .pill-blue { color: var(--blue); background: var(--blue-light); }
-    .pill-amber { color: var(--amber); background: var(--amber-light); }
-    .pill-purple { color: var(--purple); background: var(--purple-light); }
-    .pill-contract { color: #475569; background: #f8fafc; border: 1px solid #dbe3ec; padding: 2px 7px; }
-    .row-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-    .empty { padding: 42px 20px; text-align: center; color: var(--muted); }
-    .empty strong { display: block; color: var(--navy); font-size: 16px; margin-bottom: 6px; }
-    .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 1000; align-items: center; justify-content: center; }
-    .modal-overlay.open { display: flex; }
-    .modal { background: #fff; border-radius: 16px; padding: 28px 28px 24px; max-width: 480px; width: 90%; box-shadow: 0 20px 60px rgba(0,0,0,.18); }
-    .modal h3 { color: var(--navy); font-size: 18px; margin-bottom: 10px; }
-    .modal p { color: var(--muted); font-size: 14px; line-height: 1.6; margin-bottom: 20px; }
-    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; }
-    @media (max-width: 1100px) {
-      .page { width: calc(100% - 28px); }
-      .hero { grid-template-columns: 1fr; }
-      .hero-actions { justify-content: flex-start; max-width: none; }
-      .filters-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-      .filters-grid > .btn { grid-column: 1 / -1; justify-self: start; }
-    }
-    @media (max-width: 900px) {
-      .navbar { flex-wrap: wrap; height: auto; padding: 10px 16px; }
-      .navbar .spacer { display: none; }
-      .hero { padding: 20px; }
-    }
-    @media (max-width: 760px) {
-      .page { width: calc(100% - 20px); padding: 18px 0 42px; gap: 14px; }
-      .filters-grid { grid-template-columns: 1fr; }
-      .filters-grid > .btn { width: 100%; justify-self: stretch; }
-      .hero-actions > a, .hero-actions > form { flex: 1 1 190px; }
-      .hero-actions > form .btn { width: 100%; }
-      .panel-head { padding: 14px 16px; }
-      .bulk-bar { padding: 10px 16px; }
-    }
-    @media (max-width: 520px) {
-      .hero { padding: 18px; }
-      h1 { font-size: 24px; }
-      .hero-actions > a, .hero-actions > form { flex-basis: 100%; }
-      .modal { padding: 22px 18px 18px; }
-      .modal-actions { flex-direction: column-reverse; }
-      .modal-actions .btn { width: 100%; }
-    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    :root { --bg:#f4f5f7; --surface:#fff; --surface-2:#f9fafb; --border:#e1e4e8; --text:#1a1d23; --muted:#6b7280; --navy:#1e2d3d; --teal:#0d7a6b; --teal-hover:#0a5f53; --red:#b91c1c; --red-light:#fee2e2; --red-hover:#991b1b; --green:#166534; --green-light:#dcfce7; --blue:#1d4ed8; --blue-light:#dbeafe; --purple:#6b21a8; --purple-light:#f3e8ff; --shadow-sm:0 1px 3px rgba(0,0,0,.08); --shadow-md:0 10px 28px rgba(15,23,42,.08); --radius:12px; --content-max:1160px; --font:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
+    body { font-family:var(--font); background:var(--bg); color:var(--text); font-size:14px; }
+    .navbar { background:var(--navy); padding:0 24px; display:flex; align-items:center; gap:20px; min-height:52px; box-shadow:0 2px 8px rgba(0,0,0,.2); }
+    .navbar a { color:#cbd5e0; text-decoration:none; font-size:13px; font-weight:600; padding:4px 2px; border-bottom:2px solid transparent; }
+    .navbar a:hover,.navbar a.nav-active { color:#fff; border-bottom-color:#4fd1c5; }
+    .navbar .brand img { height:28px; display:block; }
+    .navbar .spacer { flex:1; }
+    .btn-logout { background:transparent; border:1px solid rgba(255,255,255,.25); color:#cbd5e0!important; padding:6px 12px!important; border-radius:7px; cursor:pointer; font-size:12px; font-weight:600; }
+    .page { width:min(var(--content-max),calc(100% - 40px)); margin:0 auto; padding:28px 0 60px; display:grid; gap:18px; }
+    .hero { display:grid; grid-template-columns:minmax(0,1fr) minmax(300px,auto); align-items:start; gap:22px; background:linear-gradient(135deg,#fff 0%,#f0fdfa 100%); border:1px solid var(--border); border-radius:18px; padding:22px; box-shadow:var(--shadow-md); }
+    .eyebrow { color:var(--teal); font-size:12px; font-weight:900; letter-spacing:.08em; text-transform:uppercase; margin-bottom:8px; }
+    h1 { color:var(--navy); font-size:28px; line-height:1.15; margin-bottom:8px; }
+    .subtitle { color:var(--muted); line-height:1.6; max-width:650px; }
+    .hero-actions { display:flex; gap:9px; flex-wrap:wrap; align-items:center; justify-content:flex-end; max-width:520px; }
+    .hero-actions form { display:flex; }
+    .btn { display:inline-flex; align-items:center; justify-content:center; min-height:36px; border:1px solid var(--border); border-radius:8px; padding:7px 13px; background:var(--surface); color:var(--navy); text-decoration:none; font-size:12px; font-weight:700; cursor:pointer; box-shadow:var(--shadow-sm); white-space:nowrap; }
+    .btn-primary { background:var(--teal); border-color:var(--teal); color:#fff; }
+    .btn-primary:hover { background:var(--teal-hover); }
+    .btn-secondary:hover { border-color:var(--teal); color:var(--teal); }
+    .btn-success { background:var(--green); border-color:var(--green); color:#fff; }
+    .btn-danger { background:var(--red); border-color:var(--red); color:#fff; }
+    .btn-danger-outline { border-color:var(--red); color:var(--red); background:var(--surface); }
+    .alert { border:1px solid #bfdbfe; background:var(--blue-light); color:var(--blue); border-radius:12px; padding:12px 14px; font-size:13px; font-weight:700; }
+    .filters-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:18px; box-shadow:var(--shadow-sm); }
+    .filters-head { margin-bottom:14px; }
+    .filters-head h2 { color:var(--navy); font-size:16px; margin-bottom:3px; }
+    .filters-head p { color:var(--muted); font-size:13px; }
+    .filters-grid { display:grid; grid-template-columns:minmax(260px,1fr) auto; gap:12px; align-items:end; max-width:620px; }
+    .field { display:flex; flex-direction:column; gap:6px; min-width:0; }
+    .field label { color:var(--muted); font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
+    select { width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--surface-2); color:var(--text); font-size:14px; outline:none; }
+    select:focus { border-color:var(--teal); box-shadow:0 0 0 3px rgba(13,122,107,.12); }
+    .panel { min-width:0; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow-sm); overflow:hidden; }
+    .panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 20px; border-bottom:1px solid #eaecef; flex-wrap:wrap; }
+    .panel-head h2 { color:var(--navy); font-size:17px; }
+    .panel-head p { color:var(--muted); font-size:13px; margin-top:2px; }
+    .bulk-bar { display:none; align-items:center; gap:10px; padding:10px 20px; background:#fff7ed; border-bottom:1px solid #fed7aa; flex-wrap:wrap; }
+    .bulk-bar span { font-size:13px; font-weight:700; color:#92400e; }
+    .table-wrap { max-width:100%; overflow-x:auto; }
+    table { width:100%; border-collapse:collapse; min-width:930px; }
+    th,td { text-align:left; padding:11px 12px; border-bottom:1px solid #eaecef; vertical-align:middle; }
+    th { background:var(--surface-2); color:var(--muted); font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; }
+    td { color:var(--text); font-size:13px; }
+    td.actions-cell { min-width:238px; }
+    .check-col { width:40px; text-align:center!important; padding:10px 8px!important; }
+    input[type=checkbox] { width:16px; height:16px; accent-color:var(--teal); cursor:pointer; }
+    tr.selected-row { background:#f0fdfa; }
+    .muted { color:var(--muted); }
+    .worker-name { color:var(--navy); font-weight:800; }
+    .pill { display:inline-flex; align-items:center; border-radius:999px; padding:3px 9px; font-size:11px; font-weight:800; margin:2px 3px 2px 0; }
+    .pill-green { color:var(--green); background:var(--green-light); }
+    .pill-blue { color:var(--blue); background:var(--blue-light); }
+    .pill-purple { color:var(--purple); background:var(--purple-light); }
+    .pill-contract { color:#475569; background:#f8fafc; border:1px solid #dbe3ec; padding:2px 7px; }
+    .row-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+    .empty { padding:42px 20px; text-align:center; color:var(--muted); }
+    .empty strong { display:block; color:var(--navy); font-size:16px; margin-bottom:6px; }
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay.open { display:flex; }
+    .modal { background:#fff; border-radius:16px; padding:28px 28px 24px; max-width:480px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,.18); }
+    .modal h3 { color:var(--navy); font-size:18px; margin-bottom:10px; }
+    .modal p { color:var(--muted); font-size:14px; line-height:1.6; margin-bottom:20px; }
+    .modal-actions { display:flex; gap:10px; justify-content:flex-end; }
+    @media(max-width:900px){.navbar{flex-wrap:wrap;height:auto;padding:10px 16px}.navbar .spacer{display:none}.hero{grid-template-columns:1fr}.hero-actions{justify-content:flex-start;max-width:none}.page{width:calc(100% - 24px)}.filters-grid{grid-template-columns:1fr}.filters-grid .btn{width:100%}}
+    @media(max-width:520px){.hero-actions>a,.hero-actions>form{flex-basis:100%}.hero-actions>form .btn{width:100%}.modal-actions{flex-direction:column-reverse}.modal-actions .btn{width:100%}}
   </style>
 </head>
 <body>
   <nav class="navbar">
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
-    <a href="/admin/vacancies">Vacantes</a>
+    <a href="/admin/locations">Sucursales</a>
     <a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a>
     <% if (role === 'dev') { %><a href="/admin/monitor">Monitor</a><% } %>
     <span class="spacer"></span>
@@ -126,43 +90,27 @@
       <div>
         <div class="eyebrow">Equipo operativo</div>
         <h1><%= pageTitle %></h1>
-        <p class="subtitle"><%= subtitle %></p>
+        <p class="subtitle">Equipo disponible para despacho. La disponibilidad territorial se administra únicamente por sucursal.</p>
       </div>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="/admin/operaciones/personal/nuevo">+ Crear auxiliar manual</a>
+        <a class="btn btn-primary" href="/operaciones/admin-worker/nuevo">+ Crear auxiliar manual</a>
         <a class="btn btn-secondary" href="/admin/operaciones/personal/importar-excel">&#11014; Importar Excel</a>
         <a class="btn btn-secondary" href="/admin/operaciones">Volver a Operaciones</a>
-        <% if (role === 'dev' || (typeof canAccessAttendance !== 'undefined' && canAccessAttendance)) { %>
-          <a class="btn btn-success" href="/admin/operaciones/portal-activaciones">Activar Portal del Auxiliar</a>
-        <% } %>
-        <% if (role === 'dev') { %>
-          <form method="post" action="/admin/operaciones/sync-contratados">
-            <button type="submit" class="btn btn-primary">Sincronizar contratados</button>
-          </form>
-        <% } %>
+        <% if (role === 'dev' || (typeof canAccessAttendance !== 'undefined' && canAccessAttendance)) { %><a class="btn btn-success" href="/admin/operaciones/portal-activaciones">Activar Portal del Auxiliar</a><% } %>
+        <% if (role === 'dev') { %><form method="post" action="/admin/operaciones/sync-contratados"><button type="submit" class="btn btn-primary">Sincronizar contratados</button></form><% } %>
       </div>
     </section>
 
     <% if (message) { %><div class="alert"><%= message %></div><% } %>
 
     <section class="filters-card">
-      <div class="filters-head">
-        <h2>Filtros de personal</h2>
-        <p>Consulta disponibilidad por ciudad operativa o vacante.</p>
-      </div>
+      <div class="filters-head"><h2>Filtros de personal</h2><p>Consulta disponibilidad por sucursal. Las vacantes ya no determinan qué auxiliar puede despacharse.</p></div>
       <form method="get" action="/admin/operaciones/personal" class="filters-grid">
         <div class="field">
-          <label for="operationalCityId">Ciudad operativa</label>
+          <label for="operationalCityId">Sucursal</label>
           <select id="operationalCityId" name="operationalCityId">
-            <option value="">Todas las ciudades operativas</option>
-            <% cities.forEach((city) => { %><option value="<%= city.id %>" data-city-name="<%= city.name %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %>
-          </select>
-        </div>
-        <div class="field">
-          <label for="vacancyId">Vacante / perfil</label>
-          <select id="vacancyId" name="vacancyId">
-            <option value="">Todas las vacantes</option>
-            <% vacancies.forEach((vacancy) => { %><option value="<%= vacancy.id %>" data-city-name="<%= vacancy.city || '' %>" <%= filters.vacancyId===vacancy.id?'selected':'' %>><%= vacancy.title %> — <%= vacancy.city || 'Sin ciudad' %></option><% }) %>
+            <option value="">Todas las sucursales</option>
+            <% cities.forEach((city) => { %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %>
           </select>
         </div>
         <button type="submit" class="btn btn-primary">Filtrar</button>
@@ -170,31 +118,25 @@
     </section>
 
     <section class="panel">
-      <div class="panel-head">
-        <div>
-          <h2>Listado de personal operativo</h2>
-          <p>Personas activas y disponibles para asignación a operaciones.</p>
-        </div>
-      </div>
-      <div class="bulk-bar" id="bulk-bar"><span id="bulk-count">0 seleccionados</span><button type="button" class="btn btn-danger" id="btn-bulk-delete">🗑 Eliminar seleccionados</button><button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button></div>
+      <div class="panel-head"><div><h2>Listado de personal operativo</h2><p>Personas activas y las sucursales donde pueden ser asignadas.</p></div></div>
+      <div class="bulk-bar" id="bulk-bar"><span id="bulk-count">0 seleccionados</span><button type="button" class="btn btn-danger" id="btn-bulk-delete">Eliminar seleccionados</button><button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button></div>
       <% if (!workers.length) { %>
         <div class="empty"><strong>No hay personal contratado disponible.</strong>Solo se muestran auxiliares activos con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.</div>
       <% } else { %>
         <div class="table-wrap">
           <table id="workers-table">
-            <thead><tr><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><th>Nombre</th><th>Contrato</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Ciudades operativas</th><th>Vacantes / perfiles</th><th>Origen</th><th>Acciones</th></tr></thead>
+            <thead><tr><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><th>Nombre</th><th>Contrato</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Sucursales</th><th>Origen</th><th>Acciones</th></tr></thead>
             <tbody>
               <% workers.forEach((w) => { %>
-                <% const sourceMap = { CANDIDATE: '🤖 Bot', MANUAL: '✍️ Manual', EXCEL_IMPORT: '📊 Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; %>
+                <% const sourceMap = { CANDIDATE:'Bot', MANUAL:'Manual', EXCEL_IMPORT:'Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; %>
                 <tr data-id="<%= w.id %>">
                   <td class="check-col"><input type="checkbox" class="row-check" value="<%= w.id %>" /></td>
                   <td><span class="worker-name"><%= w.fullName %></span></td>
                   <td><span class="pill pill-contract"><%= w.contractType === 'CONTRATISTA' ? 'Contratista' : 'Directo' %></span></td>
                   <td><%= w.phone || '-' %></td>
-                  <td><%= [w.documentType, w.documentNumber].filter(Boolean).join(' ') || '-' %></td>
+                  <td><%= [w.documentType,w.documentNumber].filter(Boolean).join(' ') || '-' %></td>
                   <td><%= w.residenceCity || w.residenceLocality || '-' %></td>
-                  <td><% if (w.cities.length) { %><% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %><% } else { %><span class="muted">Sin ciudades habilitadas</span><% } %></td>
-                  <td><% if (w.vacancies.length) { %><% w.vacancies.forEach((entry) => { %><span class="pill pill-amber"><%= entry.vacancy.title %> — <%= entry.vacancy.city || 'Sin ciudad' %></span><% }) %><% } else { %><span class="muted">Sin perfiles habilitados</span><% } %></td>
+                  <td><% if (w.cities.length) { %><% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %><% } else { %><span class="muted">Sin sucursal habilitada</span><% } %></td>
                   <td><span class="pill <%= sourcePillClass %>"><%= sourceLabel %></span></td>
                   <td class="actions-cell"><div class="row-actions"><a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/historial">Historial</a><a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a><form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline"><button class="btn btn-danger-outline" type="submit">Desactivar</button></form><button type="button" class="btn btn-danger-outline btn-single-delete" data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button></div></td>
                 </tr>
@@ -206,72 +148,23 @@
     </section>
   </main>
 
-  <div class="modal-overlay" id="modal-single"><div class="modal"><h3>Eliminar auxiliar</h3><p id="modal-single-msg">¿Estás seguro de que deseas eliminar a este auxiliar? Esta acción lo quitará definitivamente del flujo.</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-single-cancel">Cancelar</button><form method="post" id="modal-single-form"><button type="submit" class="btn btn-danger">Sí, eliminar</button></form></div></div></div>
+  <div class="modal-overlay" id="modal-single"><div class="modal"><h3>Eliminar auxiliar</h3><p id="modal-single-msg">¿Estás seguro de que deseas eliminar a este auxiliar?</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-single-cancel">Cancelar</button><form method="post" id="modal-single-form"><button type="submit" class="btn btn-danger">Sí, eliminar</button></form></div></div></div>
   <div class="modal-overlay" id="modal-bulk"><div class="modal"><h3>Eliminar seleccionados</h3><p id="modal-bulk-msg">¿Confirmas la eliminación de los auxiliares seleccionados?</p><div class="modal-actions"><button type="button" class="btn btn-secondary" id="modal-bulk-cancel">Cancelar</button><form method="post" action="/admin/operaciones/personal/eliminar-bulk" id="modal-bulk-form"><input type="hidden" name="ids" id="bulk-ids-input" value="" /><button type="submit" class="btn btn-danger">Sí, eliminar todos</button></form></div></div></div>
 
   <script>
-    const cityFilter = document.getElementById('operationalCityId');
-    const vacancyFilter = document.getElementById('vacancyId');
-    const normalizeCity = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\./g, '').replace(/\s+/g, ' ').trim().toLowerCase();
-    const cityKey = (value) => {
-      const normalized = normalizeCity(value);
-      if (!normalized) return '';
-      if (normalized.includes('bogota')) return 'bogota';
-      if (normalized.includes('siberia')) return 'siberia';
-      if (normalized.includes('ibague')) return 'ibague';
-      if (normalized.includes('neiva')) return 'neiva';
-      return normalized;
-    };
-    const allVacancyFilterOptions = Array.from(vacancyFilter?.options || []).filter((option) => option.value).map((option) => ({
-      value: option.value,
-      text: option.textContent,
-      cityName: option.dataset.cityName || '',
-      cityKey: cityKey(option.dataset.cityName),
-      selected: option.selected
-    }));
-    function allowedVacancyCityKeys(selectedCityKey) {
-      if (!selectedCityKey) return null;
-      if (selectedCityKey === 'bogota') return new Set(['bogota', 'siberia']);
-      return new Set([selectedCityKey]);
-    }
-    function refreshVacancyFilterOptions() {
-      if (!cityFilter || !vacancyFilter) return;
-      const previousValue = vacancyFilter.value;
-      const selectedCityOption = cityFilter.selectedOptions[0];
-      const selectedCityKey = cityKey(selectedCityOption?.dataset.cityName || selectedCityOption?.textContent || '');
-      const allowedKeys = allowedVacancyCityKeys(selectedCityKey);
-      vacancyFilter.innerHTML = '';
-      const allOption = document.createElement('option');
-      allOption.value = '';
-      allOption.textContent = allowedKeys ? 'Todas las vacantes de la ciudad seleccionada' : 'Todas las vacantes';
-      vacancyFilter.appendChild(allOption);
-      const filtered = allowedKeys ? allVacancyFilterOptions.filter((option) => allowedKeys.has(option.cityKey)) : allVacancyFilterOptions;
-      filtered.forEach((item) => {
-        const option = document.createElement('option');
-        option.value = item.value;
-        option.textContent = item.text;
-        option.dataset.cityName = item.cityName;
-        option.selected = item.value === previousValue || item.selected;
-        vacancyFilter.appendChild(option);
-      });
-      if (vacancyFilter.value && !filtered.some((item) => item.value === vacancyFilter.value)) vacancyFilter.value = '';
-    }
-    cityFilter?.addEventListener('change', refreshVacancyFilterOptions);
-    refreshVacancyFilterOptions();
-
-    const checkAll = document.getElementById('check-all'); const bulkBar = document.getElementById('bulk-bar'); const bulkCount = document.getElementById('bulk-count'); const bulkIdsInput = document.getElementById('bulk-ids-input');
-    function getChecked() { return [...document.querySelectorAll('.row-check:checked')]; }
-    function refreshBulkBar() { const checked = getChecked(); if (checked.length > 0) { bulkBar.style.display = 'flex'; bulkCount.textContent = checked.length + ' seleccionado' + (checked.length > 1 ? 's' : ''); } else { bulkBar.style.display = 'none'; } const rows = document.querySelectorAll('.row-check'); if (checkAll) { checkAll.indeterminate = checked.length > 0 && checked.length < rows.length; checkAll.checked = rows.length > 0 && checked.length === rows.length; } }
-    function highlightRows() { document.querySelectorAll('.row-check').forEach((cb) => { cb.closest('tr').classList.toggle('selected-row', cb.checked); }); }
-    if (checkAll) { checkAll.addEventListener('change', () => { document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = checkAll.checked; }); highlightRows(); refreshBulkBar(); }); }
-    document.querySelectorAll('.row-check').forEach((cb) => { cb.addEventListener('change', () => { highlightRows(); refreshBulkBar(); }); });
-    document.getElementById('btn-bulk-cancel')?.addEventListener('click', () => { document.querySelectorAll('.row-check').forEach((cb) => { cb.checked = false; }); if (checkAll) { checkAll.checked = false; checkAll.indeterminate = false; } highlightRows(); refreshBulkBar(); });
-    const modalSingle = document.getElementById('modal-single'); const modalSingleMsg = document.getElementById('modal-single-msg'); const modalSingleForm = document.getElementById('modal-single-form');
-    document.querySelectorAll('.btn-single-delete').forEach((btn) => { btn.addEventListener('click', () => { const id = btn.dataset.id; const name = btn.dataset.name; modalSingleMsg.textContent = `¿Eliminar a "${name}" definitivamente del flujo? Esta acción no se puede deshacer desde la UI.`; modalSingleForm.action = `/admin/operaciones/personal/${id}/eliminar`; modalSingle.classList.add('open'); }); });
-    document.getElementById('modal-single-cancel')?.addEventListener('click', () => modalSingle.classList.remove('open')); modalSingle?.addEventListener('click', (e) => { if (e.target === modalSingle) modalSingle.classList.remove('open'); });
-    const modalBulk = document.getElementById('modal-bulk'); const modalBulkMsg = document.getElementById('modal-bulk-msg');
-    document.getElementById('btn-bulk-delete')?.addEventListener('click', () => { const checked = getChecked(); if (!checked.length) return; bulkIdsInput.value = checked.map((cb) => cb.value).join(','); modalBulkMsg.textContent = `¿Confirmas eliminar ${checked.length} auxiliar${checked.length > 1 ? 'es' : ''} definitivamente del flujo?`; modalBulk.classList.add('open'); });
-    document.getElementById('modal-bulk-cancel')?.addEventListener('click', () => modalBulk.classList.remove('open')); modalBulk?.addEventListener('click', (e) => { if (e.target === modalBulk) modalBulk.classList.remove('open'); });
+    const checkAll=document.getElementById('check-all'); const bulkBar=document.getElementById('bulk-bar'); const bulkCount=document.getElementById('bulk-count'); const bulkIdsInput=document.getElementById('bulk-ids-input');
+    function getChecked(){return [...document.querySelectorAll('.row-check:checked')];}
+    function refreshBulkBar(){const checked=getChecked();bulkBar.style.display=checked.length?'flex':'none';bulkCount.textContent=checked.length+' seleccionado'+(checked.length===1?'':'s');const rows=document.querySelectorAll('.row-check');if(checkAll){checkAll.indeterminate=checked.length>0&&checked.length<rows.length;checkAll.checked=rows.length>0&&checked.length===rows.length;}}
+    function highlightRows(){document.querySelectorAll('.row-check').forEach((cb)=>cb.closest('tr').classList.toggle('selected-row',cb.checked));}
+    checkAll?.addEventListener('change',()=>{document.querySelectorAll('.row-check').forEach((cb)=>{cb.checked=checkAll.checked;});highlightRows();refreshBulkBar();});
+    document.querySelectorAll('.row-check').forEach((cb)=>cb.addEventListener('change',()=>{highlightRows();refreshBulkBar();}));
+    document.getElementById('btn-bulk-cancel')?.addEventListener('click',()=>{document.querySelectorAll('.row-check').forEach((cb)=>{cb.checked=false;});highlightRows();refreshBulkBar();});
+    const modalSingle=document.getElementById('modal-single'); const modalSingleMsg=document.getElementById('modal-single-msg'); const modalSingleForm=document.getElementById('modal-single-form');
+    document.querySelectorAll('.btn-single-delete').forEach((btn)=>btn.addEventListener('click',()=>{modalSingleMsg.textContent=`¿Eliminar a "${btn.dataset.name}" definitivamente del flujo?`;modalSingleForm.action=`/admin/operaciones/personal/${btn.dataset.id}/eliminar`;modalSingle.classList.add('open');}));
+    document.getElementById('modal-single-cancel')?.addEventListener('click',()=>modalSingle.classList.remove('open')); modalSingle?.addEventListener('click',(e)=>{if(e.target===modalSingle)modalSingle.classList.remove('open');});
+    const modalBulk=document.getElementById('modal-bulk'); const modalBulkMsg=document.getElementById('modal-bulk-msg');
+    document.getElementById('btn-bulk-delete')?.addEventListener('click',()=>{const checked=getChecked();if(!checked.length)return;bulkIdsInput.value=checked.map((cb)=>cb.value).join(',');modalBulkMsg.textContent=`¿Confirmas eliminar ${checked.length} auxiliar${checked.length===1?'':'es'} definitivamente del flujo?`;modalBulk.classList.add('open');});
+    document.getElementById('modal-bulk-cancel')?.addEventListener('click',()=>modalBulk.classList.remove('open')); modalBulk?.addEventListener('click',(e)=>{if(e.target===modalBulk)modalBulk.classList.remove('open');});
   </script>
 </body>
 </html>
