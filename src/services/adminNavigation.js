@@ -27,7 +27,7 @@ function requestCapability(req = {}, key) {
 }
 
 function activeModule(path) {
-  if (path.startsWith(USERS_PATH)) return null;
+  if (path.startsWith(USERS_PATH) || path.startsWith(BRANCHES_PATH)) return null;
   if (path.startsWith(PAYROLL_PATH)) return 'payroll';
   if (path.startsWith(OPERATIONS_PATH)) return 'operations';
   return 'recruitment';
@@ -56,10 +56,7 @@ function menuLink(href, label) {
 }
 
 function recruitmentMenuItems(access) {
-  const items = [
-    menuLink(RECRUITMENT_PATH, 'Panel de candidatos'),
-    menuLink(BRANCHES_PATH, 'Sucursales')
-  ];
+  const items = [menuLink(RECRUITMENT_PATH, 'Panel de candidatos')];
   if (access.statistics) items.push(menuLink('/admin/estadisticas', 'Estadísticas'));
   if (access.isDev) {
     items.push(menuLink('/admin/monitor', 'Monitor bot'));
@@ -103,6 +100,12 @@ function moduleMenu({ key, label, icon, active, items = [], allowed = true }) {
     </details>`;
 }
 
+function standaloneBranchesLink(path) {
+  const classes = ['admin-module-standalone-link'];
+  if (path.startsWith(BRANCHES_PATH)) classes.push('is-active');
+  return `<a class="${classes.join(' ')}" href="${BRANCHES_PATH}">Sucursales</a>`;
+}
+
 function standaloneUsersLink(access, path) {
   if (!access.users) return '';
   const classes = ['admin-module-standalone-link'];
@@ -126,11 +129,13 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
     }),
     moduleMenu({ key: 'payroll', label: 'Nómina', icon: PAYROLL_ICON, active, items: payrollMenuItems(access), allowed: access.payroll })
   ].filter(Boolean).join('\n    ');
+  const branchesLink = standaloneBranchesLink(path);
   const usersLink = standaloneUsersLink(access, path);
 
   return `<nav class="navbar admin-module-navbar" data-module-navigation="true" aria-label="Módulos principales">
     <a class="brand admin-module-brand" href="${RECRUITMENT_PATH}" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <div class="admin-module-nav-links">${modules}</div>
+    ${branchesLink}
     ${usersLink}
     <span class="spacer"></span>
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
