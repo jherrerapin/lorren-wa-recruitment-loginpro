@@ -16,6 +16,39 @@ function hours(values = {}) {
   return Object.fromEntries(CONCEPT_CODES.map((code) => [code, Number(values[code] || 0) / 60]));
 }
 
+function daily(dateKey, overrides = {}) {
+  const conceptMinutes = concepts(overrides.conceptMinutes);
+  const totalMinutes = overrides.totalMinutes ?? 420;
+  const ordinaryMinutes = overrides.ordinaryMinutes ?? 420;
+  const overtimeMinutes = overrides.overtimeMinutes ?? 0;
+  const unrecognizedOvertimeMinutes = overrides.unrecognizedOvertimeMinutes ?? 0;
+  return {
+    dateKey,
+    totalMinutes,
+    ordinaryMinutes,
+    overtimeMinutes,
+    unrecognizedOvertimeMinutes,
+    totalHours: totalMinutes / 60,
+    ordinaryHours: ordinaryMinutes / 60,
+    overtimeHours: overtimeMinutes / 60,
+    unrecognizedOvertimeHours: unrecognizedOvertimeMinutes / 60,
+    conceptMinutes,
+    conceptHours: hours(conceptMinutes),
+    clientNames: overrides.clientNames || ['Cliente TEST'],
+    operationNames: overrides.operationNames || ['Operación TEST'],
+    civilDateKeys: overrides.civilDateKeys || [dateKey],
+    holidayDateKeys: overrides.holidayDateKeys || [],
+    restDateKeys: overrides.restDateKeys || [],
+    isHoliday: overrides.isHoliday ?? false,
+    isRestDay: overrides.isRestDay ?? false,
+    compensationDateKey: overrides.compensationDateKey ?? null,
+    compensationStatus: overrides.compensationStatus ?? null,
+    compensationManagedByRestAssignment: overrides.compensationManagedByRestAssignment ?? false,
+    markings: overrides.markings || [],
+    novelties: overrides.novelties || []
+  };
+}
+
 function row(workerId, overrides = {}) {
   const conceptMinutes = concepts(overrides.conceptMinutes);
   return {
@@ -45,7 +78,7 @@ function row(workerId, overrides = {}) {
     sundayCount: overrides.sundayCount ?? 0,
     holidayCount: overrides.holidayCount ?? 0,
     restAssignments: [],
-    daily: [],
+    daily: overrides.daily || [],
     novelties: overrides.novelties || [],
     status: overrides.status || 'CALCULADO',
     exportable: overrides.exportable ?? true
@@ -92,6 +125,16 @@ test('periodo de extras es independiente y por defecto conserva el rango general
   assert.equal(oneDay.from, '2026-08-17');
   assert.equal(oneDay.to, '2026-08-17');
 
+  const withDimensionFilters = buildOvertimeReportInput({
+    periodType: 'BIWEEKLY',
+    extraPeriodType: 'CUSTOM', extraFrom: '2026-08-10', extraTo: '2026-08-16',
+    clientId: 'TEST-CLIENT', operationPointId: 'TEST-POINT', search: 'TEST búsqueda', includeTest: 'true'
+  }, generalPeriod);
+  assert.equal(withDimensionFilters.clientId, 'TEST-CLIENT');
+  assert.equal(withDimensionFilters.operationPointId, 'TEST-POINT');
+  assert.equal(withDimensionFilters.search, 'TEST búsqueda');
+  assert.equal(withDimensionFilters.includeTest, 'true');
+
   assert.throws(() => buildOvertimeReportInput({ extraPeriodType: 'BIWEEKLY' }, generalPeriod), /payroll_range_invalid/);
 });
 
@@ -105,9 +148,29 @@ test('un solo resultado conserva datos generales y toma únicamente H* del perio
         overtimeMinutes: 60,
         remuneratedDays: 2,
         paidPermissionDays: 1,
-        conceptMinutes: { HEDO: 60, RNO: 30 }
+        conceptMinutes: { HEDO: 60, RNO: 30 },
+        daily: [
+          daily('2026-08-05', {
+            totalMinutes: 480, ordinaryMinutes: 420, overtimeMinutes: 60,
+            conceptMinutes: { HEDO: 60 },
+            markings: [{ sessionId: 'TEST-GENERAL-ONLY' }]
+          }),
+          daily('2026-08-10', {
+            totalMinutes: 360, ordinaryMinutes: 360,
+            conceptMinutes: { RNO: 30 },
+            markings: [{ sessionId: 'TEST-OVERLAP-GENERAL' }]
+          })
+        ]
       }),
-      row('TEST-B', { conceptMinutes: { HEDO: 60, RDF: 20 } })
+      row('TEST-B', {
+        conceptMinutes: { HEDO: 60, RDF: 20 },
+        daily: [
+          daily('2026-08-06', {
+            totalMinutes: 480, ordinaryMinutes: 420, overtimeMinutes: 60,
+            conceptMinutes: { HEDO: 60, RDF: 20 }
+          })
+        ]
+      })
     ]
   );
   const overtime = report(
@@ -115,15 +178,42 @@ test('un solo resultado conserva datos generales y toma únicamente H* del perio
     [
       row('TEST-A', {
         totalMinutes: 900,
-        ordinaryMinutes: 855,
-        overtimeMinutes: 45,
-        conceptMinutes: { HENO: 45, RNO: 300 }
+        ordinaryMinutes: 825,
+        overtimeMinutes: 75,
+        conceptMinutes: { HENO: 45, HEDD: 30, RNO: 300 },
+        daily: [
+          daily('2026-08-10', {
+            totalMinutes: 465, ordinaryMinutes: 420, overtimeMinutes: 45,
+            conceptMinutes: { HENO: 45, RNO: 45 },
+            markings: [{ sessionId: 'TEST-OVERLAP-EXTRAS' }]
+          }),
+          daily('2026-08-16', {
+            totalMinutes: 450, ordinaryMinutes: 420, overtimeMinutes: 30,
+            conceptMinutes: { HEDD: 30, RDD: 420 },
+            isRestDay: true,
+            compensationDateKey: '2026-08-16',
+            compensationStatus: 'NOT_COMPENSATED',
+            compensationManagedByRestAssignment: true,
+            markings: [{ sessionId: 'TEST-EXTRAS-ONLY' }]
+          })
+        ]
       }),
       row('TEST-C', {
         totalMinutes: 480,
         ordinaryMinutes: 420,
         overtimeMinutes: 60,
         conceptMinutes: { HEDD: 60, RDD: 60 },
+        daily: [
+          daily('2026-08-16', {
+            totalMinutes: 480, ordinaryMinutes: 420, overtimeMinutes: 60,
+            conceptMinutes: { HEDD: 60, RDD: 60 },
+            isRestDay: true,
+            compensationDateKey: '2026-08-16',
+            compensationStatus: 'NOT_COMPENSATED',
+            compensationManagedByRestAssignment: true,
+            markings: [{ sessionId: 'TEST-C-EXTRAS-ONLY' }]
+          })
+        ],
         novelties: [{ code: 'TEST_BLOCK', dateKey: '2026-08-16', message: 'Revisión de prueba', blocking: true }],
         status: 'CON_NOVEDADES',
         exportable: false
@@ -145,12 +235,42 @@ test('un solo resultado conserva datos generales y toma únicamente H* del perio
   assert.equal(a.conceptMinutes.RNO, 30, 'el recargo pertenece al periodo general');
   assert.equal(a.conceptMinutes.HEDO, 0);
   assert.equal(a.conceptMinutes.HENO, 45);
-  assert.equal(a.overtimeMinutes, 45);
+  assert.equal(a.conceptMinutes.HEDD, 30);
+  assert.equal(a.overtimeMinutes, 75);
+  assert.deepEqual(a.daily.map((day) => day.dateKey), ['2026-08-05', '2026-08-10', '2026-08-16']);
+
+  const aGeneralOnly = a.daily.find((day) => day.dateKey === '2026-08-05');
+  assert.equal(aGeneralOnly.totalMinutes, 480);
+  assert.equal(aGeneralOnly.ordinaryMinutes, 420);
+  assert.equal(aGeneralOnly.overtimeMinutes, 0);
+  assert.equal(aGeneralOnly.conceptMinutes.HEDO, 0, 'el detalle general no conserva H* fuera del filtro de extras');
+  assert.equal(aGeneralOnly.markings[0].sessionId, 'TEST-GENERAL-ONLY');
+
+  const aOverlap = a.daily.find((day) => day.dateKey === '2026-08-10');
+  assert.equal(aOverlap.totalMinutes, 360, 'total diario pertenece al corte general');
+  assert.equal(aOverlap.ordinaryMinutes, 360, 'ordinarias diarias pertenecen al corte general');
+  assert.equal(aOverlap.conceptMinutes.RNO, 30, 'R* diario pertenece al corte general');
+  assert.equal(aOverlap.overtimeMinutes, 45, 'extra diaria pertenece al filtro de extras');
+  assert.equal(aOverlap.conceptMinutes.HENO, 45, 'H* diario pertenece al filtro de extras');
+  assert.equal(aOverlap.markings[0].sessionId, 'TEST-OVERLAP-GENERAL', 'la trazabilidad del día común se conserva desde el corte general');
+
+  const aExtrasOnly = a.daily.find((day) => day.dateKey === '2026-08-16');
+  assert.equal(aExtrasOnly.totalMinutes, 0, 'una fecha solo de extras no infla el total del corte general');
+  assert.equal(aExtrasOnly.ordinaryMinutes, 0);
+  assert.equal(aExtrasOnly.conceptMinutes.RDD, 0, 'una fecha solo de extras no importa R* al corte general');
+  assert.equal(aExtrasOnly.overtimeMinutes, 30);
+  assert.equal(aExtrasOnly.conceptMinutes.HEDD, 30);
+  assert.equal(aExtrasOnly.markings[0].sessionId, 'TEST-EXTRAS-ONLY');
+  assert.equal(aExtrasOnly.compensationDateKey, null, 'no habilita compensatorio fuera del corte general');
+  assert.equal(aExtrasOnly.compensationStatus, null);
+  assert.equal(aExtrasOnly.compensationManagedByRestAssignment, false);
 
   const b = combined.rows.find((item) => item.workerId === 'TEST-B');
   assert.equal(b.conceptMinutes.HEDO, 0, 'un H* del corte general no debe filtrarse como extra si no está en el periodo de extras');
   assert.equal(b.conceptMinutes.RDF, 20);
   assert.equal(b.overtimeMinutes, 0);
+  assert.equal(b.daily[0].conceptMinutes.HEDO, 0);
+  assert.equal(b.daily[0].conceptMinutes.RDF, 20);
 
   const c = combined.rows.find((item) => item.workerId === 'TEST-C');
   assert.equal(c.totalMinutes, 0);
@@ -162,13 +282,21 @@ test('un solo resultado conserva datos generales y toma únicamente H* del perio
   assert.equal(c.exportable, false);
   assert.equal(c.status, 'CON_NOVEDADES');
   assert.equal(c.novelties[0].code, 'TEST_BLOCK');
+  assert.equal(c.daily.length, 1);
+  assert.equal(c.daily[0].totalMinutes, 0);
+  assert.equal(c.daily[0].ordinaryMinutes, 0);
+  assert.equal(c.daily[0].overtimeMinutes, 60);
+  assert.equal(c.daily[0].conceptMinutes.HEDD, 60);
+  assert.equal(c.daily[0].conceptMinutes.RDD, 0);
+  assert.equal(c.daily[0].markings[0].sessionId, 'TEST-C-EXTRAS-ONLY');
+  assert.equal(c.daily[0].compensationStatus, null);
 
   assert.equal(combined.totals.totalMinutes, 1260);
-  assert.equal(combined.totals.overtimeMinutes, 105);
+  assert.equal(combined.totals.overtimeMinutes, 135);
   assert.equal(combined.totals.conceptMinutes.RNO, 30);
   assert.equal(combined.totals.conceptMinutes.RDF, 20);
   assert.equal(combined.totals.conceptMinutes.HENO, 45);
-  assert.equal(combined.totals.conceptMinutes.HEDD, 60);
+  assert.equal(combined.totals.conceptMinutes.HEDD, 90);
   assert.equal(combined.totals.workersWithNovelties, 1);
 });
 
