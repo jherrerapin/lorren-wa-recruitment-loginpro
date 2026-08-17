@@ -240,8 +240,8 @@
     }
 
     function providerOrderForMap(map, requestedUrl) {
-      if (isBogotaMap(map)) return ['ideca', 'osm'];
-      if (String(requestedUrl || '').includes('serviciosgis.catastrobogota.gov.co')) return ['ideca', 'osm'];
+      if (isBogotaMap(map)) return ['osm', 'ideca'];
+      if (String(requestedUrl || '').includes('serviciosgis.catastrobogota.gov.co')) return ['osm', 'ideca'];
       return ['osm'];
     }
 
