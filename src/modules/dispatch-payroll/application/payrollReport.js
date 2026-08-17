@@ -40,7 +40,7 @@ const REST_DAY_DEDUCTION_REASONS = new Set([
   WORKER_REST_REASONS.SUSPENSION,
   WORKER_REST_REASONS.NO_REMUNERADA
 ]);
-const REMUNERATED_REST_REASONS = new Set([
+const ABSENCE_OVERRIDE_REASONS = new Set([
   WORKER_REST_REASONS.COMPENSATORIO,
   WORKER_REST_REASONS.REMUNERADO,
   WORKER_REST_REASONS.INCAPACIDAD_EPS,
@@ -561,6 +561,12 @@ function sessionIsPersistedAbsence(session) {
     && !dateValue(session?.departureReportedAt);
 }
 
+function sessionHasCompletedWorkday(session) {
+  const arrivalAt = dateValue(session?.arrivalReportedAt);
+  const departureAt = dateValue(session?.departureReportedAt);
+  return Boolean(arrivalAt && departureAt && departureAt > arrivalAt);
+}
+
 function sessionStartsAtNight(session) {
   const minute = bogotaMinuteOfDay(session?.expectedStartAt);
   return Number.isInteger(minute) && minute >= DEFAULT_PAYROLL_POLICY.nightStartMinute;
@@ -732,32 +738,47 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
         .map((day) => validDateKey(day.dateKey))
         .filter(Boolean)
     );
-    const remuneratedDateKeys = new Set(workedDateKeys);
-    if (worker?.contractType === 'DIRECTO') {
+    const compensatoryDateKeys = new Set(
       row.restAssignments
-        .filter((rest) => REMUNERATED_REST_REASONS.has(rest.reason))
-        .forEach((rest) => remuneratedDateKeys.add(rest.restDate));
-    }
+        .filter((rest) => worker?.contractType === 'DIRECTO' && rest.reason === WORKER_REST_REASONS.COMPENSATORIO)
+        .map((rest) => rest.restDate)
+        .filter((dateKey) => !workedDateKeys.has(dateKey))
+    );
+    const remuneratedDateKeys = new Set([...workedDateKeys, ...compensatoryDateKeys]);
 
     const paidPermissionDateKeys = new Set(
       row.restAssignments
         .filter((rest) => rest.reason === WORKER_REST_REASONS.REMUNERADO)
         .map((rest) => rest.restDate)
+        .filter((dateKey) => !workedDateKeys.has(dateKey))
     );
     const incapacityDateKeys = new Set(
       row.restAssignments
         .filter((rest) => INCAPACITY_REASONS.has(rest.reason))
+        .map((rest) => rest.restDate)
+        .filter((dateKey) => !workedDateKeys.has(dateKey))
+    );
+    const paidJustificationDateKeys = new Set(
+      row.restAssignments
+        .filter((rest) => ABSENCE_OVERRIDE_REASONS.has(rest.reason))
         .map((rest) => rest.restDate)
     );
     const unremuneratedDateKeys = new Set(
       row.restAssignments
         .filter((rest) => rest.dayAdjustment === -1)
         .map((rest) => rest.restDate)
+        .filter((dateKey) => !workedDateKeys.has(dateKey))
     );
     absentSessions
       .filter((session) => sessionWorkerId(session) === row.workerId)
       .map((session) => sessionScheduledDateKey(session))
-      .filter((dateKey) => dateKey && dateKey >= period.from && dateKey <= period.to)
+      .filter((dateKey) => (
+        dateKey
+        && dateKey >= period.from
+        && dateKey <= period.to
+        && !workedDateKeys.has(dateKey)
+        && !paidJustificationDateKeys.has(dateKey)
+      ))
       .forEach((dateKey) => unremuneratedDateKeys.add(dateKey));
 
     const civilDateKeys = new Set(
@@ -777,7 +798,11 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
     row.paidPermissionDays = paidPermissionDateKeys.size;
     row.incapacityDays = incapacityDateKeys.size;
     row.nightShiftCount = filteredSessions.filter((session) => {
-      if (sessionWorkerId(session) !== row.workerId || !sessionStartsAtNight(session)) return false;
+      if (
+        sessionWorkerId(session) !== row.workerId
+        || !sessionHasCompletedWorkday(session)
+        || !sessionStartsAtNight(session)
+      ) return false;
       const dateKey = sessionScheduledDateKey(session);
       return Boolean(dateKey && dateKey >= period.from && dateKey <= period.to);
     }).length;
