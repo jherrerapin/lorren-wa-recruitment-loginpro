@@ -41,7 +41,10 @@ function readFlash(req, res) {
   const msg = req.cookies?._flash_msg || null;
   res.clearCookie('_flash_type');
   res.clearCookie('_flash_msg');
-  return { successMsg: type === 'success' ? msg : null, errorMsg: type === 'error' ? msg : null };
+  return {
+    successMsg: type === 'success' ? msg : normalize(req.query?.success),
+    errorMsg: type === 'error' ? msg : normalize(req.query?.error)
+  };
 }
 
 function normalize(value) {
@@ -58,12 +61,6 @@ function normalizeKey(value) {
     .toLowerCase();
 }
 
-function slugify(value) {
-  return normalizeKey(value)
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
 function isSiberiaName(value) {
   return normalizeKey(value) === 'siberia';
 }
@@ -75,21 +72,6 @@ function normalizeMany(value) {
 
 function isChecked(value) {
   return value === 'on' || value === 'true' || value === true || value === '1';
-}
-
-function normalizeInteger(value, { min = null, max = null } = {}) {
-  const text = normalize(value);
-  if (text === null) return null;
-  const parsed = Number(text);
-  if (!Number.isInteger(parsed)) return null;
-  if (min !== null && parsed < min) return null;
-  if (max !== null && parsed > max) return null;
-  return parsed;
-}
-
-function normalizeExperienceRequirement(value) {
-  const normalized = normalize(value)?.toUpperCase();
-  return ['YES', 'NO', 'INDIFFERENT'].includes(normalized) ? normalized : 'INDIFFERENT';
 }
 
 function usersRedirect(type, message, username = null) {
@@ -109,81 +91,11 @@ function unifiedBranchCompatibilityData() {
   };
 }
 
-function buildRecruitmentConfigData(body = {}, { cityName, operationName } = {}) {
-  const title = normalize(body.title);
-  const role = normalize(body.role) || title;
-  const operationAddress = normalize(body.operationAddress);
-  const requirements = normalize(body.requirements);
-  const conditions = normalize(body.conditions);
-
-  if (!title || !role || !operationAddress || !requirements || !conditions) {
-    return {
-      error: 'Completa título, cargo, zona de operación, requisitos y condiciones de la operación.'
-    };
-  }
-
-  const minAge = normalizeInteger(body.minAge, { min: 14, max: 99 });
-  const maxAge = normalizeInteger(body.maxAge, { min: 14, max: 99 });
-  if (minAge !== null && maxAge !== null && minAge > maxAge) {
-    return { error: 'La edad mínima no puede ser mayor que la edad máxima.' };
-  }
-
-  const isActive = isChecked(body.isActive);
-  const acceptingApplications = isChecked(body.acceptingApplications);
-
-  return {
-    data: {
-      title,
-      role,
-      roleDescription: normalize(body.roleDescription),
-      city: cityName,
-      operationAddress,
-      interviewAddress: normalize(body.interviewAddress),
-      requirements,
-      conditions,
-      requiredDocuments: normalize(body.requiredDocuments),
-      minAge,
-      maxAge,
-      experienceRequired: normalizeExperienceRequirement(body.experienceRequired),
-      experienceTimeText: normalize(body.experienceTimeText),
-      schedulingEnabled: isChecked(body.schedulingEnabled),
-      acceptingApplications: isActive && acceptingApplications,
-      isActive
-    },
-    label: `${operationName || 'Operación'} · ${title}`
-  };
-}
-
-async function buildUniqueVacancyKey(prisma, cityName, operationName, title) {
-  const base = [cityName, operationName, title]
-    .map(slugify)
-    .filter(Boolean)
-    .join('-')
-    .slice(0, 80) || 'operacion';
-
-  for (let suffix = 0; suffix < 1000; suffix += 1) {
-    const key = suffix === 0 ? base : `${base}-${suffix + 1}`;
-    const exists = await prisma.vacancy.findUnique({ where: { key }, select: { id: true } });
-    if (!exists) return key;
-  }
-  throw new Error('No fue posible generar un identificador único para la operación.');
-}
-
-async function loadOperationWithBranch(prisma, operationId) {
-  return prisma.operation.findUnique({
-    where: { id: operationId },
-    include: {
-      city: { select: { id: true, name: true } },
-      _count: { select: { vacancies: true } }
-    }
-  });
-}
-
 /**
  * Resuelve el permiso de reclutamiento solicitado.
  *
- * `scopeCity` se conserva por compatibilidad del control de acceso existente.
- * Este flujo no define el catálogo de Sucursales ni su uso por módulo.
+ * `scopeCity` y `scopeVacancyId` siguen siendo nombres técnicos de compatibilidad.
+ * No definen el catálogo de Sucursales ni la disponibilidad de Despacho.
  */
 async function resolveRecruiterAccessUpdate(prisma, body = {}) {
   const accessScope = normalizeUserAccessScope(body.accessScope);
@@ -247,6 +159,16 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
   };
 }
 
+function wantsJson(req) {
+  return isChecked(req.body?.returnJson) || req.get('accept')?.includes('application/json');
+}
+
+function operationError(req, res, status, message) {
+  if (wantsJson(req)) return res.status(status).json({ ok: false, error: message });
+  flash(res, 'error', message);
+  return res.redirect('/admin/locations');
+}
+
 export function locationsRouter(prisma) {
   const router = express.Router();
   router.use(sessionAuth);
@@ -261,7 +183,10 @@ export function locationsRouter(prisma) {
             vacancies: {
               orderBy: { createdAt: 'asc' },
               include: {
-                interviewSlots: { orderBy: [{ dayOfWeek: 'asc' }, { specificDate: 'asc' }, { startTime: 'asc' }] },
+                interviewSlots: {
+                  where: { isActive: true },
+                  orderBy: [{ dayOfWeek: 'asc' }, { specificDate: 'asc' }, { startTime: 'asc' }]
+                },
                 _count: { select: { candidates: true, interviewBookings: true } }
               }
             }
@@ -320,14 +245,24 @@ export function locationsRouter(prisma) {
       flash(res, 'error', 'Siberia pertenece a la sucursal Bogotá y no puede existir como sucursal independiente.');
       return res.redirect('/admin/locations');
     }
+
+    const city = await prisma.city.findUnique({
+      where: { id: req.params.id },
+      include: { _count: { select: { operations: true } } }
+    });
+    if (!city) {
+      flash(res, 'error', 'Sucursal no encontrada.');
+      return res.redirect('/admin/locations');
+    }
+    if (city.name !== name && city._count.operations > 0) {
+      flash(res, 'error', 'No se puede renombrar una sucursal que ya tiene operaciones porque existen referencias históricas de reclutamiento. Crea la sucursal correcta y migra sus operaciones de forma controlada.');
+      return res.redirect('/admin/locations');
+    }
+
     try {
       await prisma.city.update({
-        where: { id: req.params.id },
+        where: { id: city.id },
         data: { name, ...unifiedBranchCompatibilityData() }
-      });
-      await prisma.vacancy.updateMany({
-        where: { operation: { cityId: req.params.id } },
-        data: { city: name }
       });
       flash(res, 'success', `Sucursal "${name}" actualizada correctamente.`);
     } catch (error) {
@@ -362,37 +297,32 @@ export function locationsRouter(prisma) {
     return res.redirect('/admin/locations');
   });
 
+  // Esta ruta solo persiste la entidad Operation. La configuración de reclutamiento
+  // se delega al CRUD canónico ya existente en admin.js para evitar un segundo
+  // escritor de Vacancy/InterviewSlot.
   router.post('/cities/:cityId/operations', async (req, res) => {
     const name = normalize(req.body.name);
-    const city = await prisma.city.findUnique({ where: { id: req.params.cityId }, select: { id: true, name: true } });
-    if (!city) {
-      flash(res, 'error', 'Sucursal no encontrada.');
-      return res.redirect('/admin/locations');
-    }
-    if (!name) {
-      flash(res, 'error', 'El nombre de la operación no puede estar vacío.');
-      return res.redirect('/admin/locations');
-    }
-
-    const config = buildRecruitmentConfigData(req.body, { cityName: city.name, operationName: name });
-    if (config.error) {
-      flash(res, 'error', config.error);
-      return res.redirect('/admin/locations');
-    }
+    const city = await prisma.city.findUnique({
+      where: { id: req.params.cityId },
+      select: { id: true, name: true }
+    });
+    if (!city) return operationError(req, res, 404, 'Sucursal no encontrada.');
+    if (!name) return operationError(req, res, 400, 'El nombre de la operación no puede estar vacío.');
 
     try {
-      const key = await buildUniqueVacancyKey(prisma, city.name, name, config.data.title);
-      await prisma.$transaction(async (tx) => {
-        const operation = await tx.operation.create({ data: { name, cityId: city.id } });
-        await tx.vacancy.create({ data: { ...config.data, key, operationId: operation.id } });
-      });
-      flash(res, 'success', `Operación "${name}" creada con su configuración para Lórren.`);
+      const operation = await prisma.operation.create({ data: { name, cityId: city.id } });
+      if (wantsJson(req)) {
+        return res.status(201).json({
+          ok: true,
+          operation: { id: operation.id, name: operation.name, cityId: city.id, cityName: city.name }
+        });
+      }
+      flash(res, 'success', `Operación "${name}" creada. Completa su información para activar Lórren.`);
     } catch (error) {
       if (error.code === 'P2002') {
-        flash(res, 'error', `Ya existe una operación "${name}" en esta sucursal.`);
-      } else {
-        flash(res, 'error', 'Error al crear la operación.');
+        return operationError(req, res, 409, `Ya existe una operación "${name}" en esta sucursal.`);
       }
+      return operationError(req, res, 500, 'Error al crear la operación.');
     }
     return res.redirect('/admin/locations');
   });
@@ -412,64 +342,6 @@ export function locationsRouter(prisma) {
       } else {
         flash(res, 'error', 'Error al renombrar la operación.');
       }
-    }
-    return res.redirect('/admin/locations');
-  });
-
-  router.post('/operations/:id/recruitment', async (req, res) => {
-    const operation = await loadOperationWithBranch(prisma, req.params.id);
-    if (!operation) {
-      flash(res, 'error', 'Operación no encontrada.');
-      return res.redirect('/admin/locations');
-    }
-    if (operation._count.vacancies > 0) {
-      flash(res, 'error', 'Esta operación ya tiene configuración para Lórren. Edita la configuración existente.');
-      return res.redirect('/admin/locations');
-    }
-
-    const config = buildRecruitmentConfigData(req.body, { cityName: operation.city.name, operationName: operation.name });
-    if (config.error) {
-      flash(res, 'error', config.error);
-      return res.redirect('/admin/locations');
-    }
-
-    try {
-      const key = await buildUniqueVacancyKey(prisma, operation.city.name, operation.name, config.data.title);
-      await prisma.vacancy.create({ data: { ...config.data, key, operationId: operation.id } });
-      flash(res, 'success', `Configuración de "${operation.name}" creada para Lórren.`);
-    } catch (_error) {
-      flash(res, 'error', 'No fue posible crear la configuración de la operación.');
-    }
-    return res.redirect('/admin/locations');
-  });
-
-  router.post('/operations/:operationId/recruitment/:vacancyId/edit', async (req, res) => {
-    const vacancy = await prisma.vacancy.findFirst({
-      where: { id: req.params.vacancyId, operationId: req.params.operationId },
-      include: { operation: { include: { city: { select: { name: true } } } } }
-    });
-    if (!vacancy?.operation?.city) {
-      flash(res, 'error', 'Configuración de operación no encontrada.');
-      return res.redirect('/admin/locations');
-    }
-
-    const config = buildRecruitmentConfigData(req.body, {
-      cityName: vacancy.operation.city.name,
-      operationName: vacancy.operation.name
-    });
-    if (config.error) {
-      flash(res, 'error', config.error);
-      return res.redirect('/admin/locations');
-    }
-
-    try {
-      await prisma.vacancy.update({
-        where: { id: vacancy.id },
-        data: config.data
-      });
-      flash(res, 'success', `Configuración de "${vacancy.operation.name}" actualizada.`);
-    } catch (_error) {
-      flash(res, 'error', 'No fue posible actualizar la configuración de la operación.');
     }
     return res.redirect('/admin/locations');
   });
