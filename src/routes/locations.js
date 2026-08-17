@@ -65,6 +65,10 @@ function isSiberiaName(value) {
   return normalizeKey(value) === 'siberia';
 }
 
+function isBogotaName(value) {
+  return ['bogota', 'bogota d.c.', 'bogota dc'].includes(normalizeKey(value));
+}
+
 function normalizeMany(value) {
   const values = Array.isArray(value) ? value : [value];
   return [...new Set(values.map(normalize).filter(Boolean))];
@@ -308,6 +312,9 @@ export function locationsRouter(prisma) {
     });
     if (!city) return operationError(req, res, 404, 'Sucursal no encontrada.');
     if (!name) return operationError(req, res, 400, 'El nombre de la operación no puede estar vacío.');
+    if (isSiberiaName(name) && !isBogotaName(city.name)) {
+      return operationError(req, res, 400, 'La operación Siberia solo puede pertenecer a la sucursal Bogotá.');
+    }
 
     try {
       const operation = await prisma.operation.create({ data: { name, cityId: city.id } });
@@ -333,8 +340,22 @@ export function locationsRouter(prisma) {
       flash(res, 'error', 'El nombre no puede estar vacío.');
       return res.redirect('/admin/locations');
     }
+
+    const operation = await prisma.operation.findUnique({
+      where: { id: req.params.id },
+      include: { city: { select: { name: true } } }
+    });
+    if (!operation) {
+      flash(res, 'error', 'Operación no encontrada.');
+      return res.redirect('/admin/locations');
+    }
+    if (isSiberiaName(name) && !isBogotaName(operation.city?.name)) {
+      flash(res, 'error', 'La operación Siberia solo puede pertenecer a la sucursal Bogotá.');
+      return res.redirect('/admin/locations');
+    }
+
     try {
-      await prisma.operation.update({ where: { id: req.params.id }, data: { name } });
+      await prisma.operation.update({ where: { id: operation.id }, data: { name } });
       flash(res, 'success', `Operación renombrada a "${name}".`);
     } catch (error) {
       if (error.code === 'P2002') {
@@ -360,7 +381,7 @@ export function locationsRouter(prisma) {
         flash(res, 'error', `No se puede eliminar "${operation.name}" porque tiene ${operation._count.vacancies} configuración(es) de reclutamiento asociada(s).`);
         return res.redirect('/admin/locations');
       }
-      await prisma.operation.delete({ where: { id: req.params.id } });
+      await prisma.operation.delete({ where: { id: operation.id } });
       flash(res, 'success', `Operación "${operation.name}" eliminada.`);
     } catch (_error) {
       flash(res, 'error', 'Error al eliminar la operación.');
