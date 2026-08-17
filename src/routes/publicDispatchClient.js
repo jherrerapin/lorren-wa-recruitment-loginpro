@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
-import { loadUnifiedCityOptions, resolveEquivalentCityIds } from '../services/cityOptions.js';
+import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 
@@ -145,56 +145,34 @@ function buildInitialClientServiceNames(body = {}) {
 }
 
 async function loadWorkerFormOptions() {
-  const [cities, vacancies] = await Promise.all([
-    loadUnifiedCityOptions(prisma),
-    prisma.vacancy.findMany({
-      where: { isActive: true },
-      select: { id: true, title: true, city: true },
-      orderBy: [{ city: 'asc' }, { title: 'asc' }]
-    })
-  ]);
-
-  return { cities, vacancies };
+  return { cities: await loadUnifiedCityOptions(prisma) };
 }
 
-async function validateVacanciesForSelectedCities(cityIds, vacancyIds) {
-  if (!vacancyIds.length) return [];
-  if (!cityIds.length) throw new Error('Selecciona al menos una ciudad operativa antes de elegir perfiles.');
+async function validateSelectedBranches(cityIds) {
+  const uniqueIds = [...new Set(cityIds)];
+  if (!uniqueIds.length) throw new Error('Selecciona al menos una sucursal operativa.');
 
-  const selectedCityIdGroups = await Promise.all(cityIds.map((cityId) => resolveEquivalentCityIds(prisma, cityId)));
-  const equivalentCityIds = selectedCityIdGroups.flat();
-  const selectedCities = await prisma.city.findMany({
-    where: { id: { in: equivalentCityIds } },
-    select: { name: true }
+  const branches = await prisma.city.findMany({
+    where: { id: { in: uniqueIds }, NOT: { id: { startsWith: 'city_' } } },
+    select: { id: true }
   });
-  const selectedCityNames = new Set(selectedCities.map((city) => normalizeText(city.name)));
-
-  const validVacancies = await prisma.vacancy.findMany({
-    where: { id: { in: vacancyIds }, isActive: true },
-    select: { id: true, city: true }
-  });
-
-  const validVacancyIds = validVacancies
-    .filter((vacancy) => selectedCityNames.has(normalizeText(vacancy.city)))
-    .map((vacancy) => vacancy.id);
-
-  if (validVacancyIds.length !== vacancyIds.length) {
-    throw new Error('Uno o más perfiles no pertenecen a las ciudades seleccionadas o no están activos.');
+  if (branches.length !== uniqueIds.length) {
+    throw new Error('Una o más sucursales seleccionadas ya no existen.');
   }
-
-  return validVacancyIds;
+  return uniqueIds;
 }
 
-async function replaceWorkerRelations(workerId, body) {
-  const cityIds = normalizeStringList(body.cityIds);
-  const vacancyIds = normalizeStringList(body.vacancyIds);
-  const validVacancyIds = await validateVacanciesForSelectedCities(cityIds, vacancyIds);
+async function replaceWorkerBranches(workerId, body) {
+  const cityIds = await validateSelectedBranches(normalizeStringList(body.cityIds));
 
+  // DispatchWorkerVacancy permanece como dato histórico durante expand/migrate/verify,
+  // pero este flujo canónico ya no lo lee, valida ni escribe.
   await prisma.$transaction([
     prisma.dispatchWorkerCity.deleteMany({ where: { workerId } }),
-    prisma.dispatchWorkerVacancy.deleteMany({ where: { workerId } }),
-    ...(cityIds.length ? [prisma.dispatchWorkerCity.createMany({ data: cityIds.map((cityId) => ({ workerId, cityId })), skipDuplicates: true })] : []),
-    ...(validVacancyIds.length ? [prisma.dispatchWorkerVacancy.createMany({ data: validVacancyIds.map((vacancyId) => ({ workerId, vacancyId })), skipDuplicates: true })] : [])
+    prisma.dispatchWorkerCity.createMany({
+      data: cityIds.map((cityId) => ({ workerId, cityId })),
+      skipDuplicates: true
+    })
   ]);
 }
 
@@ -216,7 +194,7 @@ async function saveWorkerCv(workerId, file) {
 async function findWorkerOr404(workerId) {
   return prisma.dispatchWorker.findUnique({
     where: { id: workerId },
-    include: { cities: true, vacancies: true, candidate: true }
+    include: { cities: true, candidate: true }
   });
 }
 
@@ -287,8 +265,7 @@ export function publicDispatchClientRouter() {
   const router = express.Router();
 
   router.get('/api/ciudades', requireOps, async (_req, res) => {
-    const allCities = await loadUnifiedCityOptions(prisma);
-    const cities = allCities.filter((city) => city.usedForDispatch);
+    const cities = await loadUnifiedCityOptions(prisma);
     return res.json({ cities, generatedAt: new Date().toISOString() });
   });
 
@@ -385,10 +362,9 @@ export function publicDispatchClientRouter() {
   });
 
   router.get('/admin-worker/nuevo', requireOps, async (req, res) => {
-    const { cities, vacancies } = await loadWorkerFormOptions();
+    const { cities } = await loadWorkerFormOptions();
     return res.render('operacionesPersonalNuevo', {
       cities,
-      vacancies,
       worker: null,
       mode: 'create',
       formAction: '/operaciones/admin-worker/nuevo',
@@ -402,7 +378,7 @@ export function publicDispatchClientRouter() {
       const workerData = buildWorkerData(req.body);
       if (!workerData.fullName) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent('Nombre requerido.'));
       const worker = await prisma.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } });
-      await replaceWorkerRelations(worker.id, req.body);
+      await replaceWorkerBranches(worker.id, req.body);
       await saveWorkerCv(worker.id, req.file);
       return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar manual creado.'));
     } catch (error) {
@@ -416,7 +392,6 @@ export function publicDispatchClientRouter() {
     if (!worker) return res.status(404).send('Auxiliar no encontrado');
     return res.render('operacionesPersonalNuevo', {
       cities: options.cities,
-      vacancies: options.vacancies,
       worker,
       mode: 'edit',
       formAction: `/operaciones/admin-worker/${worker.id}/editar`,
@@ -446,7 +421,7 @@ export function publicDispatchClientRouter() {
           }
         })] : [])
       ]);
-      await replaceWorkerRelations(existing.id, req.body);
+      await replaceWorkerBranches(existing.id, req.body);
       await saveWorkerCv(existing.id, req.file);
       return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar actualizado.'));
     } catch (error) {
