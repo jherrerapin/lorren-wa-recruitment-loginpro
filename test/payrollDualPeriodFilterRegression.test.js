@@ -16,6 +16,38 @@ function hours(values = {}) {
   return Object.fromEntries(CONCEPT_CODES.map((code) => [code, Number(values[code] || 0) / 60]));
 }
 
+function daily(dateKey, overrides = {}) {
+  const conceptMinutes = concepts(overrides.conceptMinutes);
+  const totalMinutes = overrides.totalMinutes ?? 420;
+  const ordinaryMinutes = overrides.ordinaryMinutes ?? totalMinutes;
+  const overtimeMinutes = overrides.overtimeMinutes ?? 0;
+  const unrecognizedOvertimeMinutes = overrides.unrecognizedOvertimeMinutes ?? 0;
+  return {
+    dateKey,
+    totalMinutes,
+    ordinaryMinutes,
+    overtimeMinutes,
+    unrecognizedOvertimeMinutes,
+    totalHours: totalMinutes / 60,
+    ordinaryHours: ordinaryMinutes / 60,
+    overtimeHours: overtimeMinutes / 60,
+    unrecognizedOvertimeHours: unrecognizedOvertimeMinutes / 60,
+    conceptMinutes,
+    conceptHours: hours(conceptMinutes),
+    clientNames: overrides.clientNames || ['TEST Cliente'],
+    operationNames: overrides.operationNames || ['TEST Operación'],
+    civilDateKeys: overrides.civilDateKeys || [dateKey],
+    holidayDateKeys: overrides.holidayDateKeys || [],
+    restDateKeys: overrides.restDateKeys || [],
+    isHoliday: overrides.isHoliday ?? false,
+    isRestDay: overrides.isRestDay ?? false,
+    compensationDateKey: overrides.compensationDateKey ?? null,
+    compensationStatus: overrides.compensationStatus ?? null,
+    compensationManagedByRestAssignment: overrides.compensationManagedByRestAssignment ?? false,
+    markings: overrides.markings || []
+  };
+}
+
 function row(workerId, overrides = {}) {
   const conceptMinutes = concepts(overrides.conceptMinutes);
   return {
@@ -45,7 +77,7 @@ function row(workerId, overrides = {}) {
     sundayCount: overrides.sundayCount ?? 0,
     holidayCount: overrides.holidayCount ?? 0,
     restAssignments: [],
-    daily: [],
+    daily: overrides.daily || [],
     novelties: overrides.novelties || [],
     status: overrides.status || 'CALCULADO',
     exportable: overrides.exportable ?? true
@@ -170,6 +202,98 @@ test('un solo resultado conserva datos generales y toma únicamente H* del perio
   assert.equal(combined.totals.conceptMinutes.HENO, 45);
   assert.equal(combined.totals.conceptMinutes.HEDD, 60);
   assert.equal(combined.totals.workersWithNovelties, 1);
+});
+
+test('el detalle diario compone cada familia de filtros sin dejar que un periodo reemplace al otro', () => {
+  const general = report(
+    { periodType: 'BIWEEKLY', from: '2026-08-01', to: '2026-08-15', anchor: '2026-08-01' },
+    [
+      row('TEST-A', {
+        daily: [daily('2026-08-10', {
+          totalMinutes: 450,
+          ordinaryMinutes: 420,
+          overtimeMinutes: 30,
+          conceptMinutes: { HEDO: 30, RNO: 15 },
+          markings: [{ sessionId: 'TEST-GENERAL-A' }]
+        })]
+      }),
+      row('TEST-B', {
+        daily: [daily('2026-08-05', {
+          totalMinutes: 480,
+          ordinaryMinutes: 420,
+          overtimeMinutes: 60,
+          conceptMinutes: { HEDO: 60, RDF: 20 }
+        })]
+      })
+    ]
+  );
+  const overtime = report(
+    { periodType: 'WEEKLY', from: '2026-08-10', to: '2026-08-16', anchor: '2026-08-10' },
+    [
+      row('TEST-A', {
+        overtimeMinutes: 45,
+        conceptMinutes: { HENO: 45 },
+        daily: [daily('2026-08-10', {
+          totalMinutes: 480,
+          ordinaryMinutes: 435,
+          overtimeMinutes: 45,
+          conceptMinutes: { HENO: 45, RNO: 300 }
+        })]
+      }),
+      row('TEST-C', {
+        totalMinutes: 480,
+        ordinaryMinutes: 420,
+        overtimeMinutes: 60,
+        conceptMinutes: { HEDD: 60, RDD: 60 },
+        daily: [daily('2026-08-16', {
+          totalMinutes: 480,
+          ordinaryMinutes: 420,
+          overtimeMinutes: 60,
+          conceptMinutes: { HEDD: 60, RDD: 60 },
+          isRestDay: true,
+          compensationDateKey: '2026-08-16',
+          compensationStatus: 'PENDING',
+          markings: [{ sessionId: 'TEST-EXTRA-C' }]
+        })],
+        novelties: [{ code: 'TEST_BLOCK', dateKey: '2026-08-16', message: 'Revisión de prueba', blocking: true }],
+        status: 'CON_NOVEDADES',
+        exportable: false
+      })
+    ]
+  );
+
+  const combined = combinePayrollPeriodReports(general, overtime);
+
+  const aDay = combined.rows.find((item) => item.workerId === 'TEST-A').daily[0];
+  assert.equal(aDay.dateKey, '2026-08-10');
+  assert.equal(aDay.totalMinutes, 450, 'total diario pertenece al periodo general');
+  assert.equal(aDay.ordinaryMinutes, 420, 'ordinarias diarias pertenecen al periodo general');
+  assert.equal(aDay.conceptMinutes.RNO, 15, 'R* diario pertenece al periodo general');
+  assert.equal(aDay.overtimeMinutes, 45, 'extra diaria pertenece al periodo de extras');
+  assert.equal(aDay.conceptMinutes.HEDO, 0);
+  assert.equal(aDay.conceptMinutes.HENO, 45);
+  assert.equal(aDay.markings[0].sessionId, 'TEST-GENERAL-A');
+
+  const bDay = combined.rows.find((item) => item.workerId === 'TEST-B').daily[0];
+  assert.equal(bDay.dateKey, '2026-08-05');
+  assert.equal(bDay.totalMinutes, 480);
+  assert.equal(bDay.conceptMinutes.RDF, 20);
+  assert.equal(bDay.overtimeMinutes, 0);
+  assert.equal(bDay.conceptMinutes.HEDO, 0, 'H* diario fuera del filtro de extras debe quedar en cero');
+
+  const c = combined.rows.find((item) => item.workerId === 'TEST-C');
+  assert.equal(c.daily.length, 1);
+  const cDay = c.daily[0];
+  assert.equal(cDay.dateKey, '2026-08-16');
+  assert.equal(cDay.totalMinutes, 0, 'una fecha solo de extras no aporta total al corte general');
+  assert.equal(cDay.ordinaryMinutes, 0);
+  assert.equal(cDay.conceptMinutes.RDD, 0, 'R* del periodo de extras no invade el corte general');
+  assert.equal(cDay.overtimeMinutes, 60);
+  assert.equal(cDay.conceptMinutes.HEDD, 60);
+  assert.equal(cDay.markings[0].sessionId, 'TEST-EXTRA-C', 'se conserva trazabilidad de la fecha extra-only');
+  assert.equal(cDay.compensationStatus, null, 'una fecha fuera del corte general no habilita compensatorio');
+  assert.equal(cDay.compensationDateKey, null);
+  assert.equal(c.novelties[0].dateKey, cDay.dateKey, 'la novedad fechada puede asociarse al día compuesto');
 });
 
 test('la vista usa dos filtros independientes y un solo calendario reutilizable, sin Desde/Hasta visibles', async () => {
