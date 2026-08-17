@@ -5,7 +5,16 @@
   const active = isNew ? true : Boolean(value.isActive);
   const accepting = isNew ? true : Boolean(value.acceptingApplications);
   const scheduling = Boolean(value.schedulingEnabled);
+  const resolvedOperationId = typeof operationId !== 'undefined' && operationId
+    ? operationId
+    : (value.operationId || '');
+  const weeklySlots = (value.interviewSlots || []).filter((slot) => slot.specificDate === null || slot.specificDate === undefined);
+  const selectedDays = new Set(weeklySlots.map((slot) => slot.dayOfWeek).filter((day) => Number.isInteger(day)));
+  const firstWeeklySlot = weeklySlots[0] || {};
+  const distinctSlotTimes = [...new Set(weeklySlots.map((slot) => slot.startTime).filter(Boolean))];
+  const dayLabels = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 %>
+<input type="hidden" name="operationId" value="<%= resolvedOperationId %>" />
 <div class="field">
   <label for="<%= fieldPrefix %>-title">Título que verá el candidato</label>
   <input id="<%= fieldPrefix %>-title" name="title" required value="<%= value.title || defaultTitle || '' %>" placeholder="Ej: Auxiliar de cargue y descargue" />
@@ -16,7 +25,7 @@
 </div>
 <div class="field full">
   <label for="<%= fieldPrefix %>-description">Descripción</label>
-  <textarea id="<%= fieldPrefix %>-description" name="roleDescription" placeholder="Qué hará la persona y contexto de la operación"><%= value.roleDescription || '' %></textarea>
+  <textarea id="<%= fieldPrefix %>-description" name="description" placeholder="Qué hará la persona y contexto de la operación"><%= value.roleDescription || '' %></textarea>
 </div>
 <div class="field full">
   <label for="<%= fieldPrefix %>-address">Zona / dirección de operación</label>
@@ -64,5 +73,26 @@
     <label class="checkbox"><input type="checkbox" name="acceptingApplications" value="true" <%= accepting ? 'checked' : '' %> /> Recibir postulaciones</label>
     <label class="checkbox"><input type="checkbox" name="schedulingEnabled" value="true" <%= scheduling ? 'checked' : '' %> /> Agenda de entrevista habilitada</label>
   </div>
-  <div class="help">Lórren solo usa esta información cuando la configuración está activa. Si desmarcas “Recibir postulaciones”, la operación queda visible en histórico pero no abre procesos nuevos.</div>
+  <div class="help">Lórren solo usa esta información cuando la configuración está activa. Si desmarcas “Recibir postulaciones”, la operación conserva su histórico pero no abre procesos nuevos.</div>
+</div>
+<div class="field full">
+  <label>Días de entrevista</label>
+  <div class="toggle-row">
+    <% dayLabels.forEach((label, dayIndex) => { %>
+      <label class="checkbox"><input type="checkbox" name="slotDays" value="<%= dayIndex %>" <%= selectedDays.has(dayIndex) ? 'checked' : '' %> /> <%= label %></label>
+    <% }) %>
+  </div>
+  <div class="help">Solo son obligatorios cuando la agenda está habilitada. La disponibilidad recurrente se mantiene en la autoridad existente de entrevistas.</div>
+</div>
+<div class="field">
+  <label for="<%= fieldPrefix %>-slot-time">Hora de entrevista</label>
+  <input id="<%= fieldPrefix %>-slot-time" name="slotStartTime" type="time" value="<%= firstWeeklySlot.startTime || '' %>" />
+</div>
+<div class="field">
+  <label for="<%= fieldPrefix %>-slot-capacity">Cupos por horario</label>
+  <input id="<%= fieldPrefix %>-slot-capacity" name="slotMaxCandidates" type="number" min="1" value="<%= firstWeeklySlot.maxCandidates || 10 %>" />
+</div>
+<div class="field full">
+  <label class="checkbox"><input type="checkbox" name="slotCurrentWeekOnly" value="true" <%= firstWeeklySlot.currentWeekOnly ? 'checked' : '' %> /> Limitar estos horarios a la semana actual</label>
+  <% if (distinctSlotTimes.length > 1) { %><div class="config-note">Esta configuración histórica tiene más de una hora recurrente. El editor consolidado muestra la primera; conserva los horarios actuales o edítalos conscientemente antes de guardar.</div><% } %>
 </div>
