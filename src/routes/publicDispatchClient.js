@@ -162,18 +162,32 @@ async function validateSelectedBranches(cityIds) {
   return uniqueIds;
 }
 
-async function replaceWorkerBranches(workerId, body) {
-  const cityIds = await validateSelectedBranches(normalizeStringList(body.cityIds));
-
-  // DispatchWorkerVacancy permanece como dato histórico durante expand/migrate/verify,
-  // pero este flujo canónico ya no lo lee, valida ni escribe.
-  await prisma.$transaction([
-    prisma.dispatchWorkerCity.deleteMany({ where: { workerId } }),
-    prisma.dispatchWorkerCity.createMany({
-      data: cityIds.map((cityId) => ({ workerId, cityId })),
+async function createWorkerWithBranches(workerData, cityIds) {
+  return prisma.$transaction(async (tx) => {
+    const worker = await tx.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } });
+    await tx.dispatchWorkerCity.createMany({
+      data: cityIds.map((cityId) => ({ workerId: worker.id, cityId })),
       skipDuplicates: true
-    })
-  ]);
+    });
+    return worker;
+  });
+}
+
+async function updateWorkerWithBranches(existing, workerData, candidateData, cityIds) {
+  return prisma.$transaction(async (tx) => {
+    await tx.dispatchWorker.update({ where: { id: existing.id }, data: workerData });
+    if (existing.candidateId) {
+      await tx.candidate.update({
+        where: { id: existing.candidateId },
+        data: candidateData
+      });
+    }
+    await tx.dispatchWorkerCity.deleteMany({ where: { workerId: existing.id } });
+    await tx.dispatchWorkerCity.createMany({
+      data: cityIds.map((cityId) => ({ workerId: existing.id, cityId })),
+      skipDuplicates: true
+    });
+  });
 }
 
 async function saveWorkerCv(workerId, file) {
@@ -377,8 +391,8 @@ export function publicDispatchClientRouter() {
     try {
       const workerData = buildWorkerData(req.body);
       if (!workerData.fullName) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent('Nombre requerido.'));
-      const worker = await prisma.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } });
-      await replaceWorkerBranches(worker.id, req.body);
+      const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
+      const worker = await createWorkerWithBranches(workerData, cityIds);
       await saveWorkerCv(worker.id, req.file);
       return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar manual creado.'));
     } catch (error) {
@@ -406,22 +420,17 @@ export function publicDispatchClientRouter() {
       if (!existing) return res.status(404).send('Auxiliar no encontrado');
       const workerData = buildWorkerData(req.body);
       if (!workerData.fullName) return res.redirect(`/operaciones/admin-worker/${existing.id}/editar?error=` + encodeURIComponent('Nombre requerido.'));
-      await prisma.$transaction([
-        prisma.dispatchWorker.update({ where: { id: existing.id }, data: workerData }),
-        ...(existing.candidateId ? [prisma.candidate.update({
-          where: { id: existing.candidateId },
-          data: {
-            fullName: workerData.fullName,
-            phone: workerData.phone || existing.candidate.phone,
-            documentType: workerData.documentType,
-            documentNumber: workerData.documentNumber,
-            locality: workerData.residenceLocality,
-            transportMode: workerData.transportMode,
-            ...buildCandidateProfileData(req.body)
-          }
-        })] : [])
-      ]);
-      await replaceWorkerBranches(existing.id, req.body);
+      const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
+      const candidateData = existing.candidateId ? {
+        fullName: workerData.fullName,
+        phone: workerData.phone || existing.candidate.phone,
+        documentType: workerData.documentType,
+        documentNumber: workerData.documentNumber,
+        locality: workerData.residenceLocality,
+        transportMode: workerData.transportMode,
+        ...buildCandidateProfileData(req.body)
+      } : null;
+      await updateWorkerWithBranches(existing, workerData, candidateData, cityIds);
       await saveWorkerCv(existing.id, req.file);
       return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar actualizado.'));
     } catch (error) {
