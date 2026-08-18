@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import ejs from 'ejs';
 import {
+  PAYROLL_COMPENSATION_STATUS,
   PAYROLL_CONCEPT_CODES,
   calculatePayrollConceptReport,
   formatPayrollMinutes,
@@ -42,16 +43,29 @@ function isolatedEightHourSession() {
   };
 }
 
-test('una jornada aislada de 8 h genera una hora extra aunque el valor semanal siga persistido por compatibilidad', () => {
+function sessionAt({ id, start, end }) {
+  const base = isolatedEightHourSession();
+  return {
+    ...base,
+    id,
+    arrivalReportedAt: new Date(start),
+    departureReportedAt: new Date(end),
+    expectedStartAt: new Date(start),
+    expectedEndAt: new Date(end),
+    workedMinutes: Math.floor((new Date(end).getTime() - new Date(start).getTime()) / 60_000)
+  };
+}
+
+test('una jornada aislada de 8 h genera una hora extra y los límites históricos no crean novedades', () => {
   const historicalPolicy = {
     weeklyOrdinaryMinutes: 48 * 60,
     dailyOrdinaryMinutes: 8 * 60,
-    maxDailyOvertimeMinutes: 2 * 60,
-    maxWeeklyOvertimeMinutes: 12 * 60,
+    maxDailyOvertimeMinutes: 0,
+    maxWeeklyOvertimeMinutes: 0,
     nightStartMinute: 19 * 60,
     nightEndMinute: 6 * 60,
     weekStartsOn: 0,
-    restDay: 0,
+    restDay: 2,
     recognizeEarlyArrival: false,
     incompleteBreakPenaltyMinutes: 90
   };
@@ -60,6 +74,7 @@ test('una jornada aislada de 8 h genera una hora extra aunque el valor semanal s
   assert.equal(normalized.dailyOrdinaryMinutes, 420);
   assert.equal(normalized.weeklyOrdinaryMinutes, 2520);
   assert.equal(normalized.weekStartsOn, 1);
+  assert.equal(normalized.restDay, 0, 'el día de descanso histórico deja de gobernar el cálculo');
 
   const report = calculatePayrollConceptReport({
     sessions: [isolatedEightHourSession()],
@@ -75,6 +90,48 @@ test('una jornada aislada de 8 h genera una hora extra aunque el valor semanal s
   assert.equal(report.rows[0].conceptMinutes.HEDO, 60);
   assert.equal(report.totals.ordinaryMinutes, 420);
   assert.equal(report.totals.overtimeMinutes, 60);
+  assert.ok(!report.rows[0].novelties.some((item) => item.code === 'DAILY_OVERTIME_LIMIT_EXCEEDED'));
+  assert.ok(!report.rows[0].novelties.some((item) => item.code === 'WEEKLY_OVERTIME_LIMIT_EXCEEDED'));
+  assert.equal(report.rows[0].exportable, true);
+});
+
+test('domingo conserva recargo dominical sin depender de restDay ni generar compensatorio pendiente', () => {
+  const historicalPolicy = {
+    restDay: 2,
+    maxDailyOvertimeMinutes: 0,
+    maxWeeklyOvertimeMinutes: 0
+  };
+  const sunday = sessionAt({
+    id: 'TEST-SUNDAY-FLEXIBLE',
+    start: '2026-08-02T13:00:00.000Z',
+    end: '2026-08-02T20:00:00.000Z'
+  });
+  const report = calculatePayrollConceptReport({
+    sessions: [sunday],
+    policiesByClientId: new Map([['TEST-CLIENT-POLICY', historicalPolicy]]),
+    compensationByWorkerDate: new Map([
+      ['TEST-WORKER-POLICY|2026-08-02', PAYROLL_COMPENSATION_STATUS.PENDING]
+    ]),
+    range: { from: '2026-08-02', to: '2026-08-02' }
+  });
+
+  const row = report.rows[0];
+  assert.equal(row.totalMinutes, 420);
+  assert.equal(row.conceptMinutes.RDD, 420, 'domingo diurno conserva el recargo dominical');
+  assert.equal(row.daily[0].isRestDay, true);
+  assert.equal(row.daily[0].compensationStatus, PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED);
+  assert.ok(!row.novelties.some((item) => item.code === 'COMPENSATION_PENDING'));
+  assert.equal(row.exportable, true);
+});
+
+test('la vista DEV oculta cliente, máximos de extra y día de descanso de la configuración', async () => {
+  const partial = await readFile('src/views/partials/operacionesNominaTabla.ejs', 'utf8');
+  assert.doesNotMatch(partial, /<label>Cliente<\/label>/);
+  assert.doesNotMatch(partial, /name="maxDailyOvertimeHours"/);
+  assert.doesNotMatch(partial, /name="maxWeeklyOvertimeHours"/);
+  assert.doesNotMatch(partial, /name="restDay"/);
+  assert.match(partial, /role==='dev'&&report\.filters\.clientId/);
+  assert.match(partial, /type="hidden" name="clientId" value="<%= report\.filters\.clientId %>"/);
 });
 
 test('la política nocturna se muestra como 19:00 y 06:00, no como números aislados', async () => {
