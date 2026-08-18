@@ -13,6 +13,8 @@ const MODULE_MENU_GROUP = 'admin-primary-navigation';
 const RECRUITMENT_ICON = '';
 const OPERATIONS_ICON = '';
 const PAYROLL_ICON = '';
+const BRANCHES_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAX0lEQVR42u2WWwoAIAgEU7r/le0CJSSWBbO/gov7iFoDABRDvKGZWRqRyJRLb5B7+7Tagp4lZVS9cgX+syA7nFhAC2gBFmikBasmeDMs2P4RZad99Yi9p8CJyz0lCCEYKGkkNOBBvQ4AAAAASUVORK5CYII=';
+const USERS_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAlklEQVR42u1VwRaAIAhzPv//l+mSvZ5pgKB1YMfUsU2wlAKBjwHNZiKi6yCAbQLuhR8ERiHFO9JWLCcQs7H3vo+SehORVzmXruUlnX3CpQcAoDroOfldE3KRq6+AI6vrb0lMN6HUicaxeAwl86wpPEoB1sdE677lKrPKpfs5gbD8cDQv34g37xg1z7MmMtfCgUAgEPDCAQi2bAnBhNiuAAAAAElFTkSuQmCC';
 
 function requestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0] || '/';
@@ -100,17 +102,21 @@ function moduleMenu({ key, label, icon, active, items = [], allowed = true }) {
     </details>`;
 }
 
+function standaloneIcon(icon) {
+  return `<span class="admin-module-nav-icon" aria-hidden="true" style="background-image:url(${icon});background-repeat:no-repeat;background-position:center;background-size:16px 16px;"></span>`;
+}
+
 function standaloneBranchesLink(path) {
   const classes = ['admin-module-standalone-link'];
   if (path.startsWith(BRANCHES_PATH)) classes.push('is-active');
-  return `<a class="${classes.join(' ')}" href="${BRANCHES_PATH}">Sucursales</a>`;
+  return `<a class="${classes.join(' ')}" href="${BRANCHES_PATH}" data-standalone-link="branches" style="gap:7px;">${standaloneIcon(BRANCHES_ICON)}<span>Sucursales</span></a>`;
 }
 
 function standaloneUsersLink(access, path) {
   if (!access.users) return '';
   const classes = ['admin-module-standalone-link'];
   if (path.startsWith(USERS_PATH)) classes.push('is-active');
-  return `<a class="${classes.join(' ')}" href="${USERS_PATH}">Usuarios</a>`;
+  return `<a class="${classes.join(' ')}" href="${USERS_PATH}" data-standalone-link="users" style="gap:7px;">${standaloneIcon(USERS_ICON)}<span>Usuarios</span></a>`;
 }
 
 export function buildAdminModuleNavbar(req = {}, originalNav = '') {

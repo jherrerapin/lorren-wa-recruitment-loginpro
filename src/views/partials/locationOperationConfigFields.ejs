@@ -15,6 +15,8 @@
   const dayLabels = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 %>
 <input type="hidden" name="operationId" value="<%= resolvedOperationId %>" />
+<input type="hidden" name="isActive" value="<%= active ? 'true' : 'false' %>" />
+<input type="hidden" name="acceptingApplications" value="<%= accepting ? 'true' : 'false' %>" />
 <div class="field">
   <label for="<%= fieldPrefix %>-title">Título que verá el candidato</label>
   <input id="<%= fieldPrefix %>-title" name="title" required value="<%= value.title || defaultTitle || '' %>" placeholder="Ej: Auxiliar de cargue y descargue" />
@@ -60,39 +62,35 @@
   <input id="<%= fieldPrefix %>-experience-time" name="experienceTimeText" value="<%= value.experienceTimeText || '' %>" placeholder="Ej: 6 meses" />
 </div>
 <div class="field full">
-  <label for="<%= fieldPrefix %>-interview-address">Dirección de entrevista</label>
-  <input id="<%= fieldPrefix %>-interview-address" name="interviewAddress" value="<%= value.interviewAddress || '' %>" placeholder="Solo si la operación agenda entrevistas" />
+  <label class="checkbox"><input type="checkbox" name="schedulingEnabled" value="true" data-scheduling-toggle <%= scheduling ? 'checked' : '' %> /> Habilitar entrevistas</label>
+  <div class="help">Actívalo solo cuando Lórren deba ofrecer una entrevista después de completar la postulación.</div>
 </div>
-<div class="field full">
+<div class="field full" data-interview-field <%= scheduling ? '' : 'hidden' %>>
+  <label for="<%= fieldPrefix %>-interview-address">Dirección de entrevista</label>
+  <input id="<%= fieldPrefix %>-interview-address" name="interviewAddress" value="<%= value.interviewAddress || '' %>" placeholder="Lugar confirmado para la entrevista" />
+</div>
+<div class="field full" data-interview-field <%= scheduling ? '' : 'hidden' %>>
   <label for="<%= fieldPrefix %>-documents">Documentos para entrevista</label>
   <textarea id="<%= fieldPrefix %>-documents" name="requiredDocuments" placeholder="Un documento por línea"><%= value.requiredDocuments || '' %></textarea>
 </div>
-<div class="field full">
-  <div class="toggle-row">
-    <label class="checkbox"><input type="checkbox" name="isActive" value="true" <%= active ? 'checked' : '' %> /> Operación activa en Lórren</label>
-    <label class="checkbox"><input type="checkbox" name="acceptingApplications" value="true" <%= accepting ? 'checked' : '' %> /> Recibir postulaciones</label>
-    <label class="checkbox"><input type="checkbox" name="schedulingEnabled" value="true" <%= scheduling ? 'checked' : '' %> /> Agenda de entrevista habilitada</label>
-  </div>
-  <div class="help">Lórren solo usa esta información cuando la configuración está activa. Si desmarcas “Recibir postulaciones”, la operación conserva su histórico pero no abre procesos nuevos.</div>
-</div>
-<div class="field full">
+<div class="field full" data-interview-field <%= scheduling ? '' : 'hidden' %>>
   <label>Días de entrevista</label>
   <div class="toggle-row">
     <% dayLabels.forEach((label, dayIndex) => { %>
       <label class="checkbox"><input type="checkbox" name="slotDays" value="<%= dayIndex %>" <%= selectedDays.has(dayIndex) ? 'checked' : '' %> /> <%= label %></label>
     <% }) %>
   </div>
-  <div class="help">Solo son obligatorios cuando la agenda está habilitada. La disponibilidad recurrente se mantiene en la autoridad existente de entrevistas.</div>
+  <div class="help">Lórren solo ofrecerá días y horarios realmente configurados.</div>
 </div>
-<div class="field">
+<div class="field" data-interview-field <%= scheduling ? '' : 'hidden' %>>
   <label for="<%= fieldPrefix %>-slot-time">Hora de entrevista</label>
   <input id="<%= fieldPrefix %>-slot-time" name="slotStartTime" type="time" value="<%= firstWeeklySlot.startTime || '' %>" />
 </div>
-<div class="field">
+<div class="field" data-interview-field <%= scheduling ? '' : 'hidden' %>>
   <label for="<%= fieldPrefix %>-slot-capacity">Cupos por horario</label>
   <input id="<%= fieldPrefix %>-slot-capacity" name="slotMaxCandidates" type="number" min="1" value="<%= firstWeeklySlot.maxCandidates || 10 %>" />
 </div>
-<div class="field full">
+<div class="field full" data-interview-field <%= scheduling ? '' : 'hidden' %>>
   <label class="checkbox"><input type="checkbox" name="slotCurrentWeekOnly" value="true" <%= firstWeeklySlot.currentWeekOnly ? 'checked' : '' %> /> Limitar estos horarios a la semana actual</label>
   <% if (distinctSlotTimes.length > 1) { %><div class="config-note">Esta configuración histórica tiene más de una hora recurrente. El editor consolidado muestra la primera; conserva los horarios actuales o edítalos conscientemente antes de guardar.</div><% } %>
 </div>
