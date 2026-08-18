@@ -7,6 +7,7 @@ const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const WORKER_PORTAL_ACTIVATION_PATH = '/admin/operaciones/portal-activaciones';
 const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
+const SHELL_STYLESHEET = '/public/admin-module-shell.css';
 const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
 const USERS_PROGRAMMING_ACCESS_SCRIPT = '/public/users-programming-access.js';
 const MODULE_MENU_GROUP = 'admin-primary-navigation';
@@ -222,17 +223,39 @@ function stripDuplicateModuleButtons(html, navHtml) {
   return `${stripNavigationDuplicates(before)}${navHtml}${stripNavigationDuplicates(after)}`;
 }
 
+function ensureViewportMeta(html) {
+  if (!/<\/head>/i.test(html)) return html;
+  if (/<meta\b[^>]*\bname\s*=\s*["']viewport["'][^>]*>/i.test(html)) return html;
+  return html.replace(/<\/head>/i, '  <meta name="viewport" content="width=device-width, initial-scale=1.0" />\n</head>');
+}
+
 function ensureNavigationStylesheet(html) {
   if (!/<\/head>/i.test(html)) return html;
   const stylesheets = [];
   if (!html.includes(NAVIGATION_STYLESHEET)) {
     stylesheets.push(`<link rel="stylesheet" href="${NAVIGATION_STYLESHEET}" />`);
   }
+  if (!html.includes(SHELL_STYLESHEET)) {
+    stylesheets.push(`<link rel="stylesheet" href="${SHELL_STYLESHEET}" />`);
+  }
   if (!html.includes(DESKTOP_NAVIGATION_STYLESHEET)) {
     stylesheets.push(`<link rel="stylesheet" href="${DESKTOP_NAVIGATION_STYLESHEET}" media="(min-width: 901px)" />`);
   }
   if (!stylesheets.length) return html;
   return html.replace(/<\/head>/i, `  ${stylesheets.join('\n  ')}\n</head>`);
+}
+
+function ensureAdminPageShell(html) {
+  return html.replace(/<main\b([^>]*)>/i, (tag, attributes) => {
+    const classMatch = attributes.match(/\bclass\s*=\s*(["'])([^"']*)\1/i);
+    if (classMatch) {
+      const classes = classMatch[2].split(/\s+/).filter(Boolean);
+      if (classes.includes('admin-module-page-shell')) return tag;
+      const nextClass = `class=${classMatch[1]}${[...classes, 'admin-module-page-shell'].join(' ')}${classMatch[1]}`;
+      return tag.replace(classMatch[0], nextClass);
+    }
+    return `<main class="admin-module-page-shell"${attributes}>`;
+  });
 }
 
 function ensureUsersProgrammingAccessScript(html, path) {
@@ -251,8 +274,10 @@ export function injectAdminModuleNavigation(html, req = {}) {
   if (!originalNav) return html;
 
   const moduleNavbar = buildAdminModuleNavbar(req, originalNav);
-  let output = ensureNavigationStylesheet(html);
+  let output = ensureViewportMeta(html);
+  output = ensureNavigationStylesheet(output);
   output = output.replace(navPattern, moduleNavbar);
+  output = ensureAdminPageShell(output);
   output = stripDuplicateModuleButtons(output, moduleNavbar);
   return ensureUsersProgrammingAccessScript(output, path);
 }
