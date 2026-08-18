@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import ejs from 'ejs';
 
 const bridgeSource = fs.readFileSync(new URL('../src/routes/dispatchBridge.js', import.meta.url), 'utf8');
 const adminRouteSource = fs.readFileSync(new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url), 'utf8');
@@ -67,6 +68,80 @@ test('cada auxiliar ocupa una sola fila y entrada, almuerzo y salida quedan visi
   assert.match(adminViewSource, /: 'Sin almuerzo';/);
   assert.match(adminViewSource, /Ord\. <%= row\.ordinaryWorkedLabel/);
   assert.match(adminViewSource, /Extra: <%= row\.overtimeLabel/);
+});
+
+test('la plantilla renderiza entrada, almuerzo y salida en la fila principal sin abrir la tarjeta', () => {
+  const row = {
+    status: 'AUTO_VALIDATED',
+    serviceDateLabel: '10 ago 2026',
+    scheduleLabel: '08:00–15:00',
+    serviceDateIso: '2026-08-10',
+    workerName: 'TEST Auxiliar fila',
+    documentType: 'CC',
+    documentNumber: 'TEST-DOC-FILA',
+    operationPointName: 'TEST Operación fila',
+    cityName: 'TEST Ciudad',
+    arrivalReportedLabel: '8:02 a. m.',
+    effectiveWorkStartLabel: '8:02 a. m.',
+    earlyMinutesExcludedLabel: '0 min',
+    breakStarted: true,
+    breakEnded: true,
+    breakStartLabel: '12:00 p. m.',
+    breakEndLabel: '1:00 p. m.',
+    breakPenaltyApplied: false,
+    unpaidBreakLabel: '1 h 00 min',
+    departureReportedLabel: '3:05 p. m.',
+    recordedSpanLabel: '7 h 03 min',
+    ordinaryWorkedLabel: '6 h 03 min',
+    overtimeLabel: '0 min',
+    workedLabel: '6 h 03 min',
+    riskScore: 0,
+    riskFlags: [],
+    pointLatitude: null,
+    pointLongitude: null,
+    arrivalLatitude: null,
+    arrivalLongitude: null,
+    departureLatitude: null,
+    departureLongitude: null,
+    arrivalEvidenceAvailable: false,
+    departureEvidenceAvailable: false,
+    arrivalMarkId: null,
+    breakStartMarkId: null,
+    breakEndMarkId: null,
+    departureMarkId: null,
+    arrivalReportedAt: new Date('2026-08-10T13:02:00.000Z'),
+    departureReportedAt: new Date('2026-08-10T20:05:00.000Z'),
+    pendingCorrectionMarkTypes: [],
+    punctualityStatus: 'ON_TIME',
+    lateMinutes: 0,
+    sessionId: 'TEST-SESSION-FILA',
+    assignmentId: 'TEST-ASSIGNMENT-FILA',
+    manualAttendanceAllowed: false,
+    canRecognizeEarlyArrival: false,
+    earlyTimeRecognized: false,
+    lastReview: null
+  };
+  const html = ejs.render(adminViewSource, {
+    pageTitle: 'Asistencia operativa',
+    role: 'admin',
+    board: {
+      filters: { status: 'ALL', client: 'ALL', q: '' },
+      range: { from: '2026-08-10', to: '2026-08-10' },
+      metrics: {},
+      clients: [],
+      rows: [row]
+    },
+    success: null,
+    error: null,
+    focusSessionId: ''
+  });
+
+  assert.match(html, /<article class="attendance-card status-card-AUTO_VALIDATED"/);
+  assert.match(html, /data-visible-attendance-row/);
+  assert.match(html, /<span>Entrada<\/span><strong>8:02 a\. m\.<\/strong>/);
+  assert.match(html, /<span>Almuerzo<\/span><strong>12:00 p\. m\. → 1:00 p\. m\.<\/strong>/);
+  assert.match(html, /<span>Salida<\/span><strong>3:05 p\. m\.<\/strong>/);
+  assert.doesNotMatch(html, /<details class="attendance-card/);
 });
 
 test('solo ubicación geocerca evidencia y revisión o registro manual conservan interacción plegable', () => {
