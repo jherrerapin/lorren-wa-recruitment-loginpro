@@ -17,6 +17,10 @@ function moduleMenu(html, key) {
   return html.match(new RegExp(`<details[^>]*data-module-menu="${key}"[\\s\\S]*?<\\/details>`))?.[0] || '';
 }
 
+function standaloneLink(html, key) {
+  return html.match(new RegExp(`<a[^>]*data-standalone-link="${key}"[^>]*>[\\s\\S]*?<\\/a>`))?.[0] || '';
+}
+
 test('los modulos comparten un grupo exclusivo y Sucursales/Usuarios quedan independientes', () => {
   const html = injectAdminModuleNavigation(baseHtml, req('/admin', {}, 'dev'));
   const navbar = nav(html);
@@ -25,8 +29,8 @@ test('los modulos comparten un grupo exclusivo y Sucursales/Usuarios quedan inde
   assert.match(navbar, /data-module-menu="recruitment"/);
   assert.match(navbar, /data-module-menu="operations"/);
   assert.match(navbar, /data-module-menu="payroll"/);
-  assert.match(navbar, /class="admin-module-standalone-link" href="\/admin\/locations">Sucursales<\/a>/);
-  assert.match(navbar, /class="admin-module-standalone-link" href="\/admin\/users">Usuarios<\/a>/);
+  assert.match(standaloneLink(navbar, 'branches'), /class="admin-module-standalone-link"[^>]*href="\/admin\/locations"[\s\S]*<span>Sucursales<\/span>/);
+  assert.match(standaloneLink(navbar, 'users'), /class="admin-module-standalone-link"[^>]*href="\/admin\/users"[\s\S]*<span>Usuarios<\/span>/);
   assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /href="\/admin\/locations"|href="\/admin\/users"/);
   assert.match(navbar, /href="\/admin\/monitor"/);
   assert.match(navbar, /href="\/admin\/bot-knowledge"/);
@@ -40,13 +44,26 @@ test('Sucursales queda fuera de Reclutamiento y se marca activo como enlace inde
   assert.match(recruitmentMenu, /href="\/admin">Panel de candidatos<\/a>/);
   assert.doesNotMatch(recruitmentMenu, /href="\/admin\/locations"|>Sucursales<\/a>|href="\/admin\/vacancies"|>Vacantes<\/a>|>Ciudades<\/a>/);
   assert.match(recruitmentMenu, /href="\/admin\/estadisticas">Estadísticas<\/a>/);
-  assert.match(recruitment, /class="admin-module-standalone-link" href="\/admin\/locations">Sucursales<\/a>/);
-  assert.match(recruitment, /admin-module-standalone-link[^>]*href="\/admin\/users"/);
+  assert.match(standaloneLink(recruitment, 'branches'), /href="\/admin\/locations"[\s\S]*<span>Sucursales<\/span>/);
+  assert.match(standaloneLink(recruitment, 'users'), /href="\/admin\/users"/);
   assert.doesNotMatch(recruitment, /data-module-menu="operations"|data-module-menu="payroll"/);
 
   const branches = nav(injectAdminModuleNavigation(baseHtml, req('/admin/locations')));
-  assert.match(branches, /class="admin-module-standalone-link is-active" href="\/admin\/locations">Sucursales<\/a>/);
+  assert.match(standaloneLink(branches, 'branches'), /class="admin-module-standalone-link is-active"/);
   assert.doesNotMatch(moduleMenu(branches, 'recruitment'), /admin-module-menu is-active/);
+});
+
+test('Sucursales y Usuarios muestran iconos PNG sin depender de emoji o SVG', () => {
+  const navbar = nav(injectAdminModuleNavigation(baseHtml, req('/admin', {}, 'dev')));
+  const branches = standaloneLink(navbar, 'branches');
+  const users = standaloneLink(navbar, 'users');
+
+  for (const link of [branches, users]) {
+    assert.match(link, /class="admin-module-nav-icon"/);
+    assert.match(link, /background-image:url\(data:image\/png;base64,[A-Za-z0-9+/=]+\)/);
+    assert.doesNotMatch(link, /<svg\b|[🏢👥🏬🧑]/u);
+  }
+  assert.notEqual(branches, users);
 });
 
 test('cada desplegable conserva opciones y permisos de Operaciones y Nómina', () => {
@@ -129,8 +146,30 @@ test('dashboard de despacho queda compacto cuando todos sus accesos ya estan en 
 
 test('Usuarios se marca activo sin marcar Reclutamiento como modulo activo', () => {
   const navbar = nav(injectAdminModuleNavigation(baseHtml, req('/admin/users')));
-  assert.match(navbar, /class="admin-module-standalone-link is-active" href="\/admin\/users">Usuarios<\/a>/);
+  assert.match(standaloneLink(navbar, 'users'), /class="admin-module-standalone-link is-active"/);
   assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /admin-module-menu is-active/);
+});
+
+test('Sucursales recupera pausa/revisión y oculta agenda hasta habilitar entrevistas', async () => {
+  const [view, fields] = await Promise.all([
+    readFile(new URL('../src/views/locations.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/partials/locationOperationConfigFields.ejs', import.meta.url), 'utf8')
+  ]);
+
+  assert.match(view, /action="\/admin\/vacancies\/<%= config\.id %>\/toggle"/);
+  assert.match(view, /action="\/admin\/vacancies\/<%= config\.id %>\/toggle-review"/);
+  assert.match(view, /data-vacancy-action-form/);
+  assert.match(view, /dashboardReviewEnabled/);
+  assert.match(view, /Revisión HV en panel/);
+  assert.match(view, /syncInterviewFields/);
+  assert.match(view, /Crear operación y activar vacante/);
+
+  assert.doesNotMatch(fields, /Operación activa en Lórren|Recibir postulaciones|Agenda de entrevista habilitada/);
+  assert.match(fields, /type="hidden" name="isActive"/);
+  assert.match(fields, /type="hidden" name="acceptingApplications"/);
+  assert.match(fields, /data-scheduling-toggle/);
+  assert.match(fields, /Habilitar entrevistas/);
+  assert.match(fields, /data-interview-field/);
 });
 
 test('entorno de pruebas no depende de permiso de Despacho para seguir visible', () => {
