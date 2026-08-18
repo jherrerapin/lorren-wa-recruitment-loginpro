@@ -250,7 +250,8 @@ export function isDispatchDepartureWithinOperationalWindow(window, value) {
 export function getDispatchArrivalWindowState(input = {}) {
   const now = requiredTimestamp(input.now, 'attendance_window_now');
   const expectedStartAt = requiredTimestamp(input.expectedStartAt, 'attendance_expected_start');
-  const opensAt = new Date(expectedStartAt.getTime());
+  const serviceDateKey = instantDateKeyInBogota(expectedStartAt, 'attendance_expected_start');
+  const opensAt = new Date(`${serviceDateKey}T00:00:00-05:00`);
   const closesAt = new Date(expectedStartAt.getTime() + ARRIVAL_WINDOW_MS);
   const open = now >= opensAt && now <= closesAt;
   return {
