@@ -69,6 +69,36 @@ test('el compactador elimina textos auxiliares y conserva controles explícitos 
   assert.match(compactSource, /querySelectorAll\('\[data-map-mode\]'\)/);
 });
 
+test('asistencia usa un solo calendario visual y conserva from to como contrato oculto', () => {
+  assert.match(compactSource, /installAttendanceRangePicker/);
+  assert.match(compactSource, /rangeLabel\.textContent = 'Fecha \/ rango'/);
+  assert.match(compactSource, /fromInput\.type = 'hidden'/);
+  assert.match(compactSource, /toInput\.type = 'hidden'/);
+  assert.match(compactSource, /pendingRange = \{ from: key, to: key \}/);
+  assert.match(compactSource, /key < pendingRange\.from[\s\S]*from: key, to: pendingRange\.from[\s\S]*from: pendingRange\.from, to: key/);
+  assert.match(compactSource, /data-attendance-calendar-prev/);
+  assert.match(compactSource, /data-attendance-calendar-next/);
+  assert.match(compactSource, /fromInput\.value = pendingRange\.from/);
+  assert.match(compactSource, /toInput\.value = pendingRange\.to/);
+  assert.match(compactSource, /classList\.add\('in-range'\)/);
+  assert.match(compactSource, /classList\.add\('is-edge'\)/);
+  assert.doesNotMatch(compactSource, /window\.(?:alert|confirm|prompt)\s*\(/);
+});
+
+test('las métricas navegan a sus datos y la proyección tardía nunca excluye filas sin reconciliar', () => {
+  assert.match(compactSource, /value === 'asignaciones'[^\n]*status: 'ALL'/);
+  assert.match(compactSource, /value === 'por revisar'[^\n]*status: 'REVIEW_REQUIRED'/);
+  assert.match(compactSource, /value === 'automáticas'[^\n]*status: 'AUTO_VALIDATED'/);
+  assert.match(compactSource, /value === 'manuales'[^\n]*status: 'MANUAL_VALIDATED'/);
+  assert.match(compactSource, /value === 'rechazadas'[^\n]*status: 'REJECTED'/);
+  assert.match(compactSource, /value === 'sin llegada'[^\n]*status: 'NO_SHOW'/);
+  assert.match(compactSource, /value === 'llegadas tarde'[^\n]*metric: LATE_METRIC/);
+  assert.match(compactSource, /return `\$\{ATTENDANCE_PATH\}\$\{query \? `\?\$\{query\}` : ''\}#attendance-list`/);
+  assert.match(compactSource, /statusControl\?\.value === 'LATE' \|\| lateMinutes > 0/);
+  assert.match(compactSource, /if \(Number\.isFinite\(expectedLate\) && expectedLate === lateCards\.length\) \{[\s\S]*card\.hidden = !lateCards\.includes\(card\)/);
+  assert.match(compactSource, /lateCards\.forEach\(\(card\) => card\.classList\.add\('attendance-metric-focus'\)\)/);
+});
+
 test('el tablero conserva las señales de riesgo como datos de auditoría aunque la tarjeta no las muestre', async () => {
   const offlineFlags = ['OFFLINE_WEB_CAPTURE', 'CLIENT_CLOCK_UNTRUSTED'];
   const assignment = {
