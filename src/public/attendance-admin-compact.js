@@ -26,17 +26,11 @@
   function applySummaryLayout(summary) {
     if (!summary) return;
 
-    const width = Number(summary.getBoundingClientRect?.().width || summary.clientWidth || 0);
     summary.style.width = '100%';
     summary.style.maxWidth = '100%';
     summary.style.minWidth = '0';
-    summary.style.gridTemplateColumns = width > 0 && width < 360
-      ? 'minmax(0, 1fr)'
-      : (width > 0 && width < 560
-        ? 'repeat(2, minmax(0, 1fr))'
-        : 'minmax(0, 1.35fr) repeat(3, minmax(0, 1fr))');
 
-    summary.querySelectorAll('.summary-name, .summary-identity').forEach((item) => {
+    summary.querySelectorAll('.summary-name, .summary-identity, .attendance-mark-cell, .attendance-hours-cell').forEach((item) => {
       item.style.minWidth = '0';
       item.style.maxWidth = '100%';
       item.style.overflowWrap = 'anywhere';
@@ -62,11 +56,6 @@
   }
 
   function removeDetailNoise() {
-    document.querySelectorAll('.risk-flag, .info-chip').forEach((chip) => {
-      const text = normalized(chip.textContent);
-      if (text.includes('anticipado') || text.includes('hora ordinaria')) chip.remove();
-    });
-
     document.querySelectorAll('.recognize-early span').forEach((copy) => {
       copy.innerHTML = '<strong>Reconocer tiempo anterior al turno</strong>';
     });
@@ -77,7 +66,7 @@
     removeAll('.attendance-list-tools p');
     removeAll('.calculation-note');
     removeAll('.work-grid');
-    removeAll('.attendance-risk-explanation');
+    removeAll('.attendance-risk-explanation, .risk-score, .risk-flag');
     removeAll('.review-hint');
     removeAll('.info-chip');
     removeSummaryNoise();

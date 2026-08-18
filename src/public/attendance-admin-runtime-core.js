@@ -10,136 +10,6 @@
   const TILE_TIMEOUT_MS = 5_000;
   const TILE_ERROR_LIMIT = 2;
 
-  const riskOriginLabels = Object.freeze({
-    ARRIVAL: 'Llegada',
-    BREAK_START: 'Inicio de almuerzo',
-    BREAK_END: 'Fin de almuerzo',
-    DEPARTURE: 'Salida',
-    SESSION: 'Turno · señal histórica'
-  });
-
-  const riskTranslations = Object.freeze({
-    'ASSIGNMENT NOT ACTIVE': {
-      label: 'Asignación no activa',
-      help: 'La asignación ya no estaba habilitada para recibir una marcación.'
-    },
-    'ATTENDANCE NOT ENABLED': {
-      label: 'Asistencia no habilitada',
-      help: 'El punto operativo no tenía activa la configuración de asistencia.'
-    },
-    'DUPLICATE ARRIVAL': {
-      label: 'Llegada duplicada',
-      help: 'Ya existía una marcación de llegada para esta asignación.'
-    },
-    'ARRIVAL WINDOW NOT OPEN': {
-      label: 'Fuera de la ventana de marcación',
-      help: 'La marcación se intentó antes de abrir o después de cerrar el horario permitido.'
-    },
-    'GEOFENCE NOT CONFIGURED': {
-      label: 'Geocerca no configurada',
-      help: 'El punto no tenía coordenadas y radio suficientes para validar la ubicación.'
-    },
-    'LOCATION NOT AVAILABLE': {
-      label: 'Ubicación no disponible',
-      help: 'No se recibió una lectura GPS válida para comparar con el punto operativo.'
-    },
-    'OUTSIDE GEOFENCE': {
-      label: 'Fuera de la geocerca',
-      help: 'La ubicación reportada quedó por fuera del radio permitido.'
-    },
-    'LOW LOCATION ACCURACY': {
-      label: 'Precisión GPS insuficiente',
-      help: 'El margen de error del GPS superó el máximo configurado para el punto.'
-    },
-    'UNAUTHORIZED DEVICE': {
-      label: 'Dispositivo no autorizado',
-      help: 'La marcación no provino del dispositivo activado para el auxiliar.'
-    },
-    'SHARED DEVICE SIGNAL': {
-      label: 'Posible dispositivo compartido',
-      help: 'Se detectaron señales compatibles con el uso del mismo dispositivo por más de una persona.'
-    },
-    'PERSISTENT STORAGE UNAVAILABLE': {
-      label: 'Almacenamiento seguro no disponible',
-      help: 'El navegador no confirmó almacenamiento persistente para conservar la marca local.'
-    },
-    'OFFLINE WEB CAPTURE': {
-      label: 'Marcación guardada sin conexión',
-      help: 'La marcación se conservó primero en el celular y se envió cuando volvió la conexión.'
-    },
-    'CLIENT CLOCK UNTRUSTED': {
-      label: 'Hora del celular no verificable',
-      help: 'Al sincronizar después, el servidor no puede certificar por sí solo que la hora local del celular no fue modificada.'
-    },
-    'DELAYED SYNC': {
-      label: 'Sincronización tardía',
-      help: 'Pasaron varios minutos entre la captura local y la recepción en Lórren.'
-    }
-  });
-
-  function normalizedText(value) {
-    return String(value || '').trim().replace(/\s+/g, ' ').toUpperCase();
-  }
-
-  function riskPresentation(value) {
-    const original = normalizedText(value);
-    const separator = original.indexOf('::');
-    if (separator < 0) return { riskCode: original, originLabel: null };
-    const originCode = original.slice(0, separator).trim().replaceAll(' ', '_');
-    const riskCode = original.slice(separator + 2).trim();
-    return {
-      riskCode,
-      originLabel: riskOriginLabels[originCode] || null
-    };
-  }
-
-  function riskLevel(score) {
-    if (score >= 80) return 'Crítico';
-    if (score >= 50) return 'Alto';
-    if (score >= 25) return 'Medio';
-    return 'Bajo';
-  }
-
-  function translateRiskSignals(root = document) {
-    root.querySelectorAll?.('.risk-flag').forEach((element) => {
-      if (element.dataset.riskTranslated === 'true') return;
-      const presentation = riskPresentation(element.textContent);
-      const translation = riskTranslations[presentation.riskCode];
-      if (!translation) return;
-      const visibleLabel = presentation.originLabel
-        ? `${presentation.originLabel}: ${translation.label}`
-        : translation.label;
-      element.dataset.riskTranslated = 'true';
-      element.dataset.riskCode = presentation.riskCode.replaceAll(' ', '_');
-      element.textContent = visibleLabel;
-      element.title = translation.help;
-      element.setAttribute('aria-label', `${visibleLabel}. ${translation.help}`);
-    });
-
-    root.querySelectorAll?.('.risk-score').forEach((element) => {
-      if (element.dataset.riskScoreExplained === 'true') return;
-      const match = String(element.textContent || '').match(/Riesgo:\s*(\d+)\s*\/\s*100/i);
-      if (!match) return;
-      const score = Math.max(0, Math.min(100, Number(match[1])));
-      element.dataset.riskScoreExplained = 'true';
-      element.textContent = `Puntaje de revisión: ${score}/100 · ${riskLevel(score)}`;
-      element.title = 'Es un puntaje operativo acumulado por señales que requieren verificación. No representa una probabilidad de fraude.';
-      element.setAttribute('aria-label', `${element.textContent}. No es una probabilidad de fraude.`);
-    });
-
-    root.querySelectorAll?.('.risk-row').forEach((row) => {
-      if (row.dataset.riskExplanationInstalled === 'true') return;
-      const hasOfflineCapture = row.querySelector('[data-risk-code="OFFLINE_WEB_CAPTURE"]');
-      if (!hasOfflineCapture) return;
-      row.dataset.riskExplanationInstalled = 'true';
-      const note = document.createElement('div');
-      note.className = 'attendance-risk-explanation';
-      note.style.cssText = 'flex-basis:100%;margin-top:3px;padding:10px 12px;border:1px solid #f2c66d;border-radius:10px;background:#fff8e7;color:#76520b;font-size:12px;line-height:1.45;';
-      note.textContent = 'Este puntaje no significa que la persona esté fuera de la geocerca ni que haya fraude. La marca se guardó primero en el celular y se sincronizó después; por seguridad, la hora local necesita revisión humana. Una fotografía reciente reduce el puntaje, pero no certifica por sí sola la hora del dispositivo.';
-      row.appendChild(note);
-    });
-  }
-
   function finiteCoordinate(value, min, max) {
     const number = Number(value);
     return Number.isFinite(number) && number >= min && number <= max ? number : null;
@@ -323,7 +193,6 @@
   }
 
   function initialize() {
-    translateRiskSignals();
     installReliableAdminTiles(window.L);
     scheduleMapRepair(document);
 
@@ -332,9 +201,6 @@
         if (details.open) scheduleMapRepair(details);
       });
     });
-
-    const observer = new MutationObserver(() => translateRiskSignals());
-    observer.observe(document.body, { childList: true, subtree: true });
   }
 
   if (document.readyState === 'loading') {
