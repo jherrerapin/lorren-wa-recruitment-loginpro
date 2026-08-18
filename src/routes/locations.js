@@ -120,10 +120,10 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
   const requestedVacancyIds = normalizeMany(body.scopeVacancyIds);
 
   if (!requestedCities.length) {
-    return { error: 'Selecciona al menos una sucursal para filtrar sus operaciones.' };
+    return { error: 'Selecciona al menos una sucursal para filtrar sus vacantes.' };
   }
   if (!requestedVacancyIds.length) {
-    return { error: 'Selecciona al menos una operación para este usuario.' };
+    return { error: 'Selecciona al menos una vacante para este usuario.' };
   }
 
   const selectedVacancies = await prisma.vacancy.findMany({
@@ -139,13 +139,13 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
   const foundIds = new Set(selectedVacancies.map((vacancy) => vacancy.id));
   const missingVacancyIds = requestedVacancyIds.filter((id) => !foundIds.has(id));
   if (missingVacancyIds.length) {
-    return { error: 'Una o varias operaciones seleccionadas ya no existen.' };
+    return { error: 'Una o varias vacantes seleccionadas ya no existen.' };
   }
 
   const requestedCitySet = new Set(requestedCities);
   const outsideSelectedCities = selectedVacancies.filter((vacancy) => !requestedCitySet.has(vacancy.city));
   if (outsideSelectedCities.length) {
-    return { error: 'Solo puedes asignar operaciones pertenecientes a las sucursales seleccionadas.' };
+    return { error: 'Solo puedes asignar vacantes pertenecientes a las sucursales seleccionadas.' };
   }
 
   const selectedCities = [...new Set(selectedVacancies.map((vacancy) => vacancy.city).filter(Boolean))]
@@ -224,7 +224,7 @@ export function locationsRouter(prisma) {
       return res.redirect('/admin/locations');
     }
     if (isSiberiaName(name)) {
-      flash(res, 'error', 'Siberia pertenece a la sucursal Bogotá. Créala como operación o zona dentro de Bogotá, no como sucursal independiente.');
+      flash(res, 'error', 'Siberia pertenece a la sucursal Bogotá. Créala como vacante o zona dentro de Bogotá, no como sucursal independiente.');
       return res.redirect('/admin/locations');
     }
     try {
@@ -260,7 +260,7 @@ export function locationsRouter(prisma) {
       return res.redirect('/admin/locations');
     }
     if (city.name !== name && city._count.operations > 0) {
-      flash(res, 'error', 'No se puede renombrar una sucursal que ya tiene operaciones porque existen referencias históricas de reclutamiento. Crea la sucursal correcta y migra sus operaciones de forma controlada.');
+      flash(res, 'error', 'No se puede renombrar una sucursal que ya tiene vacantes porque existen referencias históricas de reclutamiento. Crea la sucursal correcta y migra sus vacantes de forma controlada.');
       return res.redirect('/admin/locations');
     }
 
@@ -291,7 +291,7 @@ export function locationsRouter(prisma) {
         return res.redirect('/admin/locations');
       }
       if (city._count.operations > 0) {
-        flash(res, 'error', `No se puede eliminar "${city.name}" porque tiene operaciones asociadas.`);
+        flash(res, 'error', `No se puede eliminar "${city.name}" porque tiene vacantes asociadas.`);
         return res.redirect('/admin/locations');
       }
       await prisma.city.delete({ where: { id: req.params.id } });
@@ -312,9 +312,9 @@ export function locationsRouter(prisma) {
       select: { id: true, name: true }
     });
     if (!city) return operationError(req, res, 404, 'Sucursal no encontrada.');
-    if (!name) return operationError(req, res, 400, 'El nombre de la operación no puede estar vacío.');
+    if (!name) return operationError(req, res, 400, 'El nombre de la vacante no puede estar vacío.');
     if (isSiberiaName(name) && !isBogotaName(city.name)) {
-      return operationError(req, res, 400, 'La operación Siberia solo puede pertenecer a la sucursal Bogotá.');
+      return operationError(req, res, 400, 'La vacante Siberia solo puede pertenecer a la sucursal Bogotá.');
     }
 
     try {
@@ -325,12 +325,12 @@ export function locationsRouter(prisma) {
           operation: { id: operation.id, name: operation.name, cityId: city.id, cityName: city.name }
         });
       }
-      flash(res, 'success', `Operación "${name}" creada. Completa su información para activar Lórren.`);
+      flash(res, 'success', `Vacante "${name}" creada. Completa su información para activar Lórren.`);
     } catch (error) {
       if (error.code === 'P2002') {
-        return operationError(req, res, 409, `Ya existe una operación "${name}" en esta sucursal.`);
+        return operationError(req, res, 409, `Ya existe una vacante "${name}" en esta sucursal.`);
       }
-      return operationError(req, res, 500, 'Error al crear la operación.');
+      return operationError(req, res, 500, 'Error al crear la vacante.');
     }
     return res.redirect('/admin/locations');
   });
@@ -347,22 +347,22 @@ export function locationsRouter(prisma) {
       include: { city: { select: { name: true } } }
     });
     if (!operation) {
-      flash(res, 'error', 'Operación no encontrada.');
+      flash(res, 'error', 'Vacante no encontrada.');
       return res.redirect('/admin/locations');
     }
     if (isSiberiaName(name) && !isBogotaName(operation.city?.name)) {
-      flash(res, 'error', 'La operación Siberia solo puede pertenecer a la sucursal Bogotá.');
+      flash(res, 'error', 'La vacante Siberia solo puede pertenecer a la sucursal Bogotá.');
       return res.redirect('/admin/locations');
     }
 
     try {
       await prisma.operation.update({ where: { id: operation.id }, data: { name } });
-      flash(res, 'success', `Operación renombrada a "${name}".`);
+      flash(res, 'success', `Vacante renombrada a "${name}".`);
     } catch (error) {
       if (error.code === 'P2002') {
-        flash(res, 'error', 'Ya existe una operación con ese nombre en la misma sucursal.');
+        flash(res, 'error', 'Ya existe una vacante con ese nombre en la misma sucursal.');
       } else {
-        flash(res, 'error', 'Error al renombrar la operación.');
+        flash(res, 'error', 'Error al renombrar la vacante.');
       }
     }
     return res.redirect('/admin/locations');
@@ -375,17 +375,17 @@ export function locationsRouter(prisma) {
         include: { _count: { select: { vacancies: true } } }
       });
       if (!operation) {
-        flash(res, 'error', 'Operación no encontrada.');
+        flash(res, 'error', 'Vacante no encontrada.');
         return res.redirect('/admin/locations');
       }
       if (operation._count.vacancies > 0) {
-        flash(res, 'error', `No se puede eliminar "${operation.name}" porque tiene ${operation._count.vacancies} configuración(es) de reclutamiento asociada(s).`);
+        flash(res, 'error', `No se puede eliminar la vacante "${operation.name}" porque ya tiene configuración de reclutamiento asociada.`);
         return res.redirect('/admin/locations');
       }
       await prisma.operation.delete({ where: { id: operation.id } });
-      flash(res, 'success', `Operación "${operation.name}" eliminada.`);
+      flash(res, 'success', `Vacante "${operation.name}" eliminada.`);
     } catch (_error) {
-      flash(res, 'error', 'Error al eliminar la operación.');
+      flash(res, 'error', 'Error al eliminar la vacante.');
     }
     return res.redirect('/admin/locations');
   });
@@ -441,8 +441,8 @@ export function locationsRouter(prisma) {
     });
 
     const accessDescription = accessUpdate.accessScope === 'ALL'
-      ? 'todas las sucursales y operaciones'
-      : `${accessUpdate.selectedVacancyIds.length} operación(es) de ${accessUpdate.selectedCities.join(', ')}`;
+      ? 'todas las sucursales y vacantes'
+      : `${accessUpdate.selectedVacancyIds.length} vacante(s) de ${accessUpdate.selectedCities.join(', ')}`;
 
     return res.redirect(usersRedirect(
       'success',
