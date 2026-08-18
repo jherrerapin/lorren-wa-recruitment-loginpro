@@ -42,14 +42,23 @@ test('un viewport existente no se duplica y un main sin clase recibe el shell', 
   assert.match(html, /<main class="admin-module-page-shell">Contenido<\/main>/);
 });
 
-test('el shell comparte gutters entre header y cuerpo y permite wrap antes de solaparse', async () => {
-  const css = await readFile(new URL('../src/public/admin-module-shell.css', import.meta.url), 'utf8');
+test('el shell comparte gutters, compacta controles y permite wrap antes de solaparse', async () => {
+  const [css, navigationCss] = await Promise.all([
+    readFile(new URL('../src/public/admin-module-shell.css', import.meta.url), 'utf8'),
+    readFile(new URL('../src/public/admin-module-navigation.css', import.meta.url), 'utf8')
+  ]);
 
   assert.match(css, /--admin-shell-max-width:\s*1600px/);
   assert.match(css, /--admin-shell-gutter:\s*clamp\(14px,\s*2vw,\s*24px\)/);
+  assert.match(css, /--admin-shell-control-gap:\s*7px/);
   assert.match(css, /\.admin-module-page-shell:not\(\.assignment-page\)[\s\S]*max-width:\s*var\(--admin-shell-max-width\)/);
-  assert.match(css, /\.admin-module-navbar[\s\S]*flex-wrap:\s*wrap/);
+  assert.match(css, /\.admin-module-navbar[\s\S]*flex-wrap:\s*wrap[\s\S]*column-gap:\s*var\(--admin-shell-control-gap\)\s*!important/);
   assert.match(css, /padding-left:\s*max\(var\(--admin-shell-gutter\),\s*calc\(\(100vw - var\(--admin-shell-max-width\)\) \/ 2 \+ var\(--admin-shell-gutter\)\)\)/);
+
+  const shellGap = Number(css.match(/--admin-shell-control-gap:\s*(\d+)px/)?.[1]);
+  const moduleGap = Number(navigationCss.match(/\.admin-module-nav-links\s*\{[\s\S]*?gap:\s*(\d+)px/)?.[1]);
+  assert.equal(shellGap, moduleGap, 'Sucursales debe quedar a la misma distancia visual que los módulos entre sí');
+
   assert.match(css, /@media \(min-width:\s*901px\) and \(max-width:\s*1180px\)[\s\S]*\.spacer[\s\S]*display:\s*none/);
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*admin-module-standalone-link[\s\S]*flex:\s*1 1 130px/);
   assert.match(css, /@media \(max-width:\s*430px\)[\s\S]*flex-basis:\s*100%/);
