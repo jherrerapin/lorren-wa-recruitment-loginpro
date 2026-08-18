@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import ejs from 'ejs';
 
 const bridgeSource = fs.readFileSync(new URL('../src/routes/dispatchBridge.js', import.meta.url), 'utf8');
 const adminRouteSource = fs.readFileSync(new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url), 'utf8');
@@ -54,8 +55,10 @@ test('el dashboard resuelve la misma autoridad antes de mostrar asistencia', () 
   assert.match(dashboardSource, /href="\/admin\/operaciones\/asistencia"/);
 });
 
-test('cada auxiliar ocupa una sola fila y entrada, almuerzo y salida quedan visibles sin desplegar la tarjeta', () => {
-  assert.match(adminViewSource, /\.attendance-list \{ display: grid; grid-template-columns: 1fr;/);
+test('cada auxiliar ocupa una fila compacta con marcaciones visibles y sin avisos de revisión', () => {
+  assert.match(adminViewSource, /\.attendance-list \{ display: grid; grid-template-columns: 1fr; gap: 7px;/);
+  assert.match(adminViewSource, /\.attendance-summary \{ padding: 7px 10px;/);
+  assert.match(adminViewSource, /\.review-panel > summary, \[data-map-details\] > summary \{ cursor: pointer; padding: 6px 9px;/);
   assert.match(adminViewSource, /<article class="attendance-card status-card-/);
   assert.match(adminViewSource, /data-visible-attendance-row/);
   assert.doesNotMatch(adminViewSource, /<details class="attendance-card/);
@@ -63,10 +66,85 @@ test('cada auxiliar ocupa una sola fila y entrada, almuerzo y salida quedan visi
   assert.match(adminViewSource, /<span>Entrada<\/span><strong><%= row\.arrivalReportedLabel \|\| 'Sin registro' %>/);
   assert.match(adminViewSource, /<span>Almuerzo<\/span><strong><%= lunchLabel %>/);
   assert.match(adminViewSource, /<span>Salida<\/span><strong><%= row\.departureReportedLabel \|\| 'Sin registro' %>/);
-  assert.match(adminViewSource, /const lunchLabel = row\.breakStarted/);
-  assert.match(adminViewSource, /: 'Sin almuerzo';/);
   assert.match(adminViewSource, /Ord\. <%= row\.ordinaryWorkedLabel/);
   assert.match(adminViewSource, /Extra: <%= row\.overtimeLabel/);
+  assert.doesNotMatch(adminViewSource, /class="attendance-state-cell"/);
+  assert.doesNotMatch(adminViewSource, /Riesgo: <%= row\.riskScore/);
+  assert.doesNotMatch(adminViewSource, /row\.riskFlags\.forEach/);
+});
+
+test('el render conserva información de asistencia aunque el backend entregue puntaje y señales de riesgo', () => {
+  const row = {
+    status: 'REVIEW_REQUIRED',
+    serviceDateLabel: '10 ago 2026',
+    scheduleLabel: '08:00–15:00',
+    serviceDateIso: '2026-08-10',
+    workerName: 'TEST Auxiliar compacto',
+    documentType: 'CC',
+    documentNumber: 'TEST-DOC-COMPACTO',
+    operationPointName: 'TEST Operación compacta',
+    cityName: 'TEST Ciudad',
+    arrivalReportedLabel: '8:02 a. m.',
+    effectiveWorkStartLabel: '8:02 a. m.',
+    earlyMinutesExcludedLabel: '0 min',
+    breakStarted: true,
+    breakEnded: true,
+    breakStartLabel: '12:00 p. m.',
+    breakEndLabel: '1:00 p. m.',
+    breakPenaltyApplied: false,
+    unpaidBreakLabel: '1 h 00 min',
+    departureReportedLabel: '3:05 p. m.',
+    recordedSpanLabel: '7 h 03 min',
+    ordinaryWorkedLabel: '6 h 03 min',
+    overtimeLabel: '0 min',
+    workedLabel: '6 h 03 min',
+    riskScore: 0,
+    riskFlags: ['ARRIVAL::BIOMETRIC_ASSESSMENT_MISSING'],
+    pointLatitude: null,
+    pointLongitude: null,
+    arrivalLatitude: null,
+    arrivalLongitude: null,
+    departureLatitude: null,
+    departureLongitude: null,
+    arrivalEvidenceAvailable: false,
+    departureEvidenceAvailable: false,
+    arrivalMarkId: null,
+    breakStartMarkId: null,
+    breakEndMarkId: null,
+    departureMarkId: null,
+    arrivalReportedAt: new Date('2026-08-10T13:02:00.000Z'),
+    departureReportedAt: new Date('2026-08-10T20:05:00.000Z'),
+    pendingCorrectionMarkTypes: [],
+    punctualityStatus: 'ON_TIME',
+    lateMinutes: 0,
+    sessionId: 'TEST-SESSION-COMPACTA',
+    assignmentId: 'TEST-ASSIGNMENT-COMPACTA',
+    manualAttendanceAllowed: false,
+    canRecognizeEarlyArrival: false,
+    earlyTimeRecognized: false,
+    lastReview: null
+  };
+
+  const html = ejs.render(adminViewSource, {
+    pageTitle: 'Asistencia operativa',
+    role: 'admin',
+    board: {
+      filters: { status: 'ALL', client: 'ALL', q: '' },
+      range: { from: '2026-08-10', to: '2026-08-10' },
+      metrics: {},
+      clients: [],
+      rows: [row]
+    },
+    success: null,
+    error: null,
+    focusSessionId: ''
+  });
+
+  assert.match(html, /<span>Entrada<\/span><strong>8:02 a\. m\.<\/strong>/);
+  assert.match(html, /<span>Almuerzo<\/span><strong>12:00 p\. m\. → 1:00 p\. m\.<\/strong>/);
+  assert.match(html, /<span>Salida<\/span><strong>3:05 p\. m\.<\/strong>/);
+  assert.match(html, /Ord\. 6 h 03 min/);
+  assert.doesNotMatch(html, /Puntaje de revisión|Riesgo:\s*0\/100|BIOMETRIC[_ ]ASSESSMENT[_ ]MISSING/);
 });
 
 test('solo ubicación geocerca evidencia y revisión o registro manual conservan interacción plegable', () => {
