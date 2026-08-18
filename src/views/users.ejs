@@ -196,7 +196,7 @@
             <div class="field full" id="vacancyField"><label for="scopeVacancyId">Vacante</label><select id="scopeVacancyId" name="scopeVacancyId"><option value="">Selecciona una vacante</option><% for (const vacancy of allowedVacancies) { %><option value="<%= vacancy.id %>"><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></option><% } %></select></div>
           </div>
         </div>
-        <% if (canManageModulePermissions) { %>
+        <% if (role === 'dev') { %>
           <div class="form-section">
             <h3 class="form-section-title">Permisos del panel</h3>
             <div class="permission-stack">
@@ -214,7 +214,7 @@
                 <label class="dispatch-row"><input name="canAccessCvAnalysis" type="checkbox" value="true" /><span><strong>Análisis de hojas de vida</strong><small>Organiza candidatos según la vacante y el perfil buscado.</small></span></label>
               </div>
             </div>
-            <p class="hint" style="margin-top:10px;">DEV y reclutador general pueden conceder o retirar estos permisos.</p>
+            <p class="hint" style="margin-top:10px;">Solo DEV puede conceder permisos iniciales. Reclutador general puede activarlos o retirarlos después desde la edición del usuario.</p>
           </div>
         <% } %>
         <div class="form-actions"><button class="btn btn-primary" type="submit">Crear usuario</button></div>
@@ -310,7 +310,7 @@
                           </div>
                           <span class="hint">Debes marcar al menos una vacante. Las vacantes nuevas no se habilitarán automáticamente.</span>
                         </div>
-                        <% if (canManageModulePermissions) { %>
+                        <% if (role === 'dev' || currentUsername === 'reclutador-general') { %>
                           <div class="field full">
                             <label>Permisos adicionales</label>
                             <label class="dispatch-row"><input id="edit-canAccessDispatch-<%= user.id %>" type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label>
