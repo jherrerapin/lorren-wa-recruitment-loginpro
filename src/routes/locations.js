@@ -1,6 +1,7 @@
 // routes/locations.js — CRUD de Sucursales, Operaciones y asignación territorial de usuarios
 import express from 'express';
 import {
+  canManageUserModulePermissions,
   encodeUserAccessSelection,
   normalizeUserAccessScope
 } from '../services/appUsers.js';
@@ -426,7 +427,7 @@ export function locationsRouter(prisma) {
       recoveryPhone: normalize(req.body.recoveryPhone),
       recoveryEmail: normalize(req.body.recoveryEmail)
     };
-    if (req.userRole === 'dev') {
+    if (canManageUserModulePermissions(req)) {
       data.canAccessAttendance = isChecked(req.body.canAccessAttendance);
       data.canAccessDispatch = isChecked(req.body.canAccessDispatch) || data.canAccessAttendance;
       data.canAccessMetaAds = isChecked(req.body.canAccessMetaAds);
