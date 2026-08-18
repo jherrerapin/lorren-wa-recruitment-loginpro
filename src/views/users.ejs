@@ -163,7 +163,7 @@
     <div class="page-header">
       <div>
         <h1>Usuarios de reclutamiento</h1>
-        <p>Al editar un usuario, primero selecciona una o varias ciudades y después marca únicamente las vacantes que podrá administrar. Marcar una ciudad no concede acceso automático a todas sus vacantes.</p>
+        <p>Al editar un usuario, primero selecciona una o varias sucursales y después marca únicamente las vacantes que podrá administrar. Marcar una sucursal no concede acceso automático a todas sus vacantes.</p>
       </div>
     </div>
 
@@ -189,10 +189,10 @@
           <div class="grid">
             <div class="field"><label for="accessScope">Alcance</label><select id="accessScope" name="accessScope">
               <% if (manageableScopeOptions.canCreateAll) { %><option value="ALL">Todas las vacantes</option><% } %>
-              <% if (allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una ciudad</option><% } %>
+              <% if (allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una sucursal</option><% } %>
               <% if (allowedVacancies.length) { %><option value="VACANCY">Una vacante específica</option><% } %>
             </select></div>
-            <div class="field" id="cityField"><label for="scopeCity">Ciudad</label><select id="scopeCity" name="scopeCity"><option value="">Selecciona una ciudad</option><% for (const city of allowedCities) { %><option value="<%= city %>"><%= city %></option><% } %></select></div>
+            <div class="field" id="cityField"><label for="scopeCity">Sucursal</label><select id="scopeCity" name="scopeCity"><option value="">Selecciona una sucursal</option><% for (const city of allowedCities) { %><option value="<%= city %>"><%= city %></option><% } %></select></div>
             <div class="field full" id="vacancyField"><label for="scopeVacancyId">Vacante</label><select id="scopeVacancyId" name="scopeVacancyId"><option value="">Selecciona una vacante</option><% for (const vacancy of allowedVacancies) { %><option value="<%= vacancy.id %>"><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></option><% } %></select></div>
           </div>
         </div>
@@ -214,7 +214,7 @@
                 <label class="dispatch-row"><input name="canAccessCvAnalysis" type="checkbox" value="true" /><span><strong>Análisis de hojas de vida</strong><small>Organiza candidatos según la vacante y el perfil buscado.</small></span></label>
               </div>
             </div>
-            <p class="hint" style="margin-top:10px;">Solo DEV puede conceder o retirar estos permisos.</p>
+            <p class="hint" style="margin-top:10px;">Solo DEV puede conceder permisos iniciales. Reclutador general puede activarlos o retirarlos después desde la edición del usuario.</p>
           </div>
         <% } %>
         <div class="form-actions"><button class="btn btn-primary" type="submit">Crear usuario</button></div>
@@ -242,6 +242,9 @@
                   <% } else if (selectedVacancies.length) { %>
                     <%= selectedVacancies.length === 1 ? '1 vacante seleccionada' : `${selectedVacancies.length} vacantes seleccionadas` %>
                     <% for (const vacancy of selectedVacancies) { %><small class="scope-vacancy-item"><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></small><% } %>
+                  <% } else if (user.accessScope === 'CITY') { %>
+                    <%= `${userCities.length === 1 ? 'Sucursal' : 'Sucursales'}: ${userCities.length ? userCities.join(', ') : 'Sin sucursal'}` %>
+                    <small>Acceso anterior pendiente de convertir a vacantes específicas.</small>
                   <% } else { %>
                     <%= describeUserScope(user) %>
                     <small>Acceso anterior pendiente de convertir a vacantes específicas.</small>
@@ -267,12 +270,12 @@
                         <div class="field full">
                           <label for="edit-accessScope-<%= user.id %>">Alcance de reclutamiento</label>
                           <select id="edit-accessScope-<%= user.id %>" name="accessScope" onchange="syncEditScopeVisibility('<%= user.id %>')">
-                            <option value="ALL" <%= user.accessScope === 'ALL' ? 'selected' : '' %>>Todas las ciudades y vacantes</option>
-                            <option value="VACANCY" <%= user.accessScope !== 'ALL' ? 'selected' : '' %>>Vacantes seleccionadas por ciudad</option>
+                            <option value="ALL" <%= user.accessScope === 'ALL' ? 'selected' : '' %>>Todas las sucursales y vacantes</option>
+                            <option value="VACANCY" <%= user.accessScope !== 'ALL' ? 'selected' : '' %>>Vacantes seleccionadas por sucursal</option>
                           </select>
                         </div>
                         <div class="field full" id="edit-cityField-<%= user.id %>">
-                          <label>1. Ciudades para consultar vacantes</label>
+                          <label>1. Sucursales para consultar vacantes</label>
                           <div class="access-list">
                             <% for (const city of allowedCities) { %>
                               <label class="access-option">
@@ -281,7 +284,7 @@
                               </label>
                             <% } %>
                           </div>
-                          <span class="hint">La ciudad solamente filtra la lista siguiente. No concede acceso por sí sola.</span>
+                          <span class="hint">La sucursal solamente filtra la lista siguiente. No concede acceso por sí sola.</span>
                         </div>
                         <div class="field full" id="edit-vacancyField-<%= user.id %>">
                           <label>2. Vacantes permitidas</label>
@@ -292,7 +295,7 @@
                               <div class="vacancy-city-group" data-city="<%= city %>">
                                 <strong class="vacancy-city-title"><%= city %></strong>
                                 <% if (!cityVacancies.length) { %>
-                                  <div class="vacancy-empty">Esta ciudad no tiene vacantes disponibles.</div>
+                                  <div class="vacancy-empty">Esta sucursal no tiene vacantes disponibles.</div>
                                 <% } else { %>
                                   <% for (const vacancy of cityVacancies) { %>
                                     <label class="access-option">
@@ -303,17 +306,17 @@
                                 <% } %>
                               </div>
                             <% } %>
-                            <div class="vacancy-empty" id="edit-vacancyEmpty-<%= user.id %>">Selecciona una ciudad para ver sus vacantes.</div>
+                            <div class="vacancy-empty" id="edit-vacancyEmpty-<%= user.id %>">Selecciona una sucursal para ver sus vacantes.</div>
                           </div>
                           <span class="hint">Debes marcar al menos una vacante. Las vacantes nuevas no se habilitarán automáticamente.</span>
                         </div>
-                        <% if (role === 'dev') { %>
+                        <% if (role === 'dev' || currentUsername === 'reclutador-general') { %>
                           <div class="field full">
                             <label>Permisos adicionales</label>
                             <label class="dispatch-row"><input id="edit-canAccessDispatch-<%= user.id %>" type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label>
                             <label class="dispatch-row"><input id="edit-canAccessAttendance-<%= user.id %>" type="checkbox" name="canAccessAttendance" value="true" <%= user.canAccessAttendance ? 'checked' : '' %> /><span><strong>Asistencia operativa</strong><small>Panel, revisión, geocerca, evidencia y configuración de puntos.</small></span></label>
                             <div class="statistics-permissions"><strong>Estadísticas</strong><small>Selecciona por separado las herramientas que podrá abrir.</small><label class="dispatch-row"><input type="checkbox" name="canAccessMetaAds" value="true" <%= user.canAccessMetaAds ? 'checked' : '' %> /><span><strong>Meta Ads</strong><small>Inversión, resultados y costos de los anuncios.</small></span></label><label class="dispatch-row"><input type="checkbox" name="canAccessCvAnalysis" value="true" <%= user.canAccessCvAnalysis ? 'checked' : '' %> /><span><strong>Análisis de hojas de vida</strong><small>Revisión y organización de candidatos con IA.</small></span></label></div>
-                            <span class="hint">Solo DEV puede modificar estos permisos. Asistencia activa también el acceso al módulo padre de Operaciones.</span>
+                            <span class="hint">DEV y reclutador general pueden modificar estos permisos. Asistencia activa también el acceso al módulo padre de Operaciones.</span>
                           </div>
                         <% } %>
                       </div>

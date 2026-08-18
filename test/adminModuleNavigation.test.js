@@ -173,7 +173,7 @@ test('Usuarios se marca activo sin marcar Reclutamiento como modulo activo', () 
   assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /admin-module-menu is-active/);
 });
 
-test('Sucursales recupera pausa/revisión y oculta agenda hasta habilitar entrevistas', async () => {
+test('Sucursales recupera pausa/revisión, cuenta vacantes y usa su terminología visible', async () => {
   const [view, fields] = await Promise.all([
     readFile(new URL('../src/views/locations.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/views/partials/locationOperationConfigFields.ejs', import.meta.url), 'utf8')
@@ -185,9 +185,18 @@ test('Sucursales recupera pausa/revisión y oculta agenda hasta habilitar entrev
   assert.match(view, /dashboardReviewEnabled/);
   assert.match(view, /Revisión HV en panel/);
   assert.match(view, /syncInterviewFields/);
-  assert.match(view, /Crear operación y activar vacante/);
+  assert.match(view, /const vacancyCount = city\.operations\.reduce/);
+  assert.match(view, /<%= vacancyCount %> vacante/);
+  assert.match(view, /\+ Crear vacante en/);
+  assert.match(view, /Nombre de la vacante/);
+  assert.match(view, /Crear y activar vacante/);
+  assert.doesNotMatch(view, /\+ Crear operación en|Nombre de la operación|Crear operación y activar vacante|Sin operaciones configuradas/);
 
   assert.doesNotMatch(fields, /Operación activa en Lórren|Recibir postulaciones|Agenda de entrevista habilitada/);
+  assert.doesNotMatch(fields, /contexto de la operación|dirección de operación|Requisitos reales de la operación/);
+  assert.match(fields, /contexto de la vacante/);
+  assert.match(fields, /dirección de la vacante/);
+  assert.match(fields, /Requisitos reales de la vacante/);
   assert.match(fields, /type="hidden" name="isActive"/);
   assert.match(fields, /type="hidden" name="acceptingApplications"/);
   assert.match(fields, /data-scheduling-toggle/);

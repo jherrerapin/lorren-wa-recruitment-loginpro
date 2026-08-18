@@ -27,15 +27,15 @@
 </div>
 <div class="field full">
   <label for="<%= fieldPrefix %>-description">Descripción</label>
-  <textarea id="<%= fieldPrefix %>-description" name="description" placeholder="Qué hará la persona y contexto de la operación"><%= value.roleDescription || '' %></textarea>
+  <textarea id="<%= fieldPrefix %>-description" name="description" placeholder="Qué hará la persona y contexto de la vacante"><%= value.roleDescription || '' %></textarea>
 </div>
 <div class="field full">
-  <label for="<%= fieldPrefix %>-address">Zona / dirección de operación</label>
+  <label for="<%= fieldPrefix %>-address">Zona / dirección de la vacante</label>
   <input id="<%= fieldPrefix %>-address" name="operationAddress" required value="<%= value.operationAddress || '' %>" placeholder="Ej: Siberia, zona industrial" />
 </div>
 <div class="field full">
   <label for="<%= fieldPrefix %>-requirements">Requisitos</label>
-  <textarea id="<%= fieldPrefix %>-requirements" name="requirements" required placeholder="Requisitos reales de la operación"><%= value.requirements || '' %></textarea>
+  <textarea id="<%= fieldPrefix %>-requirements" name="requirements" required placeholder="Requisitos reales de la vacante"><%= value.requirements || '' %></textarea>
 </div>
 <div class="field full">
   <label for="<%= fieldPrefix %>-conditions">Condiciones / beneficios</label>
