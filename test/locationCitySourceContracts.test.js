@@ -17,9 +17,11 @@ test('sucursales reemplaza la clasificación funcional de ciudades sin contrato 
   assert.match(route, /unifiedBranchCompatibilityData/);
   assert.match(route, /Siberia pertenece a la sucursal Bogotá/);
   assert.match(route, /isSiberiaName\(name\) && !isBogotaName\(city\.name\)/);
-  assert.match(route, /La operación Siberia solo puede pertenecer a la sucursal Bogotá/);
+  assert.match(route, /La vacante Siberia solo puede pertenecer a la sucursal Bogotá/);
   assert.doesNotMatch(view, /name="usedForRecruitment"|name="usedForDispatch"|Bot \/ Reclutamiento.*Despacho o ambos/);
   assert.match(view, /<h1>Sucursales<\/h1>/);
+  assert.match(view, /<%= vacancyCount %> vacante/);
+  assert.doesNotMatch(view, />\+ Crear operación en|Nombre de la operación|Sin operaciones configuradas/);
   assert.doesNotMatch(view, /Bogotá incluye Siberia|la sucursal se hereda automáticamente|Dato heredado:|configuraciones históricas|persistencia de vacantes y horarios/);
   assert.doesNotMatch(view, /href="\/admin\/vacancies"/);
 });
