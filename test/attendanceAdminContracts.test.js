@@ -54,27 +54,27 @@ test('el dashboard resuelve la misma autoridad antes de mostrar asistencia', () 
   assert.match(dashboardSource, /href="\/admin\/operaciones\/asistencia"/);
 });
 
-test('las tarjetas comprimidas muestran llegada, almuerzo, salida y horas extra', () => {
-  assert.match(adminViewSource, /<details class="attendance-card status-card-/);
-  assert.match(adminViewSource, /Desplegar todas/);
-  assert.match(adminViewSource, /Comprimir todas/);
-  assert.match(adminViewSource, /<span>Llegada<\/span>/);
-  assert.match(adminViewSource, /<span>Almuerzo<\/span>/);
-  assert.match(adminViewSource, /<span>Salida<\/span>/);
-  assert.match(adminViewSource, /<span>Horas extra<\/span>/);
-  assert.match(adminViewSource, /Riesgo: <%= row\.riskScore %>\/100/);
+test('cada auxiliar ocupa una sola fila y entrada, almuerzo y salida quedan visibles sin desplegar la tarjeta', () => {
+  assert.match(adminViewSource, /\.attendance-list \{ display: grid; grid-template-columns: 1fr;/);
+  assert.match(adminViewSource, /<article class="attendance-card status-card-/);
+  assert.match(adminViewSource, /data-visible-attendance-row/);
+  assert.doesNotMatch(adminViewSource, /<details class="attendance-card/);
+  assert.doesNotMatch(adminViewSource, /id="expandAllAttendance"|id="collapseAllAttendance"|Desplegar todas|Comprimir todas/);
+  assert.match(adminViewSource, /<span>Entrada<\/span><strong><%= row\.arrivalReportedLabel \|\| 'Sin registro' %>/);
+  assert.match(adminViewSource, /<span>Almuerzo<\/span><strong><%= lunchLabel %>/);
+  assert.match(adminViewSource, /<span>Salida<\/span><strong><%= row\.departureReportedLabel \|\| 'Sin registro' %>/);
+  assert.match(adminViewSource, /const lunchLabel = row\.breakStarted/);
+  assert.match(adminViewSource, /: 'Sin almuerzo';/);
+  assert.match(adminViewSource, /Ord\. <%= row\.ordinaryWorkedLabel/);
+  assert.match(adminViewSource, /Extra: <%= row\.overtimeLabel/);
 });
 
-test('el detalle muestra desglose ordinario, extra, penalización, fotografías y geocerca', () => {
-  assert.match(adminViewSource, /Ver ubicación y geocerca/);
-  assert.match(adminViewSource, /Entrada a salida/);
-  assert.match(adminViewSource, /Inicio contabilizado/);
-  assert.match(adminViewSource, /Anticipado excluido/);
-  assert.match(adminViewSource, /Almuerzo descontado/);
-  assert.match(adminViewSource, /Horas ordinarias/);
-  assert.match(adminViewSource, /Horas extra/);
-  assert.match(adminViewSource, /Total trabajado/);
-  assert.match(adminViewSource, /1 h 30 min/);
+test('solo ubicación geocerca evidencia y revisión o registro manual conservan interacción plegable', () => {
+  assert.match(adminViewSource, /<details data-map-details><summary class="btn">Ver ubicación y geocerca<\/summary>/);
+  assert.match(adminViewSource, /const hasAttendanceEvidence = Boolean/);
+  assert.match(adminViewSource, /\|\| hasAttendanceEvidence\) \{ %><details data-map-details>/);
+  assert.match(adminViewSource, /<details class="review-panel"/);
+  assert.match(adminViewSource, /row\.sessionId \? 'Revisar o corregir asistencia' : 'Registrar asistencia manual'/);
   assert.match(adminViewSource, /Ver fotografía de entrada/);
   assert.match(adminViewSource, /Ver fotografía de salida/);
   assert.match(adminViewSource, /leaflet@1\.9\.4/);
