@@ -21,6 +21,10 @@ function standaloneLink(html, key) {
   return html.match(new RegExp(`<a[^>]*data-standalone-link="${key}"[^>]*>[\\s\\S]*?<\\/a>`))?.[0] || '';
 }
 
+function primaryNavigationGroup(html) {
+  return html.match(/<div class="admin-module-nav-links" data-primary-nav-group="true">([\s\S]*?)<\/div>\s*<span class="spacer">/)?.[1] || '';
+}
+
 test('los modulos comparten un grupo exclusivo y Sucursales/Usuarios quedan independientes', () => {
   const html = injectAdminModuleNavigation(baseHtml, req('/admin', {}, 'dev'));
   const navbar = nav(html);
@@ -36,6 +40,25 @@ test('los modulos comparten un grupo exclusivo y Sucursales/Usuarios quedan inde
   assert.match(navbar, /href="\/admin\/bot-knowledge"/);
   assert.match(navbar, /href="\/admin\/operaciones\/pruebas"/);
   assert.doesNotMatch(html, /data-module-cards=|admin-module-switcher|admin-module-card-grid/);
+});
+
+test('Sucursales y Usuarios comparten el flujo visual primario sin entrar en desplegables', () => {
+  const navbar = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia', {
+    canAccessDispatch: true,
+    canAccessAttendance: true,
+    canAccessPayroll: true
+  }, 'dev')));
+  const group = primaryNavigationGroup(navbar);
+
+  assert.match(group, /data-module-menu="recruitment"/);
+  assert.match(group, /data-module-menu="operations"/);
+  assert.match(group, /data-module-menu="payroll"/);
+  assert.match(group, /data-standalone-link="branches"/);
+  assert.match(group, /data-standalone-link="users"/);
+  assert.ok(group.indexOf('data-module-menu="payroll"') < group.indexOf('data-standalone-link="branches"'));
+  assert.ok(group.indexOf('data-standalone-link="branches"') < group.indexOf('data-standalone-link="users"'));
+  assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /data-standalone-link|Sucursales|Usuarios/);
+  assert.match(navbar, /data-primary-nav-group="true"[\s\S]*data-standalone-link="branches"[\s\S]*data-standalone-link="users"[\s\S]*<\/div>\s*<span class="spacer">/);
 });
 
 test('Sucursales queda fuera de Reclutamiento y se marca activo como enlace independiente', () => {
