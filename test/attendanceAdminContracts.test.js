@@ -30,9 +30,10 @@ test('las decisiones administrativas recalculan jornada y exigen motivo auditabl
 });
 
 test('la jornada manual del coordinador captura entrada y salida sin una autoridad paralela', () => {
-  assert.match(adminViewSource, /type="datetime-local" name="arrivalReportedAt"/);
-  assert.match(adminViewSource, /type="datetime-local" name="departureReportedAt"/);
-  assert.match(adminViewSource, /Registrar asistencia manual/);
+  assert.match(adminViewSource, /type="datetime-local" name="arrivalReportedAt" required/);
+  assert.match(adminViewSource, /type="datetime-local" name="departureReportedAt" required/);
+  assert.match(adminViewSource, /Registrar jornada manual/);
+  assert.match(adminViewSource, /La puntualidad se calcula contra el horario programado/);
   assert.match(adminRouteSource, /arrivalReportedAt: req\.body\.arrivalReportedAt/);
   assert.match(adminRouteSource, /departureReportedAt: req\.body\.departureReportedAt/);
   assert.doesNotMatch(adminViewSource, /<h3>Jornada manual auditada<\/h3><select name="attendanceStatus"/);
@@ -68,8 +69,10 @@ test('cada auxiliar ocupa una sola fila y entrada, almuerzo y salida quedan visi
   assert.match(adminViewSource, /Extra: <%= row\.overtimeLabel/);
 });
 
-test('solo ubicación/geocerca y revisión o registro manual conservan interacción plegable', () => {
+test('solo ubicación geocerca evidencia y revisión o registro manual conservan interacción plegable', () => {
   assert.match(adminViewSource, /<details data-map-details><summary class="btn">Ver ubicación y geocerca<\/summary>/);
+  assert.match(adminViewSource, /const hasAttendanceEvidence = Boolean/);
+  assert.match(adminViewSource, /\|\| hasAttendanceEvidence\) \{ %><details data-map-details>/);
   assert.match(adminViewSource, /<details class="review-panel"/);
   assert.match(adminViewSource, /row\.sessionId \? 'Revisar o corregir asistencia' : 'Registrar asistencia manual'/);
   assert.match(adminViewSource, /Ver fotografía de entrada/);
