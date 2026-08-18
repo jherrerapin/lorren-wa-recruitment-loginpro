@@ -259,9 +259,9 @@ function clientIdentity(session) {
 
 function compensationStatusFor(map, workerId, dateKey) {
   const value = map instanceof Map ? map.get(`${workerId}|${dateKey}`) : null;
-  return value === PAYROLL_COMPENSATION_STATUS.COMPENSATED
-    ? PAYROLL_COMPENSATION_STATUS.COMPENSATED
-    : PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED;
+  return Object.values(PAYROLL_COMPENSATION_STATUS).includes(value)
+    ? value
+    : PAYROLL_COMPENSATION_STATUS.PENDING;
 }
 
 function localMinuteKey(parts) {
