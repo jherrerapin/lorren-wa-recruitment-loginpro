@@ -47,23 +47,30 @@ La semana de Nómina es una regla fija de lunes a domingo. Las políticas histó
 
 Para conciliar correctamente cada una de las dos ventanas, `loadPayrollReport()` carga la semana completa de lunes a domingo que toque cada extremo del rango solicitado. Los días fuera de la ventana visible no se muestran ni se exportan como parte de esa ventana, pero sí participan en el balance entre excesos diarios y faltantes diarios de la misma semana. La semana es una **ventana de conciliación**; no existe un umbral de 42 horas que por sí solo cree o elimine horas extra.
 
-La composición de ambos resultados no reclasifica minutos. El motor canónico se ejecuta con cada rango y el adaptador de Nómina toma del periodo general las métricas base del corte y sustituye `Horas extra`, `H*` y `R*` por los calculados para la ventana independiente de extras. Los días y contadores generales permanecen en su corte original. Las novedades del periodo de extras también se conservan para no ocultar un bloqueo de esa ventana.
+La composición de ambos resultados no reclasifica minutos. El motor canónico se ejecuta con cada rango y el adaptador de Nómina toma del periodo general las métricas base del corte y sustituye `Horas extra`, `H*` y `R*` por los calculados para la ventana independiente de extras. Los días y contadores generales permanecen en su corte original. Las novedades del periodo de extras también se conservan para no ocultar un bloqueo real de esa ventana.
 
-El detalle diario sigue exactamente la misma propiedad de métricas que la fila consolidada. Una fecha del periodo general conserva total, ordinarias, descansos y marcaciones del corte general, pero sus conceptos `H*` y `R*` se muestran únicamente si esa fecha participa en el resultado del filtro de extras. Si una fecha es relevante solo por hora extra o recargo, puede incorporarse al detalle para explicar esos conceptos y su trazabilidad, con las métricas generales en cero y sin habilitar acciones de compensatorio fuera del periodo general. Si una fecha aparece en ambas ventanas se fusiona una sola vez: la base viene del periodo general y los conceptos `H*`/`R*` del periodo de extras. Esta composición ocurre después de que cada rango fue calculado por la autoridad canónica; no vuelve a clasificar minutos.
+El detalle diario sigue exactamente la misma propiedad de métricas que la fila consolidada. Una fecha del periodo general conserva total, ordinarias, descansos y marcaciones del corte general, pero sus conceptos `H*` y `R*` se muestran únicamente si esa fecha participa en el resultado del filtro de extras. Si una fecha es relevante solo por hora extra o recargo, puede incorporarse al detalle para explicar esos conceptos y su trazabilidad, con las métricas generales en cero. Si una fecha aparece en ambas ventanas se fusiona una sola vez: la base viene del periodo general y los conceptos `H*`/`R*` del periodo de extras. Esta composición ocurre después de que cada rango fue calculado por la autoridad canónica; no vuelve a clasificar minutos.
 
-## Política por cliente
+## Jornada flexible y parámetros por cliente
 
 La referencia operativa de jornada es fija en **7 horas diarias** para el balance de extras. Los valores históricos de horas ordinarias semanales pueden seguir leídos/persistidos por compatibilidad, pero no gobiernan la clasificación de horas extra.
 
-DEV puede configurar por cliente:
+LoginPro trabaja con jornada flexible. Por ello:
 
-- máximo de horas extra diarias y semanales;
+- no existe un máximo de horas extra diarias que genere novedad o bloquee exportación;
+- no existe un máximo de horas extra semanales que genere novedad o bloquee exportación;
+- no existe un día de descanso configurable que pueda cambiar la clasificación del calendario;
+- los valores históricos `maxDailyOvertimeMinutes`, `maxWeeklyOvertimeMinutes` y `restDay` pueden seguir presentes en eventos auditados antiguos, pero no gobiernan el cálculo actual.
+
+El domingo se reconoce por calendario (`weekday = 0`) y conserva los conceptos dominicales que correspondan. Un festivo reconocido por el calendario colombiano conserva prioridad sobre la clasificación dominical.
+
+DEV puede seguir configurando por cliente únicamente parámetros que sí afectan la interpretación de una jornada:
+
 - inicio y final de jornada nocturna;
-- día de descanso obligatorio;
 - reconocimiento de llegada anticipada;
 - descuento por almuerzo iniciado sin regreso.
 
-No son configurables el inicio de semana ni la prioridad entre festivo y descanso: la semana siempre inicia el lunes y un día reconocido por el calendario colombiano se presenta como festivo. La política se conserva mediante eventos auditados `DISPATCH_PAYROLL_POLICY`. La política inicial queda versionada como `CO-2026-07`.
+El cliente se selecciona mediante el filtro normal del reporte; la configuración DEV no presenta un segundo selector de cliente. La persistencia histórica continúa usando eventos auditados `DISPATCH_PAYROLL_POLICY` para no romper compatibilidad ni borrar datos existentes.
 
 ## Clasificación y balance de horas extra
 
@@ -99,15 +106,15 @@ faltante: 3 h
 extra final: 0 h
 ```
 
-Los límites configurados de extra diaria y semanal continúan siendo validaciones sobre el **resultado reconocido**; no son el criterio que origina la hora extra.
+Una vez reconocido el remanente, el motor no aplica topes diarios ni semanales. Superar antiguos valores configurados no crea novedades y no cambia `exportable`.
 
 Además el motor separa:
 
 - diurno o nocturno;
-- ordinario, descanso obligatorio o festivo;
-- compensado o no compensado únicamente cuando el minuto corresponde al día de descanso obligatorio.
+- ordinario, domingo o festivo;
+- compensado o no compensado cuando existe una decisión explícita de compensatorio para domingo.
 
-La franja nocturna del motor es 19:00–06:00. La clasificación de descanso/festivo se hace sobre la fecha y hora civil de cada minuto en `America/Bogota`; por eso un turno que cruza medianoche puede cambiar de concepto al comenzar el día siguiente, pero sigue perteneciendo a una sola jornada operativa para el balance de 7 horas, tomando como referencia la fecha de inicio de la jornada.
+La franja nocturna del motor es 19:00–06:00. La clasificación dominical/festiva se hace sobre la fecha y hora civil de cada minuto en `America/Bogota`; por eso un turno que cruza medianoche puede cambiar de concepto al comenzar el día siguiente, pero sigue perteneciendo a una sola jornada operativa para el balance de 7 horas, tomando como referencia la fecha de inicio de la jornada.
 
 Conceptos producidos:
 
@@ -118,7 +125,7 @@ Conceptos producidos:
 
 `RDFC` y `RNFC` fueron retirados del contrato de conceptos: un festivo ordinario se reporta como `RDF` o `RNF` y se identifica además con el indicativo `Festivo`. No existen columnas ni generación nueva para conceptos festivos compensados.
 
-Una fracción se asigna a un único concepto. Por ejemplo, una hora extra nocturna en el día de descanso obligatorio se reporta como HEND y no se duplica en HENO, RNO o RND.
+Una fracción se asigna a un único concepto. Por ejemplo, una hora extra nocturna dominical se reporta como HEND y no se duplica en HENO, RNO o RND.
 
 ## Almuerzo
 
@@ -135,24 +142,15 @@ El módulo identifica, entre otras:
 - tiempo guardado diferente al calculado;
 - almuerzo abierto;
 - jornadas superpuestas;
-- remanente candidato que no supera el umbral mínimo de reconocimiento;
-- exceso del límite extra diario;
-- exceso del límite extra semanal;
-- compensatorio pendiente exclusivamente para el día de descanso obligatorio.
+- remanente candidato que no supera el umbral mínimo de reconocimiento.
 
-Un festivo no genera `COMPENSATION_PENDING`. La tabla conserva el estado y el detalle de novedades para revisión operativa. El Excel `.xlsx` descargable no incluye columnas `Estado` ni `Novedades`; retirarlas es una decisión de presentación y no elimina el estado ni las novedades del cálculo o del runtime.
+No se generan novedades por superar antiguos máximos diarios/semanales de extra ni por tener un compensatorio dominical pendiente. Un festivo tampoco genera novedad de compensatorio. La tabla conserva las novedades reales de asistencia/cálculo para revisión operativa. El Excel `.xlsx` descargable no incluye columnas `Estado` ni `Novedades`; retirarlas es una decisión de presentación y no elimina el estado ni las novedades reales del runtime.
 
 ## Compensatorios
 
-El compensatorio se administra únicamente para el día de descanso obligatorio. El portal permite marcar por auxiliar y fecha:
+La decisión de compensatorio dominical puede conservarse explícitamente para distinguir conceptos `RDD/RND` de `RDDC/RNDC`, pero no es un requisito para que una fila sea exportable. Un estado pendiente no genera una novedad bloqueante.
 
-- pendiente;
-- no compensado;
-- compensado.
-
-La decisión queda auditada en `DISPATCH_PAYROLL_COMPENSATION`. Mientras un día de descanso obligatorio esté pendiente, la fila se considera con novedades.
-
-Los festivos no usan este flujo: se muestran con el indicativo `Festivo`, sus minutos se clasifican como festivos y el backend rechaza nuevos intentos de guardar un estado de compensatorio para esa fecha. Eventos históricos de compensatorio asociados a un festivo no gobiernan el cálculo actual.
+La decisión queda auditada en `DISPATCH_PAYROLL_COMPENSATION`. Los festivos no usan este flujo: se muestran con el indicativo `Festivo`, sus minutos se clasifican como festivos y el backend rechaza nuevos intentos de guardar un estado de compensatorio para esa fecha. Eventos históricos de compensatorio asociados a un festivo no gobiernan el cálculo actual.
 
 ## Calendario
 
