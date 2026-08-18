@@ -70,17 +70,19 @@ test('calcula el horario programado en Bogotá', () => {
   assert.equal(expected.expectedEndAt.toISOString(), '2026-07-22T22:00:00.000Z');
 });
 
-test('abre la llegada desde la hora de inicio hasta ocho horas después, inclusive', () => {
+test('abre al iniciar el día operativo y cierra ocho horas después del inicio, inclusive', () => {
   const expectedStartAt = new Date('2026-07-22T13:00:00.000Z');
-  const beforeStart = getDispatchArrivalWindowState({ now: new Date('2026-07-22T12:59:59.999Z'), expectedStartAt });
+  const previousDay = getDispatchArrivalWindowState({ now: new Date('2026-07-22T04:59:59.999Z'), expectedStartAt });
+  const earlySameDay = getDispatchArrivalWindowState({ now: new Date('2026-07-22T12:59:59.999Z'), expectedStartAt });
   const atStart = getDispatchArrivalWindowState({ now: new Date('2026-07-22T13:00:00.000Z'), expectedStartAt });
   const atClose = getDispatchArrivalWindowState({ now: new Date('2026-07-22T21:00:00.000Z'), expectedStartAt });
   const afterClose = getDispatchArrivalWindowState({ now: new Date('2026-07-22T21:00:00.001Z'), expectedStartAt });
 
-  assert.equal(beforeStart.open, false);
-  assert.equal(beforeStart.expired, false);
-  assert.equal(beforeStart.opensAt.toISOString(), '2026-07-22T13:00:00.000Z');
-  assert.equal(beforeStart.closesAt.toISOString(), '2026-07-22T21:00:00.000Z');
+  assert.equal(previousDay.open, false);
+  assert.equal(previousDay.expired, false);
+  assert.equal(previousDay.opensAt.toISOString(), '2026-07-22T05:00:00.000Z');
+  assert.equal(previousDay.closesAt.toISOString(), '2026-07-22T21:00:00.000Z');
+  assert.equal(earlySameDay.open, true);
   assert.equal(atStart.open, true);
   assert.equal(atClose.open, true);
   assert.equal(atClose.expired, false);
@@ -88,16 +90,40 @@ test('abre la llegada desde la hora de inicio hasta ocho horas después, inclusi
   assert.equal(afterClose.expired, true);
 });
 
+test('permite 06:48 para una entrada programada a las 07:00 del mismo día', () => {
+  const expectedStartAt = new Date('2026-07-22T12:00:00.000Z');
+  const window = getDispatchArrivalWindowState({
+    now: new Date('2026-07-22T11:48:00.000Z'),
+    expectedStartAt
+  });
+
+  assert.equal(window.open, true);
+  assert.equal(window.opensAt.toISOString(), '2026-07-22T05:00:00.000Z');
+  assert.equal(window.closesAt.toISOString(), '2026-07-22T20:00:00.000Z');
+});
+
 test('rechaza una asignación de otro auxiliar antes de consultar dispositivo', async () => {
   const prisma = successfulPrisma(assignmentFixture({ workerId: 'worker-2' }));
   await assert.rejects(() => registerDispatchArrival(prisma, input()), /attendance_assignment_not_found/);
 });
 
-test('rechaza en backend una llegada antes de la hora de inicio', async () => {
+test('rechaza en backend una llegada del día anterior', async () => {
   const prisma = successfulPrisma(assignmentFixture());
-  const result = await registerDispatchArrival(prisma, input({ now: new Date('2026-07-22T12:59:59.999Z') }));
+  const result = await registerDispatchArrival(prisma, input({ now: new Date('2026-07-22T04:59:59.999Z') }));
   assert.equal(result.recorded, false);
   assert.deepEqual(result.validation.riskFlags, ['ARRIVAL_WINDOW_NOT_OPEN']);
+});
+
+test('registra en backend una llegada anticipada del mismo día', async () => {
+  const assignment = assignmentFixture();
+  assignment.serviceRequest = { ...assignment.serviceRequest, startTime: '07:00' };
+  const prisma = successfulPrisma(assignment);
+  const result = await registerDispatchArrival(prisma, input({ now: new Date('2026-07-22T11:48:00.000Z') }));
+
+  assert.equal(result.recorded, true);
+  assert.equal(result.attendanceSession.arrivalReportedAt.toISOString(), '2026-07-22T11:48:00.000Z');
+  assert.equal(result.attendanceSession.expectedStartAt.toISOString(), '2026-07-22T12:00:00.000Z');
+  assert.equal(result.validation.reportedPunctuality, 'ON_TIME');
 });
 
 test('registra la llegada desde la hora exacta de inicio', async () => {
@@ -108,11 +134,22 @@ test('registra la llegada desde la hora exacta de inicio', async () => {
   assert.equal(result.attendanceSession.expectedStartAt.toISOString(), '2026-07-22T13:00:00.000Z');
 });
 
-test('rechaza captura offline realizada antes de la hora de inicio', async () => {
+test('offline permite una captura anticipada del mismo día usando clientCapturedAt', async () => {
   const prisma = successfulPrisma(assignmentFixture());
   const result = await registerDispatchArrival(prisma, input({
     captureMode: 'OFFLINE_WEB',
     clientCapturedAt: new Date('2026-07-22T12:50:00.000Z'),
+    now: new Date('2026-07-22T13:10:00.000Z')
+  }));
+  assert.equal(result.recorded, true);
+  assert.equal(result.attendanceSession.arrivalReportedAt.toISOString(), '2026-07-22T12:50:00.000Z');
+});
+
+test('offline rechaza una captura realizada el día anterior', async () => {
+  const prisma = successfulPrisma(assignmentFixture());
+  const result = await registerDispatchArrival(prisma, input({
+    captureMode: 'OFFLINE_WEB',
+    clientCapturedAt: new Date('2026-07-22T04:59:59.999Z'),
     now: new Date('2026-07-22T13:10:00.000Z')
   }));
   assert.equal(result.recorded, false);
