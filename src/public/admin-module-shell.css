@@ -1,6 +1,7 @@
 :root {
   --admin-shell-max-width: 1600px;
   --admin-shell-gutter: clamp(14px, 2vw, 24px);
+  --admin-shell-control-gap: 7px;
 }
 
 .admin-module-page-shell:not(.assignment-page) {
@@ -17,6 +18,7 @@
   box-sizing: border-box;
   width: 100%;
   flex-wrap: wrap;
+  column-gap: var(--admin-shell-control-gap) !important;
   padding-left: max(var(--admin-shell-gutter), calc((100vw - var(--admin-shell-max-width)) / 2 + var(--admin-shell-gutter))) !important;
   padding-right: max(var(--admin-shell-gutter), calc((100vw - var(--admin-shell-max-width)) / 2 + var(--admin-shell-gutter))) !important;
 }
