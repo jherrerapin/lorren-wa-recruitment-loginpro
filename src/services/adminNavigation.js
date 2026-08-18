@@ -141,9 +141,10 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
 
   return `<nav class="navbar admin-module-navbar" data-module-navigation="true" aria-label="Módulos principales">
     <a class="brand admin-module-brand" href="${RECRUITMENT_PATH}" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
-    <div class="admin-module-nav-links">${modules}</div>
-    ${branchesLink}
-    ${usersLink}
+    <div class="admin-module-nav-links" data-primary-nav-group="true">${modules}
+      ${branchesLink}
+      ${usersLink}
+    </div>
     <span class="spacer"></span>
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>`;
