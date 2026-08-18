@@ -23,6 +23,31 @@
     });
   }
 
+  function compactVisibleAttendanceRows() {
+    document.querySelectorAll('.attendance-hours-cell').forEach((cell) => {
+      const primary = cell.querySelector('strong');
+      const secondary = cell.querySelector('small');
+      const primaryText = String(primary?.textContent || '').trim();
+      const secondaryText = String(secondary?.textContent || '').trim();
+      if (primary && secondaryText) primary.textContent = `${primaryText} · ${secondaryText}`;
+    });
+
+    removeAll('.attendance-mark-cell > small, .attendance-hours-cell > small');
+  }
+
+  function restoreMapModeLabels() {
+    const labels = Object.freeze({
+      arrival: 'Ver entrada en el mapa',
+      departure: 'Ver salida en el mapa',
+      both: 'Ver ambas en el mapa'
+    });
+
+    document.querySelectorAll('[data-map-mode]').forEach((button) => {
+      const label = labels[button.dataset.mapMode];
+      if (label) button.textContent = label;
+    });
+  }
+
   function applySummaryLayout(summary) {
     if (!summary) return;
 
@@ -70,6 +95,8 @@
     removeAll('.review-hint');
     removeAll('.info-chip');
     removeSummaryNoise();
+    compactVisibleAttendanceRows();
+    restoreMapModeLabels();
     installSummaryLayouts();
     removeDetailNoise();
   }

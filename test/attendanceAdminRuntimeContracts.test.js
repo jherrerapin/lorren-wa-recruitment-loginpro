@@ -59,6 +59,16 @@ test('el runtime administrativo deja de generar puntajes y señales técnicas vi
   assert.doesNotMatch(compactSource, /gridTemplateColumns/);
 });
 
+test('el compactador elimina textos auxiliares y conserva controles explícitos del mapa', () => {
+  assert.match(compactSource, /compactVisibleAttendanceRows/);
+  assert.match(compactSource, /removeAll\('\.attendance-mark-cell > small, \.attendance-hours-cell > small'\)/);
+  assert.match(compactSource, /primary\.textContent = `\$\{primaryText\} · \$\{secondaryText\}`/);
+  assert.match(compactSource, /arrival: 'Ver entrada en el mapa'/);
+  assert.match(compactSource, /departure: 'Ver salida en el mapa'/);
+  assert.match(compactSource, /both: 'Ver ambas en el mapa'/);
+  assert.match(compactSource, /querySelectorAll\('\[data-map-mode\]'\)/);
+});
+
 test('el tablero conserva las señales de riesgo como datos de auditoría aunque la tarjeta no las muestre', async () => {
   const offlineFlags = ['OFFLINE_WEB_CAPTURE', 'CLIENT_CLOCK_UNTRUSTED'];
   const assignment = {
