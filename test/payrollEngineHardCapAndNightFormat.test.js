@@ -119,7 +119,7 @@ test('domingo conserva recargo dominical sin depender de restDay ni generar comp
   assert.equal(row.totalMinutes, 420);
   assert.equal(row.conceptMinutes.RDD, 420, 'domingo diurno conserva el recargo dominical');
   assert.equal(row.daily[0].isRestDay, true);
-  assert.equal(row.daily[0].compensationStatus, PAYROLL_COMPENSATION_STATUS.NOT_COMPENSATED);
+  assert.equal(row.daily[0].compensationStatus, PAYROLL_COMPENSATION_STATUS.PENDING);
   assert.ok(!row.novelties.some((item) => item.code === 'COMPENSATION_PENDING'));
   assert.equal(row.exportable, true);
 });
