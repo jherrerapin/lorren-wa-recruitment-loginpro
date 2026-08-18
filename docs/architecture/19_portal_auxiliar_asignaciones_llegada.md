@@ -12,20 +12,22 @@ La activación y la sesión segura ya existen. Esta fase convierte la portada ac
 2. La cookie segura del portal resuelve internamente `workerId` y `workerDeviceId`.
 3. La portada consulta únicamente asignaciones activas de ese auxiliar.
 4. Cada tarjeta muestra fecha, horario, cliente, operación, ciudad y dirección.
-5. El botón de llegada solo se habilita desde la hora programada de entrada (`expectedStartAt`) y permanece disponible hasta ocho horas después, inclusive, aunque la ventana cruce de la fecha X a X+1.
+5. El botón de llegada se habilita desde las 00:00 de la fecha operativa en `America/Bogota` y permanece disponible hasta ocho horas después de la hora programada de entrada (`expectedStartAt`), inclusive, aunque la ventana cruce de la fecha X a X+1.
 6. El navegador solicita ubicación de alta precisión mediante una acción explícita.
 7. Cuando la política del punto requiere evidencia, solicita cámara frontal y autorización expresa para usar la fotografía.
 8. El servidor vuelve a comprobar sesión, propiedad de la asignación, dispositivo, ventana, geocerca e idempotencia.
 9. La evidencia se guarda en R2 sin permitir sobrescribir una clave existente.
 10. `registerDispatchArrival()` registra la marcación de manera transaccional y devuelve validación automática o revisión requerida.
 
-Ejemplo nocturno: una asignación cuya entrada programada es a las 21:00 de X puede registrar llegada hasta las 05:00 de X+1. El cambio de día civil no vence por sí solo la marcación; la frontera depende exclusivamente de `expectedStartAt + 8 h`.
+Una asignación del día X programada a las 07:00 puede registrar llegada a las 06:48 del mismo día. Una asignación del día X+1 no puede marcarse durante X.
+
+Ejemplo nocturno: una asignación cuya entrada programada es a las 21:00 de X puede registrar llegada hasta las 05:00 de X+1. El cambio de día civil no vence por sí solo la marcación; el cierre depende de `expectedStartAt + 8 h`.
 
 ## Seguridad
 
 - Una asignación se carga mediante la combinación de `assignmentId` y `workerId` de la sesión.
 - La autoridad transaccional recibe además `expectedWorkerId` como defensa en profundidad.
-- La ventana de llegada se comprueba dentro de la autoridad, no solo en la interfaz: antes de `expectedStartAt` está cerrada; en `expectedStartAt + 8 h` todavía está abierta y vence después de ese instante.
+- La ventana de llegada se comprueba dentro de la autoridad, no solo en la interfaz: antes de las 00:00 de la fecha operativa está cerrada; durante esa fecha admite llegada anticipada y en `expectedStartAt + 8 h` todavía está abierta; vence después de ese instante.
 - El identificador de instalación nunca se persiste crudo; se transforma con HMAC y `ATTENDANCE_INSTALLATION_PEPPER`.
 - La marcación usa una clave de idempotencia y no puede generar una segunda llegada.
 - El token de activación se redacta de `req.originalUrl` antes de que Morgan escriba el log.
