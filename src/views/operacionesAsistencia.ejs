@@ -20,26 +20,24 @@
     .metric.late { border-top-color: #b45309; } .metric.rejected { border-top-color: #b91c1c; } .metric.no-show { border-top-color: #64748b; }
     .metric-label { color: var(--muted); font-size: 11px; font-weight: 900; text-transform: uppercase; }
     .metric-value { margin-top: 5px; color: var(--navy); font-size: 25px; font-weight: 950; }
-    .attendance-list-tools { padding: 14px 16px; }
-    .attendance-list-tools p { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
-    .attendance-list { display: grid; grid-template-columns: 1fr; gap: 10px; align-items: start; }
+    .attendance-list-tools { padding: 11px 14px; }
+    .attendance-list-tools p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+    .attendance-list { display: grid; grid-template-columns: 1fr; gap: 7px; align-items: start; }
     .attendance-card { overflow: hidden; min-width: 0; border-left: 4px solid #94a3b8; }
-    .attendance-summary { padding: 11px 14px; overflow-x: auto; }
-    .summary-main { display: grid; grid-template-columns: minmax(170px, 1.45fr) minmax(120px, 1fr) repeat(3, minmax(100px, .9fr)) minmax(110px, .8fr) minmax(110px, .9fr); gap: 8px 10px; align-items: center; min-width: 900px; }
-    .summary-name { display: block; color: var(--navy); font-size: 15px; font-weight: 950; line-height: 1.2; }
-    .summary-secondary { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; line-height: 1.3; }
-    .summary-identity, .attendance-mark-cell, .attendance-hours-cell, .attendance-state-cell { min-width: 0; }
-    .summary-identity > span, .attendance-mark-cell > span, .attendance-hours-cell > span, .attendance-state-cell > span { display: block; color: var(--muted); font-size: 9px; font-weight: 900; text-transform: uppercase; }
-    .summary-identity > strong, .attendance-mark-cell > strong, .attendance-hours-cell > strong { display: block; margin-top: 2px; color: var(--navy); font-size: 12px; overflow-wrap: anywhere; }
-    .attendance-mark-cell > small, .attendance-hours-cell > small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; line-height: 1.25; }
-    .attendance-hours-cell > strong { font-size: 11px; }
-    .attendance-state-cell { display: flex; gap: 5px; align-items: center; flex-wrap: wrap; }
-    .attendance-body { padding: 0 14px 12px; }
-    .status-pill, .risk-score, .risk-flag, .risk-ok, .info-chip { display: inline-flex; border-radius: 999px; padding: 5px 9px; font-size: 10px; font-weight: 900; }
-    .status-pill, .risk-score { background: #eef2f7; color: #475569; }
-    .risk-flag { background: #fff7ed; color: #9a3412; } .risk-ok { background: #dcfce7; color: #166534; }
+    .attendance-summary { padding: 7px 10px; overflow-x: auto; }
+    .summary-main { display: grid; grid-template-columns: minmax(165px, 1.4fr) minmax(115px, 1fr) repeat(3, minmax(95px, .9fr)) minmax(110px, .85fr); gap: 5px 9px; align-items: center; min-width: 790px; }
+    .summary-name { display: block; color: var(--navy); font-size: 14px; font-weight: 950; line-height: 1.1; }
+    .summary-secondary { display: block; margin-top: 1px; color: var(--muted); font-size: 9px; line-height: 1.15; }
+    .summary-identity, .attendance-mark-cell, .attendance-hours-cell { min-width: 0; }
+    .summary-identity > span, .attendance-mark-cell > span, .attendance-hours-cell > span { display: block; color: var(--muted); font-size: 8px; font-weight: 900; text-transform: uppercase; }
+    .summary-identity > strong, .attendance-mark-cell > strong, .attendance-hours-cell > strong { display: block; margin-top: 1px; color: var(--navy); font-size: 11px; line-height: 1.15; overflow-wrap: anywhere; }
+    .attendance-mark-cell > small, .attendance-hours-cell > small { display: block; margin-top: 1px; color: var(--muted); font-size: 8px; line-height: 1.15; }
+    .attendance-hours-cell > strong { font-size: 10px; }
+    .attendance-body { padding: 0 10px 7px; }
+    .status-pill, .info-chip { display: inline-flex; border-radius: 999px; padding: 4px 7px; font-size: 9px; font-weight: 900; }
+    .status-pill { background: #eef2f7; color: #475569; }
     .info-chip { background: #e0f2fe; color: #075985; }
-    .detail-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); gap: 10px; align-items: start; }
+    .detail-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); gap: 6px; align-items: start; }
     .detail-grid > div:empty { display: none; }
     .detail-grid > div:empty + .review-panel { grid-column: 1 / -1; }
     .attendance-map { height: 320px; border: 1px solid var(--border); border-radius: 14px; background: #eef2f5; overflow: hidden; }
@@ -51,8 +49,8 @@
     .map-legend .operation::before { background: #2563eb; } .map-legend .arrival::before { background: #dc2626; } .map-legend .departure::before { background: #d97706; }
     .evidence-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .map-empty-note { margin: 10px 12px 0; color: var(--muted); font-size: 11px; }
-    .review-panel, [data-map-details] { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-    .review-panel > summary, [data-map-details] > summary { cursor: pointer; padding: 10px 12px; color: var(--navy); font-size: 12px; font-weight: 900; background: #f8fafc; list-style: none; }
+    .review-panel, [data-map-details] { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .review-panel > summary, [data-map-details] > summary { cursor: pointer; padding: 6px 9px; color: var(--navy); font-size: 11px; line-height: 1.15; font-weight: 900; background: #f8fafc; list-style: none; }
     .review-panel > summary::-webkit-details-marker, [data-map-details] > summary::-webkit-details-marker { display: none; }
     [data-map-details] > summary.btn { display: block; width: 100%; border: 0; border-radius: 0; text-align: left; }
     [data-map-details][open] { padding-bottom: 12px; }
@@ -138,7 +136,6 @@
                 <div class="attendance-mark-cell"><span>Almuerzo</span><strong><%= lunchLabel %></strong><small><%= lunchNote %></small></div>
                 <div class="attendance-mark-cell"><span>Salida</span><strong><%= row.departureReportedLabel || 'Sin registro' %></strong><small>Entrada a salida: <%= row.recordedSpanLabel || 'Pendiente' %></small></div>
                 <div class="attendance-hours-cell"><span>Horas</span><strong>Ord. <%= row.ordinaryWorkedLabel || 'Pendiente' %></strong><small>Extra: <%= row.overtimeLabel || 'Pendiente' %> · Total: <%= row.workedLabel || 'Pendiente' %></small></div>
-                <div class="attendance-state-cell"><span>Estado</span><span class="risk-score">Riesgo: <%= row.riskScore %>/100</span><% row.riskFlags.forEach((flag) => { %><span class="risk-flag"><%= flag.replaceAll('_', ' ') %></span><% }) %></div>
               </div>
             </div>
             <div class="attendance-body">
