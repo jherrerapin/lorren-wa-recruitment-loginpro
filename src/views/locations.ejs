@@ -108,16 +108,17 @@
   <section class="branch-list">
     <% if (!cities.length) { %><div class="empty">No hay sucursales registradas.</div><% } %>
     <% for (const city of cities) { %>
+      <% const vacancyCount = city.operations.reduce((total, op) => total + (op.vacancies?.length || 0), 0); %>
       <article class="branch-card">
         <div class="branch-header">
           <div class="branch-title">
             <span class="branch-name"><%= city.name %></span>
-            <span class="count"><%= city.operations.length %> operación<%= city.operations.length === 1 ? '' : 'es' %></span>
+            <span class="count"><%= vacancyCount %> vacante<%= vacancyCount === 1 ? '' : 's' %></span>
           </div>
           <div class="actions">
             <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-branch-<%= city.id %>">Editar sucursal</button>
             <% if (city.operations.length === 0) { %>
-              <form method="post" action="/admin/locations/cities/<%= city.id %>/delete" data-confirm-title="Eliminar sucursal" data-confirm-text="Se eliminará la sucursal <%= city.name %>. Esta acción solo está disponible si no tiene operaciones.">
+              <form method="post" action="/admin/locations/cities/<%= city.id %>/delete" data-confirm-title="Eliminar sucursal" data-confirm-text="Se eliminará la sucursal <%= city.name %>. Esta acción solo está disponible si no tiene vacantes asociadas.">
                 <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
               </form>
             <% } %>
@@ -130,11 +131,11 @@
             <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
             <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-branch-<%= city.id %>">Cancelar</button>
           </form>
-          <% if (city.operations.length) { %><div class="help" style="margin-top:8px;">Por seguridad de referencias históricas, una sucursal con operaciones no se renombra directamente.</div><% } %>
+          <% if (city.operations.length) { %><div class="help" style="margin-top:8px;">Por seguridad de referencias históricas, una sucursal con vacantes no se renombra directamente.</div><% } %>
         </div>
 
         <div class="operations">
-          <% if (!city.operations.length) { %><div class="empty">Sin operaciones configuradas.</div><% } %>
+          <% if (!city.operations.length) { %><div class="empty">Sin vacantes configuradas.</div><% } %>
           <% for (const op of city.operations) { %>
             <section class="operation-card">
               <div class="operation-head">
@@ -142,7 +143,7 @@
                 <div class="actions">
                   <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-op-<%= op.id %>">Renombrar</button>
                   <% if (op.vacancies.length === 0) { %>
-                    <form method="post" action="/admin/locations/operations/<%= op.id %>/delete" data-confirm-title="Eliminar operación" data-confirm-text="Se eliminará la operación <%= op.name %>.">
+                    <form method="post" action="/admin/locations/operations/<%= op.id %>/delete" data-confirm-title="Eliminar vacante" data-confirm-text="Se eliminará la vacante <%= op.name %>.">
                       <button type="submit" class="btn btn-danger btn-sm">Eliminar</button>
                     </form>
                   <% } %>
@@ -151,7 +152,7 @@
 
               <div class="edit-panel" id="edit-op-<%= op.id %>">
                 <form method="post" action="/admin/locations/operations/<%= op.id %>/edit" class="inline-form">
-                  <input type="text" name="name" value="<%= op.name %>" required placeholder="Nombre de la operación" />
+                  <input type="text" name="name" value="<%= op.name %>" required placeholder="Nombre de la vacante" />
                   <button type="submit" class="btn btn-primary btn-sm">Guardar</button>
                   <button type="button" class="btn btn-secondary btn-sm" data-toggle-target="edit-op-<%= op.id %>">Cancelar</button>
                 </form>
@@ -159,7 +160,7 @@
 
               <div class="operation-body">
                 <% if (op.vacancies.length === 0) { %>
-                  <div class="config-note">Esta operación todavía no tiene una vacante configurada para Lórren.</div>
+                  <div class="config-note">Esta vacante todavía no tiene su configuración completa para Lórren.</div>
                   <form method="post" action="/admin/vacancies/create" class="config-grid" data-vacancy-config-form>
                     <%- include('partials/locationOperationConfigFields', { prefix: 'legacy-' + op.id, config: null, defaultTitle: op.name, operationId: op.id }) %>
                     <div class="field full"><button type="submit" class="btn btn-primary">Guardar y activar vacante</button></div>
@@ -213,15 +214,15 @@
         </div>
 
         <details class="create-operation">
-          <summary>+ Crear operación en <%= city.name %></summary>
+          <summary>+ Crear vacante en <%= city.name %></summary>
           <div class="create-operation-body">
             <form method="post" action="/admin/locations/cities/<%= city.id %>/operations" class="config-grid" data-create-operation-form>
               <div class="field full">
-                <label for="op-name-<%= city.id %>">Nombre de la operación</label>
+                <label for="op-name-<%= city.id %>">Nombre de la vacante</label>
                 <input id="op-name-<%= city.id %>" type="text" name="name" required placeholder="Ej: Siberia, Montevideo, Zona industrial" />
               </div>
               <%- include('partials/locationOperationConfigFields', { prefix: 'new-' + city.id, config: null, defaultTitle: '', operationId: '' }) %>
-              <div class="field full"><button type="submit" class="btn btn-primary">Crear operación y activar vacante</button></div>
+              <div class="field full"><button type="submit" class="btn btn-primary">Crear y activar vacante</button></div>
             </form>
           </div>
         </details>
@@ -364,17 +365,17 @@
         });
         const operationPayload = await operationResponse.json().catch(() => ({}));
         if (!operationResponse.ok || !operationPayload?.operation?.id) {
-          const message = operationPayload?.error || 'No fue posible crear la operación.';
+          const message = operationPayload?.error || 'No fue posible crear la vacante.';
           window.location.assign('/admin/locations?error=' + encodeURIComponent(message));
           return;
         }
 
         allParams.delete('name');
         allParams.set('operationId', operationPayload.operation.id);
-        const nextUrl = await postCanonicalVacancy('/admin/vacancies/create', allParams, `Operación "${operationPayload.operation.name}" creada y vacante activada.`);
+        const nextUrl = await postCanonicalVacancy('/admin/vacancies/create', allParams, `Vacante "${operationPayload.operation.name}" creada y activada.`);
         window.location.assign(nextUrl);
       } catch (_error) {
-        window.location.assign('/admin/locations?error=' + encodeURIComponent('La operación no pudo completarse. Si la operación quedó creada, puedes abrirla y completar su configuración.'));
+        window.location.assign('/admin/locations?error=' + encodeURIComponent('La vacante no pudo completarse. Si quedó un registro pendiente, puedes abrirlo y completar su configuración.'));
       }
     });
   });
