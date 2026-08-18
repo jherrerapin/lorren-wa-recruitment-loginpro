@@ -144,6 +144,23 @@ export function generateRecoveryCode() {
   return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
+export function canManageUserModulePermissions(source = {}) {
+  const session = source?.session || {};
+  const role = source?.userRole || source?.role || session.userRole || null;
+  if (role === 'dev') return true;
+
+  const userSource = source?.userSource || session.userSource || null;
+  const username = source?.username || session.username || null;
+  const accessScope = normalizeUserAccessScope(
+    source?.userAccessScope || session.userAccessScope || 'ALL'
+  );
+
+  return userSource === 'db'
+    && role === 'admin'
+    && username === 'reclutador-general'
+    && accessScope === 'ALL';
+}
+
 export function getAccessContext(source = {}) {
   const role = source.userRole || null;
   const scope = role === 'dev'
@@ -287,8 +304,8 @@ export function describeUserScope(user = {}) {
 
   if (scope === 'CITY') {
     const cities = normalizeUserAccessCities(user.scopeCity);
-    if (!cities.length) return 'Ciudades: Sin ciudad';
-    return `${cities.length === 1 ? 'Ciudad' : 'Ciudades'}: ${cities.join(', ')}`;
+    if (!cities.length) return 'Sucursales: Sin sucursal';
+    return `${cities.length === 1 ? 'Sucursal' : 'Sucursales'}: ${cities.join(', ')}`;
   }
 
   if (scope === 'VACANCY') {
