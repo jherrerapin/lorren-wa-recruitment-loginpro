@@ -304,8 +304,8 @@ export function describeUserScope(user = {}) {
 
   if (scope === 'CITY') {
     const cities = normalizeUserAccessCities(user.scopeCity);
-    if (!cities.length) return 'Sucursales: Sin sucursal';
-    return `${cities.length === 1 ? 'Sucursal' : 'Sucursales'}: ${cities.join(', ')}`;
+    if (!cities.length) return 'Ciudades: Sin ciudad';
+    return `${cities.length === 1 ? 'Ciudad' : 'Ciudades'}: ${cities.join(', ')}`;
   }
 
   if (scope === 'VACANCY') {
