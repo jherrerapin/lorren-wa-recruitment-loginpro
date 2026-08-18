@@ -500,7 +500,7 @@ export async function savePayrollCompensation(prisma, input = {}) {
       entityLabel: `${worker.fullName} · ${dateKey}`,
       action: PAYROLL_COMPENSATION_ACTION,
       actorUsername: normalizeString(input.actorUsername, 160),
-      actorRole,
+      actorRole: normalizeString(input.actorRole, 80),
       actorSource: 'payroll-admin',
       ipAddress: normalizeString(input.ipAddress, 120),
       userAgent: normalizeString(input.userAgent, 500),
@@ -915,7 +915,7 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
 }
 
 export async function loadPayrollReport(prisma, query = {}, options = {}) {
-  const now = options.now instanceof Date ? options.now : new Date();
+  const now = dateValue(options.now) || new Date();
   const period = resolvePayrollPeriod(query, now);
   const filters = normalizedFilters(query, options);
   const calculationFrom = payrollWeekStartKey(period.from, 1);
