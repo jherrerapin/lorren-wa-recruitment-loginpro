@@ -10,6 +10,7 @@ import {
   normalizePayrollPolicy,
   payrollWeekStartKey
 } from '../domain/payrollConceptEngine.js';
+import { buildDispatchAttendanceExpectedWindow } from '../../dispatch-attendance/application/registerArrival.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../../../services/dispatchOperationalCoverage.js';
 
 export const PAYROLL_POLICY_ENTITY_TYPE = 'DISPATCH_PAYROLL_POLICY';
@@ -50,6 +51,7 @@ const INCAPACITY_REASONS = new Set([
   WORKER_REST_REASONS.INCAPACIDAD_EPS,
   WORKER_REST_REASONS.INCAPACIDAD_ARL
 ]);
+const DEFAULT_ABSENCE_GRACE_MINUTES = 15;
 const PAYROLL_MARK_TIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
   timeZone: 'America/Bogota',
   hour: 'numeric',
@@ -546,6 +548,68 @@ function dateValue(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function assignmentMatchesFilters(assignment, filters) {
+  return sessionMatchesFilters({ assignment }, filters);
+}
+
+function assignmentServiceDateKey(assignment) {
+  const serviceDate = dateValue(assignment?.serviceRequest?.serviceDate);
+  if (!serviceDate) return null;
+  const isLegacyUtcDateOnly = serviceDate.getUTCHours() === 0
+    && serviceDate.getUTCMinutes() === 0
+    && serviceDate.getUTCSeconds() === 0
+    && serviceDate.getUTCMilliseconds() === 0;
+  return isLegacyUtcDateOnly ? serviceDate.toISOString().slice(0, 10) : bogotaDateKey(serviceDate);
+}
+
+function assignmentExpectedWindow(assignment) {
+  const request = assignment?.serviceRequest;
+  if (!request?.startTime) return null;
+  try {
+    return buildDispatchAttendanceExpectedWindow(request);
+  } catch {
+    return null;
+  }
+}
+
+function absenceGraceMinutes(assignment) {
+  const value = Number(assignment?.serviceRequest?.operationPoint?.absenceGraceMinutes);
+  return Number.isFinite(value) && value >= 0 ? value : DEFAULT_ABSENCE_GRACE_MINUTES;
+}
+
+function inferredAbsenceSession(assignment, now = new Date()) {
+  const dateKey = assignmentServiceDateKey(assignment);
+  if (!dateKey) return null;
+  const today = todayBogotaKey(now);
+  if (dateKey > today) return null;
+
+  const persisted = assignment?.attendanceSession || null;
+  if (String(persisted?.attendanceStatus || '').toUpperCase() === 'ABSENT') return null;
+  if (dateValue(persisted?.arrivalReportedAt) || dateValue(persisted?.departureReportedAt)) return null;
+
+  const expected = assignmentExpectedWindow(assignment);
+  if (dateKey === today) {
+    if (!expected?.expectedStartAt) return null;
+    const deadline = new Date(expected.expectedStartAt.getTime() + absenceGraceMinutes(assignment) * 60_000);
+    if (now.getTime() <= deadline.getTime()) return null;
+  }
+
+  return {
+    id: persisted?.id || `inferred-absence-${assignment.id}`,
+    attendanceStatus: 'ABSENT',
+    validationStatus: persisted?.validationStatus || 'PENDING',
+    expectedStartAt: dateValue(persisted?.expectedStartAt) || expected?.expectedStartAt || bogotaDayStart(dateKey),
+    expectedEndAt: dateValue(persisted?.expectedEndAt) || expected?.expectedEndAt || null,
+    arrivalReportedAt: null,
+    departureReportedAt: null,
+    marks: [],
+    reviews: [],
+    source: 'PAYROLL_INFERRED_ABSENCE',
+    inferredFromAssignment: true,
+    assignment
+  };
+}
+
 function bogotaMinuteOfDay(value) {
   const date = dateValue(value);
   if (!date) return null;
@@ -851,7 +915,8 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
 }
 
 export async function loadPayrollReport(prisma, query = {}, options = {}) {
-  const period = resolvePayrollPeriod(query, options.now || new Date());
+  const now = dateValue(options.now) || new Date();
+  const period = resolvePayrollPeriod(query, now);
   const filters = normalizedFilters(query, options);
   const calculationFrom = payrollWeekStartKey(period.from, 1);
   const calculationTo = addDateKeyDays(payrollWeekStartKey(period.to, 1), 6);
@@ -859,8 +924,38 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
   const calculationEnd = bogotaDayStart(addDateKeyDays(calculationTo, 1));
   const periodStart = bogotaDayStart(period.from);
   const periodEnd = bogotaDayStart(addDateKeyDays(period.to, 1));
+  const assignmentPeriodStart = new Date(`${period.from}T00:00:00.000Z`);
+  const assignmentPeriodEnd = new Date(`${addDateKeyDays(period.to, 1)}T00:00:00.000Z`);
+  const assignmentLookup = typeof prisma.dispatchAssignment?.findMany === 'function'
+    ? prisma.dispatchAssignment.findMany({
+      where: {
+        status: { in: ACTIVE_DISPATCH_ASSIGNMENT_STATUSES },
+        serviceRequest: { serviceDate: { gte: assignmentPeriodStart, lt: assignmentPeriodEnd } }
+      },
+      include: {
+        worker: true,
+        serviceRequest: {
+          include: {
+            operationPoint: { include: { client: true } }
+          }
+        },
+        attendanceSession: {
+          select: {
+            id: true,
+            attendanceStatus: true,
+            validationStatus: true,
+            expectedStartAt: true,
+            expectedEndAt: true,
+            arrivalReportedAt: true,
+            departureReportedAt: true
+          }
+        }
+      },
+      orderBy: { serviceRequest: { serviceDate: 'asc' } }
+    })
+    : Promise.resolve([]);
 
-  const [sessions, clients, workers, periodRests] = await Promise.all([
+  const [sessions, assignments, clients, workers, periodRests] = await Promise.all([
     prisma.dispatchAttendanceSession.findMany({
       where: {
         OR: [
@@ -896,6 +991,7 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
       },
       orderBy: { arrivalReportedAt: 'asc' }
     }),
+    assignmentLookup,
     prisma.dispatchClient.findMany({
       where: { isActive: true, ...(filters.includeTest ? {} : { isTestClient: false }) },
       include: { operationPoints: { where: { isActive: true }, orderBy: { name: 'asc' } } },
@@ -913,8 +1009,15 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
   ]);
 
   const matchedSessions = sessions.filter((session) => sessionMatchesFilters(session, filters));
-  const absentSessions = matchedSessions.filter(sessionIsPersistedAbsence);
+  const persistedAbsences = matchedSessions.filter(sessionIsPersistedAbsence);
   const filteredSessions = matchedSessions.filter((session) => !sessionIsPersistedAbsence(session));
+  const persistedAbsenceAssignmentIds = new Set(persistedAbsences.map((session) => session?.assignment?.id).filter(Boolean));
+  const inferredAbsences = assignments
+    .filter((assignment) => assignmentMatchesFilters(assignment, filters))
+    .filter((assignment) => !persistedAbsenceAssignmentIds.has(assignment.id))
+    .map((assignment) => inferredAbsenceSession(assignment, now))
+    .filter(Boolean);
+  const absentSessions = [...persistedAbsences, ...inferredAbsences];
   const clientIds = [...new Set(filteredSessions.map((session) => session.assignment?.serviceRequest?.operationPoint?.clientId).filter(Boolean))];
   const workerIds = [...new Set(filteredSessions.map((session) => session.assignment?.workerId).filter(Boolean))];
   const compensationRange = { from: calculationFrom, to: calculationTo };
@@ -938,7 +1041,7 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
     clients,
     workers,
     policiesByClientId,
-    generatedAt: options.now || new Date()
+    generatedAt: now
   };
 }
 
