@@ -11,6 +11,10 @@ const runtimeSource = fs.readFileSync(
   new URL('../src/public/attendance-admin-runtime-core.js', import.meta.url),
   'utf8'
 );
+const compactSource = fs.readFileSync(
+  new URL('../src/public/attendance-admin-compact.js', import.meta.url),
+  'utf8'
+);
 
 const leafletHtml = `<!doctype html><html><body><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-invalid" crossorigin=""></script></body></html>`;
 
@@ -47,20 +51,15 @@ test('el runtime correctivo se carga solamente en el panel administrativo de asi
   assert.doesNotMatch(pointConfigHtml, /attendance-admin-runtime\.js/);
 });
 
-test('las señales internas se presentan en español, con origen, y el puntaje deja de parecer probabilidad', () => {
-  assert.match(runtimeSource, /Marcación guardada sin conexión/);
-  assert.match(runtimeSource, /Hora del celular no verificable/);
-  assert.match(runtimeSource, /Sincronización tardía/);
-  assert.match(runtimeSource, /ARRIVAL:\s*'Llegada'/);
-  assert.match(runtimeSource, /BREAK_START:\s*'Inicio de almuerzo'/);
-  assert.match(runtimeSource, /riskPresentation/);
-  assert.match(runtimeSource, /indexOf\('::'\)/);
-  assert.match(runtimeSource, /Puntaje de revisión:/);
-  assert.match(runtimeSource, /No representa una probabilidad de fraude/);
-  assert.doesNotMatch(runtimeSource, /riskScore\s*[+\-]=/);
+test('el runtime administrativo deja de generar puntajes y señales técnicas visibles', () => {
+  assert.doesNotMatch(runtimeSource, /Puntaje de revisión:/);
+  assert.doesNotMatch(runtimeSource, /riskTranslations|riskPresentation|translateRiskSignals|riskLevel/);
+  assert.doesNotMatch(runtimeSource, /\.risk-score|\.risk-flag/);
+  assert.match(compactSource, /removeAll\('\.attendance-risk-explanation, \.risk-score, \.risk-flag'\)/);
+  assert.doesNotMatch(compactSource, /gridTemplateColumns/);
 });
 
-test('el tablero atribuye señales históricas a la marcación que las originó', async () => {
+test('el tablero conserva las señales de riesgo como datos de auditoría aunque la tarjeta no las muestre', async () => {
   const offlineFlags = ['OFFLINE_WEB_CAPTURE', 'CLIENT_CLOCK_UNTRUSTED'];
   const assignment = {
     id: 'assignment-risk-origin',
