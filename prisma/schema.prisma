@@ -243,8 +243,8 @@ model InterviewBooking {
   reminderWindowClosed Boolean       @default(false)
   reminderResponse     String?
   notes                String?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
 }
 
 model Candidate {
@@ -448,6 +448,9 @@ model AppUser {
   id                  String          @id @default(cuid())
   username            String          @unique
   passwordHash        String
+  displayName         String?
+  email               String?         @unique
+  identityMigratedAt  DateTime?
   recoveryCodeHash    String?
   role                AppUserRole     @default(ADMIN)
   accessScope         UserAccessScope @default(ALL)
