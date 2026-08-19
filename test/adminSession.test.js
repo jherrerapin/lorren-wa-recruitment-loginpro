@@ -236,14 +236,7 @@ test('el middleware completa userId del perfil env antes de continuar con las ru
   }
   const prismaClient = {
     appUser: {
-      findUnique: async () => ({
-        id: 'profile-9',
-        username: 'operaciones-despacho-alertas',
-        isActive: true,
-        displayName: 'Perfil Operativo',
-        email: 'perfil.operativo@example.test',
-        identityMigratedAt: new Date('2026-08-19T20:00:00.000Z')
-      })
+      findUnique: async () => ({ id: 'profile-9', username: 'operaciones-despacho-alertas', isActive: true })
     }
   };
   const result = createAdminSessionMiddleware({

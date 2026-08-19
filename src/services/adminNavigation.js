@@ -1,5 +1,3 @@
-import { canCreateRecruiterUsers } from './appUsers.js';
-
 const RECRUITMENT_PATH = '/admin';
 const BRANCHES_PATH = '/admin/locations';
 const USERS_PATH = '/admin/users';
@@ -31,15 +29,6 @@ function requestCapability(req = {}, key) {
   return req[key] === true || req.session?.[key] === true;
 }
 
-function escapeHtml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 function activeModule(path) {
   if (path.startsWith(USERS_PATH) || path.startsWith(BRANCHES_PATH)) return null;
   if (path.startsWith(PAYROLL_PATH)) return 'payroll';
@@ -47,7 +36,11 @@ function activeModule(path) {
   return 'recruitment';
 }
 
-function moduleAccess(req = {}) {
+function originalNavHasLink(navHtml, href) {
+  return navHtml.includes(`href="${href}"`) || navHtml.includes(`href='${href}'`);
+}
+
+function moduleAccess(req = {}, originalNav = '') {
   const role = requestRole(req);
   const isDev = role === 'dev';
   return {
@@ -57,7 +50,7 @@ function moduleAccess(req = {}) {
     payroll: isDev || requestCapability(req, 'canAccessPayroll'),
     testWorkspace: isDev || requestCapability(req, 'canAccessTestWorkspace'),
     statistics: isDev || requestCapability(req, 'canAccessStatistics'),
-    users: canCreateRecruiterUsers(req)
+    users: isDev || originalNavHasLink(originalNav, USERS_PATH)
   };
 }
 
@@ -127,24 +120,10 @@ function standaloneUsersLink(access, path) {
   return `<a class="${classes.join(' ')}" href="${USERS_PATH}" data-standalone-link="users" style="gap:7px;">${standaloneIcon(USERS_ICON)}<span>Usuarios</span></a>`;
 }
 
-function sessionIdentity(req = {}) {
-  const session = req.session || {};
-  const isImpersonating = Boolean(session.devImpersonation);
-  const name = String(session.displayName || (session.userRole === 'dev' ? 'DEV' : '')).trim();
-  if (!name && !isImpersonating) return '';
-  const safeName = escapeHtml(name || 'Usuario');
-
-  if (isImpersonating) {
-    return `<div class="admin-session-identity is-impersonating" data-session-identity="true"><span class="admin-session-mode">Vista como</span><strong class="admin-session-user-name">${safeName}</strong><form method="post" action="/admin/users/impersonation/stop"><button type="submit" class="admin-session-return">Volver a DEV</button></form></div>`;
-  }
-
-  return `<div class="admin-session-identity" data-session-identity="true"><span class="admin-session-user-name">${safeName}</span></div>`;
-}
-
 export function buildAdminModuleNavbar(req = {}, originalNav = '') {
   const path = requestPath(req);
   const active = activeModule(path);
-  const access = moduleAccess(req);
+  const access = moduleAccess(req, originalNav);
   const modules = [
     moduleMenu({ key: 'recruitment', label: 'Reclutamiento', icon: RECRUITMENT_ICON, active, items: recruitmentMenuItems(access) }),
     moduleMenu({
@@ -159,7 +138,6 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
   ].filter(Boolean).join('\n    ');
   const branchesLink = standaloneBranchesLink(path);
   const usersLink = standaloneUsersLink(access, path);
-  const identity = sessionIdentity(req);
 
   return `<nav class="navbar admin-module-navbar" data-module-navigation="true" aria-label="Módulos principales">
     <a class="brand admin-module-brand" href="${RECRUITMENT_PATH}" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
@@ -168,7 +146,6 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
       ${usersLink}
     </div>
     <span class="spacer"></span>
-    ${identity}
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>`;
 }

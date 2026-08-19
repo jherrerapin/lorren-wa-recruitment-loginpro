@@ -54,68 +54,6 @@
   min-width: 0;
 }
 
-.admin-session-identity {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-  max-width: 260px;
-  min-height: 36px;
-  padding: 6px 9px;
-  border: 1px solid rgba(255, 255, 255, .14);
-  border-radius: 9px;
-  color: #edf3f7;
-  font-size: 12px;
-  line-height: 1.2;
-  position: relative;
-  z-index: 1300;
-}
-
-.admin-session-user-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.admin-session-mode {
-  color: #a7f3d0;
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: .04em;
-  white-space: nowrap;
-}
-
-.admin-session-identity.is-impersonating {
-  border-color: rgba(94, 234, 212, .5);
-  background: rgba(13, 122, 107, .26);
-  max-width: 430px;
-}
-
-.admin-session-identity form {
-  margin: 0;
-}
-
-.admin-session-return {
-  border: 1px solid rgba(255, 255, 255, .3);
-  border-radius: 7px;
-  padding: 5px 8px;
-  background: transparent;
-  color: #fff;
-  font: inherit;
-  font-size: 11px;
-  font-weight: 800;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.admin-session-return:hover,
-.admin-session-return:focus-visible {
-  background: rgba(255, 255, 255, .1);
-  outline: none;
-}
-
 .admin-module-navbar a.admin-module-standalone-link {
   display: inline-flex;
   align-items: center;
@@ -238,7 +176,7 @@
 }
 
 .admin-module-menu[data-module-menu="operations"] .admin-module-nav-icon {
-  background-image: url("data:image/png;base64,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");
+  background-image: url("data:image/png;base64,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");
 }
 
 .admin-module-menu[data-module-menu="payroll"] .admin-module-nav-icon {
@@ -295,29 +233,8 @@
     padding: 9px 14px !important;
   }
 
-  .admin-module-navbar .admin-module-brand,
-  .admin-module-navbar > form {
-    order: 1;
-  }
-
-  .admin-module-navbar > form {
-    margin-left: auto !important;
-  }
-
   .admin-module-navbar .spacer {
     display: none;
-  }
-
-  .admin-session-identity {
-    order: 2;
-    width: 100%;
-    max-width: none;
-    justify-content: flex-start;
-  }
-
-  .admin-session-identity.is-impersonating {
-    max-width: none;
-    flex-wrap: wrap;
   }
 
   .admin-module-nav-links {
@@ -358,9 +275,5 @@
 
   .admin-module-nav-icon {
     display: none;
-  }
-
-  .admin-session-user-name {
-    white-space: normal;
   }
 }

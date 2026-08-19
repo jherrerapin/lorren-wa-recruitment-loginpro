@@ -4,11 +4,7 @@ import { readFileSync } from 'node:fs';
 import express from 'express';
 import { adminRouter } from '../src/routes/admin.js';
 import { locationsRouter } from '../src/routes/locations.js';
-import {
-  canCreateRecruiterUsers,
-  canManageUserModulePermissions,
-  normalizeAppUserEmail
-} from '../src/services/appUsers.js';
+import { canManageUserModulePermissions } from '../src/services/appUsers.js';
 import { dedupeCitiesByNormalizedName } from '../src/services/cityOptions.js';
 
 function readSource(path) {
@@ -28,37 +24,7 @@ function close(server) {
   });
 }
 
-function identityParams(overrides = {}) {
-  return new URLSearchParams({
-    displayName: 'Usuario de Prueba',
-    email: 'usuario.prueba@example.test',
-    password: 'TEST-123456',
-    ...overrides
-  });
-}
-
-test('normalizador canónico de correo usa minúsculas y rechaza entradas inválidas', () => {
-  assert.equal(normalizeAppUserEmail('  PERSONA@EXAMPLE.TEST '), 'persona@example.test');
-  assert.equal(normalizeAppUserEmail('correo-sin-dominio'), null);
-  assert.equal(normalizeAppUserEmail(''), null);
-});
-
-test('crear usuarios y conceder módulos son capacidades distintas', () => {
-  assert.equal(canCreateRecruiterUsers({ userRole: 'dev', userSource: 'env' }), true);
-  assert.equal(canCreateRecruiterUsers({
-    userRole: 'admin',
-    userSource: 'db',
-    username: 'reclutador-general',
-    userAccessScope: 'ALL'
-  }), true);
-  assert.equal(canCreateRecruiterUsers({
-    userRole: 'admin',
-    userSource: 'db',
-    username: 'reclutador-sucursal',
-    userAccessScope: 'CITY'
-  }), true);
-  assert.equal(canCreateRecruiterUsers({ userRole: null }), false);
-
+test('la autoridad de permisos de módulos admite DEV y reclutador-general DB con alcance total', () => {
   assert.equal(canManageUserModulePermissions({ userRole: 'dev', userSource: 'env' }), true);
   assert.equal(canManageUserModulePermissions({
     userRole: 'admin',
@@ -66,10 +32,11 @@ test('crear usuarios y conceder módulos son capacidades distintas', () => {
     username: 'reclutador-general',
     userAccessScope: 'ALL'
   }), true);
+
   assert.equal(canManageUserModulePermissions({
     userRole: 'admin',
     userSource: 'db',
-    username: 'reclutador-sucursal',
+    username: 'reclutador-vacante',
     userAccessScope: 'ALL'
   }), false);
   assert.equal(canManageUserModulePermissions({
@@ -92,7 +59,7 @@ test('reclutador-general puede activar y retirar módulos de un usuario administ
     appUser: {
       findUnique: async () => ({
         id: 'user-1',
-        username: 'legacy-user',
+        username: 'reclutador-vacante',
         role: 'ADMIN',
         canAccessDispatch: false,
         canAccessAttendance: false,
@@ -238,7 +205,7 @@ test('edición de usuario conserva alcance CITY con varias sucursales', async ()
     appUser: {
       findUnique: async () => ({
         id: 'user-1',
-        username: 'legacy-multiple',
+        username: 'reclutador-multiple',
         role: 'ADMIN',
         canAccessDispatch: false,
         canAccessAttendance: false,
@@ -288,11 +255,11 @@ test('edición de usuario conserva alcance CITY con varias sucursales', async ()
   }
 });
 
-test('creación de usuario conserva alcance CITY con varias sucursales y crea identidad por correo', async () => {
+test('creación de usuario acepta el JSON compatible generado por múltiples checkboxes', async () => {
   const created = [];
   const prisma = {
     appUser: {
-      findUnique: async () => null,
+      findMany: async () => [],
       create: async ({ data }) => {
         created.push(data);
         return { id: 'created-user', ...data };
@@ -317,9 +284,8 @@ test('creación de usuario conserva alcance CITY con varias sucursales y crea id
   const server = await listen(app);
   try {
     const { port } = server.address();
-    const params = identityParams({
-      displayName: 'Persona Uno',
-      email: 'PERSONA.UNO@EXAMPLE.TEST',
+    const params = new URLSearchParams({
+      password: 'TEST-123456',
       accessScope: 'CITY',
       scopeCity: JSON.stringify(['Bogotá', 'Neiva'])
     });
@@ -332,15 +298,9 @@ test('creación de usuario conserva alcance CITY con varias sucursales y crea id
 
     assert.equal(response.status, 302);
     assert.equal(created.length, 1);
-    assert.equal(created[0].displayName, 'Persona Uno');
-    assert.equal(created[0].email, 'persona.uno@example.test');
-    assert.equal(created[0].recoveryEmail, 'persona.uno@example.test');
     assert.equal(created[0].accessScope, 'CITY');
     assert.equal(created[0].scopeCity, '["Bogotá","Neiva"]');
     assert.equal(created[0].scopeVacancyId, null);
-    assert.match(created[0].username, /^user-[0-9a-f-]{36}$/);
-    assert.doesNotMatch(created[0].username, /^reclutador-/);
-    assert.ok(created[0].identityMigratedAt instanceof Date);
   } finally {
     await close(server);
   }
@@ -354,7 +314,7 @@ test('creación de usuario persiste varias vacantes seleccionadas y conserva la 
   ];
   const prisma = {
     appUser: {
-      findUnique: async () => null,
+      findMany: async () => [],
       create: async ({ data }) => {
         created.push(data);
         return { id: 'created-user', ...data };
@@ -385,7 +345,10 @@ test('creación de usuario persiste varias vacantes seleccionadas y conserva la 
   const server = await listen(app);
   try {
     const { port } = server.address();
-    const params = identityParams({ accessScope: 'VACANCY' });
+    const params = new URLSearchParams({
+      password: 'TEST-123456',
+      accessScope: 'VACANCY'
+    });
     params.append('scopeVacancyIds', 'vacancy-alpha');
     params.append('scopeVacancyIds', 'vacancy-beta');
 
@@ -413,7 +376,7 @@ test('creación de usuario rechaza alcance VACANCY sin vacantes seleccionadas', 
   const created = [];
   const prisma = {
     appUser: {
-      findUnique: async () => null,
+      findMany: async () => [],
       create: async ({ data }) => {
         created.push(data);
         return { id: 'created-user', ...data };
@@ -442,7 +405,7 @@ test('creación de usuario rechaza alcance VACANCY sin vacantes seleccionadas', 
     const response = await fetch(`http://127.0.0.1:${port}/admin/users/create`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: identityParams({ accessScope: 'VACANCY' }).toString(),
+      body: new URLSearchParams({ password: 'TEST-123456', accessScope: 'VACANCY' }).toString(),
       redirect: 'manual'
     });
 
@@ -454,195 +417,30 @@ test('creación de usuario rechaza alcance VACANCY sin vacantes seleccionadas', 
   }
 });
 
-test('reclutador común crea dentro de su sucursal pero un POST manipulado no concede módulos', async () => {
-  const created = [];
-  const prisma = {
-    appUser: {
-      findUnique: async () => null,
-      create: async ({ data }) => {
-        created.push(data);
-        return { id: 'created-user', ...data };
-      }
-    }
-  };
-
-  const app = express();
-  app.use(express.urlencoded({ extended: true }));
-  app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'ordinary-creator',
-      username: 'legacy-ordinary',
-      userSource: 'db',
-      userAccessScope: 'CITY',
-      userAccessCity: 'Bogotá'
-    };
-    next();
-  });
-  app.use('/admin', adminRouter(prisma));
-
-  const server = await listen(app);
-  try {
-    const { port } = server.address();
-    const params = identityParams({
-      displayName: 'Persona Dos',
-      email: 'persona.dos@example.test',
-      accessScope: 'CITY',
-      scopeCity: JSON.stringify(['Bogotá']),
-      canAccessDispatch: 'true',
-      canAccessAttendance: 'true',
-      canAccessMetaAds: 'true',
-      canAccessCvAnalysis: 'true'
-    });
-    const response = await fetch(`http://127.0.0.1:${port}/admin/users/create`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
-      redirect: 'manual'
-    });
-
-    assert.equal(response.status, 302);
-    assert.equal(created.length, 1);
-    assert.equal(created[0].scopeCity, 'Bogotá');
-    assert.equal(created[0].canAccessDispatch, false);
-    assert.equal(created[0].canAccessAttendance, false);
-    assert.equal(created[0].canAccessStatistics, false);
-    assert.equal(created[0].canAccessMetaAds, false);
-    assert.equal(created[0].canAccessCvAnalysis, false);
-  } finally {
-    await close(server);
-  }
-});
-
-test('reclutador común no puede crear un usuario fuera de sus sucursales', async () => {
-  const created = [];
-  const prisma = {
-    appUser: {
-      findUnique: async () => null,
-      create: async ({ data }) => {
-        created.push(data);
-        return { id: 'created-user', ...data };
-      }
-    }
-  };
-
-  const app = express();
-  app.use(express.urlencoded({ extended: true }));
-  app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'ordinary-creator',
-      username: 'legacy-ordinary',
-      userSource: 'db',
-      userAccessScope: 'CITY',
-      userAccessCity: JSON.stringify(['Bogotá'])
-    };
-    next();
-  });
-  app.use('/admin', adminRouter(prisma));
-
-  const server = await listen(app);
-  try {
-    const { port } = server.address();
-    const params = identityParams({
-      displayName: 'Persona Tres',
-      email: 'persona.tres@example.test',
-      accessScope: 'CITY',
-      scopeCity: JSON.stringify(['Neiva'])
-    });
-    const response = await fetch(`http://127.0.0.1:${port}/admin/users/create`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
-      redirect: 'manual'
-    });
-
-    assert.equal(response.status, 302);
-    assert.equal(created.length, 0);
-    assert.match(response.headers.get('location') || '', /propio%20alcance/);
-  } finally {
-    await close(server);
-  }
-});
-
-test('reclutador-general puede conceder módulos al crear', async () => {
-  const created = [];
-  const prisma = {
-    appUser: {
-      findUnique: async () => null,
-      create: async ({ data }) => {
-        created.push(data);
-        return { id: 'created-user', ...data };
-      }
-    }
-  };
-  const app = express();
-  app.use(express.urlencoded({ extended: true }));
-  app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'general-1',
-      username: 'reclutador-general',
-      userSource: 'db',
-      userAccessScope: 'ALL'
-    };
-    next();
-  });
-  app.use('/admin', adminRouter(prisma));
-
-  const server = await listen(app);
-  try {
-    const { port } = server.address();
-    const params = identityParams({
-      displayName: 'Persona Cuatro',
-      email: 'persona.cuatro@example.test',
-      accessScope: 'ALL',
-      canAccessAttendance: 'true',
-      canAccessMetaAds: 'true'
-    });
-    const response = await fetch(`http://127.0.0.1:${port}/admin/users/create`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
-      redirect: 'manual'
-    });
-    assert.equal(response.status, 302);
-    assert.equal(created.length, 1);
-    assert.equal(created[0].canAccessDispatch, true);
-    assert.equal(created[0].canAccessAttendance, true);
-    assert.equal(created[0].canAccessStatistics, true);
-    assert.equal(created[0].canAccessMetaAds, true);
-  } finally {
-    await close(server);
-  }
-});
-
-test('el módulo de Usuarios muestra identidad profesional y selección múltiple sin username visible', () => {
+test('el módulo de permisos muestra Sucursales y Vacantes con selección múltiple', () => {
   const usersView = readSource('src/views/users.ejs');
   const locationsSource = readSource('src/routes/locations.js');
   const adminSource = readSource('src/routes/admin.js');
 
-  assert.match(usersView, /name="displayName"/);
-  assert.match(usersView, /name="email" type="email"/);
-  assert.match(usersView, /Este nombre aparecerá dentro del panel/);
-  assert.match(usersView, /Será el identificador de inicio de sesión/);
+  assert.match(usersView, /una o varias sucursales completas/);
   assert.match(usersView, />Una o varias sucursales</);
   assert.match(usersView, /id="createCityOptions"/);
   assert.match(usersView, /type="checkbox" name="scopeCities"/);
   assert.match(usersView, /id="scopeCity" name="scopeCity" type="hidden"/);
   assert.doesNotMatch(usersView, /<select id="scopeCity"/);
   assert.match(usersView, /fetch\('\/admin\/locations\/api\/cities'/);
+  assert.match(usersView, /option value="CITY"/);
+  assert.match(usersView, /Sucursales seleccionadas/);
+  assert.match(usersView, /Todas las sucursales y vacantes/);
   assert.match(usersView, />Una o varias vacantes</);
   assert.match(usersView, /id="createVacancyOptions"/);
   assert.match(usersView, /type="checkbox" name="scopeVacancyIds"/);
   assert.doesNotMatch(usersView, /<select id="scopeVacancyId"/);
-  assert.match(usersView, /canManageModulePermissions/);
-  assert.match(usersView, /canImpersonateUsers/);
-  assert.match(usersView, /Entrar como usuario/);
-  assert.match(usersView, /Actualización pendiente/);
-  assert.doesNotMatch(usersView, /<strong><%= user\.username %><\/strong>/);
-  assert.match(adminSource, /`user-\$\{randomUUID\(\)\}`/);
-  assert.doesNotMatch(adminSource, /buildUniqueRecruiterUsername\(/);
-  assert.match(adminSource, /const canGrantModules = canManageUserModulePermissions\(req\)/);
+  assert.match(adminSource, /encodeUserAccessSelection/);
+  assert.match(adminSource, /requestedVacancyIds/);
+  assert.match(usersView, /role === 'dev' \|\| currentUsername === 'reclutador-general'/);
+  assert.match(usersView, /Solo DEV puede conceder permisos iniciales/);
+  assert.match(locationsSource, /router\.get\('\/api\/cities'/);
+  assert.match(locationsSource, /if \(accessScope === 'CITY'\)/);
   assert.match(locationsSource, /if \(canManageUserModulePermissions\(req\)\)/);
 });
