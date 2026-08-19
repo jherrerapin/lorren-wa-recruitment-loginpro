@@ -230,7 +230,8 @@ export function locationsRouter(prisma) {
     });
   });
 
-  router.get('/api/cities', async (_req, res) => {
+  router.get('/api/cities', async (req, res) => {
+    if (!canManageRecruiterUsers(req)) return res.status(403).json({ error: 'forbidden' });
     const cities = await loadUnifiedCityOptions(prisma);
     res.json(cities.map((city) => ({ id: city.id, name: city.name })));
   });
@@ -320,7 +321,7 @@ export function locationsRouter(prisma) {
         flash(res, 'error', `No se puede eliminar "${city.name}" porque tiene vacantes asociadas.`);
         return res.redirect('/admin/locations');
       }
-      await prisma.city.delete({ where: { id: city.id } });
+      await prisma.city.delete({ where: { id: req.params.id } });
       flash(res, 'success', `Sucursal "${city.name}" eliminada.`);
     } catch (_error) {
       flash(res, 'error', 'Error al eliminar la sucursal.');
