@@ -28,7 +28,7 @@
     .brand { display: inline-flex; align-items: center; }
     .brand img { height: 32px; width: auto; object-fit: contain; display: block; }
     h1 { margin-top: 8px; font-size: 24px; color: #111827; }
-    p { margin-top: 8px; color: #6b7280; font-size: 14px; }
+    p { margin-top: 8px; color: #6b7280; font-size: 14px; line-height: 1.45; }
     form { margin-top: 20px; display: grid; gap: 14px; }
     .field label { display: block; margin-bottom: 6px; font-size: 13px; color: #4b5563; font-weight: 600; }
     .field input {
@@ -75,6 +75,7 @@
       margin-top: 14px;
       font-size: 13px;
       color: #6b7280;
+      line-height: 1.45;
     }
     .helper a {
       color: #4f46e5;
@@ -89,7 +90,7 @@
       <img src="/public/logo-loginpro.svg" alt="LoginPro" />
     </div>
     <h1>Acceso al panel</h1>
-    <p>Ingresa tus credenciales para continuar.</p>
+    <p>Ingresa con tu correo electrónico y contraseña.</p>
 
     <% if (error) { %>
       <div class="error"><%= error %></div>
@@ -100,8 +101,8 @@
 
     <form method="post" action="/login">
       <div class="field">
-        <label for="username">Usuario</label>
-        <input id="username" name="username" type="text" autocomplete="username" required value="<%= username %>" />
+        <label for="username">Correo electrónico</label>
+        <input id="username" name="username" type="text" inputmode="email" autocomplete="username" required value="<%= username %>" />
       </div>
 
       <div class="field">
@@ -113,10 +114,10 @@
     </form>
 
     <div class="helper">
-      ¿Olvidaste tu contraseña? <a href="/recover">Recuperar acceso con código</a>.
+      Si todavía no has actualizado tu acceso, usa tu usuario actual una última vez. Antes de entrar al panel te pediremos confirmar tu nombre y correo.
     </div>
     <div class="helper">
-      Los usuarios antiguos por variables de entorno siguen entrando normal; su recuperación se gestiona desde el perfil dev.
+      ¿Olvidaste tu contraseña? <a href="/recover">Recuperar acceso con código</a>.
     </div>
   </main>
 </body>
