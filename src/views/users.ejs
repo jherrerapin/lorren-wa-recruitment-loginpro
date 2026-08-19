@@ -189,7 +189,7 @@
           <div class="grid">
             <div class="field"><label for="accessScope">Alcance</label><select id="accessScope" name="accessScope">
               <% if (manageableScopeOptions.canCreateAll) { %><option value="ALL">Todas las vacantes</option><% } %>
-              <% if (allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una o varias sucursales</option><% } %>
+              <% if (manageableScopeOptions.canCreateAll || allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una o varias sucursales</option><% } %>
               <% if (allowedVacancies.length) { %><option value="VACANCY">Una vacante específica</option><% } %>
             </select></div>
             <div class="field full" id="cityField">
