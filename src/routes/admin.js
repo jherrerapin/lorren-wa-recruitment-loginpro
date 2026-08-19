@@ -56,18 +56,14 @@ import { loadPendingCvMigrationCount, migrateCandidateCvBatch } from '../service
 import { normalizeKnowledgeContent, normalizeKnowledgeScope } from '../services/botKnowledge.js';
 import {
   buildCandidateAccessWhere,
+  buildUniqueRecruiterUsername,
   buildVacancyAccessWhere,
   canAccessCandidate,
   canAccessVacancy,
-  canCreateRecruiterUsers,
-  canManageUserModulePermissions,
   describeUserScope,
-  encodeUserAccessCities,
   encodeUserAccessSelection,
   generateRecoveryCode,
   getAccessContext,
-  normalizeAppUserEmail,
-  normalizeUserAccessCities,
   normalizeUserAccessScope
 } from '../services/appUsers.js';
 
@@ -101,15 +97,7 @@ function canManageRecruiterUsers(req) {
 function ensureRecruiterUserManagementAccess(req, res) {
   if (canManageRecruiterUsers(req)) return true;
   if (res) {
-    return res.redirect('/admin?error=' + encodeURIComponent('La administración de usuarios solo está disponible para reclutador-general y DEV.'));
-  }
-  return false;
-}
-
-function ensureRecruiterUserCreationAccess(req, res) {
-  if (canCreateRecruiterUsers(req)) return true;
-  if (res) {
-    return res.redirect('/admin?error=' + encodeURIComponent('No tienes acceso para crear usuarios.'));
+    return res.redirect('/admin?error=' + encodeURIComponent('La gestión de usuarios solo está disponible para reclutador general y devloginpro.'));
   }
   return false;
 }
@@ -127,6 +115,39 @@ function isProtectedRecruiterProfile(user = {}) {
   return user.username === 'reclutador-general' || isEnvironmentAdminProfile(user);
 }
 
+async function ensureEnvironmentAdminProfile(prisma) {
+  const username = environmentAdminUsername();
+  if (!username) return null;
+
+  const existing = await prisma.appUser.findUnique({ where: { username } });
+  if (existing) return existing;
+
+  try {
+    return await prisma.appUser.create({
+      data: {
+        username,
+        passwordHash: await bcrypt.hash(randomUUID(), 12),
+        role: 'ADMIN',
+        accessScope: 'ALL',
+        scopeCity: null,
+        scopeVacancyId: null,
+        canAccessDispatch: false,
+        canAccessAttendance: false,
+        canAccessStatistics: false,
+        canAccessMetaAds: false,
+        canAccessCvAnalysis: false,
+        createdByUsername: 'Sistema: perfil principal de Railway',
+        isActive: true
+      }
+    });
+  } catch (error) {
+    if (error?.code === 'P2002') {
+      return prisma.appUser.findUnique({ where: { username } });
+    }
+    throw error;
+  }
+}
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -136,13 +157,6 @@ function normalizeString(value) {
 function normalizeManyStrings(value) {
   const values = Array.isArray(value) ? value : [value];
   return [...new Set(values.map(normalizeString).filter(Boolean))];
-}
-
-function appUserLabel(user = {}) {
-  return normalizeString(user.displayName)
-    || normalizeAppUserEmail(user.email)
-    || normalizeString(user.username)
-    || 'usuario';
 }
 
 function normalizeDigits(value) {
@@ -413,53 +427,42 @@ function getManageableScopeOptions(req, vacancies = []) {
     };
   }
   if (accessContext.scope === 'CITY') {
-    const allowedCities = normalizeUserAccessCities(accessContext.cities?.length ? accessContext.cities : accessContext.city);
     return {
       canCreateAll: false,
-      allowedCities,
-      allowedVacancies: vacancies.filter((vacancy) => allowedCities.includes(vacancy.city))
+      allowedCities: accessContext.city ? [accessContext.city] : [],
+      allowedVacancies: vacancies.filter((vacancy) => vacancy.city === accessContext.city)
     };
   }
-  const allowedVacancyIds = normalizeManyStrings([
-    ...(Array.isArray(accessContext.vacancyIds) ? accessContext.vacancyIds : []),
-    accessContext.vacancyId
-  ]);
-  const allowedVacancies = vacancies.filter((vacancy) => allowedVacancyIds.includes(vacancy.id));
   return {
     canCreateAll: false,
-    allowedCities: Array.from(new Set(allowedVacancies.map((vacancy) => vacancy.city).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'es')),
-    allowedVacancies
+    allowedCities: [],
+    allowedVacancies: vacancies.filter((vacancy) => vacancy.id === accessContext.vacancyId)
   };
 }
 
 async function resolveRequestedUserScope(prisma, req, body = {}) {
   const accessContext = getRequestAccessContext(req);
   const accessScope = normalizeUserAccessScope(body.accessScope);
-  const requestedCities = normalizeUserAccessCities(body.scopeCity);
+  const scopeCity = normalizeString(body.scopeCity);
   const requestedVacancyIds = normalizeManyStrings([
     ...(Array.isArray(body.scopeVacancyIds) ? body.scopeVacancyIds : [body.scopeVacancyIds]),
     body.scopeVacancyId
   ]);
-  const creatorCities = normalizeUserAccessCities(accessContext.cities?.length ? accessContext.cities : accessContext.city);
-  const creatorVacancyIds = normalizeManyStrings([
-    ...(Array.isArray(accessContext.vacancyIds) ? accessContext.vacancyIds : []),
-    accessContext.vacancyId
-  ]);
 
-  if (accessContext.scope === 'VACANCY' && accessScope !== 'VACANCY') {
-    return { error: 'Tu perfil solo puede crear usuarios con alcance por vacantes.' };
+  if (!accessContext.isDev && accessContext.scope === 'VACANCY' && accessScope !== 'VACANCY') {
+    return { error: 'Tu perfil solo puede crear usuarios asignados a la misma vacante.' };
   }
-  if (accessContext.scope === 'CITY' && accessScope === 'ALL') {
+  if (!accessContext.isDev && accessContext.scope === 'CITY' && accessScope === 'ALL') {
     return { error: 'Tu perfil no puede crear usuarios con acceso total.' };
   }
-  if (accessContext.scope === 'VACANCY'
-    && requestedVacancyIds.some((vacancyId) => !creatorVacancyIds.includes(vacancyId))) {
-    return { error: 'Solo puedes asignar vacantes que estén dentro de tu propio alcance.' };
+  if (!accessContext.isDev && accessContext.scope === 'VACANCY'
+    && requestedVacancyIds.some((vacancyId) => vacancyId !== accessContext.vacancyId)) {
+    return { error: 'Tu perfil solo puede crear usuarios para tu misma vacante.' };
   }
 
   if (accessScope === 'ALL') {
     if (!accessContext.isDev && accessContext.scope !== 'ALL') {
-      return { error: 'No puedes crear usuarios con un alcance mayor al tuyo.' };
+      return { error: 'Solo dev o un reclutador general pueden crear usuarios con acceso total.' };
     }
     return {
       accessScope,
@@ -470,16 +473,18 @@ async function resolveRequestedUserScope(prisma, req, body = {}) {
   }
 
   if (accessScope === 'CITY') {
-    if (!requestedCities.length) {
-      return { error: 'Debes seleccionar al menos una sucursal para este usuario.' };
+    const finalCity = accessContext.isDev || accessContext.scope === 'ALL'
+      ? scopeCity
+      : accessContext.city;
+    if (!finalCity) {
+      return { error: 'Debes seleccionar una ciudad para este usuario.' };
     }
-    if (accessContext.scope === 'CITY'
-      && requestedCities.some((city) => !creatorCities.includes(city))) {
-      return { error: 'Solo puedes asignar sucursales que estén dentro de tu propio alcance.' };
+    if (!accessContext.isDev && accessContext.scope === 'CITY' && finalCity !== accessContext.city) {
+      return { error: 'Tu perfil solo puede crear usuarios para tu misma ciudad.' };
     }
     return {
       accessScope,
-      scopeCity: encodeUserAccessCities(requestedCities),
+      scopeCity: finalCity,
       scopeVacancyId: null,
       scopeVacancy: null
     };
@@ -600,30 +605,28 @@ function buildManageableUsersWhere(accessContext = {}) {
     return { role: 'ADMIN', ...visibilityWhere };
   }
   if (accessContext.scope === 'CITY') {
-    const cities = normalizeUserAccessCities(accessContext.cities?.length ? accessContext.cities : accessContext.city);
     return {
       role: 'ADMIN',
       ...visibilityWhere,
       OR: [
-        ...(cities.length === 1 ? [{ accessScope: 'CITY', scopeCity: cities[0] }] : []),
+        {
+          accessScope: 'CITY',
+          scopeCity: accessContext.city || '__OUT_OF_SCOPE__'
+        },
         {
           accessScope: 'VACANCY',
           scopeVacancy: {
-            city: { in: cities.length ? cities : ['__OUT_OF_SCOPE__'] }
+            city: accessContext.city || '__OUT_OF_SCOPE__'
           }
         }
       ]
     };
   }
-  const vacancyIds = normalizeManyStrings([
-    ...(Array.isArray(accessContext.vacancyIds) ? accessContext.vacancyIds : []),
-    accessContext.vacancyId
-  ]);
   return {
     role: 'ADMIN',
     ...visibilityWhere,
     accessScope: 'VACANCY',
-    scopeVacancyId: vacancyIds.length === 1 ? vacancyIds[0] : { in: vacancyIds.length ? vacancyIds : ['__OUT_OF_SCOPE__'] }
+    scopeVacancyId: accessContext.vacancyId || '__OUT_OF_SCOPE__'
   };
 }
 
@@ -1231,7 +1234,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
               age: true, neighborhood: true, locality: true, zone: true, status: true,
               medicalRestrictions: true, transportMode: true,
               interviewNotes: true,
-              cvOriginalName: true, cvMimeType: true, cvStorageKey: true, gender: true,
+      cvOriginalName: true, cvMimeType: true, cvStorageKey: true, gender: true,
               botPaused: true, botPausedAt: true, botPauseReason: true,
               currentStep: true,
               lastInboundAt: true,
@@ -1633,10 +1636,10 @@ export function adminRouter(prisma) {
           cvOriginalName: true,
           cvStorageKey: true,
           gender: true,
-          botPaused: true,
-          botPausedAt: true,
-          botPauseReason: true,
-          lastInboundAt: true,
+            botPaused: true,
+            botPausedAt: true,
+            botPauseReason: true,
+            lastInboundAt: true,
           lastOutboundAt: true,
           devLastSeenAt: true,
           vacancy: { select: { city: true } }
@@ -1795,9 +1798,9 @@ export function adminRouter(prisma) {
         rejectionReason: true,
         rejectionDetails: true,
         createdAt: true,
-        cvMimeType: true,
-        cvOriginalName: true,
-        cvStorageKey: true,
+          cvMimeType: true,
+          cvOriginalName: true,
+          cvStorageKey: true,
         vacancy: { select: { city: true } }
       }
     });
@@ -1898,6 +1901,7 @@ export function adminRouter(prisma) {
     res.end();
   });
 
+  // ── Detalle de candidato ─────────────────────────────────────
   router.get('/outreach/approved', async (req, res) => {
     const accessContext = getRequestAccessContext(req);
     const outreachFilters = normalizeOutreachFilters(req.query);
@@ -1973,6 +1977,7 @@ export function adminRouter(prisma) {
       preparedError: preparedRecipients.length ? null : 'Selecciona al menos un candidato aprobado para preparar la ronda.'
     });
   });
+
 
   router.get('/bot-knowledge', ensureDevRole, async (req, res) => {
     const success = normalizeString(req.query.success);
@@ -2494,6 +2499,7 @@ export function adminRouter(prisma) {
     }
   });
 
+  // ── Cambiar estado ───────────────────────────────────────────
   router.post('/candidates/:id/status', express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const status = normalizeString(req.body.status);
@@ -2530,6 +2536,7 @@ export function adminRouter(prisma) {
     res.redirect(buildCandidateDetailPath(id, returnTo));
   });
 
+  // ── Edición manual ───────────────────────────────────────────
   router.get('/candidates/:id/open-whatsapp', async (req, res) => {
     const { id } = req.params;
     const returnTo = safeAdminReturnPath(req.query.returnTo || req.get('referer') || '/admin');
@@ -2769,13 +2776,13 @@ export function adminRouter(prisma) {
     const existingCandidate = await prisma.candidate.findUnique({
       where: { id },
       select: {
-        id: true,
-        status: true,
-        gender: true,
-        interviewNotes: true,
-        botPaused: true,
-        botPausedAt: true,
-        botPauseReason: true,
+      id: true,
+      status: true,
+      gender: true,
+      interviewNotes: true,
+      botPaused: true,
+      botPausedAt: true,
+      botPauseReason: true,
         cvData: true,
         cvOriginalName: true,
         cvMimeType: true,
@@ -2865,6 +2872,7 @@ export function adminRouter(prisma) {
     res.redirect(buildCandidateDetailPath(id, returnTo));
   });
 
+  // ── Pausar / reanudar bot ────────────────────────────────────
   router.post('/candidates/:id/bot-pause', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const reason = normalizeString(req.body.reason) || 'Pausa manual desde admin';
@@ -2958,6 +2966,8 @@ export function adminRouter(prisma) {
     res.redirect(`/admin/candidates/${id}?botPauseSuccess=` + encodeURIComponent('Bot reanudado correctamente.'));
   });
 
+  // ── CV: descargar ────────────────────────────────────────────
+
   router.post('/candidates/:id/bot-knowledge', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const content = normalizeKnowledgeContent(req.body.content);
@@ -2995,6 +3005,7 @@ export function adminRouter(prisma) {
     res.send(buffer);
   });
 
+  // ── CV: subir / reemplazar ───────────────────────────────────
   router.post('/candidates/:id/cv/upload', (req, res, next) => {
     cvUpload(req, res, (err) => {
       if (err instanceof multer.MulterError) {
@@ -3035,6 +3046,7 @@ export function adminRouter(prisma) {
     res.redirect(`/admin/candidates/${id}?` + buildCvStatusQuery('cvSuccess', 'Hoja de vida actualizada correctamente.'));
   });
 
+  // ── CV: eliminar ─────────────────────────────────────────────
   router.post('/candidates/:id/cv/delete', async (req, res) => {
     if (!await ensureCandidateIdAccess(prisma, req, req.params.id, res, `/admin/candidates/${req.params.id}`)) return;
     const candidate = await prisma.candidate.findUnique({
@@ -3049,6 +3061,7 @@ export function adminRouter(prisma) {
     res.redirect(`/admin/candidates/${req.params.id}?` + buildCvStatusQuery('cvSuccess', 'Hoja de vida eliminada.'));
   });
 
+  // ── Mensajes salientes (solo dev) ────────────────────────────
   router.post('/candidates/:id/outbound', ensureDevRole, express.urlencoded({ extended: true }), async (req, res) => {
     const { id } = req.params;
     const action = normalizeString(req.body.action);
@@ -3133,9 +3146,13 @@ export function adminRouter(prisma) {
     }
   });
 
+  // ── CRUD de vacantes ─────────────────────────────────────────
   router.get('/users', async (req, res) => {
-    if (!ensureRecruiterUserCreationAccess(req, res)) return;
+    if (!ensureRecruiterUserManagementAccess(req, res)) return;
     const accessContext = getRequestAccessContext(req);
+    if (accessContext.isDev) {
+      await ensureEnvironmentAdminProfile(prisma);
+    }
     const [users, vacancies] = await Promise.all([
       prisma.appUser.findMany({
         where: buildManageableUsersWhere(accessContext),
@@ -3163,17 +3180,10 @@ export function adminRouter(prisma) {
     ]);
 
     const manageableScopeOptions = getManageableScopeOptions(req, vacancies);
-    const highlightedUserId = normalizeString(req.query.userId);
-    const highlightedUser = highlightedUserId
-      ? users.find((user) => user.id === highlightedUserId) || null
-      : null;
     res.render('users', {
       role: req.userRole,
       canAccessDispatch: req.canAccessDispatch,
-      canCreateUsers: canCreateRecruiterUsers(req),
       canManageUsers: canManageRecruiterUsers(req),
-      canManageModulePermissions: canManageUserModulePermissions(req),
-      canImpersonateUsers: req.userRole === 'dev' && !req.session?.devImpersonation,
       users,
       vacancies,
       manageableScopeOptions,
@@ -3181,8 +3191,7 @@ export function adminRouter(prisma) {
       successMsg: normalizeString(req.query.success),
       errorMsg: normalizeString(req.query.error),
       revealedRecoveryCode: normalizeString(req.query.recoveryCode),
-      highlightedUserId,
-      highlightedUser,
+      highlightedUsername: normalizeString(req.query.username),
       currentUsername: req.username || '',
       currentUserId: req.userId || '',
       environmentAdminUsername: environmentAdminUsername() || ''
@@ -3190,81 +3199,56 @@ export function adminRouter(prisma) {
   });
 
   router.post('/users/create', express.urlencoded({ extended: true }), async (req, res) => {
-    if (!ensureRecruiterUserCreationAccess(req, res)) return;
-    const displayName = normalizeString(req.body.displayName);
-    const email = normalizeAppUserEmail(req.body.email);
+    if (!ensureRecruiterUserManagementAccess(req, res)) return;
     const password = typeof req.body.password === 'string' ? req.body.password : '';
-    if (!displayName || displayName.length < 3) {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('Debes ingresar el nombre completo del usuario.'));
-    }
-    if (!email) {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('Debes ingresar un correo electrónico válido.'));
-    }
     if (password.length < 6) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('La contrasena inicial debe tener al menos 6 caracteres.'));
     }
 
-    const existingEmail = await prisma.appUser.findUnique({
-      where: { email },
-      select: { id: true }
-    });
-    if (existingEmail) {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('Ese correo ya está asociado a otro usuario.'));
-    }
-
-    const canGrantModules = canManageUserModulePermissions(req);
-    const canAccessAttendance = canGrantModules && req.body.canAccessAttendance === 'true';
-    const canAccessDispatch = canGrantModules
+    const canAccessAttendance = req.userRole === 'dev' && req.body.canAccessAttendance === 'true';
+    const canAccessDispatch = req.userRole === 'dev'
       && (req.body.canAccessDispatch === 'true' || canAccessAttendance);
-    const canAccessMetaAds = canGrantModules && req.body.canAccessMetaAds === 'true';
-    const canAccessCvAnalysis = canGrantModules && req.body.canAccessCvAnalysis === 'true';
+    const canAccessMetaAds = req.userRole === 'dev' && req.body.canAccessMetaAds === 'true';
+    const canAccessCvAnalysis = req.userRole === 'dev' && req.body.canAccessCvAnalysis === 'true';
     const scopeResolution = await resolveRequestedUserScope(prisma, req, req.body);
     if (scopeResolution.error) {
       return res.redirect('/admin/users?error=' + encodeURIComponent(scopeResolution.error));
     }
 
-    const username = `user-${randomUUID()}`;
+    const username = await buildUniqueRecruiterUsername(prisma, {
+      accessScope: scopeResolution.accessScope,
+      scopeCity: scopeResolution.scopeCity,
+      vacancyTitle: scopeResolution.scopeVacancy?.title
+    });
     const passwordHash = await bcrypt.hash(password, 10);
     const recoveryCode = generateRecoveryCode();
     const recoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
-    const identityMigratedAt = new Date();
 
-    let createdUser;
-    try {
-      createdUser = await prisma.appUser.create({
-        data: {
-          username,
-          passwordHash,
-          displayName,
-          email,
-          identityMigratedAt,
-          recoveryCodeHash,
-          role: 'ADMIN',
-          accessScope: scopeResolution.accessScope,
-          scopeCity: scopeResolution.scopeCity,
-          scopeVacancyId: scopeResolution.scopeVacancyId,
-          canAccessDispatch,
-          canAccessAttendance,
-          canAccessStatistics: canAccessMetaAds || canAccessCvAnalysis,
-          canAccessMetaAds,
-          canAccessCvAnalysis,
-          recoveryPhone: normalizeString(req.body.recoveryPhone),
-          recoveryEmail: email,
-          createdByUsername: req.username || req.userRole || 'system',
-          lastPasswordResetAt: identityMigratedAt,
-          isActive: true
-        }
-      });
-    } catch (error) {
-      if (error?.code === 'P2002') {
-        return res.redirect('/admin/users?error=' + encodeURIComponent('El correo ya está asociado a otro usuario.'));
+    await prisma.appUser.create({
+      data: {
+        username,
+        passwordHash,
+        recoveryCodeHash,
+        role: 'ADMIN',
+        accessScope: scopeResolution.accessScope,
+        scopeCity: scopeResolution.scopeCity,
+        scopeVacancyId: scopeResolution.scopeVacancyId,
+        canAccessDispatch,
+        canAccessAttendance,
+        canAccessStatistics: canAccessMetaAds || canAccessCvAnalysis,
+        canAccessMetaAds,
+        canAccessCvAnalysis,
+        recoveryPhone: normalizeString(req.body.recoveryPhone),
+        recoveryEmail: normalizeString(req.body.recoveryEmail),
+        createdByUsername: req.username || req.userRole || 'system',
+        lastPasswordResetAt: new Date(),
+        isActive: true
       }
-      throw error;
-    }
+    });
 
     const params = new URLSearchParams();
-    params.set('success', `${displayName} fue creado correctamente.`);
-    params.set('userId', createdUser.id);
+    params.set('success', `Usuario ${username} creado correctamente.`);
+    params.set('username', username);
     params.set('recoveryCode', recoveryCode);
     return res.redirect(`/admin/users?${params.toString()}`);
   });
@@ -3294,10 +3278,10 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Usuario no encontrado.'));
     }
     if (user.role !== 'ADMIN') {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios del panel.'));
+      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios reclutadores.'));
     }
     if (isEnvironmentAdminProfile(user)) {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('La contraseña del perfil principal se administra desde su configuración de entorno.'));
+      return res.redirect('/admin/users?error=' + encodeURIComponent('La contraseña del perfil principal se administra en Railway.'));
     }
     if (!accessContext.isDev && isProtectedRecruiterProfile(user)) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Solo DEV puede administrar este perfil protegido.'));
@@ -3322,10 +3306,7 @@ export function adminRouter(prisma) {
       }
     });
 
-    const params = new URLSearchParams();
-    params.set('success', `Contrasena actualizada para ${appUserLabel(user)}.`);
-    params.set('userId', user.id);
-    return res.redirect(`/admin/users?${params.toString()}`);
+    return res.redirect('/admin/users?success=' + encodeURIComponent(`Contrasena actualizada para ${user.username}.`) + '&username=' + encodeURIComponent(user.username));
   });
 
   router.post('/users/:id/reset-recovery-code', express.urlencoded({ extended: true }), async (req, res) => {
@@ -3348,10 +3329,10 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Usuario no encontrado.'));
     }
     if (user.role !== 'ADMIN') {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios del panel.'));
+      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios reclutadores.'));
     }
     if (isEnvironmentAdminProfile(user)) {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('La recuperación del perfil principal se administra desde su configuración de entorno.'));
+      return res.redirect('/admin/users?error=' + encodeURIComponent('La recuperación del perfil principal se administra en Railway.'));
     }
     if (!accessContext.isDev && isProtectedRecruiterProfile(user)) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Solo DEV puede administrar este perfil protegido.'));
@@ -3375,8 +3356,8 @@ export function adminRouter(prisma) {
     });
 
     const params = new URLSearchParams();
-    params.set('success', `Codigo de recuperacion regenerado para ${appUserLabel(user)}.`);
-    params.set('userId', user.id);
+    params.set('success', `Codigo de recuperacion regenerado para ${user.username}.`);
+    params.set('username', user.username);
     params.set('recoveryCode', recoveryCode);
     return res.redirect(`/admin/users?${params.toString()}`);
   });
@@ -3401,10 +3382,10 @@ export function adminRouter(prisma) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Usuario no encontrado.'));
     }
     if (user.role !== 'ADMIN') {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios del panel.'));
+      return res.redirect('/admin/users?error=' + encodeURIComponent('Solo puedes administrar usuarios reclutadores.'));
     }
     if (isEnvironmentAdminProfile(user)) {
-      return res.redirect('/admin/users?error=' + encodeURIComponent('El perfil principal se activa y desactiva desde su configuración de entorno.'));
+      return res.redirect('/admin/users?error=' + encodeURIComponent('El perfil principal se activa y desactiva desde Railway.'));
     }
     if (!accessContext.isDev && isProtectedRecruiterProfile(user)) {
       return res.redirect('/admin/users?error=' + encodeURIComponent('Solo DEV puede administrar este perfil protegido.'));
@@ -3428,10 +3409,7 @@ export function adminRouter(prisma) {
       data: { isActive: !user.isActive }
     });
 
-    const params = new URLSearchParams();
-    params.set('success', `${appUserLabel(user)} ${user.isActive ? 'fue desactivado' : 'fue activado'} correctamente.`);
-    params.set('userId', user.id);
-    return res.redirect(`/admin/users?${params.toString()}`);
+    return res.redirect('/admin/users?success=' + encodeURIComponent(`Usuario ${user.username} ${user.isActive ? 'desactivado' : 'activado'} correctamente.`) + '&username=' + encodeURIComponent(user.username));
   });
 
   router.get('/vacancies', async (req, res) => {
@@ -3792,6 +3770,7 @@ export function adminRouter(prisma) {
       : 'Revisión de hojas de vida finalizada. La vacante pausada se retiró del panel.';
     res.redirect('/admin/vacancies?success=' + encodeURIComponent(msg));
   });
+
 
   return router;
 }

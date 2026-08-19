@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Usuarios | LoginPro</title>
+  <title>Usuarios de reclutamiento | LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -77,7 +77,6 @@
     .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
     .badge-active { background: var(--green-light); color: var(--green); }
     .badge-inactive { background: var(--red-light); color: var(--red); }
-    .badge-pending { background: var(--amber-light); color: var(--amber); }
     .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
     .inline-form input { min-width: 190px; }
     .recovery-box { margin-top: 8px; padding: 12px 14px; border-radius: var(--radius); border: 1px dashed #60a5fa; background: #eff6ff; color: #1d4ed8; font-size: 13px; font-weight: 700; }
@@ -163,92 +162,88 @@
   <div class="page">
     <div class="page-header">
       <div>
-        <h1>Usuarios</h1>
-        <p>Cada persona se identifica por su nombre y correo. El alcance define qué sucursales o vacantes puede ver y es independiente de su identidad.</p>
+        <h1>Usuarios de reclutamiento</h1>
+        <p>El alcance puede cubrir todas las vacantes, una o varias sucursales completas, o vacantes específicas. Las sucursales se toman del catálogo configurado en Sucursales.</p>
       </div>
     </div>
 
     <% if (successMsg) { %><div class="alert alert-success"><%= successMsg %></div><% } %>
     <% if (errorMsg) { %><div class="alert alert-error"><%= errorMsg %></div><% } %>
-    <% if (revealedRecoveryCode && highlightedUser) { %>
-      <div class="alert alert-info">Código de recuperación vigente para <strong><%= highlightedUser.displayName || highlightedUser.email || 'el usuario' %></strong>:<div class="recovery-box"><%= revealedRecoveryCode %></div></div>
+    <% if (revealedRecoveryCode && highlightedUsername) { %>
+      <div class="alert alert-info">Código de recuperación vigente para <strong><%= highlightedUsername %></strong>:<div class="recovery-box"><%= revealedRecoveryCode %></div></div>
     <% } %>
 
-    <% if (canCreateUsers) { %>
-      <section class="card form-card">
-        <div class="form-head"><h2>Crear usuario</h2><p>Registra su identidad y define únicamente el alcance que puedes conceder desde tu propio perfil.</p></div>
-        <form id="createUserForm" method="post" action="/admin/users/create">
-          <div class="form-section">
-            <h3 class="form-section-title">Identidad y acceso</h3>
-            <div class="grid">
-              <div class="field"><label for="displayName">Nombre completo</label><input id="displayName" name="displayName" type="text" minlength="3" maxlength="120" autocomplete="name" required /><span class="hint">Este nombre aparecerá dentro del panel.</span></div>
-              <div class="field"><label for="email">Correo electrónico</label><input id="email" name="email" type="email" maxlength="254" autocomplete="email" required /><span class="hint">Será el identificador de inicio de sesión.</span></div>
-              <div class="field"><label for="password">Contraseña inicial</label><input id="password" name="password" type="password" minlength="6" autocomplete="new-password" required /><span class="hint">Mínimo 6 caracteres. La contraseña se almacena únicamente como hash.</span></div>
-              <div class="field"><label for="recoveryPhone">Teléfono de recuperación</label><input id="recoveryPhone" name="recoveryPhone" type="text" /></div>
+    <section class="card form-card">
+      <div class="form-head"><h2>Crear usuario</h2><p>Define el acceso inicial y marca las sucursales o vacantes que correspondan.</p></div>
+      <form id="createUserForm" method="post" action="/admin/users/create">
+        <div class="form-section">
+          <h3 class="form-section-title">Acceso del usuario</h3>
+          <div class="grid">
+            <div class="field"><label for="password">Contraseña inicial</label><input id="password" name="password" type="password" minlength="6" required /><span class="hint">Mínimo 6 caracteres.</span></div>
+            <div class="field"><label for="recoveryPhone">Teléfono de recuperación</label><input id="recoveryPhone" name="recoveryPhone" type="text" /></div>
+            <div class="field"><label for="recoveryEmail">Correo de recuperación</label><input id="recoveryEmail" name="recoveryEmail" type="email" /></div>
+          </div>
+        </div>
+        <div class="form-section">
+          <h3 class="form-section-title">Alcance inicial de reclutamiento</h3>
+          <div class="grid">
+            <div class="field"><label for="accessScope">Alcance</label><select id="accessScope" name="accessScope">
+              <% if (manageableScopeOptions.canCreateAll) { %><option value="ALL">Todas las vacantes</option><% } %>
+              <% if (manageableScopeOptions.canCreateAll || allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una o varias sucursales</option><% } %>
+              <% if (allowedVacancies.length) { %><option value="VACANCY">Una o varias vacantes</option><% } %>
+            </select></div>
+            <div class="field full" id="cityField">
+              <label>Sucursales</label>
+              <div class="access-list" id="createCityOptions">
+                <% for (const city of allowedCities) { %>
+                  <label class="access-option"><input type="checkbox" name="scopeCities" value="<%= city %>" /><span><%= city %></span></label>
+                <% } %>
+              </div>
+              <input id="scopeCity" name="scopeCity" type="hidden" value="" />
+              <span class="hint">Marca una o varias sucursales. Este alcance incluye las vacantes de las sucursales seleccionadas.</span>
+            </div>
+            <div class="field full" id="vacancyField">
+              <label>Vacantes</label>
+              <div class="access-list" id="createVacancyOptions">
+                <% for (const vacancy of allowedVacancies) { %>
+                  <label class="access-option"><input type="checkbox" name="scopeVacancyIds" value="<%= vacancy.id %>" /><span><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></span></label>
+                <% } %>
+              </div>
+              <span class="hint">Marca una o varias vacantes. El usuario tendrá acceso únicamente a las vacantes seleccionadas.</span>
             </div>
           </div>
+        </div>
+        <% if (role === 'dev') { %>
           <div class="form-section">
-            <h3 class="form-section-title">Alcance inicial</h3>
-            <div class="grid">
-              <div class="field"><label for="accessScope">Alcance</label><select id="accessScope" name="accessScope">
-                <% if (manageableScopeOptions.canCreateAll) { %><option value="ALL">Todas las vacantes</option><% } %>
-                <% if (manageableScopeOptions.canCreateAll || allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una o varias sucursales</option><% } %>
-                <% if (allowedVacancies.length) { %><option value="VACANCY">Una o varias vacantes</option><% } %>
-              </select></div>
-              <div class="field full" id="cityField">
-                <label>Sucursales</label>
-                <div class="access-list" id="createCityOptions">
-                  <% for (const city of allowedCities) { %>
-                    <label class="access-option"><input type="checkbox" name="scopeCities" value="<%= city %>" /><span><%= city %></span></label>
-                  <% } %>
-                </div>
-                <input id="scopeCity" name="scopeCity" type="hidden" value="" />
-                <span class="hint">Marca una o varias sucursales. Este alcance incluye sus vacantes.</span>
-              </div>
-              <div class="field full" id="vacancyField">
-                <label>Vacantes</label>
-                <div class="access-list" id="createVacancyOptions">
-                  <% for (const vacancy of allowedVacancies) { %>
-                    <label class="access-option"><input type="checkbox" name="scopeVacancyIds" value="<%= vacancy.id %>" /><span><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></span></label>
-                  <% } %>
-                </div>
-                <span class="hint">Marca una o varias vacantes. El usuario tendrá acceso únicamente a las seleccionadas.</span>
+            <h3 class="form-section-title">Permisos del panel</h3>
+            <div class="permission-stack">
+              <label class="permission-card" for="canAccessDispatch">
+                <input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" />
+                <span><strong>Operaciones / Despacho</strong><small>Permite entrar al panel operativo además del alcance de reclutamiento seleccionado.</small></span>
+              </label>
+              <label class="permission-card" for="canAccessAttendance">
+                <input id="canAccessAttendance" name="canAccessAttendance" type="checkbox" value="true" />
+                <span><strong>Asistencia operativa</strong><small>Permite ver y administrar marcaciones, geocercas, evidencias y configuración de puntos. También activa Operaciones / Despacho.</small></span>
+              </label>
+              <div class="statistics-permissions">
+                <strong>Estadísticas</strong><small>Marca únicamente las herramientas que podrá usar este usuario.</small>
+                <label class="dispatch-row"><input name="canAccessMetaAds" type="checkbox" value="true" /><span><strong>Meta Ads</strong><small>Consulta inversión, resultados y costos de los anuncios.</small></span></label>
+                <label class="dispatch-row"><input name="canAccessCvAnalysis" type="checkbox" value="true" /><span><strong>Análisis de hojas de vida</strong><small>Organiza candidatos según la vacante y el perfil buscado.</small></span></label>
               </div>
             </div>
+            <p class="hint" style="margin-top:10px;">Solo DEV puede conceder permisos iniciales. Reclutador general puede activarlos o retirarlos después desde la edición del usuario.</p>
           </div>
-          <% if (canManageModulePermissions) { %>
-            <div class="form-section">
-              <h3 class="form-section-title">Permisos del panel</h3>
-              <div class="permission-stack">
-                <label class="permission-card" for="canAccessDispatch">
-                  <input id="canAccessDispatch" name="canAccessDispatch" type="checkbox" value="true" />
-                  <span><strong>Operaciones / Despacho</strong><small>Permite entrar al panel operativo además del alcance seleccionado.</small></span>
-                </label>
-                <label class="permission-card" for="canAccessAttendance">
-                  <input id="canAccessAttendance" name="canAccessAttendance" type="checkbox" value="true" />
-                  <span><strong>Asistencia operativa</strong><small>Permite administrar marcaciones y configuración de asistencia. También activa Operaciones / Despacho.</small></span>
-                </label>
-                <div class="statistics-permissions">
-                  <strong>Estadísticas</strong><small>Marca únicamente las herramientas que podrá usar este usuario.</small>
-                  <label class="dispatch-row"><input name="canAccessMetaAds" type="checkbox" value="true" /><span><strong>Meta Ads</strong><small>Consulta inversión, resultados y costos.</small></span></label>
-                  <label class="dispatch-row"><input name="canAccessCvAnalysis" type="checkbox" value="true" /><span><strong>Análisis de hojas de vida</strong><small>Organiza candidatos según la vacante.</small></span></label>
-                </div>
-              </div>
-              <p class="hint" style="margin-top:10px;">Los permisos adicionales solo pueden ser concedidos por DEV o reclutador-general.</p>
-            </div>
-          <% } else { %>
-            <div class="alert alert-info" style="margin-top:16px;">Puedes crear usuarios dentro de tu alcance. Los permisos adicionales del panel los asigna DEV o reclutador-general.</div>
-          <% } %>
-          <div class="form-actions"><button class="btn btn-primary" type="submit">Crear usuario</button></div>
-        </form>
-      </section>
-    <% } %>
+        <% } %>
+        <div class="form-actions"><button class="btn btn-primary" type="submit">Crear usuario</button></div>
+      </form>
+      <p class="hint" style="margin-top:12px;">El username se genera automáticamente como <strong>reclutador-...</strong>. Si ya existe, el sistema agrega un consecutivo.</p>
+    </section>
 
     <section class="card">
-      <h2>Usuarios</h2>
-      <% if (!users.length) { %><div class="empty">Todavía no hay usuarios creados dentro de tu alcance.</div><% } else { %>
+      <h2>Usuarios creados</h2>
+      <% if (!users.length) { %><div class="empty">Todavía no hay usuarios creados en base de datos para este alcance.</div><% } else { %>
         <table>
-          <thead><tr><th>Persona</th><th>Alcance</th><th>Permisos</th><th>Estado</th><th>Recuperación</th><th>Acciones</th></tr></thead>
+          <thead><tr><th>Usuario</th><th>Alcance</th><th>Permisos</th><th>Estado</th><th>Recuperación</th><th>Acciones</th></tr></thead>
           <tbody>
             <% for (const user of users) {
               const metadata = parseAccessMetadata(user.scopeCity);
@@ -256,17 +251,9 @@
               const selectedVacancies = allowedVacancies.filter((vacancy) => userVacancyIds.includes(vacancy.id));
               const userCities = [...new Set([...metadata.cities, ...selectedVacancies.map((vacancy) => vacancy.city)].filter(Boolean))];
               const editCityOptions = [...new Set([...allowedCities, ...userCities])].sort((a, b) => a.localeCompare(b, 'es'));
-              const userLabel = user.displayName || user.email || 'Identidad pendiente';
             %>
               <tr>
-                <td>
-                  <strong><%= user.displayName || 'Nombre pendiente' %></strong>
-                  <small><%= user.email || 'Correo pendiente de actualización' %></small>
-                  <% if (!user.identityMigratedAt) { %><small><span class="badge badge-pending">Actualización pendiente</span></small><% } %>
-                  <% if (user.username === environmentAdminUsername) { %><small>Perfil principal configurado por entorno</small><% } %>
-                  <% if (highlightedUserId === user.id) { %><small>Último usuario intervenido</small><% } %>
-                  <small>Creado por: <%= user.createdByUsername || 'Sistema' %></small>
-                </td>
+                <td><strong><%= user.username %></strong><% if (user.username === environmentAdminUsername) { %><small>Perfil principal configurado en Railway</small><% } %><% if (user.username === highlightedUsername) { %><small>Último usuario intervenido</small><% } %><small>Creado por: <%= user.createdByUsername || 'Sistema' %></small></td>
                 <td>
                   <% if (user.accessScope === 'ALL') { %>
                     Todas las vacantes
@@ -282,75 +269,78 @@
                 </td>
                 <td>Reclutamiento<% if (user.canAccessDispatch) { %><small>Operaciones / Despacho</small><% } %><% if (user.canAccessAttendance) { %><small>Asistencia operativa</small><% } %><% if (user.canAccessMetaAds) { %><small>Estadísticas: Meta Ads</small><% } %><% if (user.canAccessCvAnalysis) { %><small>Estadísticas: Análisis HV</small><% } %></td>
                 <td><span class="badge <%= user.isActive ? 'badge-active' : 'badge-inactive' %>"><%= user.isActive ? 'Activo' : 'Inactivo' %></span><small>Último cambio de contraseña: <%= user.lastPasswordResetAt ? user.lastPasswordResetAt.toLocaleString('es-CO', { hour12: false }) : 'Sin registro' %></small></td>
-                <td><% if (user.username === environmentAdminUsername && !user.identityMigratedAt) { %><small>La cuenta debe completar primero la actualización de identidad.</small><% } else { %><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.email || 'Pendiente' %></small><small>Recuperación disponible desde /recover.</small><% } %></td>
+                <td><% if (user.username === environmentAdminUsername) { %><small>La contraseña y recuperación se administran en Railway.</small><% } else { %><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.recoveryEmail || '—' %></small><small>Recuperación disponible desde /recover.</small><% } %></td>
                 <td>
-                  <% if (canImpersonateUsers && user.identityMigratedAt && user.isActive && user.username !== environmentAdminUsername) { %>
-                    <form method="post" action="/admin/users/<%= user.id %>/impersonate" class="inline-form"><button type="submit" class="btn btn-primary btn-sm">Entrar como usuario</button></form>
+                  <% if (user.username !== environmentAdminUsername) { %>
+                    <form method="post" action="/admin/users/<%= user.id %>/toggle" class="inline-form"><button type="submit" class="btn <%= user.isActive ? 'btn-danger' : 'btn-secondary' %>"><%= user.isActive ? 'Desactivar' : 'Activar' %></button></form>
+                    <form method="post" action="/admin/users/<%= user.id %>/reset-recovery-code" class="inline-form"><button type="submit" class="btn btn-warning">Regenerar código</button></form>
+                    <form method="post" action="/admin/users/<%= user.id %>/reset-password" class="inline-form"><input name="newPassword" type="password" minlength="6" placeholder="Nueva contraseña" required /><button type="submit" class="btn btn-secondary">Resetear contraseña</button></form>
                   <% } %>
+                  <div class="inline-form"><button type="button" class="btn btn-edit btn-sm" onclick="toggleEditDrawer('<%= user.id %>')">Editar datos y acceso</button></div>
 
-                  <% if (canManageUsers) { %>
-                    <% if (user.username !== environmentAdminUsername) { %>
-                      <form method="post" action="/admin/users/<%= user.id %>/toggle" class="inline-form"><button type="submit" class="btn <%= user.isActive ? 'btn-danger' : 'btn-secondary' %>"><%= user.isActive ? 'Desactivar' : 'Activar' %></button></form>
-                      <form method="post" action="/admin/users/<%= user.id %>/reset-recovery-code" class="inline-form"><button type="submit" class="btn btn-warning">Regenerar código</button></form>
-                      <form method="post" action="/admin/users/<%= user.id %>/reset-password" class="inline-form"><input name="newPassword" type="password" minlength="6" placeholder="Nueva contraseña" required /><button type="submit" class="btn btn-secondary">Resetear contraseña</button></form>
-                    <% } %>
-                    <div class="inline-form"><button type="button" class="btn btn-edit btn-sm" onclick="toggleEditDrawer('<%= user.id %>')">Editar datos y acceso</button></div>
-
-                    <div class="edit-drawer" id="edit-drawer-<%= user.id %>">
-                      <form method="post" action="/admin/locations/users/<%= user.id %>/access">
-                        <p class="edit-drawer-title">Editar <%= userLabel %></p>
-                        <div class="grid">
-                          <div class="field"><label>Correo de acceso</label><input type="email" value="<%= user.email || '' %>" disabled /><span class="hint">La identidad de acceso se administra en la migración de cuenta.</span></div>
-                          <div class="field"><label for="edit-recoveryPhone-<%= user.id %>">Teléfono de recuperación</label><input id="edit-recoveryPhone-<%= user.id %>" name="recoveryPhone" type="text" value="<%= user.recoveryPhone || '' %>" placeholder="3001234567" /></div>
-                          <input name="recoveryEmail" type="hidden" value="<%= user.email || user.recoveryEmail || '' %>" />
-                          <div class="field full">
-                            <label for="edit-accessScope-<%= user.id %>">Alcance</label>
-                            <select id="edit-accessScope-<%= user.id %>" name="accessScope" onchange="syncEditScopeVisibility('<%= user.id %>')">
-                              <option value="ALL" <%= user.accessScope === 'ALL' ? 'selected' : '' %>>Todas las sucursales y vacantes</option>
-                              <option value="CITY" <%= user.accessScope === 'CITY' ? 'selected' : '' %>>Sucursales seleccionadas</option>
-                              <option value="VACANCY" <%= user.accessScope === 'VACANCY' ? 'selected' : '' %>>Vacantes seleccionadas por sucursal</option>
-                            </select>
-                          </div>
-                          <div class="field full" id="edit-cityField-<%= user.id %>">
-                            <label>Sucursales</label>
-                            <div class="access-list edit-city-options" data-user-id="<%= user.id %>" data-selected-cities="<%= JSON.stringify(userCities) %>">
-                              <% for (const city of editCityOptions) { %>
-                                <label class="access-option"><input type="checkbox" name="scopeCities" value="<%= city %>" <%= userCities.includes(city) ? 'checked' : '' %> onchange="syncVacancyGroups('<%= user.id %>')" /><span><%= city %></span></label>
-                              <% } %>
-                            </div>
-                            <span class="hint">Con alcance por sucursal, las sucursales marcadas conceden acceso a sus vacantes. Con alcance por vacantes, filtran la lista siguiente.</span>
-                          </div>
-                          <div class="field full" id="edit-vacancyField-<%= user.id %>">
-                            <label>Vacantes permitidas</label>
-                            <div class="vacancy-access-list">
-                              <% for (const city of allowedCities) {
-                                const cityVacancies = allowedVacancies.filter((vacancy) => vacancy.city === city);
-                              %>
-                                <div class="vacancy-city-group" data-city="<%= city %>">
-                                  <strong class="vacancy-city-title"><%= city %></strong>
-                                  <% if (!cityVacancies.length) { %><div class="vacancy-empty">Esta sucursal no tiene vacantes disponibles.</div><% } else { %>
-                                    <% for (const vacancy of cityVacancies) { %><label class="access-option"><input type="checkbox" name="scopeVacancyIds" value="<%= vacancy.id %>" <%= userVacancyIds.includes(vacancy.id) ? 'checked' : '' %> /><span><%= vacancy.title || vacancy.role %></span></label><% } %>
-                                  <% } %>
-                                </div>
-                              <% } %>
-                              <div class="vacancy-empty" id="edit-vacancyEmpty-<%= user.id %>">Selecciona una sucursal para ver sus vacantes.</div>
-                            </div>
-                            <span class="hint">Cuando eliges vacantes específicas, debes marcar al menos una.</span>
-                          </div>
-                          <% if (canManageModulePermissions) { %>
-                            <div class="field full">
-                              <label>Permisos adicionales</label>
-                              <label class="dispatch-row"><input id="edit-canAccessDispatch-<%= user.id %>" type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label>
-                              <label class="dispatch-row"><input id="edit-canAccessAttendance-<%= user.id %>" type="checkbox" name="canAccessAttendance" value="true" <%= user.canAccessAttendance ? 'checked' : '' %> /><span><strong>Asistencia operativa</strong><small>Panel, revisión, geocerca, evidencia y configuración de puntos.</small></span></label>
-                              <div class="statistics-permissions"><strong>Estadísticas</strong><small>Selecciona por separado las herramientas que podrá abrir.</small><label class="dispatch-row"><input type="checkbox" name="canAccessMetaAds" value="true" <%= user.canAccessMetaAds ? 'checked' : '' %> /><span><strong>Meta Ads</strong><small>Inversión, resultados y costos.</small></span></label><label class="dispatch-row"><input type="checkbox" name="canAccessCvAnalysis" value="true" <%= user.canAccessCvAnalysis ? 'checked' : '' %> /><span><strong>Análisis de hojas de vida</strong><small>Revisión y organización de candidatos.</small></span></label></div>
-                              <span class="hint">Solo DEV y reclutador-general pueden modificar estos permisos.</span>
-                            </div>
-                          <% } %>
+                  <div class="edit-drawer" id="edit-drawer-<%= user.id %>">
+                    <form method="post" action="/admin/locations/users/<%= user.id %>/access">
+                      <p class="edit-drawer-title">Editar usuario <%= user.username %></p>
+                      <div class="grid">
+                        <div class="field"><label for="edit-recoveryEmail-<%= user.id %>">Correo de recuperación</label><input id="edit-recoveryEmail-<%= user.id %>" name="recoveryEmail" type="email" value="<%= user.recoveryEmail || '' %>" placeholder="correo@dominio.com" /></div>
+                        <div class="field"><label for="edit-recoveryPhone-<%= user.id %>">Teléfono de recuperación</label><input id="edit-recoveryPhone-<%= user.id %>" name="recoveryPhone" type="text" value="<%= user.recoveryPhone || '' %>" placeholder="3001234567" /></div>
+                        <div class="field full">
+                          <label for="edit-accessScope-<%= user.id %>">Alcance de reclutamiento</label>
+                          <select id="edit-accessScope-<%= user.id %>" name="accessScope" onchange="syncEditScopeVisibility('<%= user.id %>')">
+                            <option value="ALL" <%= user.accessScope === 'ALL' ? 'selected' : '' %>>Todas las sucursales y vacantes</option>
+                            <option value="CITY" <%= user.accessScope === 'CITY' ? 'selected' : '' %>>Sucursales seleccionadas</option>
+                            <option value="VACANCY" <%= user.accessScope === 'VACANCY' ? 'selected' : '' %>>Vacantes seleccionadas por sucursal</option>
+                          </select>
                         </div>
-                        <div class="edit-drawer-actions"><button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDrawer('<%= user.id %>')">Cancelar</button><button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button></div>
-                      </form>
-                    </div>
-                  <% } %>
+                        <div class="field full" id="edit-cityField-<%= user.id %>">
+                          <label>Sucursales</label>
+                          <div class="access-list edit-city-options" data-user-id="<%= user.id %>" data-selected-cities="<%= JSON.stringify(userCities) %>">
+                            <% for (const city of editCityOptions) { %>
+                              <label class="access-option">
+                                <input type="checkbox" name="scopeCities" value="<%= city %>" <%= userCities.includes(city) ? 'checked' : '' %> onchange="syncVacancyGroups('<%= user.id %>')" />
+                                <span><%= city %></span>
+                              </label>
+                            <% } %>
+                          </div>
+                          <span class="hint">Con alcance por sucursal, las sucursales marcadas conceden acceso completo a sus vacantes. Con alcance por vacantes, solo filtran la lista siguiente.</span>
+                        </div>
+                        <div class="field full" id="edit-vacancyField-<%= user.id %>">
+                          <label>Vacantes permitidas</label>
+                          <div class="vacancy-access-list">
+                            <% for (const city of allowedCities) {
+                              const cityVacancies = allowedVacancies.filter((vacancy) => vacancy.city === city);
+                            %>
+                              <div class="vacancy-city-group" data-city="<%= city %>">
+                                <strong class="vacancy-city-title"><%= city %></strong>
+                                <% if (!cityVacancies.length) { %>
+                                  <div class="vacancy-empty">Esta sucursal no tiene vacantes disponibles.</div>
+                                <% } else { %>
+                                  <% for (const vacancy of cityVacancies) { %>
+                                    <label class="access-option">
+                                      <input type="checkbox" name="scopeVacancyIds" value="<%= vacancy.id %>" <%= userVacancyIds.includes(vacancy.id) ? 'checked' : '' %> />
+                                      <span><%= vacancy.title || vacancy.role %></span>
+                                    </label>
+                                  <% } %>
+                                <% } %>
+                              </div>
+                            <% } %>
+                            <div class="vacancy-empty" id="edit-vacancyEmpty-<%= user.id %>">Selecciona una sucursal para ver sus vacantes.</div>
+                          </div>
+                          <span class="hint">Cuando eliges vacantes específicas, debes marcar al menos una. Las vacantes nuevas no se habilitarán automáticamente.</span>
+                        </div>
+                        <% if (role === 'dev' || currentUsername === 'reclutador-general') { %>
+                          <div class="field full">
+                            <label>Permisos adicionales</label>
+                            <label class="dispatch-row"><input id="edit-canAccessDispatch-<%= user.id %>" type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label>
+                            <label class="dispatch-row"><input id="edit-canAccessAttendance-<%= user.id %>" type="checkbox" name="canAccessAttendance" value="true" <%= user.canAccessAttendance ? 'checked' : '' %> /><span><strong>Asistencia operativa</strong><small>Panel, revisión, geocerca, evidencia y configuración de puntos.</small></span></label>
+                            <div class="statistics-permissions"><strong>Estadísticas</strong><small>Selecciona por separado las herramientas que podrá abrir.</small><label class="dispatch-row"><input type="checkbox" name="canAccessMetaAds" value="true" <%= user.canAccessMetaAds ? 'checked' : '' %> /><span><strong>Meta Ads</strong><small>Inversión, resultados y costos de los anuncios.</small></span></label><label class="dispatch-row"><input type="checkbox" name="canAccessCvAnalysis" value="true" <%= user.canAccessCvAnalysis ? 'checked' : '' %> /><span><strong>Análisis de hojas de vida</strong><small>Revisión y organización de candidatos con IA.</small></span></label></div>
+                            <span class="hint">DEV y reclutador general pueden modificar estos permisos. Asistencia activa también el acceso al módulo padre de Operaciones.</span>
+                          </div>
+                        <% } %>
+                      </div>
+                      <div class="edit-drawer-actions"><button type="button" class="btn btn-secondary btn-sm" onclick="toggleEditDrawer('<%= user.id %>')">Cancelar</button><button type="submit" class="btn btn-primary btn-sm">Guardar cambios</button></div>
+                    </form>
+                  </div>
                 </td>
               </tr>
             <% } %>
@@ -362,12 +352,19 @@
 
   <script>
     function normalizeCityKey(value) {
-      return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+      return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
     }
 
     function checkedCityNames(container) {
       if (!container) return [];
-      return Array.from(container.querySelectorAll('input[name="scopeCities"]:checked')).map((input) => input.value).filter(Boolean);
+      return Array.from(container.querySelectorAll('input[name="scopeCities"]:checked'))
+        .map((input) => input.value)
+        .filter(Boolean);
     }
 
     function renderCityOptions(container, cities, selectedCities = [], userId = null) {
@@ -380,10 +377,15 @@
         const label = document.createElement('label');
         label.className = 'access-option';
         const input = document.createElement('input');
-        input.type = 'checkbox'; input.name = 'scopeCities'; input.value = name; input.checked = selectedKeys.has(normalizeCityKey(name));
+        input.type = 'checkbox';
+        input.name = 'scopeCities';
+        input.value = name;
+        input.checked = selectedKeys.has(normalizeCityKey(name));
         if (userId) input.addEventListener('change', () => syncVacancyGroups(userId));
-        const text = document.createElement('span'); text.textContent = name;
-        label.append(input, text); fragment.append(label);
+        const text = document.createElement('span');
+        text.textContent = name;
+        label.append(input, text);
+        fragment.append(label);
       }
       container.replaceChildren(fragment);
     }
@@ -394,13 +396,18 @@
         if (!response.ok) return;
         const cities = await response.json();
         if (!Array.isArray(cities) || !cities.length) return;
+
         const createContainer = document.getElementById('createCityOptions');
         renderCityOptions(createContainer, cities, checkedCityNames(createContainer));
         syncCreateScopeCity();
+
         document.querySelectorAll('.edit-city-options').forEach((container) => {
           const userId = container.dataset.userId || null;
           let selectedCities = checkedCityNames(container);
-          try { const persisted = JSON.parse(container.dataset.selectedCities || '[]'); if (Array.isArray(persisted)) selectedCities = persisted; } catch (_error) {}
+          try {
+            const persisted = JSON.parse(container.dataset.selectedCities || '[]');
+            if (Array.isArray(persisted)) selectedCities = persisted;
+          } catch (_error) {}
           renderCityOptions(container, cities, selectedCities, userId);
           if (userId) syncEditScopeVisibility(userId);
         });
@@ -431,14 +438,22 @@
 
     if (createCityOptions) createCityOptions.addEventListener('change', syncCreateScopeCity);
     if (createUserForm) createUserForm.addEventListener('submit', syncCreateScopeCity);
-    if (accessScope) { accessScope.addEventListener('change', syncCreateScopeVisibility); syncCreateScopeVisibility(); }
+    if (accessScope) {
+      accessScope.addEventListener('change', syncCreateScopeVisibility);
+      syncCreateScopeVisibility();
+    }
 
     function bindAttendanceParent(attendanceInput, dispatchInput) {
       if (!attendanceInput || !dispatchInput) return;
       const requireDispatch = () => { if (attendanceInput.checked) dispatchInput.checked = true; };
-      attendanceInput.addEventListener('change', requireDispatch); requireDispatch();
+      attendanceInput.addEventListener('change', requireDispatch);
+      requireDispatch();
     }
-    bindAttendanceParent(document.getElementById('canAccessAttendance'), document.getElementById('canAccessDispatch'));
+
+    bindAttendanceParent(
+      document.getElementById('canAccessAttendance'),
+      document.getElementById('canAccessDispatch')
+    );
     document.querySelectorAll('[id^="edit-canAccessAttendance-"]').forEach((attendanceInput) => {
       const userId = attendanceInput.id.replace('edit-canAccessAttendance-', '');
       bindAttendanceParent(attendanceInput, document.getElementById('edit-canAccessDispatch-' + userId));
@@ -449,25 +464,34 @@
       const vacancyField = document.getElementById('edit-vacancyField-' + userId);
       const emptyMessage = document.getElementById('edit-vacancyEmpty-' + userId);
       if (!cityField || !vacancyField) return;
-      const selectedCityKeys = new Set(Array.from(cityField.querySelectorAll('input[name="scopeCities"]:checked')).map((input) => normalizeCityKey(input.value)));
+
+      const selectedCityKeys = new Set(
+        Array.from(cityField.querySelectorAll('input[name="scopeCities"]:checked'))
+          .map((input) => normalizeCityKey(input.value))
+      );
       let visibleGroups = 0;
+
       vacancyField.querySelectorAll('.vacancy-city-group').forEach((group) => {
         const visible = selectedCityKeys.has(normalizeCityKey(group.dataset.city));
         group.style.display = visible ? 'block' : 'none';
-        if (visible) visibleGroups += 1;
-        else group.querySelectorAll('input[name="scopeVacancyIds"]').forEach((input) => { input.checked = false; });
+        if (visible) {
+          visibleGroups += 1;
+        } else {
+          group.querySelectorAll('input[name="scopeVacancyIds"]').forEach((input) => { input.checked = false; });
+        }
       });
+
       if (emptyMessage) emptyMessage.style.display = visibleGroups ? 'none' : 'block';
     }
 
     function syncEditScopeVisibility(userId) {
-      const editScope = document.getElementById('edit-accessScope-' + userId);
-      const editCityField = document.getElementById('edit-cityField-' + userId);
-      const editVacancyField = document.getElementById('edit-vacancyField-' + userId);
-      const scope = editScope ? editScope.value : 'ALL';
+      const accessScope = document.getElementById('edit-accessScope-' + userId);
+      const cityField = document.getElementById('edit-cityField-' + userId);
+      const vacancyField = document.getElementById('edit-vacancyField-' + userId);
+      const scope = accessScope ? accessScope.value : 'ALL';
       const usesCities = scope === 'CITY' || scope === 'VACANCY';
-      if (editCityField) editCityField.style.display = usesCities ? 'flex' : 'none';
-      if (editVacancyField) editVacancyField.style.display = scope === 'VACANCY' ? 'flex' : 'none';
+      if (cityField) cityField.style.display = usesCities ? 'flex' : 'none';
+      if (vacancyField) vacancyField.style.display = scope === 'VACANCY' ? 'flex' : 'none';
       if (scope === 'VACANCY') syncVacancyGroups(userId);
     }
 

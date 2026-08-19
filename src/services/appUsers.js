@@ -12,10 +12,6 @@ function uniqueNormalizedStrings(values = []) {
   return [...new Set(values.map(normalizeString).filter(Boolean))];
 }
 
-function sourceValue(source = {}, key) {
-  return source?.[key] ?? source?.session?.[key] ?? null;
-}
-
 function parseUserAccessMetadata(value) {
   if (Array.isArray(value)) {
     return {
@@ -97,14 +93,6 @@ export function encodeUserAccessSelection({ cities = [], vacancyIds = [] } = {})
   });
 }
 
-export function normalizeAppUserEmail(value) {
-  const normalized = normalizeString(value)?.toLowerCase() || null;
-  if (!normalized) return null;
-  if (normalized.length > 254) return null;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) return null;
-  return normalized;
-}
-
 export function toSlug(value) {
   return String(value || '')
     .toLowerCase()
@@ -156,40 +144,16 @@ export function generateRecoveryCode() {
   return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
-/**
- * Crear una cuenta y conceder permisos adicionales son capacidades distintas.
- * Cualquier usuario autenticado del panel con rol admin/dev puede crear cuentas;
- * el alcance del creador limita después qué sucursales/vacantes puede asignar.
- */
-export function canCreateRecruiterUsers(source = {}) {
-  const role = sourceValue(source, 'userRole') || sourceValue(source, 'role');
-  return role === 'dev' || role === 'admin';
-}
-
-/**
- * Conserva la autoridad histórica para operaciones sensibles sobre cuentas.
- * No equivale a poder conceder módulos adicionales.
- */
-export function canManageRecruiterUsers(source = {}) {
-  const role = sourceValue(source, 'userRole') || sourceValue(source, 'role');
-  const userSource = sourceValue(source, 'userSource');
-  const username = sourceValue(source, 'username');
-  const accessScope = normalizeUserAccessScope(sourceValue(source, 'userAccessScope') || 'ALL');
-
-  if (userSource === 'env' && (role === 'admin' || role === 'dev')) return true;
-  return userSource === 'db'
-    && role === 'admin'
-    && username === 'reclutador-general'
-    && accessScope === 'ALL';
-}
-
 export function canManageUserModulePermissions(source = {}) {
-  const role = sourceValue(source, 'userRole') || sourceValue(source, 'role');
+  const session = source?.session || {};
+  const role = source?.userRole || source?.role || session.userRole || null;
   if (role === 'dev') return true;
 
-  const userSource = sourceValue(source, 'userSource');
-  const username = sourceValue(source, 'username');
-  const accessScope = normalizeUserAccessScope(sourceValue(source, 'userAccessScope') || 'ALL');
+  const userSource = source?.userSource || session.userSource || null;
+  const username = source?.username || session.username || null;
+  const accessScope = normalizeUserAccessScope(
+    source?.userAccessScope || session.userAccessScope || 'ALL'
+  );
 
   return userSource === 'db'
     && role === 'admin'
