@@ -165,6 +165,56 @@ test('login por correo se traduce al identificador interno antes de la autoridad
   assert.equal(req.body.username, 'legacy-user');
 });
 
+test('un error de login por correo nunca vuelve a mostrar el alias interno', async () => {
+  const sessionData = {};
+  const prismaClient = {
+    appUser: {
+      findUnique: async ({ where }) => where.email === 'persona@example.test'
+        ? { username: 'legacy-user', identityMigratedAt: new Date(), role: 'ADMIN' }
+        : null
+    }
+  };
+  const { middleware } = createHarness({ sessionData, prismaClient });
+  const req = {
+    method: 'POST', path: '/login', originalUrl: '/login',
+    body: { username: 'PERSONA@EXAMPLE.TEST', password: 'incorrecta' }
+  };
+  const result = await runMiddleware(middleware, req);
+  assert.equal(req.body.username, 'legacy-user');
+
+  result.res.render('login', { error: 'Credenciales inválidas.', username: req.body.username });
+  const renderEvent = result.events.at(-1);
+  assert.equal(renderEvent[0], 'render');
+  assert.equal(renderEvent[1], 'login');
+  assert.equal(renderEvent[2].username, 'persona@example.test');
+  assert.doesNotMatch(JSON.stringify(renderEvent[2]), /legacy-user/);
+});
+
+test('recuperación por correo conserva el correo visible al redirigir al login', async () => {
+  const sessionData = {};
+  const prismaClient = {
+    appUser: {
+      findUnique: async ({ where }) => where.email === 'persona@example.test'
+        ? { username: 'legacy-user', identityMigratedAt: new Date(), role: 'ADMIN' }
+        : null
+    }
+  };
+  const { middleware } = createHarness({ sessionData, prismaClient });
+  const req = {
+    method: 'POST', path: '/recover', originalUrl: '/recover',
+    body: { username: 'PERSONA@EXAMPLE.TEST', recoveryCode: '123456', newPassword: 'nueva-clave' }
+  };
+  const result = await runMiddleware(middleware, req);
+  assert.equal(req.body.username, 'legacy-user');
+
+  result.res.redirect('/login?success=Contrasena+actualizada&username=legacy-user');
+  const redirectEvent = result.events.at(-1);
+  assert.equal(redirectEvent[0], 'redirect');
+  const redirectUrl = new URL(redirectEvent[1], 'https://example.test');
+  assert.equal(redirectUrl.searchParams.get('username'), 'persona@example.test');
+  assert.doesNotMatch(redirectEvent[1], /legacy-user/);
+});
+
 test('username histórico deja de autenticar cuando la identidad ya fue migrada', async () => {
   const sessionData = {};
   const prismaClient = {
