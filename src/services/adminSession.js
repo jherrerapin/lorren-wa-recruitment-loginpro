@@ -145,6 +145,43 @@ function identityPending(sessionData = {}, profile = null) {
   return sessionData.userSource === 'env' && sessionData.userRole === 'admin';
 }
 
+function preserveCredentialPresentation(req, res) {
+  if (!res || res.__identityCredentialPresentationWrapped) return;
+  res.__identityCredentialPresentationWrapped = true;
+
+  if (typeof res.render === 'function') {
+    const originalRender = res.render.bind(res);
+    res.render = (view, options, callback) => {
+      if (typeof options === 'function') return originalRender(view, options);
+      const visibleIdentifier = normalizeAppUserEmail(req.identityVisibleCredential);
+      const nextOptions = visibleIdentifier && ['login', 'recover'].includes(view)
+        ? { ...(options || {}), username: visibleIdentifier }
+        : options;
+      return originalRender(view, nextOptions, callback);
+    };
+  }
+
+  if (typeof res.redirect === 'function') {
+    const originalRedirect = res.redirect.bind(res);
+    res.redirect = (...args) => {
+      const visibleIdentifier = normalizeAppUserEmail(req.identityVisibleCredential);
+      const locationIndex = args.length > 1 ? 1 : 0;
+      const location = args[locationIndex];
+      if (visibleIdentifier && typeof location === 'string' && location.startsWith('/login?')) {
+        const [pathname, query = ''] = location.split('?');
+        if (pathname === '/login') {
+          const params = new URLSearchParams(query);
+          if (params.has('username')) {
+            params.set('username', visibleIdentifier);
+            args[locationIndex] = `${pathname}?${params.toString()}`;
+          }
+        }
+      }
+      return originalRedirect(...args);
+    };
+  }
+}
+
 async function canonicalizeCredentialIdentifier(req, prismaClient) {
   const path = requestPath(req);
   if (req.method !== 'POST' || !['/login', '/recover'].includes(path)) return;
@@ -156,6 +193,7 @@ async function canonicalizeCredentialIdentifier(req, prismaClient) {
   let profile = null;
 
   if (email) {
+    req.identityVisibleCredential = email;
     profile = await prismaClient.appUser.findUnique({
       where: { email },
       select: { username: true, identityMigratedAt: true, role: true }
@@ -409,6 +447,7 @@ async function handleIdentitySessionRequest(req, res, {
   bcryptModule,
   env
 }) {
+  preserveCredentialPresentation(req, res);
   await canonicalizeCredentialIdentifier(req, prismaClient);
 
   const path = requestPath(req);
