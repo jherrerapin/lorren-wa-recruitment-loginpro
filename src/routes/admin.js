@@ -61,6 +61,7 @@ import {
   canAccessCandidate,
   canAccessVacancy,
   describeUserScope,
+  encodeUserAccessSelection,
   generateRecoveryCode,
   getAccessContext,
   normalizeUserAccessScope
@@ -151,6 +152,11 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeManyStrings(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return [...new Set(values.map(normalizeString).filter(Boolean))];
 }
 
 function normalizeDigits(value) {
@@ -438,7 +444,10 @@ async function resolveRequestedUserScope(prisma, req, body = {}) {
   const accessContext = getRequestAccessContext(req);
   const accessScope = normalizeUserAccessScope(body.accessScope);
   const scopeCity = normalizeString(body.scopeCity);
-  const scopeVacancyId = normalizeString(body.scopeVacancyId);
+  const requestedVacancyIds = normalizeManyStrings([
+    ...(Array.isArray(body.scopeVacancyIds) ? body.scopeVacancyIds : [body.scopeVacancyIds]),
+    body.scopeVacancyId
+  ]);
 
   if (!accessContext.isDev && accessContext.scope === 'VACANCY' && accessScope !== 'VACANCY') {
     return { error: 'Tu perfil solo puede crear usuarios asignados a la misma vacante.' };
@@ -446,7 +455,8 @@ async function resolveRequestedUserScope(prisma, req, body = {}) {
   if (!accessContext.isDev && accessContext.scope === 'CITY' && accessScope === 'ALL') {
     return { error: 'Tu perfil no puede crear usuarios con acceso total.' };
   }
-  if (!accessContext.isDev && accessContext.scope === 'VACANCY' && scopeVacancyId !== accessContext.vacancyId) {
+  if (!accessContext.isDev && accessContext.scope === 'VACANCY'
+    && requestedVacancyIds.some((vacancyId) => vacancyId !== accessContext.vacancyId)) {
     return { error: 'Tu perfil solo puede crear usuarios para tu misma vacante.' };
   }
 
@@ -480,26 +490,37 @@ async function resolveRequestedUserScope(prisma, req, body = {}) {
     };
   }
 
-  if (!scopeVacancyId) {
-    return { error: 'Debes seleccionar una vacante para este usuario.' };
+  if (!requestedVacancyIds.length) {
+    return { error: 'Debes seleccionar al menos una vacante para este usuario.' };
   }
 
-  const scopeVacancy = await prisma.vacancy.findUnique({
-    where: { id: scopeVacancyId },
-    select: { id: true, title: true, city: true }
+  const selectedVacancies = await prisma.vacancy.findMany({
+    where: { id: { in: requestedVacancyIds } },
+    select: { id: true, title: true, role: true, city: true }
   });
-  if (!scopeVacancy) {
-    return { error: 'La vacante seleccionada no existe.' };
+  const vacanciesById = new Map(selectedVacancies.map((vacancy) => [vacancy.id, vacancy]));
+  const missingVacancyIds = requestedVacancyIds.filter((vacancyId) => !vacanciesById.has(vacancyId));
+  if (missingVacancyIds.length) {
+    return { error: 'Una o varias vacantes seleccionadas ya no existen.' };
   }
-  if (!canAccessVacancy(accessContext, scopeVacancy)) {
+
+  const orderedVacancies = requestedVacancyIds.map((vacancyId) => vacanciesById.get(vacancyId));
+  if (orderedVacancies.some((vacancy) => !canAccessVacancy(accessContext, vacancy))) {
     return { error: 'Tu perfil no puede crear usuarios fuera de tu alcance.' };
   }
 
+  const selectedCities = [...new Set(orderedVacancies.map((vacancy) => vacancy.city).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'es'));
+
   return {
     accessScope: 'VACANCY',
-    scopeCity: null,
-    scopeVacancyId: scopeVacancy.id,
-    scopeVacancy
+    scopeCity: encodeUserAccessSelection({
+      cities: selectedCities,
+      vacancyIds: requestedVacancyIds
+    }),
+    scopeVacancyId: requestedVacancyIds[0],
+    scopeVacancy: orderedVacancies[0],
+    selectedVacancies: orderedVacancies
   };
 }
 

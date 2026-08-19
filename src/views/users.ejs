@@ -174,7 +174,7 @@
     <% } %>
 
     <section class="card form-card">
-      <div class="form-head"><h2>Crear usuario</h2><p>Define el acceso inicial y marca todas las sucursales que correspondan cuando el alcance sea por sucursal.</p></div>
+      <div class="form-head"><h2>Crear usuario</h2><p>Define el acceso inicial y marca las sucursales o vacantes que correspondan.</p></div>
       <form id="createUserForm" method="post" action="/admin/users/create">
         <div class="form-section">
           <h3 class="form-section-title">Acceso del usuario</h3>
@@ -190,7 +190,7 @@
             <div class="field"><label for="accessScope">Alcance</label><select id="accessScope" name="accessScope">
               <% if (manageableScopeOptions.canCreateAll) { %><option value="ALL">Todas las vacantes</option><% } %>
               <% if (manageableScopeOptions.canCreateAll || allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una o varias sucursales</option><% } %>
-              <% if (allowedVacancies.length) { %><option value="VACANCY">Una vacante específica</option><% } %>
+              <% if (allowedVacancies.length) { %><option value="VACANCY">Una o varias vacantes</option><% } %>
             </select></div>
             <div class="field full" id="cityField">
               <label>Sucursales</label>
@@ -202,7 +202,15 @@
               <input id="scopeCity" name="scopeCity" type="hidden" value="" />
               <span class="hint">Marca una o varias sucursales. Este alcance incluye las vacantes de las sucursales seleccionadas.</span>
             </div>
-            <div class="field full" id="vacancyField"><label for="scopeVacancyId">Vacante</label><select id="scopeVacancyId" name="scopeVacancyId"><option value="">Selecciona una vacante</option><% for (const vacancy of allowedVacancies) { %><option value="<%= vacancy.id %>"><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></option><% } %></select></div>
+            <div class="field full" id="vacancyField">
+              <label>Vacantes</label>
+              <div class="access-list" id="createVacancyOptions">
+                <% for (const vacancy of allowedVacancies) { %>
+                  <label class="access-option"><input type="checkbox" name="scopeVacancyIds" value="<%= vacancy.id %>" /><span><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></span></label>
+                <% } %>
+              </div>
+              <span class="hint">Marca una o varias vacantes. El usuario tendrá acceso únicamente a las vacantes seleccionadas.</span>
+            </div>
           </div>
         </div>
         <% if (role === 'dev') { %>
