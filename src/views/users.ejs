@@ -163,7 +163,7 @@
     <div class="page-header">
       <div>
         <h1>Usuarios de reclutamiento</h1>
-        <p>Al editar un usuario, primero selecciona una o varias sucursales y después marca únicamente las vacantes que podrá administrar. Marcar una sucursal no concede acceso automático a todas sus vacantes.</p>
+        <p>El alcance puede cubrir todas las vacantes, una o varias sucursales completas, o vacantes específicas. Las sucursales se toman del catálogo configurado en Sucursales.</p>
       </div>
     </div>
 
@@ -174,8 +174,8 @@
     <% } %>
 
     <section class="card form-card">
-      <div class="form-head"><h2>Crear usuario</h2><p>Define el acceso inicial. Después puedes ajustar varias vacantes desde la edición del usuario.</p></div>
-      <form method="post" action="/admin/users/create">
+      <div class="form-head"><h2>Crear usuario</h2><p>Define el acceso inicial y marca todas las sucursales que correspondan cuando el alcance sea por sucursal.</p></div>
+      <form id="createUserForm" method="post" action="/admin/users/create">
         <div class="form-section">
           <h3 class="form-section-title">Acceso del usuario</h3>
           <div class="grid">
@@ -189,10 +189,19 @@
           <div class="grid">
             <div class="field"><label for="accessScope">Alcance</label><select id="accessScope" name="accessScope">
               <% if (manageableScopeOptions.canCreateAll) { %><option value="ALL">Todas las vacantes</option><% } %>
-              <% if (allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una sucursal</option><% } %>
+              <% if (manageableScopeOptions.canCreateAll || allowedCities.length) { %><option value="CITY" <%= manageableScopeOptions.canCreateAll ? '' : 'selected' %>>Una o varias sucursales</option><% } %>
               <% if (allowedVacancies.length) { %><option value="VACANCY">Una vacante específica</option><% } %>
             </select></div>
-            <div class="field" id="cityField"><label for="scopeCity">Sucursal</label><select id="scopeCity" name="scopeCity"><option value="">Selecciona una sucursal</option><% for (const city of allowedCities) { %><option value="<%= city %>"><%= city %></option><% } %></select></div>
+            <div class="field full" id="cityField">
+              <label>Sucursales</label>
+              <div class="access-list" id="createCityOptions">
+                <% for (const city of allowedCities) { %>
+                  <label class="access-option"><input type="checkbox" name="scopeCities" value="<%= city %>" /><span><%= city %></span></label>
+                <% } %>
+              </div>
+              <input id="scopeCity" name="scopeCity" type="hidden" value="" />
+              <span class="hint">Marca una o varias sucursales. Este alcance incluye las vacantes de las sucursales seleccionadas.</span>
+            </div>
             <div class="field full" id="vacancyField"><label for="scopeVacancyId">Vacante</label><select id="scopeVacancyId" name="scopeVacancyId"><option value="">Selecciona una vacante</option><% for (const vacancy of allowedVacancies) { %><option value="<%= vacancy.id %>"><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></option><% } %></select></div>
           </div>
         </div>
@@ -233,6 +242,7 @@
               const userVacancyIds = [...new Set([...metadata.vacancyIds, user.scopeVacancyId].filter(Boolean))];
               const selectedVacancies = allowedVacancies.filter((vacancy) => userVacancyIds.includes(vacancy.id));
               const userCities = [...new Set([...metadata.cities, ...selectedVacancies.map((vacancy) => vacancy.city)].filter(Boolean))];
+              const editCityOptions = [...new Set([...allowedCities, ...userCities])].sort((a, b) => a.localeCompare(b, 'es'));
             %>
               <tr>
                 <td><strong><%= user.username %></strong><% if (user.username === environmentAdminUsername) { %><small>Perfil principal configurado en Railway</small><% } %><% if (user.username === highlightedUsername) { %><small>Último usuario intervenido</small><% } %><small>Creado por: <%= user.createdByUsername || 'Sistema' %></small></td>
@@ -244,7 +254,6 @@
                     <% for (const vacancy of selectedVacancies) { %><small class="scope-vacancy-item"><%= vacancy.city %> · <%= vacancy.title || vacancy.role %></small><% } %>
                   <% } else if (user.accessScope === 'CITY') { %>
                     <%= `${userCities.length === 1 ? 'Sucursal' : 'Sucursales'}: ${userCities.length ? userCities.join(', ') : 'Sin sucursal'}` %>
-                    <small>Acceso anterior pendiente de convertir a vacantes específicas.</small>
                   <% } else { %>
                     <%= describeUserScope(user) %>
                     <small>Acceso anterior pendiente de convertir a vacantes específicas.</small>
@@ -271,23 +280,24 @@
                           <label for="edit-accessScope-<%= user.id %>">Alcance de reclutamiento</label>
                           <select id="edit-accessScope-<%= user.id %>" name="accessScope" onchange="syncEditScopeVisibility('<%= user.id %>')">
                             <option value="ALL" <%= user.accessScope === 'ALL' ? 'selected' : '' %>>Todas las sucursales y vacantes</option>
-                            <option value="VACANCY" <%= user.accessScope !== 'ALL' ? 'selected' : '' %>>Vacantes seleccionadas por sucursal</option>
+                            <option value="CITY" <%= user.accessScope === 'CITY' ? 'selected' : '' %>>Sucursales seleccionadas</option>
+                            <option value="VACANCY" <%= user.accessScope === 'VACANCY' ? 'selected' : '' %>>Vacantes seleccionadas por sucursal</option>
                           </select>
                         </div>
                         <div class="field full" id="edit-cityField-<%= user.id %>">
-                          <label>1. Sucursales para consultar vacantes</label>
-                          <div class="access-list">
-                            <% for (const city of allowedCities) { %>
+                          <label>Sucursales</label>
+                          <div class="access-list edit-city-options" data-user-id="<%= user.id %>" data-selected-cities="<%= JSON.stringify(userCities) %>">
+                            <% for (const city of editCityOptions) { %>
                               <label class="access-option">
                                 <input type="checkbox" name="scopeCities" value="<%= city %>" <%= userCities.includes(city) ? 'checked' : '' %> onchange="syncVacancyGroups('<%= user.id %>')" />
                                 <span><%= city %></span>
                               </label>
                             <% } %>
                           </div>
-                          <span class="hint">La sucursal solamente filtra la lista siguiente. No concede acceso por sí sola.</span>
+                          <span class="hint">Con alcance por sucursal, las sucursales marcadas conceden acceso completo a sus vacantes. Con alcance por vacantes, solo filtran la lista siguiente.</span>
                         </div>
                         <div class="field full" id="edit-vacancyField-<%= user.id %>">
-                          <label>2. Vacantes permitidas</label>
+                          <label>Vacantes permitidas</label>
                           <div class="vacancy-access-list">
                             <% for (const city of allowedCities) {
                               const cityVacancies = allowedVacancies.filter((vacancy) => vacancy.city === city);
@@ -308,7 +318,7 @@
                             <% } %>
                             <div class="vacancy-empty" id="edit-vacancyEmpty-<%= user.id %>">Selecciona una sucursal para ver sus vacantes.</div>
                           </div>
-                          <span class="hint">Debes marcar al menos una vacante. Las vacantes nuevas no se habilitarán automáticamente.</span>
+                          <span class="hint">Cuando eliges vacantes específicas, debes marcar al menos una. Las vacantes nuevas no se habilitarán automáticamente.</span>
                         </div>
                         <% if (role === 'dev' || currentUsername === 'reclutador-general') { %>
                           <div class="field full">
@@ -333,17 +343,97 @@
   </div>
 
   <script>
-    (function () {
-      const accessScope = document.getElementById('accessScope');
-      const cityField = document.getElementById('cityField');
-      const vacancyField = document.getElementById('vacancyField');
-      function syncCreateScopeVisibility() {
-        const scope = accessScope ? accessScope.value : 'ALL';
-        if (cityField) cityField.style.display = scope === 'CITY' ? 'flex' : 'none';
-        if (vacancyField) vacancyField.style.display = scope === 'VACANCY' ? 'flex' : 'none';
+    function normalizeCityKey(value) {
+      return String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+    }
+
+    function checkedCityNames(container) {
+      if (!container) return [];
+      return Array.from(container.querySelectorAll('input[name="scopeCities"]:checked'))
+        .map((input) => input.value)
+        .filter(Boolean);
+    }
+
+    function renderCityOptions(container, cities, selectedCities = [], userId = null) {
+      if (!container) return;
+      const selectedKeys = new Set(selectedCities.map(normalizeCityKey));
+      const fragment = document.createDocumentFragment();
+      for (const city of cities) {
+        const name = String(city?.name || '').trim();
+        if (!name) continue;
+        const label = document.createElement('label');
+        label.className = 'access-option';
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.name = 'scopeCities';
+        input.value = name;
+        input.checked = selectedKeys.has(normalizeCityKey(name));
+        if (userId) input.addEventListener('change', () => syncVacancyGroups(userId));
+        const text = document.createElement('span');
+        text.textContent = name;
+        label.append(input, text);
+        fragment.append(label);
       }
-      if (accessScope) { accessScope.addEventListener('change', syncCreateScopeVisibility); syncCreateScopeVisibility(); }
-    })();
+      container.replaceChildren(fragment);
+    }
+
+    async function hydrateCanonicalCities() {
+      try {
+        const response = await fetch('/admin/locations/api/cities', { headers: { Accept: 'application/json' } });
+        if (!response.ok) return;
+        const cities = await response.json();
+        if (!Array.isArray(cities) || !cities.length) return;
+
+        const createContainer = document.getElementById('createCityOptions');
+        renderCityOptions(createContainer, cities, checkedCityNames(createContainer));
+        syncCreateScopeCity();
+
+        document.querySelectorAll('.edit-city-options').forEach((container) => {
+          const userId = container.dataset.userId || null;
+          let selectedCities = checkedCityNames(container);
+          try {
+            const persisted = JSON.parse(container.dataset.selectedCities || '[]');
+            if (Array.isArray(persisted)) selectedCities = persisted;
+          } catch (_error) {}
+          renderCityOptions(container, cities, selectedCities, userId);
+          if (userId) syncEditScopeVisibility(userId);
+        });
+      } catch (_error) {
+        // Conserva las opciones renderizadas por el servidor si el catálogo no puede recargarse.
+      }
+    }
+
+    const accessScope = document.getElementById('accessScope');
+    const cityField = document.getElementById('cityField');
+    const vacancyField = document.getElementById('vacancyField');
+    const createCityOptions = document.getElementById('createCityOptions');
+    const scopeCity = document.getElementById('scopeCity');
+    const createUserForm = document.getElementById('createUserForm');
+
+    function syncCreateScopeCity() {
+      if (!scopeCity) return;
+      const cities = checkedCityNames(createCityOptions);
+      scopeCity.value = cities.length ? JSON.stringify(cities) : '';
+    }
+
+    function syncCreateScopeVisibility() {
+      const scope = accessScope ? accessScope.value : 'ALL';
+      if (cityField) cityField.style.display = scope === 'CITY' ? 'flex' : 'none';
+      if (vacancyField) vacancyField.style.display = scope === 'VACANCY' ? 'flex' : 'none';
+      syncCreateScopeCity();
+    }
+
+    if (createCityOptions) createCityOptions.addEventListener('change', syncCreateScopeCity);
+    if (createUserForm) createUserForm.addEventListener('submit', syncCreateScopeCity);
+    if (accessScope) {
+      accessScope.addEventListener('change', syncCreateScopeVisibility);
+      syncCreateScopeVisibility();
+    }
 
     function bindAttendanceParent(attendanceInput, dispatchInput) {
       if (!attendanceInput || !dispatchInput) return;
@@ -367,14 +457,14 @@
       const emptyMessage = document.getElementById('edit-vacancyEmpty-' + userId);
       if (!cityField || !vacancyField) return;
 
-      const selectedCities = new Set(
+      const selectedCityKeys = new Set(
         Array.from(cityField.querySelectorAll('input[name="scopeCities"]:checked'))
-          .map((input) => input.value)
+          .map((input) => normalizeCityKey(input.value))
       );
       let visibleGroups = 0;
 
       vacancyField.querySelectorAll('.vacancy-city-group').forEach((group) => {
-        const visible = selectedCities.has(group.dataset.city);
+        const visible = selectedCityKeys.has(normalizeCityKey(group.dataset.city));
         group.style.display = visible ? 'block' : 'none';
         if (visible) {
           visibleGroups += 1;
@@ -390,10 +480,11 @@
       const accessScope = document.getElementById('edit-accessScope-' + userId);
       const cityField = document.getElementById('edit-cityField-' + userId);
       const vacancyField = document.getElementById('edit-vacancyField-' + userId);
-      const selectedAccess = accessScope ? accessScope.value === 'VACANCY' : false;
-      if (cityField) cityField.style.display = selectedAccess ? 'flex' : 'none';
-      if (vacancyField) vacancyField.style.display = selectedAccess ? 'flex' : 'none';
-      if (selectedAccess) syncVacancyGroups(userId);
+      const scope = accessScope ? accessScope.value : 'ALL';
+      const usesCities = scope === 'CITY' || scope === 'VACANCY';
+      if (cityField) cityField.style.display = usesCities ? 'flex' : 'none';
+      if (vacancyField) vacancyField.style.display = scope === 'VACANCY' ? 'flex' : 'none';
+      if (scope === 'VACANCY') syncVacancyGroups(userId);
     }
 
     function toggleEditDrawer(userId) {
@@ -402,6 +493,8 @@
       drawer.classList.toggle('open');
       if (drawer.classList.contains('open')) syncEditScopeVisibility(userId);
     }
+
+    hydrateCanonicalCities();
   </script>
 </body>
 </html>
