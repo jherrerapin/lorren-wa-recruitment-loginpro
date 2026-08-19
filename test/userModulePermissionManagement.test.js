@@ -306,9 +306,121 @@ test('creación de usuario acepta el JSON compatible generado por múltiples che
   }
 });
 
-test('el módulo de permisos muestra Sucursales con selección múltiple y edición CITY', () => {
+test('creación de usuario persiste varias vacantes seleccionadas y conserva la primera como compatibilidad', async () => {
+  const created = [];
+  const vacancies = [
+    { id: 'vacancy-alpha', title: 'Auxiliar Alpha', role: 'Auxiliar', city: 'Bogotá' },
+    { id: 'vacancy-beta', title: 'Auxiliar Beta', role: 'Auxiliar', city: 'Neiva' }
+  ];
+  const prisma = {
+    appUser: {
+      findMany: async () => [],
+      create: async ({ data }) => {
+        created.push(data);
+        return { id: 'created-user', ...data };
+      }
+    },
+    vacancy: {
+      findMany: async ({ where } = {}) => {
+        const requestedIds = where?.id?.in || [];
+        return vacancies.filter((vacancy) => requestedIds.includes(vacancy.id));
+      }
+    }
+  };
+
+  const app = express();
+  app.use(express.urlencoded({ extended: true }));
+  app.use((req, _res, next) => {
+    req.session = {
+      userRole: 'admin',
+      userId: 'env-admin',
+      username: 'admin-test',
+      userSource: 'env',
+      userAccessScope: 'ALL'
+    };
+    next();
+  });
+  app.use('/admin', adminRouter(prisma));
+
+  const server = await listen(app);
+  try {
+    const { port } = server.address();
+    const params = new URLSearchParams({
+      password: 'TEST-123456',
+      accessScope: 'VACANCY'
+    });
+    params.append('scopeVacancyIds', 'vacancy-alpha');
+    params.append('scopeVacancyIds', 'vacancy-beta');
+
+    const response = await fetch(`http://127.0.0.1:${port}/admin/users/create`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+      redirect: 'manual'
+    });
+
+    assert.equal(response.status, 302);
+    assert.equal(created.length, 1);
+    assert.equal(created[0].accessScope, 'VACANCY');
+    assert.equal(created[0].scopeVacancyId, 'vacancy-alpha');
+    assert.deepEqual(JSON.parse(created[0].scopeCity), {
+      cities: ['Bogotá', 'Neiva'],
+      vacancyIds: ['vacancy-alpha', 'vacancy-beta']
+    });
+  } finally {
+    await close(server);
+  }
+});
+
+test('creación de usuario rechaza alcance VACANCY sin vacantes seleccionadas', async () => {
+  const created = [];
+  const prisma = {
+    appUser: {
+      findMany: async () => [],
+      create: async ({ data }) => {
+        created.push(data);
+        return { id: 'created-user', ...data };
+      }
+    },
+    vacancy: { findMany: async () => [] }
+  };
+
+  const app = express();
+  app.use(express.urlencoded({ extended: true }));
+  app.use((req, _res, next) => {
+    req.session = {
+      userRole: 'admin',
+      userId: 'env-admin',
+      username: 'admin-test',
+      userSource: 'env',
+      userAccessScope: 'ALL'
+    };
+    next();
+  });
+  app.use('/admin', adminRouter(prisma));
+
+  const server = await listen(app);
+  try {
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/admin/users/create`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 'TEST-123456', accessScope: 'VACANCY' }).toString(),
+      redirect: 'manual'
+    });
+
+    assert.equal(response.status, 302);
+    assert.equal(created.length, 0);
+    assert.match(response.headers.get('location') || '', /Debes%20seleccionar%20al%20menos%20una%20vacante/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('el módulo de permisos muestra Sucursales y Vacantes con selección múltiple', () => {
   const usersView = readSource('src/views/users.ejs');
   const locationsSource = readSource('src/routes/locations.js');
+  const adminSource = readSource('src/routes/admin.js');
 
   assert.match(usersView, /una o varias sucursales completas/);
   assert.match(usersView, />Una o varias sucursales</);
@@ -320,6 +432,12 @@ test('el módulo de permisos muestra Sucursales con selección múltiple y edici
   assert.match(usersView, /option value="CITY"/);
   assert.match(usersView, /Sucursales seleccionadas/);
   assert.match(usersView, /Todas las sucursales y vacantes/);
+  assert.match(usersView, />Una o varias vacantes</);
+  assert.match(usersView, /id="createVacancyOptions"/);
+  assert.match(usersView, /type="checkbox" name="scopeVacancyIds"/);
+  assert.doesNotMatch(usersView, /<select id="scopeVacancyId"/);
+  assert.match(adminSource, /encodeUserAccessSelection/);
+  assert.match(adminSource, /requestedVacancyIds/);
   assert.match(usersView, /role === 'dev' \|\| currentUsername === 'reclutador-general'/);
   assert.match(usersView, /Solo DEV puede conceder permisos iniciales/);
   assert.match(locationsSource, /router\.get\('\/api\/cities'/);
