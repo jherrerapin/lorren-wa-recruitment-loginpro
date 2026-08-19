@@ -2,9 +2,11 @@
 import express from 'express';
 import {
   canManageUserModulePermissions,
+  encodeUserAccessCities,
   encodeUserAccessSelection,
   normalizeUserAccessScope
 } from '../services/appUsers.js';
+import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 
 function sessionAuth(req, res, next) {
   const role = req.session?.userRole;
@@ -116,12 +118,31 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
     };
   }
 
-  const requestedCities = normalizeMany(body.scopeCities);
-  const requestedVacancyIds = normalizeMany(body.scopeVacancyIds);
-
+  const requestedCities = normalizeMany(body.scopeCities)
+    .sort((a, b) => a.localeCompare(b, 'es'));
   if (!requestedCities.length) {
-    return { error: 'Selecciona al menos una sucursal para filtrar sus vacantes.' };
+    return { error: 'Selecciona al menos una sucursal para este usuario.' };
   }
+
+  const cityOptions = await loadUnifiedCityOptions(prisma);
+  const canonicalCityNames = new Set(cityOptions.map((city) => city.name));
+  const invalidCities = requestedCities.filter((city) => !canonicalCityNames.has(city));
+  if (invalidCities.length) {
+    return { error: 'Una o varias sucursales seleccionadas ya no existen.' };
+  }
+
+  if (accessScope === 'CITY') {
+    return {
+      accessScope: 'CITY',
+      scopeCity: encodeUserAccessCities(requestedCities),
+      scopeVacancyId: null,
+      selectedCities: requestedCities,
+      selectedVacancyIds: [],
+      selectedVacancies: []
+    };
+  }
+
+  const requestedVacancyIds = normalizeMany(body.scopeVacancyIds);
   if (!requestedVacancyIds.length) {
     return { error: 'Selecciona al menos una vacante para este usuario.' };
   }
@@ -142,14 +163,14 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
     return { error: 'Una o varias vacantes seleccionadas ya no existen.' };
   }
 
-  const requestedCitySet = new Set(requestedCities);
-  const outsideSelectedCities = selectedVacancies.filter((vacancy) => !requestedCitySet.has(vacancy.city));
+  const requestedCityKeys = new Set(requestedCities.map(normalizeKey));
+  const outsideSelectedCities = selectedVacancies.filter((vacancy) => !requestedCityKeys.has(normalizeKey(vacancy.city)));
   if (outsideSelectedCities.length) {
     return { error: 'Solo puedes asignar vacantes pertenecientes a las sucursales seleccionadas.' };
   }
 
-  const selectedCities = [...new Set(selectedVacancies.map((vacancy) => vacancy.city).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, 'es'));
+  const selectedVacancyCityKeys = new Set(selectedVacancies.map((vacancy) => normalizeKey(vacancy.city)).filter(Boolean));
+  const selectedCities = requestedCities.filter((city) => selectedVacancyCityKeys.has(normalizeKey(city)));
 
   return {
     accessScope: 'VACANCY',
@@ -207,6 +228,11 @@ export function locationsRouter(prisma) {
       role: req.userRole,
       canAccessDispatch: Boolean(req.session?.canAccessDispatch)
     });
+  });
+
+  router.get('/api/cities', async (_req, res) => {
+    const cities = await loadUnifiedCityOptions(prisma);
+    res.json(cities.map((city) => ({ id: city.id, name: city.name })));
   });
 
   router.get('/api/operations', async (_req, res) => {
@@ -294,7 +320,7 @@ export function locationsRouter(prisma) {
         flash(res, 'error', `No se puede eliminar "${city.name}" porque tiene vacantes asociadas.`);
         return res.redirect('/admin/locations');
       }
-      await prisma.city.delete({ where: { id: req.params.id } });
+      await prisma.city.delete({ where: { id: city.id } });
       flash(res, 'success', `Sucursal "${city.name}" eliminada.`);
     } catch (_error) {
       flash(res, 'error', 'Error al eliminar la sucursal.');
@@ -442,7 +468,9 @@ export function locationsRouter(prisma) {
 
     const accessDescription = accessUpdate.accessScope === 'ALL'
       ? 'todas las sucursales y vacantes'
-      : `${accessUpdate.selectedVacancyIds.length} vacante(s) de ${accessUpdate.selectedCities.join(', ')}`;
+      : accessUpdate.accessScope === 'CITY'
+        ? `${accessUpdate.selectedCities.length} sucursal(es): ${accessUpdate.selectedCities.join(', ')}`
+        : `${accessUpdate.selectedVacancyIds.length} vacante(s) de ${accessUpdate.selectedCities.join(', ')}`;
 
     return res.redirect(usersRedirect(
       'success',
