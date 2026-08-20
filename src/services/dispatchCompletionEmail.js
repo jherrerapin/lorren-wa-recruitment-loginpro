@@ -329,14 +329,17 @@ export async function getDispatchCompletionPackage(prisma, serviceRequestId, opt
 }
 
 /**
- * Envía automáticamente el correo de cierre cuando el grupo queda completamente
- * confirmado. Los reintentos manuales usan la misma autoridad e idempotencia.
+ * Envío de cierre únicamente bajo una acción manual explícita. Los importadores
+ * históricos pueden seguir invocando esta función al completar una solicitud,
+ * pero sin `manual: true` no se ejecuta ningún efecto externo.
  *
  * @param {object} prisma
  * @param {string} serviceRequestId
- * @param {{ replyTo?: string|null, managedBy?: string|null, managedByUsername?: string|null, pdfBuilder?: Function }} [options]
+ * @param {{ manual?: boolean, replyTo?: string|null, managedBy?: string|null, managedByUsername?: string|null, pdfBuilder?: Function }} [options]
  */
 export async function sendDispatchCompletionEmail(prisma, serviceRequestId, options = {}) {
+  if (options.manual !== true) return { skipped: true, reason: 'manual_send_required' };
+
   const requestGroup = await loadRequestGroup(prisma, serviceRequestId);
   if (!requestGroup.length) return { skipped: true, reason: 'service_request_not_found' };
   if (!groupIsComplete(requestGroup)) return { skipped: true, reason: 'service_request_not_complete' };
