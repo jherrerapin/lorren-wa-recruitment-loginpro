@@ -273,9 +273,12 @@ async function migrateAuthenticatedIdentity(req, res, {
     });
   }
 
-  const displayName = normalizeString(req.body?.displayName);
-  const email = normalizeAppUserEmail(req.body?.email);
-  const confirmEmail = normalizeAppUserEmail(req.body?.confirmEmail);
+  const submittedDisplayName = normalizeString(req.body?.displayName);
+  const submittedEmail = normalizeAppUserEmail(req.body?.email);
+  const submittedConfirmEmail = normalizeAppUserEmail(req.body?.confirmEmail);
+  const displayName = forcePasswordChange ? normalizeString(profile?.displayName) : submittedDisplayName;
+  const email = forcePasswordChange ? normalizeAppUserEmail(profile?.email) : submittedEmail;
+  const confirmEmail = forcePasswordChange ? email : submittedConfirmEmail;
   const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
   const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
   const confirmNewPassword = typeof req.body?.confirmNewPassword === 'string' ? req.body.confirmNewPassword : '';
@@ -332,21 +335,23 @@ async function migrateAuthenticatedIdentity(req, res, {
 
   const migratedAt = new Date();
   if (profile) {
-    const data = {
-      displayName,
-      email,
-      recoveryEmail: email
-    };
-    if (forcePasswordChange) {
-      data.passwordHash = await bcryptModule.hash(newPassword, 10);
-      data.lastPasswordResetAt = migratedAt;
-    } else {
-      data.identityMigratedAt = migratedAt;
-      if (sessionData.userSource === 'env') {
-        data.passwordHash = await bcryptModule.hash(currentPassword, 10);
-        data.lastPasswordResetAt = migratedAt;
-      }
-    }
+    const data = forcePasswordChange
+      ? {
+          passwordHash: await bcryptModule.hash(newPassword, 10),
+          lastPasswordResetAt: migratedAt
+        }
+      : {
+          displayName,
+          email,
+          recoveryEmail: email,
+          identityMigratedAt: migratedAt,
+          ...(sessionData.userSource === 'env'
+            ? {
+                passwordHash: await bcryptModule.hash(currentPassword, 10),
+                lastPasswordResetAt: migratedAt
+              }
+            : {})
+        };
     profile = await prismaClient.appUser.update({
       where: { id: profile.id },
       data,
