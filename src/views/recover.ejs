@@ -27,7 +27,7 @@
     }
     .brand img { height: 32px; width: auto; object-fit: contain; display: block; }
     h1 { margin-top: 8px; font-size: 24px; color: #111827; }
-    p { margin-top: 8px; color: #6b7280; font-size: 14px; }
+    p { margin-top: 8px; color: #6b7280; font-size: 14px; line-height: 1.45; }
     form { margin-top: 20px; display: grid; gap: 14px; }
     .field label { display: block; margin-bottom: 6px; font-size: 13px; color: #4b5563; font-weight: 600; }
     .field input {
@@ -58,65 +58,39 @@
       font-size: 13px;
       padding: 10px 12px;
     }
-    .error {
-      border: 1px solid #fecaca;
-      background: #fef2f2;
-      color: #b91c1c;
-    }
-    .success {
-      border: 1px solid #bbf7d0;
-      background: #f0fdf4;
-      color: #166534;
-    }
-    .helper {
-      margin-top: 14px;
-      font-size: 13px;
-      color: #6b7280;
-    }
-    .helper a {
-      color: #4f46e5;
-      text-decoration: none;
-      font-weight: 600;
-    }
+    .error { border: 1px solid #fecaca; background: #fef2f2; color: #b91c1c; }
+    .success { border: 1px solid #bbf7d0; background: #f0fdf4; color: #166534; }
+    .helper { margin-top: 14px; font-size: 13px; color: #6b7280; line-height: 1.45; }
+    .helper a { color: #4f46e5; text-decoration: none; font-weight: 600; }
   </style>
 </head>
 <body>
   <main class="card">
-    <div class="brand">
-      <img src="/public/logo-loginpro.svg" alt="LoginPro" />
-    </div>
+    <div class="brand"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></div>
     <h1>Recuperar acceso</h1>
-    <p>Usa el usuario, el código de recuperación entregado por dev/reclutador y define una nueva contraseña.</p>
+    <p>Usa tu correo electrónico, el código de recuperación vigente y define una nueva contraseña.</p>
 
-    <% if (error) { %>
-      <div class="error"><%= error %></div>
-    <% } %>
-    <% if (success) { %>
-      <div class="success"><%= success %></div>
-    <% } %>
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <% if (success) { %><div class="success"><%= success %></div><% } %>
 
     <form method="post" action="/recover">
       <div class="field">
-        <label for="username">Usuario</label>
-        <input id="username" name="username" type="text" required autocomplete="username" value="<%= username %>" />
+        <label for="username">Correo electrónico</label>
+        <input id="username" name="username" type="text" inputmode="email" required autocomplete="username" value="<%= username %>" />
       </div>
-
       <div class="field">
         <label for="recoveryCode">Código de recuperación</label>
         <input id="recoveryCode" name="recoveryCode" type="text" inputmode="numeric" autocomplete="one-time-code" required />
       </div>
-
       <div class="field">
         <label for="newPassword">Nueva contraseña</label>
         <input id="newPassword" name="newPassword" type="password" autocomplete="new-password" minlength="6" required />
       </div>
-
       <button class="btn" type="submit">Actualizar contraseña</button>
     </form>
 
-    <div class="helper">
-      <a href="/login">Volver al login</a>
-    </div>
+    <div class="helper">Si todavía no has actualizado tu acceso, puedes usar temporalmente tu usuario anterior para recuperar la contraseña y luego completar la migración.</div>
+    <div class="helper"><a href="/login">Volver al login</a></div>
   </main>
 </body>
 </html>

@@ -29,6 +29,21 @@ test('AppUser schema has dispatch access permission and migration', () => {
   );
 });
 
+test('AppUser expande identidad por nombre y correo sin retirar username histórico', () => {
+  const schema = readSource('prisma/schema.prisma');
+  const migration = readSource('prisma/migrations/20260819205500_app_user_email_identity/migration.sql');
+
+  assert.match(schema, /username\s+String\s+@unique/);
+  assert.match(schema, /displayName\s+String\?/);
+  assert.match(schema, /email\s+String\?\s+@unique/);
+  assert.match(schema, /identityMigratedAt\s+DateTime\?/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "displayName" TEXT/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "email" TEXT/);
+  assert.match(migration, /ADD COLUMN IF NOT EXISTS "identityMigratedAt" TIMESTAMP\(3\)/);
+  assert.match(migration, /CREATE UNIQUE INDEX IF NOT EXISTS "AppUser_email_key"/);
+  assert.doesNotMatch(migration, /DROP COLUMN|DROP TABLE|ALTER COLUMN[^\n]*NOT NULL/i);
+});
+
 test('login session carries dispatch access permission', () => {
   const serverSource = readSource('src/server.js');
 
@@ -75,16 +90,19 @@ test('legacy admin operations fallback renders dashboard required locals', () =>
   assert.match(adminSource, /router\.get\(\s*['"]\/operaciones['"][\s\S]*?canAccessDispatch:\s*Boolean\(req\.canAccessDispatch\)/);
 });
 
-test('admin user creation restricts canAccessDispatch to DEV in backend', () => {
+test('creación de usuarios separa identidad, alcance y autoridad de permisos en backend', () => {
   const adminSource = readSource('src/routes/admin.js');
 
   assert.match(adminSource, /router\.post\(\s*['"]\/users\/create['"]/);
-  assert.match(adminSource, /const\s+canAccessDispatch\s*=\s*req\.userRole\s*===\s*['"]dev['"]\s*&&\s*req\.body\.canAccessDispatch\s*===\s*['"]true['"]/);
-  assert.match(adminSource, /prisma\.appUser\.create\([\s\S]*?data:\s*{[\s\S]*?username,[\s\S]*?role:\s*['"]ADMIN['"][\s\S]*?canAccessDispatch,/);
-  assert.match(adminSource, /buildUniqueRecruiterUsername/);
+  assert.match(adminSource, /const\s+canGrantModules\s*=\s*canManageUserModulePermissions\(req\)/);
+  assert.match(adminSource, /const\s+canAccessAttendance\s*=\s*canGrantModules\s*&&/);
+  assert.match(adminSource, /const\s+canAccessDispatch\s*=\s*canGrantModules[\s\S]*?canAccessAttendance/);
+  assert.match(adminSource, /const\s+canAccessMetaAds\s*=\s*canGrantModules\s*&&/);
+  assert.match(adminSource, /const\s+canAccessCvAnalysis\s*=\s*canGrantModules\s*&&/);
+  assert.match(adminSource, /const\s+username\s*=\s*`user-\$\{randomUUID\(\)\}`/);
+  assert.match(adminSource, /displayName,[\s\S]*?email,[\s\S]*?identityMigratedAt/);
+  assert.doesNotMatch(adminSource, /buildUniqueRecruiterUsername\(/);
 });
-
-
 
 test('operations dashboard uses updated LoginPro logo asset', () => {
   const operationsView = readSource('src/views/operacionesDashboard.ejs');
@@ -93,15 +111,16 @@ test('operations dashboard uses updated LoginPro logo asset', () => {
   assert.doesNotMatch(operationsView, /\/public\/loginpro\.png/);
 });
 
-test('users view has one form with dispatch checkbox and no operations-only form', () => {
+test('users view muestra permisos solo a su autoridad y no crea formulario operations-only', () => {
   const usersView = readSource('src/views/users.ejs');
 
   assert.match(usersView, /name=["']canAccessDispatch["']/);
   assert.match(usersView, /id=["']canAccessDispatch["']/);
   assert.match(usersView, /value=["']true["']/);
   assert.match(usersView, />Operaciones \/ Despacho</);
-  assert.match(usersView, /Permite entrar al panel operativo además del alcance de reclutamiento seleccionado\./);
-  assert.match(usersView, /<%\s*if\s*\(role\s*===\s*['\"]dev['\"]\)\s*{\s*%>[\s\S]*id=["']canAccessDispatch["'][\s\S]*<%\s*}\s*%>/);
+  assert.match(usersView, /Permite entrar al panel operativo además del alcance seleccionado\./);
+  assert.match(usersView, /<%\s*if\s*\(canManageModulePermissions\)\s*{\s*%>[\s\S]*id=["']canAccessDispatch["']/);
+  assert.match(usersView, /Los permisos adicionales solo pueden ser concedidos por DEV o reclutador-general/);
   assert.match(usersView, /if \(user\.canAccessDispatch\)[\s\S]*Operaciones \/ Despacho/);
   assert.doesNotMatch(usersView, /Crear usuario de Operaciones \/ Despacho/);
   assert.doesNotMatch(usersView, /\/admin\/users\/create-operations/);
@@ -119,17 +138,20 @@ test('los perfiles protegidos solo aparecen en el listado de usuarios para DEV',
   assert.match(visibilityRule, /return \{ role: 'ADMIN', \.\.\.visibilityWhere \}/);
 });
 
-test('reclutador-general puede administrar usuarios y el perfil de Railway queda protegido', () => {
+test('reclutador-general conserva administración sensible y la identidad del perfil por entorno se migra en sesión', () => {
   const adminSource = readSource('src/routes/admin.js');
   const locationsSource = readSource('src/routes/locations.js');
   const usersView = readSource('src/views/users.ejs');
+  const sessionSource = readSource('src/services/adminSession.js');
 
   assert.match(adminSource, /source\s*===\s*'db'[\s\S]*?username\s*===\s*'reclutador-general'[\s\S]*?accessScope\s*===\s*'ALL'/);
-  assert.match(adminSource, /if \(accessContext\.isDev\) \{\s*await ensureEnvironmentAdminProfile\(prisma\)/);
-  assert.match(adminSource, /passwordHash:\s*await bcrypt\.hash\(randomUUID\(\),\s*12\)/);
+  assert.doesNotMatch(adminSource, /ensureEnvironmentAdminProfile/);
+  assert.match(sessionSource, /async function migrateAuthenticatedIdentity/);
+  assert.match(sessionSource, /environmentProfileData\(sessionData, passwordHash/);
+  assert.match(sessionSource, /identityMigratedAt:/);
   assert.match(locationsSource, /req\.userSource\s*===\s*'db'[\s\S]*?req\.username\s*===\s*'reclutador-general'[\s\S]*?req\.userAccessScope\s*===\s*'ALL'/);
   assert.match(locationsSource, /req\.userRole\s*!==\s*'dev'\s*&&\s*isProtectedRecruiterProfile\(user\)/);
-  assert.match(usersView, /Perfil principal configurado en Railway/);
+  assert.match(usersView, /Perfil principal configurado por entorno/);
   assert.match(usersView, /user\.username\s*!==\s*environmentAdminUsername[\s\S]*?reset-password/);
 });
 
@@ -217,7 +239,6 @@ test('operations navigation uses dispatch permission without target blank', () =
   const allViewSource = views.map(readSource).join('\n');
   assert.doesNotMatch(allViewSource, /target=["']_blank["'][^>]*>\s*Operaciones \/ Despacho/);
 });
-
 
 test('monitor navigation remains dev-only outside operations dashboard', () => {
   const views = [

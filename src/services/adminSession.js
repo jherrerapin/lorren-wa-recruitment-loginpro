@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import session from 'express-session';
 import connectPgSimple from 'connect-pg-simple';
 import { prisma as defaultPrisma } from '../lib/prisma.js';
+import { normalizeAppUserEmail } from './appUsers.js';
 
 export const ADMIN_SESSION_DEFAULTS = Object.freeze({
   cookieName: 'loginpro.sid',
@@ -12,10 +13,19 @@ export const ADMIN_SESSION_DEFAULTS = Object.freeze({
   pruneSessionIntervalSeconds: 60 * 60
 });
 
+const IDENTITY_PATH = '/account/identity';
+const IMPERSONATE_PATH = /^\/admin\/users\/([^/]+)\/impersonate$/;
+const IMPERSONATION_STOP_PATH = '/admin/users/impersonation/stop';
+const MIGRATED_USERNAME_SENTINEL = '__login_requires_email__';
+
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function requestPath(req = {}) {
+  return String(req.path || req.originalUrl || req.url || '').split('?')[0] || '/';
 }
 
 function environmentSessionCanUseDispatch(sessionData = {}) {
@@ -25,18 +35,23 @@ function environmentSessionCanUseDispatch(sessionData = {}) {
     || Boolean(username?.startsWith('operaciones-despacho'));
 }
 
-function environmentProfileData(sessionData, passwordHash) {
+function environmentProfileData(sessionData, passwordHash, identity = {}) {
   const username = normalizeString(sessionData.username);
   const isDev = sessionData.userRole === 'dev';
+  const dispatchByProfile = Boolean(username?.startsWith('operaciones-despacho'));
   return {
     username,
     passwordHash,
+    displayName: normalizeString(identity.displayName),
+    email: normalizeAppUserEmail(identity.email),
+    identityMigratedAt: identity.identityMigratedAt || null,
     role: isDev ? 'DEV' : 'ADMIN',
     accessScope: 'ALL',
     scopeCity: null,
     scopeVacancyId: null,
+    recoveryEmail: normalizeAppUserEmail(identity.email),
     createdByUsername: username,
-    canAccessDispatch: true,
+    canAccessDispatch: isDev || sessionData.canAccessDispatch === true || dispatchByProfile,
     canAccessAttendance: isDev || sessionData.canAccessAttendance === true,
     canAccessStatistics: isDev || sessionData.canAccessStatistics === true,
     canAccessMetaAds: isDev || sessionData.canAccessMetaAds === true,
@@ -74,6 +89,393 @@ export async function ensureEnvironmentDispatchProfile(sessionData, {
 
   if (created?.isActive !== false) sessionData.userId = created?.id || null;
   return created || null;
+}
+
+function identitySelect() {
+  return {
+    id: true,
+    username: true,
+    passwordHash: true,
+    displayName: true,
+    email: true,
+    identityMigratedAt: true,
+    role: true,
+    accessScope: true,
+    scopeCity: true,
+    scopeVacancyId: true,
+    canAccessDispatch: true,
+    canAccessAttendance: true,
+    canAccessStatistics: true,
+    canAccessMetaAds: true,
+    canAccessCvAnalysis: true,
+    isActive: true
+  };
+}
+
+async function findSessionProfile(prismaClient, sessionData = {}) {
+  if (!prismaClient?.appUser || !sessionData?.userRole) return null;
+  if (sessionData.userId) {
+    return prismaClient.appUser.findUnique({
+      where: { id: sessionData.userId },
+      select: identitySelect()
+    });
+  }
+  const username = normalizeString(sessionData.username);
+  if (!username) return null;
+  return prismaClient.appUser.findUnique({
+    where: { username },
+    select: identitySelect()
+  });
+}
+
+function syncSessionIdentity(sessionData, profile) {
+  if (!sessionData || !profile) return;
+  if (profile.id && profile.isActive !== false) sessionData.userId = profile.id;
+  sessionData.displayName = normalizeString(profile.displayName);
+  sessionData.userEmail = normalizeAppUserEmail(profile.email);
+  sessionData.identityMigratedAt = profile.identityMigratedAt
+    ? new Date(profile.identityMigratedAt).toISOString()
+    : null;
+}
+
+function identityPending(sessionData = {}, profile = null) {
+  if (!sessionData.userRole || sessionData.userRole === 'dev') return false;
+  if (sessionData.devImpersonation) return false;
+  if (profile) return !profile.identityMigratedAt;
+  return sessionData.userSource === 'env' && sessionData.userRole === 'admin';
+}
+
+function preserveCredentialPresentation(req, res) {
+  if (!res || res.__identityCredentialPresentationWrapped) return;
+  res.__identityCredentialPresentationWrapped = true;
+
+  if (typeof res.render === 'function') {
+    const originalRender = res.render.bind(res);
+    res.render = (view, options, callback) => {
+      if (typeof options === 'function') return originalRender(view, options);
+      const visibleIdentifier = normalizeAppUserEmail(req.identityVisibleCredential);
+      const nextOptions = visibleIdentifier && ['login', 'recover'].includes(view)
+        ? { ...(options || {}), username: visibleIdentifier }
+        : options;
+      return originalRender(view, nextOptions, callback);
+    };
+  }
+
+  if (typeof res.redirect === 'function') {
+    const originalRedirect = res.redirect.bind(res);
+    res.redirect = (...args) => {
+      const visibleIdentifier = normalizeAppUserEmail(req.identityVisibleCredential);
+      const locationIndex = args.length > 1 ? 1 : 0;
+      const location = args[locationIndex];
+      if (visibleIdentifier && typeof location === 'string' && location.startsWith('/login?')) {
+        const [pathname, query = ''] = location.split('?');
+        if (pathname === '/login') {
+          const params = new URLSearchParams(query);
+          if (params.has('username')) {
+            params.set('username', visibleIdentifier);
+            args[locationIndex] = `${pathname}?${params.toString()}`;
+          }
+        }
+      }
+      return originalRedirect(...args);
+    };
+  }
+}
+
+async function canonicalizeCredentialIdentifier(req, prismaClient) {
+  const path = requestPath(req);
+  if (req.method !== 'POST' || !['/login', '/recover'].includes(path)) return;
+  if (!req.body || typeof req.body.username !== 'string' || !prismaClient?.appUser) return;
+
+  const submitted = normalizeString(req.body.username);
+  if (!submitted) return;
+  const email = normalizeAppUserEmail(submitted);
+  let profile = null;
+
+  if (email) {
+    req.identityVisibleCredential = email;
+    profile = await prismaClient.appUser.findUnique({
+      where: { email },
+      select: { username: true, identityMigratedAt: true, role: true }
+    });
+    if (profile?.username) req.body.username = profile.username;
+    return;
+  }
+
+  profile = await prismaClient.appUser.findUnique({
+    where: { username: submitted },
+    select: { username: true, identityMigratedAt: true, role: true }
+  });
+  if (profile?.identityMigratedAt && profile.role !== 'DEV') {
+    req.body.username = MIGRATED_USERNAME_SENTINEL;
+  }
+}
+
+async function verifyEnvironmentCredential(plain, configured, bcryptModule = bcrypt) {
+  if (!plain || !configured) return false;
+  if (configured.startsWith('$2b$') || configured.startsWith('$2a$')) {
+    return bcryptModule.compare(plain, configured);
+  }
+  return plain === configured;
+}
+
+function renderIdentityMigration(res, values = {}) {
+  return res.status(values.status || 200).render('identityMigration', {
+    error: values.error || null,
+    displayName: values.displayName || '',
+    email: values.email || ''
+  });
+}
+
+async function migrateAuthenticatedIdentity(req, res, {
+  prismaClient,
+  bcryptModule,
+  env
+}) {
+  const sessionData = req.session || {};
+  if (!sessionData.userRole) return res.redirect('/login');
+  if (sessionData.userRole === 'dev') return res.redirect('/admin');
+
+  if (req.method === 'GET') {
+    return renderIdentityMigration(res, {
+      displayName: sessionData.displayName || ''
+    });
+  }
+
+  const displayName = normalizeString(req.body?.displayName);
+  const email = normalizeAppUserEmail(req.body?.email);
+  const confirmEmail = normalizeAppUserEmail(req.body?.confirmEmail);
+  const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+
+  if (!displayName || displayName.length < 3) {
+    return renderIdentityMigration(res, { status: 400, error: 'Ingresa tu nombre completo.', displayName, email });
+  }
+  if (!email || !confirmEmail || email !== confirmEmail) {
+    return renderIdentityMigration(res, { status: 400, error: 'Ingresa el mismo correo electrónico en ambos campos.', displayName, email: email || '' });
+  }
+  if (!currentPassword) {
+    return renderIdentityMigration(res, { status: 400, error: 'Confirma tu contraseña actual para actualizar el acceso.', displayName, email });
+  }
+
+  let profile = await findSessionProfile(prismaClient, sessionData);
+  let passwordMatches = false;
+  if (sessionData.userSource === 'env') {
+    const configuredPassword = sessionData.userRole === 'admin' ? env.ADMIN_PASS : null;
+    passwordMatches = await verifyEnvironmentCredential(currentPassword, configuredPassword, bcryptModule);
+  } else if (profile?.passwordHash) {
+    passwordMatches = await bcryptModule.compare(currentPassword, profile.passwordHash);
+  }
+  if (!passwordMatches) {
+    return renderIdentityMigration(res, { status: 401, error: 'La contraseña actual no es correcta.', displayName, email });
+  }
+
+  const emailOwner = await prismaClient.appUser.findUnique({
+    where: { email },
+    select: { id: true }
+  });
+  if (emailOwner && emailOwner.id !== profile?.id) {
+    return renderIdentityMigration(res, { status: 409, error: 'Ese correo ya está asociado a otro usuario.', displayName, email });
+  }
+
+  const migratedAt = new Date();
+  if (profile) {
+    const data = {
+      displayName,
+      email,
+      recoveryEmail: email,
+      identityMigratedAt: migratedAt
+    };
+    if (sessionData.userSource === 'env') {
+      data.passwordHash = await bcryptModule.hash(currentPassword, 10);
+      data.lastPasswordResetAt = migratedAt;
+    }
+    profile = await prismaClient.appUser.update({
+      where: { id: profile.id },
+      data,
+      select: identitySelect()
+    });
+  } else if (sessionData.userSource === 'env' && sessionData.userRole === 'admin') {
+    const username = normalizeString(sessionData.username);
+    if (!username) return renderIdentityMigration(res, { status: 400, error: 'No fue posible vincular esta sesión a una cuenta.', displayName, email });
+    const passwordHash = await bcryptModule.hash(currentPassword, 10);
+    try {
+      profile = await prismaClient.appUser.create({
+        data: {
+          ...environmentProfileData(sessionData, passwordHash, {
+            displayName,
+            email,
+            identityMigratedAt: migratedAt
+          }),
+          lastPasswordResetAt: migratedAt
+        },
+        select: identitySelect()
+      });
+    } catch (error) {
+      if (error?.code !== 'P2002') throw error;
+      profile = await prismaClient.appUser.findUnique({
+        where: { username },
+        select: identitySelect()
+      });
+      if (!profile) throw error;
+      profile = await prismaClient.appUser.update({
+        where: { id: profile.id },
+        data: {
+          displayName,
+          email,
+          recoveryEmail: email,
+          identityMigratedAt: migratedAt,
+          passwordHash,
+          lastPasswordResetAt: migratedAt
+        },
+        select: identitySelect()
+      });
+    }
+  }
+
+  if (!profile) return renderIdentityMigration(res, { status: 500, error: 'No fue posible actualizar tu acceso.', displayName, email });
+  syncSessionIdentity(sessionData, profile);
+  return res.redirect(303, '/admin');
+}
+
+function sessionSnapshot(sessionData = {}) {
+  const keys = [
+    'userId', 'userRole', 'username', 'userAccessScope', 'userAccessCity', 'userAccessVacancyId',
+    'userSource', 'canAccessDispatch', 'canAccessAttendance', 'canAccessPayroll', 'canAccessTestWorkspace',
+    'canAccessStatistics', 'canAccessMetaAds', 'canAccessCvAnalysis', 'displayName', 'userEmail', 'identityMigratedAt'
+  ];
+  return Object.fromEntries(keys.map((key) => [key, sessionData[key] ?? null]));
+}
+
+function applyProfileToSession(sessionData, profile) {
+  sessionData.userId = profile.id;
+  sessionData.userRole = profile.role === 'DEV' ? 'dev' : 'admin';
+  sessionData.username = profile.username;
+  sessionData.userAccessScope = profile.accessScope || 'ALL';
+  sessionData.userAccessCity = profile.scopeCity || null;
+  sessionData.userAccessVacancyId = profile.scopeVacancyId || null;
+  sessionData.userSource = 'db';
+  sessionData.canAccessDispatch = Boolean(profile.canAccessDispatch || profile.canAccessAttendance);
+  sessionData.canAccessAttendance = Boolean(profile.canAccessAttendance);
+  sessionData.canAccessPayroll = false;
+  sessionData.canAccessTestWorkspace = false;
+  sessionData.canAccessMetaAds = Boolean(profile.canAccessMetaAds);
+  sessionData.canAccessCvAnalysis = Boolean(profile.canAccessCvAnalysis);
+  sessionData.canAccessStatistics = Boolean(profile.canAccessMetaAds || profile.canAccessCvAnalysis);
+  syncSessionIdentity(sessionData, profile);
+}
+
+async function recordImpersonationAudit(prismaClient, data = {}) {
+  if (typeof prismaClient?.devAuditEvent?.create !== 'function') return;
+  try {
+    await prismaClient.devAuditEvent.create({
+      data: {
+        entityType: 'APP_USER',
+        entityId: data.targetUserId || null,
+        entityLabel: null,
+        action: data.action,
+        actorUserId: data.actorUserId || null,
+        actorUsername: data.actorUsername || 'dev',
+        actorRole: 'dev',
+        actorSource: data.actorSource || 'dashboard',
+        method: 'POST',
+        path: data.path || null,
+        metadata: { targetUserId: data.targetUserId || null }
+      }
+    });
+  } catch (_error) {
+    // La auditoría no debe dejar al DEV atrapado en la sesión objetivo.
+  }
+}
+
+async function startDevImpersonation(req, res, prismaClient, targetUserId) {
+  const sessionData = req.session || {};
+  if (sessionData.userRole !== 'dev' || sessionData.devImpersonation) {
+    return res.status(403).send('Acceso restringido a DEV');
+  }
+
+  const target = await prismaClient.appUser.findUnique({
+    where: { id: targetUserId },
+    select: identitySelect()
+  });
+  if (!target || target.role !== 'ADMIN' || target.isActive === false) {
+    return res.redirect('/admin/users?error=' + encodeURIComponent('Usuario no disponible para vista DEV.'));
+  }
+  if (!target.identityMigratedAt || !target.displayName || !target.email) {
+    return res.redirect('/admin/users?error=' + encodeURIComponent('Ese usuario debe actualizar primero su nombre y correo.'));
+  }
+
+  const origin = sessionSnapshot(sessionData);
+  sessionData.devImpersonation = {
+    origin,
+    targetUserId: target.id
+  };
+  applyProfileToSession(sessionData, target);
+  await recordImpersonationAudit(prismaClient, {
+    action: 'USER_IMPERSONATION_STARTED',
+    targetUserId: target.id,
+    actorUserId: origin.userId,
+    actorUsername: origin.username,
+    actorSource: origin.userSource,
+    path: requestPath(req)
+  });
+  return res.redirect(303, '/admin');
+}
+
+async function stopDevImpersonation(req, res, prismaClient) {
+  const sessionData = req.session || {};
+  const impersonation = sessionData.devImpersonation;
+  if (!impersonation?.origin || impersonation.origin.userRole !== 'dev') {
+    return res.status(403).send('No hay una vista DEV activa.');
+  }
+  const targetUserId = impersonation.targetUserId || sessionData.userId || null;
+  const origin = impersonation.origin;
+  delete sessionData.devImpersonation;
+  for (const [key, value] of Object.entries(origin)) sessionData[key] = value;
+  await recordImpersonationAudit(prismaClient, {
+    action: 'USER_IMPERSONATION_FINISHED',
+    targetUserId,
+    actorUserId: origin.userId,
+    actorUsername: origin.username,
+    actorSource: origin.userSource,
+    path: requestPath(req)
+  });
+  return res.redirect(303, '/admin/users');
+}
+
+async function handleIdentitySessionRequest(req, res, {
+  prismaClient,
+  bcryptModule,
+  env
+}) {
+  preserveCredentialPresentation(req, res);
+  await canonicalizeCredentialIdentifier(req, prismaClient);
+
+  const path = requestPath(req);
+  const impersonateMatch = req.method === 'POST' ? path.match(IMPERSONATE_PATH) : null;
+  if (impersonateMatch) {
+    return { handled: true, result: await startDevImpersonation(req, res, prismaClient, impersonateMatch[1]) };
+  }
+  if (req.method === 'POST' && path === IMPERSONATION_STOP_PATH) {
+    return { handled: true, result: await stopDevImpersonation(req, res, prismaClient) };
+  }
+
+  if (!req.session?.userRole) return { handled: false };
+  const profile = await findSessionProfile(prismaClient, req.session);
+  if (profile) syncSessionIdentity(req.session, profile);
+
+  if (path === IDENTITY_PATH) {
+    return {
+      handled: true,
+      result: await migrateAuthenticatedIdentity(req, res, { prismaClient, bcryptModule, env })
+    };
+  }
+
+  if (identityPending(req.session, profile)
+    && (path === '/' || path.startsWith('/admin') || path.startsWith('/operaciones'))) {
+    return { handled: true, result: res.redirect(303, IDENTITY_PATH) };
+  }
+
+  return { handled: false };
 }
 
 export function resolveAdminSessionConfig(env = process.env) {
@@ -176,7 +578,12 @@ export function createAdminSessionMiddleware({
       .catch((error) => {
         logger.warn('[ENV_DISPATCH_PROFILE_BRIDGE_FAILED]', error);
       })
-      .then(() => next());
+      .then(() => handleIdentitySessionRequest(req, res, { prismaClient, bcryptModule, env }))
+      .then((result) => {
+        if (result?.handled) return result.result;
+        return next();
+      })
+      .catch((error) => next(error));
   });
 
   return { middleware, store, config };
