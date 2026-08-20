@@ -160,6 +160,37 @@ test('el sender canónico conserva envío manual explícito con PDF adjunto e id
   }
 });
 
+test('el envío manual no se duplica cuando completionEmailSentAt ya existe', async () => {
+  const env = snapshotEnvironment();
+  const originalFetch = globalThis.fetch;
+  let providerCalls = 0;
+  let pdfBuilds = 0;
+  const prisma = prismaFor([serviceRequest({ completionEmailSentAt: new Date('2026-08-20T12:00:00.000Z') })]);
+
+  configureTestEmail();
+  globalThis.fetch = async () => {
+    providerCalls += 1;
+    throw new Error('El proveedor no debe invocarse en un envío ya persistido.');
+  };
+
+  try {
+    const result = await sendDispatchCompletionEmail(prisma, 'request-test-1', {
+      manual: true,
+      pdfBuilder: async () => {
+        pdfBuilds += 1;
+        throw new Error('El PDF no debe regenerarse en un envío ya persistido.');
+      }
+    });
+    assert.equal(result.reason, 'already_sent');
+    assert.equal(providerCalls, 0);
+    assert.equal(pdfBuilds, 0);
+    assert.equal(prisma.updates.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment(env);
+  }
+});
+
 test('un grupo pendiente tampoco se entrega mediante el sender manual', async () => {
   const env = snapshotEnvironment();
   const originalFetch = globalThis.fetch;
