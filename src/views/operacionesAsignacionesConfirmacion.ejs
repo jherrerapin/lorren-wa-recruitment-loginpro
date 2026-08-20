@@ -117,14 +117,14 @@ Hora : *{{horaInicio}} por favor.*
                 <span>Correo: <%= selectedServiceRequest.requestedByEmail || 'No registrado' %></span>
                 <span>WhatsApp: <%= selectedServiceRequest.requestedByPhone || 'No registrado' %></span>
               </div>
-              <p class="notify-hint">La información no se envía automáticamente. Revisa el PDF y elige el canal cuando estés listo. Si la solicitud tiene varios horarios agrupados, el backend solo permitirá la entrega cuando todos estén confirmados.</p>
+              <p class="notify-hint">El correo con el PDF se intenta enviar automáticamente al completarse la confirmación cuando hay un correo registrado. Desde aquí puedes descargar el PDF o reintentar el correo si hizo falta. Si hay varios horarios agrupados, el backend solo entrega el paquete cuando todos estén confirmados.</p>
               <div class="notify-actions">
                 <a class="btn" href="<%= deliveryPdfUrl %>">Descargar PDF</a>
                 <% if (selectedServiceRequest.requestedByEmail) { %>
                   <% if (selectedServiceRequest.completionEmailSentAt) { %><span class="status-pill complete">Correo enviado</span><% } else { %>
                     <form method="post" action="/admin/operaciones/asignaciones/entrega/email">
                       <input type="hidden" name="serviceRequestId" value="<%= selectedServiceRequest.id %>" />
-                      <button class="btn btn-primary" type="submit">Enviar correo con PDF</button>
+                      <button class="btn btn-primary" type="submit">Reintentar correo con PDF</button>
                     </form>
                   <% } %>
                 <% } %>
