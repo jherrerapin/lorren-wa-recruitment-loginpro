@@ -76,7 +76,38 @@ function configureTestEmail() {
   delete process.env.EMAIL_FROM;
 }
 
-test('correo de cierre se envía automáticamente con el PDF adjunto e idempotencia persistida', async () => {
+test('la confirmación automática no envía correo ni genera PDF sin acción manual explícita', async () => {
+  const env = snapshotEnvironment();
+  const originalFetch = globalThis.fetch;
+  const prisma = prismaFor([serviceRequest()]);
+  let providerCalls = 0;
+  let pdfBuilds = 0;
+
+  configureTestEmail();
+  globalThis.fetch = async () => {
+    providerCalls += 1;
+    throw new Error('El proveedor no debe invocarse en un disparo automático.');
+  };
+
+  try {
+    const result = await sendDispatchCompletionEmail(prisma, 'request-test-1', {
+      pdfBuilder: async () => {
+        pdfBuilds += 1;
+        throw new Error('El PDF no debe generarse en un disparo automático.');
+      }
+    });
+
+    assert.equal(result.reason, 'manual_send_required');
+    assert.equal(providerCalls, 0);
+    assert.equal(pdfBuilds, 0);
+    assert.equal(prisma.updates.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreEnvironment(env);
+  }
+});
+
+test('el sender canónico conserva envío manual explícito con PDF adjunto e idempotencia persistida', async () => {
   const env = snapshotEnvironment();
   const originalFetch = globalThis.fetch;
   const prisma = prismaFor([serviceRequest()]);
@@ -95,6 +126,7 @@ test('correo de cierre se envía automáticamente con el PDF adjunto e idempoten
 
   try {
     const result = await sendDispatchCompletionEmail(prisma, 'request-test-1', {
+      manual: true,
       managedBy: 'Coordinación TEST',
       pdfBuilder: async (_prisma, options) => {
         pdfBuilds += 1;
@@ -128,37 +160,7 @@ test('correo de cierre se envía automáticamente con el PDF adjunto e idempoten
   }
 });
 
-test('correo automático no se duplica cuando completionEmailSentAt ya existe', async () => {
-  const env = snapshotEnvironment();
-  const originalFetch = globalThis.fetch;
-  let providerCalls = 0;
-  let pdfBuilds = 0;
-  const prisma = prismaFor([serviceRequest({ completionEmailSentAt: new Date('2026-08-20T12:00:00.000Z') })]);
-
-  configureTestEmail();
-  globalThis.fetch = async () => {
-    providerCalls += 1;
-    throw new Error('El proveedor no debe invocarse en un envío ya persistido.');
-  };
-
-  try {
-    const result = await sendDispatchCompletionEmail(prisma, 'request-test-1', {
-      pdfBuilder: async () => {
-        pdfBuilds += 1;
-        throw new Error('El PDF no debe regenerarse en un envío ya persistido.');
-      }
-    });
-    assert.equal(result.reason, 'already_sent');
-    assert.equal(providerCalls, 0);
-    assert.equal(pdfBuilds, 0);
-    assert.equal(prisma.updates.length, 0);
-  } finally {
-    globalThis.fetch = originalFetch;
-    restoreEnvironment(env);
-  }
-});
-
-test('grupo con un horario pendiente no genera ni envía el PDF de cierre', async () => {
+test('un grupo pendiente tampoco se entrega mediante el sender manual', async () => {
   const env = snapshotEnvironment();
   const originalFetch = globalThis.fetch;
   let providerCalls = 0;
@@ -183,6 +185,7 @@ test('grupo con un horario pendiente no genera ni envía el PDF de cierre', asyn
 
   try {
     const result = await sendDispatchCompletionEmail(prisma, 'request-test-1', {
+      manual: true,
       pdfBuilder: async () => {
         pdfBuilds += 1;
         throw new Error('No debe generarse PDF mientras el grupo esté incompleto.');
@@ -197,7 +200,7 @@ test('grupo con un horario pendiente no genera ni envía el PDF de cierre', asyn
   }
 });
 
-test('fallo del PDF se registra como error de entrega sin propagar la excepción', async () => {
+test('fallo del PDF manual se registra como error de entrega sin propagar la excepción', async () => {
   const env = snapshotEnvironment();
   const originalFetch = globalThis.fetch;
   let providerCalls = 0;
@@ -211,6 +214,7 @@ test('fallo del PDF se registra como error de entrega sin propagar la excepción
 
   try {
     const result = await sendDispatchCompletionEmail(prisma, 'request-test-1', {
+      manual: true,
       pdfBuilder: async () => {
         throw new Error('TEST pdf generation failed');
       }
@@ -226,16 +230,23 @@ test('fallo del PDF se registra como error de entrega sin propagar la excepción
   }
 });
 
-test('los dos flujos de confirmación conservan el disparo automático y la UI ofrece PDF/WhatsApp solo tras completar', () => {
-  const opsRoute = fs.readFileSync(new URL('../src/routes/dispatchOpsExtras.js', import.meta.url), 'utf8');
-  const whatsappInbound = fs.readFileSync(new URL('../src/services/dispatchWhatsappWebhookService.js', import.meta.url), 'utf8');
+test('la UI de cierre es compacta y abre correo o WhatsApp al contacto persistido tras descargar PDF', () => {
+  const service = fs.readFileSync(new URL('../src/services/dispatchCompletionEmail.js', import.meta.url), 'utf8');
   const view = fs.readFileSync(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url), 'utf8');
 
-  assert.match(opsRoute, /statusResult\?\.status === 'ASSIGNMENT_COMPLETE'[\s\S]{0,300}notifyIfServiceRequestCompleted/);
-  assert.match(whatsappInbound, /statusResult\?\.status === 'ASSIGNMENT_COMPLETE'[\s\S]{0,300}sendDispatchCompletionEmail/);
-  assert.match(view, /if \(selectedRequestComplete\)[\s\S]{0,250}completionDeliveryBlock/);
-  assert.match(view, /navigator\.canShare/);
+  assert.match(service, /options\.manual !== true[\s\S]{0,120}manual_send_required/);
+  assert.match(view, /if \(selectedRequestComplete\)[\s\S]{0,350}completionDeliveryActions/);
+  assert.match(view, /class="completion-delivery"/);
+  assert.match(view, />PDF<\/a>/);
+  assert.match(view, /data-email="<%= selectedServiceRequest\.requestedByEmail %>"/);
+  assert.match(view, /openCompletionEmail/);
+  assert.match(view, /mailto:/);
+  assert.match(view, /data-phone="<%= selectedServiceRequest\.requestedByPhone %>"/);
+  assert.match(view, /openCompletionWhatsapp/);
   assert.match(view, /web\.whatsapp\.com\/send\?phone=/);
-  assert.match(view, /downloadPdfAndOpenWhatsapp/);
+  assert.match(view, /downloadCompletionPdf\(button\)/);
+  assert.doesNotMatch(view, /navigator\.share|navigator\.canShare/);
+  assert.doesNotMatch(view, /class="notify-block"/);
+  assert.doesNotMatch(view, /action="\/admin\/operaciones\/asignaciones\/entrega\/email"/);
   assert.doesNotMatch(view, /(?:window\.|globalThis\.)?(?:alert|confirm|prompt)\s*\(/);
 });
