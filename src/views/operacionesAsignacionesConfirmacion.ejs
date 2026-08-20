@@ -39,7 +39,7 @@
   <% const safeSameDaySet = typeof assignedWorkerIdsOnSelectedDate !== 'undefined' && assignedWorkerIdsOnSelectedDate ? assignedWorkerIdsOnSelectedDate : new Set(); %>
   <% const effectiveAvailableWorkers = typeof availableWorkers !== 'undefined' && availableWorkers ? availableWorkers : workers; %>
   <% const safeRestAssignments = typeof restAssignments !== 'undefined' && Array.isArray(restAssignments) ? restAssignments : []; %>
-  <% const safeRestDate = typeof restDate !== 'undefined' && safeRestDate ? safeRestDate : ''; %>
+  <% const safeRestDate = typeof restDate !== 'undefined' && restDate ? restDate : ''; %>
   <% const safeAssignmentDate = typeof selectedAssignmentDate !== 'undefined' && selectedAssignmentDate ? selectedAssignmentDate : ''; %>
   <% const safeRestReasons = typeof restReasons !== 'undefined' && Array.isArray(restReasons) ? restReasons : []; %>
   <% const requestLabel=(v)=>({PENDING_ASSIGNMENT:'Pendiente de asignación',ASSIGNMENT_PARTIAL:'Asignación parcial',PENDING_CONFIRMATION:'Pendiente de confirmación',ASSIGNMENT_COMPLETE:'Asignación completa',CANCELLED:'Cancelada'}[v]||v||'Pendiente'); %>
