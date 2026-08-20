@@ -98,6 +98,7 @@ test('correo de cierre se envía automáticamente con el PDF adjunto e idempoten
       managedBy: 'Coordinación TEST',
       pdfBuilder: async (_prisma, options) => {
         pdfBuilds += 1;
+        assert.equal(options.fecha, '2026-08-21');
         assert.deepEqual(options.requestIds, ['request-test-1']);
         assert.equal(options.includePending, false);
         return { selectedDate: '2026-08-21', buffer: Buffer.from('%PDF-TEST-CONTENT') };
