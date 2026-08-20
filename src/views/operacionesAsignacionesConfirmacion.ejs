@@ -229,8 +229,7 @@ Hora : *{{horaInicio}} por favor.*
         const documentType = String(card.dataset.workerDocumentType || '').trim();
         const documentNumber = String(card.dataset.workerDocumentNumber || '').trim();
         const documentLabel = [documentType, documentNumber].filter(Boolean).join(' ');
-        const phone = String(card.dataset.workerPhone || '').trim();
-        return `${index + 1}. ${name}${documentLabel ? ` | Documento: ${documentLabel}` : ''}${phone ? ` | Tel: ${phone}` : ''}`;
+        return `${index + 1}. ${name}${documentLabel ? ` | Documento: ${documentLabel}` : ''}`;
       });
       return [
         requesterName ? `Hola ${requesterName},` : 'Hola,',
