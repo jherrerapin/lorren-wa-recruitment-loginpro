@@ -272,75 +272,94 @@ function completionPdfFilename(selectedDate) {
   return buildProgrammingFilename(selectedDate, 'auxiliares-confirmados');
 }
 
-export async function getDispatchCompletionPackage(prisma, serviceRequestId, options = {}) {
-  const requestGroup = await loadRequestGroup(prisma, serviceRequestId);
-  if (!requestGroup.length) return { ready: false, reason: 'service_request_not_found' };
-  if (!groupIsComplete(requestGroup)) return { ready: false, reason: 'service_request_not_complete' };
-
+function completionGroupState(requestGroup) {
   const sortedRequests = sortRequestsByTime(requestGroup);
-  const firstRequest = sortedRequests[0];
+  return {
+    sortedRequests,
+    firstRequest: sortedRequests[0] || {},
+    requestIds: sortedRequests.map((request) => request.id),
+    recipientEmail: getGroupRecipient(requestGroup),
+    recipientPhone: getGroupPhone(requestGroup),
+    recipientName: getGroupRequesterName(requestGroup),
+    emailAlreadySent: requestGroup.every((request) => request.completionEmailSentAt)
+  };
+}
+
+async function buildCompletionPackageFromGroup(prisma, requestGroup, options = {}) {
+  const state = completionGroupState(requestGroup);
   const managedBy = normalizeString(options.managedBy || options.managedByUsername);
-  const requesterName = getGroupRequesterName(requestGroup);
-  const requestIds = sortedRequests.map((request) => request.id);
-  const pdf = await buildProgrammingPdfBuffer(prisma, {
-    fecha: firstRequest.serviceDate,
-    requestIds,
+  const pdfBuilder = typeof options.pdfBuilder === 'function' ? options.pdfBuilder : buildProgrammingPdfBuffer;
+  const pdf = await pdfBuilder(prisma, {
+    fecha: state.firstRequest.serviceDate,
+    requestIds: state.requestIds,
     managedBy: managedBy || 'LoginPro Operaciones',
     includePending: false
   });
 
   return {
     ready: true,
-    requestIds,
-    recipientEmail: getGroupRecipient(requestGroup),
-    recipientPhone: getGroupPhone(requestGroup),
-    recipientName: requesterName,
-    emailAlreadySent: requestGroup.every((request) => request.completionEmailSentAt),
-    subject: `Solicitud confirmada - ${firstRequest.clientName} - ${firstRequest.operationPointName || firstRequest.cityName || ''}`.trim(),
+    requestIds: state.requestIds,
+    recipientEmail: state.recipientEmail,
+    recipientPhone: state.recipientPhone,
+    recipientName: state.recipientName,
+    emailAlreadySent: state.emailAlreadySent,
+    subject: `Solicitud confirmada - ${state.firstRequest.clientName} - ${state.firstRequest.operationPointName || state.firstRequest.cityName || ''}`.trim(),
     html: buildHtmlForRequests(requestGroup, managedBy),
     text: buildTextForRequests(requestGroup, managedBy),
-    whatsappText: buildWhatsappText(requestGroup, requesterName),
+    whatsappText: buildWhatsappText(requestGroup, state.recipientName),
     pdfBuffer: pdf.buffer,
     pdfFilename: completionPdfFilename(pdf.selectedDate)
   };
 }
 
+async function recordCompletionDeliveryError(prisma, requestIds, message) {
+  if (!requestIds.length) return;
+  await prisma.dispatchServiceRequest.updateMany({
+    where: { id: { in: requestIds } },
+    data: { completionEmailLastError: message }
+  });
+}
+
+export async function getDispatchCompletionPackage(prisma, serviceRequestId, options = {}) {
+  const requestGroup = await loadRequestGroup(prisma, serviceRequestId);
+  if (!requestGroup.length) return { ready: false, reason: 'service_request_not_found' };
+  if (!groupIsComplete(requestGroup)) return { ready: false, reason: 'service_request_not_complete' };
+  return buildCompletionPackageFromGroup(prisma, requestGroup, options);
+}
+
 /**
- * Envío manual de cierre. Las llamadas automáticas históricas permanecen inocuas
- * porque deben optar explícitamente por `manual: true`.
+ * Envía automáticamente el correo de cierre cuando el grupo queda completamente
+ * confirmado. Los reintentos manuales usan la misma autoridad e idempotencia.
  *
  * @param {object} prisma
  * @param {string} serviceRequestId
- * @param {{ manual?: boolean, replyTo?: string|null, managedBy?: string|null, managedByUsername?: string|null }} [options]
+ * @param {{ replyTo?: string|null, managedBy?: string|null, managedByUsername?: string|null, pdfBuilder?: Function }} [options]
  */
 export async function sendDispatchCompletionEmail(prisma, serviceRequestId, options = {}) {
-  if (options.manual !== true) return { skipped: true, reason: 'manual_send_required' };
+  const requestGroup = await loadRequestGroup(prisma, serviceRequestId);
+  if (!requestGroup.length) return { skipped: true, reason: 'service_request_not_found' };
+  if (!groupIsComplete(requestGroup)) return { skipped: true, reason: 'service_request_not_complete' };
 
-  const completionPackage = await getDispatchCompletionPackage(prisma, serviceRequestId, options);
-  if (!completionPackage.ready) return { skipped: true, reason: completionPackage.reason };
-  if (completionPackage.emailAlreadySent) return { skipped: true, reason: 'already_sent' };
-
-  const recipient = completionPackage.recipientEmail;
-  if (!recipient) return { skipped: true, reason: 'missing_requested_by_email' };
+  const state = completionGroupState(requestGroup);
+  if (state.emailAlreadySent) return { skipped: true, reason: 'already_sent' };
+  if (!state.recipientEmail) return { skipped: true, reason: 'missing_requested_by_email' };
 
   const config = getEmailConfig();
   if (config.provider !== EMAIL_PROVIDER_RESEND) return { skipped: true, reason: 'unsupported_provider' };
   if (!config.resendApiKey || !config.from) {
     const errorMessage = 'Faltan RESEND_API_KEY y/o DISPATCH_EMAIL_FROM para enviar correo de cierre.';
-    await prisma.dispatchServiceRequest.updateMany({
-      where: { id: { in: completionPackage.requestIds } },
-      data: { completionEmailLastError: errorMessage }
-    });
+    await recordCompletionDeliveryError(prisma, state.requestIds, errorMessage);
     return { skipped: true, reason: 'missing_email_config' };
   }
 
   const replyTo = normalizeString(options.replyTo) || config.defaultReplyTo;
 
   try {
+    const completionPackage = await buildCompletionPackageFromGroup(prisma, requestGroup, options);
     const providerId = await sendWithResend({
       apiKey: config.resendApiKey,
       from: config.from,
-      to: recipient,
+      to: state.recipientEmail,
       subject: completionPackage.subject,
       html: completionPackage.html,
       text: completionPackage.text,
@@ -352,10 +371,10 @@ export async function sendDispatchCompletionEmail(prisma, serviceRequestId, opti
     });
 
     await prisma.dispatchServiceRequest.updateMany({
-      where: { id: { in: completionPackage.requestIds } },
+      where: { id: { in: state.requestIds } },
       data: {
         completionEmailSentAt: new Date(),
-        completionEmailTo: recipient,
+        completionEmailTo: state.recipientEmail,
         completionEmailProviderId: providerId,
         completionEmailLastError: null
       }
@@ -363,16 +382,13 @@ export async function sendDispatchCompletionEmail(prisma, serviceRequestId, opti
 
     return {
       sent: true,
-      to: recipient,
+      to: state.recipientEmail,
       providerId,
       pdfFilename: completionPackage.pdfFilename
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error desconocido enviando correo.';
-    await prisma.dispatchServiceRequest.updateMany({
-      where: { id: { in: completionPackage.requestIds } },
-      data: { completionEmailLastError: message }
-    });
+    await recordCompletionDeliveryError(prisma, state.requestIds, message);
     return { sent: false, error: message };
   }
 }
