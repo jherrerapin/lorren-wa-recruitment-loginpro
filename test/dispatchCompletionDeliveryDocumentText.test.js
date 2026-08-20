@@ -7,16 +7,23 @@ const view = fs.readFileSync(
   'utf8'
 );
 
-test('correo y WhatsApp incluyen nombre, documento y teléfono de auxiliares confirmados en el texto al solicitante', () => {
+test('correo y WhatsApp incluyen nombre y documento, pero no teléfono, en el texto al solicitante', () => {
   assert.match(view, /data-worker-document-type="<%= assignment\.worker\.documentType \|\| '' %>"/);
   assert.match(view, /data-worker-document-number="<%= assignment\.worker\.documentNumber \|\| '' %>"/);
-  assert.ok(view.includes("card.dataset.workerDocumentType"));
-  assert.ok(view.includes("card.dataset.workerDocumentNumber"));
-  assert.ok(view.includes("[documentType, documentNumber].filter(Boolean).join(' ')"));
-  assert.ok(view.includes("documentLabel ? ` | Documento: ${documentLabel}` : ''"));
-  assert.ok(view.includes("phone ? ` | Tel: ${phone}` : ''"));
 
-  assert.ok(view.includes("return /Estado:\\s*Confirmado/i.test"));
+  const deliveryTextMatch = view.match(
+    /function completionDeliveryText\(button\) \{([\s\S]*?)\n    \}\n\n    function downloadCompletionPdf/
+  );
+  assert.ok(deliveryTextMatch, 'Debe existir el compositor único de entrega al solicitante.');
+  const deliveryTextSource = deliveryTextMatch[1];
+
+  assert.ok(deliveryTextSource.includes("card.dataset.workerDocumentType"));
+  assert.ok(deliveryTextSource.includes("card.dataset.workerDocumentNumber"));
+  assert.ok(deliveryTextSource.includes("[documentType, documentNumber].filter(Boolean).join(' ')"));
+  assert.ok(deliveryTextSource.includes("documentLabel ? ` | Documento: ${documentLabel}` : ''"));
+  assert.doesNotMatch(deliveryTextSource, /workerPhone|\| Tel:/);
+
+  assert.ok(deliveryTextSource.includes("return /Estado:\\s*Confirmado/i.test"));
   assert.match(view, /const body = completionDeliveryText\(button\)/);
   assert.match(view, /const text = completionDeliveryText\(button\)/);
 });
