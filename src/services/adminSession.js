@@ -17,6 +17,9 @@ const IDENTITY_PATH = '/account/identity';
 const IMPERSONATE_PATH = /^\/admin\/users\/([^/]+)\/impersonate$/;
 const IMPERSONATION_STOP_PATH = '/admin/users/impersonation/stop';
 const MIGRATED_USERNAME_SENTINEL = '__login_requires_email__';
+const INITIAL_PASSWORD_POLICY_EFFECTIVE_AT = new Date('2026-08-20T23:11:06.000Z');
+const INITIAL_PASSWORD_MIN_LENGTH = 12;
+const BCRYPT_SAFE_MAX_BYTES = 72;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -99,6 +102,8 @@ function identitySelect() {
     displayName: true,
     email: true,
     identityMigratedAt: true,
+    lastPasswordResetAt: true,
+    createdAt: true,
     role: true,
     accessScope: true,
     scopeCity: true,
@@ -143,6 +148,26 @@ function identityPending(sessionData = {}, profile = null) {
   if (sessionData.devImpersonation) return false;
   if (profile) return !profile.identityMigratedAt;
   return sessionData.userSource === 'env' && sessionData.userRole === 'admin';
+}
+
+function dateTimeValue(value) {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  const time = parsed.getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function initialPasswordChangePending(sessionData = {}, profile = null) {
+  if (!profile || !sessionData.userRole || sessionData.userRole === 'dev') return false;
+  if (sessionData.devImpersonation || sessionData.userSource !== 'db') return false;
+  if (profile.role === 'DEV' || !String(profile.username || '').startsWith('user-')) return false;
+
+  const createdAt = dateTimeValue(profile.createdAt);
+  const identityMigratedAt = dateTimeValue(profile.identityMigratedAt);
+  const lastPasswordResetAt = dateTimeValue(profile.lastPasswordResetAt);
+  if (createdAt === null || identityMigratedAt === null || lastPasswordResetAt === null) return false;
+  if (createdAt < INITIAL_PASSWORD_POLICY_EFFECTIVE_AT.getTime()) return false;
+  return identityMigratedAt === lastPasswordResetAt;
 }
 
 function preserveCredentialPresentation(req, res) {
@@ -223,7 +248,8 @@ function renderIdentityMigration(res, values = {}) {
   return res.status(values.status || 200).render('identityMigration', {
     error: values.error || null,
     displayName: values.displayName || '',
-    email: values.email || ''
+    email: values.email || '',
+    forcePasswordChange: values.forcePasswordChange === true
   });
 }
 
@@ -236,9 +262,14 @@ async function migrateAuthenticatedIdentity(req, res, {
   if (!sessionData.userRole) return res.redirect('/login');
   if (sessionData.userRole === 'dev') return res.redirect('/admin');
 
+  let profile = await findSessionProfile(prismaClient, sessionData);
+  const forcePasswordChange = initialPasswordChangePending(sessionData, profile);
+
   if (req.method === 'GET') {
     return renderIdentityMigration(res, {
-      displayName: sessionData.displayName || ''
+      displayName: profile?.displayName || sessionData.displayName || '',
+      email: profile?.email || sessionData.userEmail || '',
+      forcePasswordChange
     });
   }
 
@@ -246,18 +277,40 @@ async function migrateAuthenticatedIdentity(req, res, {
   const email = normalizeAppUserEmail(req.body?.email);
   const confirmEmail = normalizeAppUserEmail(req.body?.confirmEmail);
   const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  const confirmNewPassword = typeof req.body?.confirmNewPassword === 'string' ? req.body.confirmNewPassword : '';
+  const renderError = (status, error) => renderIdentityMigration(res, {
+    status,
+    error,
+    displayName,
+    email: email || '',
+    forcePasswordChange
+  });
 
   if (!displayName || displayName.length < 3) {
-    return renderIdentityMigration(res, { status: 400, error: 'Ingresa tu nombre completo.', displayName, email });
+    return renderError(400, 'Ingresa tu nombre completo.');
   }
   if (!email || !confirmEmail || email !== confirmEmail) {
-    return renderIdentityMigration(res, { status: 400, error: 'Ingresa el mismo correo electrónico en ambos campos.', displayName, email: email || '' });
+    return renderError(400, 'Ingresa el mismo correo electrónico en ambos campos.');
   }
   if (!currentPassword) {
-    return renderIdentityMigration(res, { status: 400, error: 'Confirma tu contraseña actual para actualizar el acceso.', displayName, email });
+    return renderError(400, 'Confirma tu contraseña actual para actualizar el acceso.');
+  }
+  if (forcePasswordChange) {
+    if (newPassword.length < INITIAL_PASSWORD_MIN_LENGTH) {
+      return renderError(400, `La nueva contraseña debe tener al menos ${INITIAL_PASSWORD_MIN_LENGTH} caracteres.`);
+    }
+    if (Buffer.byteLength(newPassword, 'utf8') > BCRYPT_SAFE_MAX_BYTES) {
+      return renderError(400, 'La nueva contraseña es demasiado larga. Usa máximo 72 bytes.');
+    }
+    if (newPassword !== confirmNewPassword) {
+      return renderError(400, 'La nueva contraseña y su confirmación no coinciden.');
+    }
+    if (newPassword === currentPassword) {
+      return renderError(400, 'La nueva contraseña debe ser diferente de la contraseña inicial.');
+    }
   }
 
-  let profile = await findSessionProfile(prismaClient, sessionData);
   let passwordMatches = false;
   if (sessionData.userSource === 'env') {
     const configuredPassword = sessionData.userRole === 'admin' ? env.ADMIN_PASS : null;
@@ -266,7 +319,7 @@ async function migrateAuthenticatedIdentity(req, res, {
     passwordMatches = await bcryptModule.compare(currentPassword, profile.passwordHash);
   }
   if (!passwordMatches) {
-    return renderIdentityMigration(res, { status: 401, error: 'La contraseña actual no es correcta.', displayName, email });
+    return renderError(401, 'La contraseña actual no es correcta.');
   }
 
   const emailOwner = await prismaClient.appUser.findUnique({
@@ -274,7 +327,7 @@ async function migrateAuthenticatedIdentity(req, res, {
     select: { id: true }
   });
   if (emailOwner && emailOwner.id !== profile?.id) {
-    return renderIdentityMigration(res, { status: 409, error: 'Ese correo ya está asociado a otro usuario.', displayName, email });
+    return renderError(409, 'Ese correo ya está asociado a otro usuario.');
   }
 
   const migratedAt = new Date();
@@ -282,12 +335,17 @@ async function migrateAuthenticatedIdentity(req, res, {
     const data = {
       displayName,
       email,
-      recoveryEmail: email,
-      identityMigratedAt: migratedAt
+      recoveryEmail: email
     };
-    if (sessionData.userSource === 'env') {
-      data.passwordHash = await bcryptModule.hash(currentPassword, 10);
+    if (forcePasswordChange) {
+      data.passwordHash = await bcryptModule.hash(newPassword, 10);
       data.lastPasswordResetAt = migratedAt;
+    } else {
+      data.identityMigratedAt = migratedAt;
+      if (sessionData.userSource === 'env') {
+        data.passwordHash = await bcryptModule.hash(currentPassword, 10);
+        data.lastPasswordResetAt = migratedAt;
+      }
     }
     profile = await prismaClient.appUser.update({
       where: { id: profile.id },
@@ -296,7 +354,7 @@ async function migrateAuthenticatedIdentity(req, res, {
     });
   } else if (sessionData.userSource === 'env' && sessionData.userRole === 'admin') {
     const username = normalizeString(sessionData.username);
-    if (!username) return renderIdentityMigration(res, { status: 400, error: 'No fue posible vincular esta sesión a una cuenta.', displayName, email });
+    if (!username) return renderError(400, 'No fue posible vincular esta sesión a una cuenta.');
     const passwordHash = await bcryptModule.hash(currentPassword, 10);
     try {
       profile = await prismaClient.appUser.create({
@@ -332,7 +390,7 @@ async function migrateAuthenticatedIdentity(req, res, {
     }
   }
 
-  if (!profile) return renderIdentityMigration(res, { status: 500, error: 'No fue posible actualizar tu acceso.', displayName, email });
+  if (!profile) return renderError(500, 'No fue posible actualizar tu acceso.');
   syncSessionIdentity(sessionData, profile);
   return res.redirect(303, '/admin');
 }
@@ -470,7 +528,7 @@ async function handleIdentitySessionRequest(req, res, {
     };
   }
 
-  if (identityPending(req.session, profile)
+  if ((identityPending(req.session, profile) || initialPasswordChangePending(req.session, profile))
     && (path === '/' || path.startsWith('/admin') || path.startsWith('/operaciones'))) {
     return { handled: true, result: res.redirect(303, IDENTITY_PATH) };
   }
