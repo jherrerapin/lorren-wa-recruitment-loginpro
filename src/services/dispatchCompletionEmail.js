@@ -1,4 +1,14 @@
-import { buildGroupedWhereClauseForRequest, countAssignments, extractRequestGroupCode, resolveRequestServiceName } from './dispatchRequestGrouping.js';
+import { dispatchServiceDateKey } from './dispatchDate.js';
+import {
+  buildGroupedWhereClauseForRequest,
+  countAssignments,
+  extractRequestGroupCode,
+  resolveRequestServiceName
+} from './dispatchRequestGrouping.js';
+import {
+  buildProgrammingFilename,
+  buildProgrammingPdfBuffer
+} from './dispatchProgrammingPdfService.js';
 
 const EMAIL_PROVIDER_RESEND = 'resend';
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
@@ -29,7 +39,9 @@ function formatDate(value) {
 }
 
 function formatShift(request) {
-  return request.startTime || '-';
+  const start = normalizeString(request.startTime) || '-';
+  const end = normalizeString(request.endTime);
+  return end ? `${start} - ${end}` : start;
 }
 
 function sortRequestsByTime(requests) {
@@ -53,12 +65,24 @@ function groupIsComplete(requests) {
   return requests.length > 0 && requests.every(requestIsComplete);
 }
 
-function getGroupRecipient(requests) {
-  const firstWithEmail = requests.find((request) => normalizeString(request.requestedByEmail));
-  return normalizeString(firstWithEmail?.requestedByEmail);
+function firstPersistedValue(requests, fieldName) {
+  const row = requests.find((request) => normalizeString(request[fieldName]));
+  return normalizeString(row?.[fieldName]);
 }
 
-function buildTextForRequests(requests, managedByUsername) {
+function getGroupRecipient(requests) {
+  return firstPersistedValue(requests, 'requestedByEmail');
+}
+
+function getGroupPhone(requests) {
+  return firstPersistedValue(requests, 'requestedByPhone');
+}
+
+function getGroupRequesterName(requests) {
+  return firstPersistedValue(requests, 'requestedByName');
+}
+
+function buildTextForRequests(requests, managedBy) {
   const sortedRequests = sortRequestsByTime(requests);
   const primary = sortedRequests[0] || {};
   const serviceName = resolveRequestServiceName(primary) || '-';
@@ -93,11 +117,11 @@ function buildTextForRequests(requests, managedByUsername) {
     '',
     primary.notes ? `Notas: ${primary.notes}` : null,
     '',
-    managedByUsername ? `Gestionado por: ${managedByUsername}` : null
+    managedBy ? `Gestionado por: ${managedBy}` : null
   ].filter(Boolean).join('\n');
 }
 
-function buildHtmlForRequests(requests, managedByUsername) {
+function buildHtmlForRequests(requests, managedBy) {
   const sortedRequests = sortRequestsByTime(requests);
   const primary = sortedRequests[0] || {};
   const serviceName = resolveRequestServiceName(primary) || '-';
@@ -129,8 +153,8 @@ function buildHtmlForRequests(requests, managedByUsername) {
       </table>`;
   }).join('');
 
-  const managedByRow = managedByUsername
-    ? `<tr><td style="padding:6px 0;color:#64748b;">Gestionado por</td><td style="padding:6px 0;">${escapeHtml(managedByUsername)}</td></tr>`
+  const managedByRow = managedBy
+    ? `<tr><td style="padding:6px 0;color:#64748b;">Gestionado por</td><td style="padding:6px 0;">${escapeHtml(managedBy)}</td></tr>`
     : '';
 
   return `
@@ -140,6 +164,7 @@ function buildHtmlForRequests(requests, managedByUsername) {
       <p style="margin:6px 0 0;color:#cbd5e1;">La asignación fue completada y confirmada para todos los horarios solicitados.</p>
     </div>
     <div style="border:1px solid #e5e7eb;border-top:0;padding:22px 24px;border-radius:0 0 14px 14px;">
+      <p style="margin:0 0 18px;color:#334155;">Adjuntamos el PDF con el detalle de los auxiliares confirmados para esta solicitud.</p>
       <h2 style="font-size:16px;margin:0 0 12px;color:#1e2d3d;">Información de la solicitud</h2>
       <table style="border-collapse:collapse;width:100%;margin-bottom:22px;">
         <tbody>
@@ -162,6 +187,20 @@ function buildHtmlForRequests(requests, managedByUsername) {
   </div>`;
 }
 
+function buildWhatsappText(requests, requesterName) {
+  const sortedRequests = sortRequestsByTime(requests);
+  const primary = sortedRequests[0] || {};
+  const greeting = requesterName ? `Hola ${requesterName},` : 'Hola,';
+  return [
+    greeting,
+    '',
+    `Te compartimos el PDF con los auxiliares confirmados para ${primary.clientName || 'la solicitud'}${primary.operationPointName ? `, ${primary.operationPointName}` : ''}.`,
+    `Fecha: ${formatDate(primary.serviceDate)}.`,
+    '',
+    'Quedamos atentos.'
+  ].join('\n');
+}
+
 function getEmailConfig() {
   return {
     provider: normalizeString(process.env.EMAIL_PROVIDER) || EMAIL_PROVIDER_RESEND,
@@ -171,7 +210,7 @@ function getEmailConfig() {
   };
 }
 
-async function sendWithResend({ apiKey, from, to, subject, html, text, replyTo }) {
+async function sendWithResend({ apiKey, from, to, subject, html, text, replyTo, attachment }) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -184,6 +223,10 @@ async function sendWithResend({ apiKey, from, to, subject, html, text, replyTo }
       subject,
       html,
       text,
+      attachments: [{
+        filename: attachment.filename,
+        content: attachment.buffer.toString('base64')
+      }],
       ...(replyTo ? { reply_to: replyTo } : {})
     })
   });
@@ -201,6 +244,7 @@ async function loadRequestGroup(prisma, serviceRequestId) {
   const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
     where: { id: serviceRequestId },
     include: {
+      service: true,
       assignments: {
         include: { worker: true },
         orderBy: { createdAt: 'asc' }
@@ -215,6 +259,7 @@ async function loadRequestGroup(prisma, serviceRequestId) {
   return prisma.dispatchServiceRequest.findMany({
     where: buildGroupedWhereClauseForRequest(serviceRequest),
     include: {
+      service: true,
       assignments: {
         include: { worker: true },
         orderBy: { createdAt: 'asc' }
@@ -224,66 +269,127 @@ async function loadRequestGroup(prisma, serviceRequestId) {
   });
 }
 
+function completionPdfFilename(selectedDate) {
+  return buildProgrammingFilename(selectedDate, 'auxiliares-confirmados');
+}
+
+function completionGroupState(requestGroup) {
+  const sortedRequests = sortRequestsByTime(requestGroup);
+  return {
+    sortedRequests,
+    firstRequest: sortedRequests[0] || {},
+    requestIds: sortedRequests.map((request) => request.id),
+    recipientEmail: getGroupRecipient(requestGroup),
+    recipientPhone: getGroupPhone(requestGroup),
+    recipientName: getGroupRequesterName(requestGroup),
+    emailAlreadySent: requestGroup.every((request) => request.completionEmailSentAt)
+  };
+}
+
+async function buildCompletionPackageFromGroup(prisma, requestGroup, options = {}) {
+  const state = completionGroupState(requestGroup);
+  const managedBy = normalizeString(options.managedBy || options.managedByUsername);
+  const pdfBuilder = typeof options.pdfBuilder === 'function' ? options.pdfBuilder : buildProgrammingPdfBuffer;
+  const pdf = await pdfBuilder(prisma, {
+    fecha: dispatchServiceDateKey(state.firstRequest.serviceDate),
+    requestIds: state.requestIds,
+    managedBy: managedBy || 'LoginPro Operaciones',
+    includePending: false
+  });
+
+  return {
+    ready: true,
+    requestIds: state.requestIds,
+    recipientEmail: state.recipientEmail,
+    recipientPhone: state.recipientPhone,
+    recipientName: state.recipientName,
+    emailAlreadySent: state.emailAlreadySent,
+    subject: `Solicitud confirmada - ${state.firstRequest.clientName} - ${state.firstRequest.operationPointName || state.firstRequest.cityName || ''}`.trim(),
+    html: buildHtmlForRequests(requestGroup, managedBy),
+    text: buildTextForRequests(requestGroup, managedBy),
+    whatsappText: buildWhatsappText(requestGroup, state.recipientName),
+    pdfBuffer: pdf.buffer,
+    pdfFilename: completionPdfFilename(pdf.selectedDate)
+  };
+}
+
+async function recordCompletionDeliveryError(prisma, requestIds, message) {
+  if (!requestIds.length) return;
+  await prisma.dispatchServiceRequest.updateMany({
+    where: { id: { in: requestIds } },
+    data: { completionEmailLastError: message }
+  });
+}
+
+export async function getDispatchCompletionPackage(prisma, serviceRequestId, options = {}) {
+  const requestGroup = await loadRequestGroup(prisma, serviceRequestId);
+  if (!requestGroup.length) return { ready: false, reason: 'service_request_not_found' };
+  if (!groupIsComplete(requestGroup)) return { ready: false, reason: 'service_request_not_complete' };
+  return buildCompletionPackageFromGroup(prisma, requestGroup, options);
+}
+
 /**
+ * Envía automáticamente el correo de cierre cuando el grupo queda completamente
+ * confirmado. Los reintentos manuales usan la misma autoridad e idempotencia.
+ *
  * @param {object} prisma
  * @param {string} serviceRequestId
- * @param {{ replyTo?: string|null, managedByUsername?: string|null }} [options]
+ * @param {{ replyTo?: string|null, managedBy?: string|null, managedByUsername?: string|null, pdfBuilder?: Function }} [options]
  */
 export async function sendDispatchCompletionEmail(prisma, serviceRequestId, options = {}) {
   const requestGroup = await loadRequestGroup(prisma, serviceRequestId);
   if (!requestGroup.length) return { skipped: true, reason: 'service_request_not_found' };
   if (!groupIsComplete(requestGroup)) return { skipped: true, reason: 'service_request_not_complete' };
-  if (requestGroup.every((request) => request.completionEmailSentAt)) return { skipped: true, reason: 'already_sent' };
 
-  const recipient = getGroupRecipient(requestGroup);
-  if (!recipient) return { skipped: true, reason: 'missing_requested_by_email' };
+  const state = completionGroupState(requestGroup);
+  if (state.emailAlreadySent) return { skipped: true, reason: 'already_sent' };
+  if (!state.recipientEmail) return { skipped: true, reason: 'missing_requested_by_email' };
 
   const config = getEmailConfig();
-  const firstRequest = sortRequestsByTime(requestGroup)[0];
   if (config.provider !== EMAIL_PROVIDER_RESEND) return { skipped: true, reason: 'unsupported_provider' };
   if (!config.resendApiKey || !config.from) {
     const errorMessage = 'Faltan RESEND_API_KEY y/o DISPATCH_EMAIL_FROM para enviar correo de cierre.';
-    await prisma.dispatchServiceRequest.updateMany({
-      where: { id: { in: requestGroup.map((request) => request.id) } },
-      data: { completionEmailLastError: errorMessage }
-    });
+    await recordCompletionDeliveryError(prisma, state.requestIds, errorMessage);
     return { skipped: true, reason: 'missing_email_config' };
   }
 
   const replyTo = normalizeString(options.replyTo) || config.defaultReplyTo;
-  const managedByUsername = normalizeString(options.managedByUsername);
-  const subject = `Solicitud confirmada - ${firstRequest.clientName} - ${firstRequest.operationPointName || firstRequest.cityName || ''}`.trim();
-  const html = buildHtmlForRequests(requestGroup, managedByUsername);
-  const text = buildTextForRequests(requestGroup, managedByUsername);
 
   try {
+    const completionPackage = await buildCompletionPackageFromGroup(prisma, requestGroup, options);
     const providerId = await sendWithResend({
       apiKey: config.resendApiKey,
       from: config.from,
-      to: recipient,
-      subject,
-      html,
-      text,
-      replyTo
+      to: state.recipientEmail,
+      subject: completionPackage.subject,
+      html: completionPackage.html,
+      text: completionPackage.text,
+      replyTo,
+      attachment: {
+        filename: completionPackage.pdfFilename,
+        buffer: completionPackage.pdfBuffer
+      }
     });
 
     await prisma.dispatchServiceRequest.updateMany({
-      where: { id: { in: requestGroup.map((request) => request.id) } },
+      where: { id: { in: state.requestIds } },
       data: {
         completionEmailSentAt: new Date(),
-        completionEmailTo: recipient,
+        completionEmailTo: state.recipientEmail,
         completionEmailProviderId: providerId,
         completionEmailLastError: null
       }
     });
 
-    return { sent: true, to: recipient, providerId };
+    return {
+      sent: true,
+      to: state.recipientEmail,
+      providerId,
+      pdfFilename: completionPackage.pdfFilename
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Error desconocido enviando correo.';
-    await prisma.dispatchServiceRequest.updateMany({
-      where: { id: { in: requestGroup.map((request) => request.id) } },
-      data: { completionEmailLastError: message }
-    });
+    await recordCompletionDeliveryError(prisma, state.requestIds, message);
     return { sent: false, error: message };
   }
 }
