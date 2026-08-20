@@ -261,7 +261,7 @@ test('fallo del PDF manual se registra como error de entrega sin propagar la exc
   }
 });
 
-test('la UI de cierre es compacta y abre correo o WhatsApp al contacto persistido tras descargar PDF', () => {
+test('la UI de cierre es compacta y correo/WhatsApp comparten el detalle textual además del PDF', () => {
   const service = fs.readFileSync(new URL('../src/services/dispatchCompletionEmail.js', import.meta.url), 'utf8');
   const view = fs.readFileSync(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url), 'utf8');
 
@@ -276,6 +276,25 @@ test('la UI de cierre es compacta y abre correo o WhatsApp al contacto persistid
   assert.match(view, /openCompletionWhatsapp/);
   assert.match(view, /web\.whatsapp\.com\/send\?phone=/);
   assert.match(view, /downloadCompletionPdf\(button\)/);
+
+  assert.ok(view.includes("document.querySelectorAll('.assigned-card')"));
+  assert.ok(view.includes("return /Estado:\\s*Confirmado/i.test"));
+  assert.ok(view.includes("detailCard?.dataset.service"));
+  assert.ok(view.includes("detailCard?.dataset.city"));
+  assert.ok(view.includes("detailCard?.dataset.address"));
+  assert.ok(view.includes("card.dataset.workerName"));
+  assert.ok(view.includes("card.dataset.workerPhone"));
+  assert.ok(view.includes("client ? `Cliente: ${client}` : ''"));
+  assert.ok(view.includes("operation ? `Operación: ${operation}` : ''"));
+  assert.ok(view.includes("service ? `Servicio: ${service}` : ''"));
+  assert.ok(view.includes("city ? `Ciudad: ${city}` : ''"));
+  assert.ok(view.includes("address ? `Dirección: ${address}` : ''"));
+  assert.ok(view.includes("schedule ? `Horario: ${schedule}` : ''"));
+  assert.ok(view.includes("`Auxiliares confirmados: ${confirmedCards.length}`"));
+  assert.ok(view.includes("'El PDF se descarga como respaldo con el mismo detalle.'"));
+  assert.match(view, /const body = completionDeliveryText\(button\)/);
+  assert.match(view, /const text = completionDeliveryText\(button\)/);
+
   assert.doesNotMatch(view, /navigator\.share|navigator\.canShare/);
   assert.doesNotMatch(view, /class="notify-block"/);
   assert.doesNotMatch(view, /action="\/admin\/operaciones\/asignaciones\/entrega\/email"/);
