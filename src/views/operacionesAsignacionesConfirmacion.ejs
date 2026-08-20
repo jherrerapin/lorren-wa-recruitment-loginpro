@@ -208,15 +208,45 @@ Hora : *{{horaInicio}} por favor.*
 
     function completionDeliveryText(button) {
       const requesterName = String(button.dataset.requesterName || '').trim();
-      const client = String(button.dataset.client || '').trim();
-      const operation = String(button.dataset.operation || '').trim();
-      const date = String(button.dataset.date || '').trim();
+      const confirmedCards = Array.from(document.querySelectorAll('.assigned-card')).filter((card) => {
+        const statusLine = card.querySelector('.assignment-status-line');
+        return /Estado:\s*Confirmado/i.test(String(statusLine?.textContent || ''));
+      });
+      const detailCard = confirmedCards[0] || null;
+      const client = String(button.dataset.client || detailCard?.dataset.client || '').trim();
+      const operation = String(button.dataset.operation || detailCard?.dataset.operation || '').trim();
+      const service = String(detailCard?.dataset.service || '').trim();
+      const city = String(detailCard?.dataset.city || '').trim();
+      const address = String(detailCard?.dataset.address || '').trim();
+      const date = String(button.dataset.date || detailCard?.dataset.date || '').trim();
+      const start = String(detailCard?.dataset.start || '').trim();
+      const summaryLine = Array.from(document.querySelectorAll('#selectedRequestSummary .meta span'))
+        .map((element) => String(element.textContent || '').trim())
+        .find((text) => text.includes('Horario:')) || '';
+      const schedule = summaryLine.includes('Horario:') ? summaryLine.split('Horario:').slice(1).join('Horario:').trim() : start;
+      const workers = confirmedCards.map((card, index) => {
+        const name = String(card.dataset.workerName || '').trim() || 'Auxiliar';
+        const phone = String(card.dataset.workerPhone || '').trim();
+        return `${index + 1}. ${name}${phone ? ` | Tel: ${phone}` : ''}`;
+      });
       return [
         requesterName ? `Hola ${requesterName},` : 'Hola,',
         '',
-        `Te comparto el PDF con los auxiliares confirmados para ${client || 'la solicitud'}${operation ? `, ${operation}` : ''}.`,
-        date ? `Fecha: ${date}.` : '',
+        'Te comparto la información de la solicitud confirmada:',
         '',
+        client ? `Cliente: ${client}` : '',
+        operation ? `Operación: ${operation}` : '',
+        service ? `Servicio: ${service}` : '',
+        city ? `Ciudad: ${city}` : '',
+        address ? `Dirección: ${address}` : '',
+        date ? `Fecha: ${date}` : '',
+        schedule ? `Horario: ${schedule}` : '',
+        `Auxiliares confirmados: ${confirmedCards.length}`,
+        '',
+        workers.length ? 'Auxiliares:' : '',
+        ...workers,
+        '',
+        'El PDF se descarga como respaldo con el mismo detalle.',
         'Quedo atento.'
       ].filter(Boolean).join('\n');
     }
