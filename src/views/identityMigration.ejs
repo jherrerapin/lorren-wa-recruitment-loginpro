@@ -14,6 +14,8 @@
     h1 { margin: 0 0 10px; font-size: 24px; text-align: center; }
     .lead { margin: 0 0 22px; color: #596776; font-size: 14px; line-height: 1.55; text-align: center; }
     .notice { margin-bottom: 20px; padding: 12px 14px; border-radius: 10px; background: #eef6f4; color: #0d675b; font-size: 13px; line-height: 1.45; }
+    .identity-summary { margin-bottom: 16px; padding: 12px 14px; border: 1px solid #dbe2e8; border-radius: 10px; background: #f8fafc; color: #475569; font-size: 13px; line-height: 1.5; }
+    .identity-summary strong { color: #1e2d3d; }
     .error { margin-bottom: 16px; padding: 11px 13px; border-radius: 9px; background: #fee2e2; color: #991b1b; font-size: 13px; font-weight: 700; }
     form { display: grid; gap: 15px; }
     label { display: grid; gap: 6px; color: #475569; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
@@ -30,26 +32,48 @@
 <body>
   <main class="card">
     <div class="brand"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></div>
-    <h1>Actualiza tu acceso a LoginPro</h1>
-    <p class="lead">Desde ahora tu acceso será personal y estará asociado a tu nombre y correo electrónico.</p>
-    <div class="notice">Debes completar esta actualización para continuar al panel. El correo anterior de recuperación no se toma como válido automáticamente.</div>
+    <% if (forcePasswordChange) { %>
+      <h1>Cambia tu contraseña inicial</h1>
+      <p class="lead">La contraseña que te entregaron sirve únicamente para este primer acceso. Debes reemplazarla antes de entrar al panel.</p>
+      <div class="notice">La nueva contraseña debe tener mínimo 12 caracteres, ser distinta de la inicial y se guardará únicamente como hash seguro.</div>
+      <div class="identity-summary"><strong><%= displayName || 'Usuario' %></strong><br /><%= email || '' %></div>
+    <% } else { %>
+      <h1>Actualiza tu acceso a LoginPro</h1>
+      <p class="lead">Desde ahora tu acceso será personal y estará asociado a tu nombre y correo electrónico.</p>
+      <div class="notice">Debes completar esta actualización para continuar al panel. El correo anterior de recuperación no se toma como válido automáticamente.</div>
+    <% } %>
     <% if (error) { %><div class="error"><%= error %></div><% } %>
     <form method="post" action="/account/identity" autocomplete="on">
-      <label>Nombre completo
-        <input name="displayName" type="text" minlength="3" maxlength="120" autocomplete="name" value="<%= displayName || '' %>" required />
-        <span class="hint">Este es el nombre que aparecerá dentro del panel.</span>
-      </label>
-      <label>Correo electrónico
-        <input name="email" type="email" maxlength="254" autocomplete="email" value="<%= email || '' %>" required />
-      </label>
-      <label>Confirmar correo electrónico
-        <input name="confirmEmail" type="email" maxlength="254" autocomplete="email" required />
-      </label>
-      <label>Contraseña actual
+      <% if (forcePasswordChange) { %>
+        <input name="displayName" type="hidden" value="<%= displayName || '' %>" />
+        <input name="email" type="hidden" value="<%= email || '' %>" />
+        <input name="confirmEmail" type="hidden" value="<%= email || '' %>" />
+      <% } else { %>
+        <label>Nombre completo
+          <input name="displayName" type="text" minlength="3" maxlength="120" autocomplete="name" value="<%= displayName || '' %>" required />
+          <span class="hint">Este es el nombre que aparecerá dentro del panel.</span>
+        </label>
+        <label>Correo electrónico
+          <input name="email" type="email" maxlength="254" autocomplete="email" value="<%= email || '' %>" required />
+        </label>
+        <label>Confirmar correo electrónico
+          <input name="confirmEmail" type="email" maxlength="254" autocomplete="email" required />
+        </label>
+      <% } %>
+      <label><%= forcePasswordChange ? 'Contraseña inicial' : 'Contraseña actual' %>
         <input name="currentPassword" type="password" autocomplete="current-password" required />
-        <span class="hint">Tu contraseña no cambia. Solo la usamos para confirmar esta actualización.</span>
+        <span class="hint"><%= forcePasswordChange ? 'Confirma la contraseña temporal con la que acabas de ingresar.' : 'Solo la usamos para confirmar esta actualización.' %></span>
       </label>
-      <button type="submit">Guardar y continuar</button>
+      <% if (forcePasswordChange) { %>
+        <label>Nueva contraseña
+          <input name="newPassword" type="password" minlength="12" maxlength="72" autocomplete="new-password" required />
+          <span class="hint">Mínimo 12 caracteres. No reutilices la contraseña inicial.</span>
+        </label>
+        <label>Confirmar nueva contraseña
+          <input name="confirmNewPassword" type="password" minlength="12" maxlength="72" autocomplete="new-password" required />
+        </label>
+      <% } %>
+      <button type="submit"><%= forcePasswordChange ? 'Cambiar contraseña y continuar' : 'Guardar y continuar' %></button>
     </form>
     <form class="logout" method="post" action="/logout"><button type="submit">Cerrar sesión</button></form>
   </main>
