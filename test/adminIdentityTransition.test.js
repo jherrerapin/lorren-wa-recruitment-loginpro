@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { createAdminSessionMiddleware } from '../src/services/adminSession.js';
 
 class FakeStore {
@@ -377,4 +378,140 @@ test('un reclutador no puede forzar la ruta de impersonación', async () => {
   assert.equal(result.events.some((event) => event[0] === 'status' && event[1] === 403), true);
   assert.deepEqual(result.events.at(-1), ['send', 'Acceso restringido a DEV']);
   assert.equal(targetQueries, 0, 'la autorización ocurre antes de consultar al usuario objetivo');
+});
+
+function provisionedProfile(overrides = {}) {
+  const provisionedAt = new Date('2026-08-20T23:20:00.000Z');
+  return migratedProfile({
+    id: 'user-first-access-test',
+    username: 'user-TEST-FIRST-ACCESS',
+    passwordHash: 'hash:TEMPORAL-TEST-123',
+    displayName: 'Usuario TEST',
+    email: 'usuario.test@example.test',
+    identityMigratedAt: provisionedAt,
+    lastPasswordResetAt: provisionedAt,
+    createdAt: provisionedAt,
+    accessScope: 'ALL',
+    scopeCity: null,
+    ...overrides
+  });
+}
+
+function firstAccessHarness(profileOverrides = {}) {
+  let profile = provisionedProfile(profileOverrides);
+  const updates = [];
+  const sessionData = {
+    userId: profile.id,
+    userRole: 'admin',
+    username: profile.username,
+    userSource: 'db',
+    userAccessScope: 'ALL'
+  };
+  const prismaClient = {
+    appUser: {
+      findUnique: async ({ where }) => {
+        if (where.id === profile.id) return { ...profile };
+        if (where.email === profile.email) return { id: profile.id };
+        return null;
+      },
+      update: async ({ where, data }) => {
+        assert.equal(where.id, profile.id);
+        updates.push(data);
+        profile = { ...profile, ...data };
+        return { ...profile };
+      }
+    }
+  };
+  const { middleware } = createHarness({ sessionData, prismaClient });
+  return { middleware, sessionData, updates, getProfile: () => ({ ...profile }) };
+}
+
+test('usuario nuevo puede autenticarse pero queda bloqueado antes del panel hasta cambiar la contraseña inicial', async () => {
+  const harness = firstAccessHarness();
+  const result = await runMiddleware(harness.middleware, { method: 'GET', path: '/admin', originalUrl: '/admin' });
+  assert.deepEqual(result.events.at(-1), ['redirect', 303, '/account/identity']);
+});
+
+test('primer acceso reutiliza la pantalla canónica y muestra el cambio de contraseña con la identidad ya registrada', async () => {
+  const harness = firstAccessHarness();
+  const result = await runMiddleware(harness.middleware, {
+    method: 'GET', path: '/account/identity', originalUrl: '/account/identity'
+  });
+  const renderEvent = result.events.find((event) => event[0] === 'render');
+  assert.equal(renderEvent?.[1], 'identityMigration');
+  assert.equal(renderEvent?.[2]?.forcePasswordChange, true);
+  assert.equal(renderEvent?.[2]?.displayName, 'Usuario TEST');
+  assert.equal(renderEvent?.[2]?.email, 'usuario.test@example.test');
+});
+
+test('cambio inicial revalida la temporal, reemplaza el hash y libera el panel', async () => {
+  const harness = firstAccessHarness();
+  const result = await runMiddleware(harness.middleware, {
+    method: 'POST', path: '/account/identity', originalUrl: '/account/identity',
+    body: {
+      displayName: 'Usuario TEST',
+      email: 'usuario.test@example.test',
+      confirmEmail: 'usuario.test@example.test',
+      currentPassword: 'TEMPORAL-TEST-123',
+      newPassword: 'Nueva-clave-TEST-2026',
+      confirmNewPassword: 'Nueva-clave-TEST-2026'
+    }
+  });
+
+  assert.deepEqual(result.events.at(-1), ['redirect', 303, '/admin']);
+  assert.equal(harness.updates.length, 1);
+  assert.equal(harness.updates[0].passwordHash, 'hash:Nueva-clave-TEST-2026');
+  assert.ok(harness.updates[0].lastPasswordResetAt instanceof Date);
+  assert.equal('identityMigratedAt' in harness.updates[0], false, 'el cambio de contraseña no debe reescribir la identidad');
+
+  const after = await runMiddleware(harness.middleware, { method: 'GET', path: '/admin', originalUrl: '/admin' });
+  assert.deepEqual(after.events.at(-1), ['next']);
+});
+
+test('cambio inicial rechaza contraseña corta, repetida, no confirmada o fuera del límite seguro de bcrypt', async () => {
+  const cases = [
+    { newPassword: 'corta', confirmNewPassword: 'corta', expected: /al menos 12 caracteres/ },
+    { newPassword: 'TEMPORAL-TEST-123', confirmNewPassword: 'TEMPORAL-TEST-123', expected: /diferente de la contraseña inicial/ },
+    { newPassword: 'Nueva-clave-TEST-2026', confirmNewPassword: 'Otra-clave-TEST-2026', expected: /no coinciden/ },
+    { newPassword: 'á'.repeat(37), confirmNewPassword: 'á'.repeat(37), expected: /máximo 72 bytes/ }
+  ];
+
+  for (const item of cases) {
+    const harness = firstAccessHarness();
+    const result = await runMiddleware(harness.middleware, {
+      method: 'POST', path: '/account/identity', originalUrl: '/account/identity',
+      body: {
+        displayName: 'Usuario TEST',
+        email: 'usuario.test@example.test',
+        confirmEmail: 'usuario.test@example.test',
+        currentPassword: 'TEMPORAL-TEST-123',
+        newPassword: item.newPassword,
+        confirmNewPassword: item.confirmNewPassword
+      }
+    });
+    const renderEvent = result.events.find((event) => event[0] === 'render');
+    assert.equal(renderEvent?.[1], 'identityMigration');
+    assert.equal(renderEvent?.[2]?.forcePasswordChange, true);
+    assert.match(renderEvent?.[2]?.error || '', item.expected);
+    assert.equal(harness.updates.length, 0);
+  }
+});
+
+test('cuentas históricas no quedan bloqueadas retroactivamente por igualdad de timestamps', async () => {
+  const historicalAt = new Date('2026-08-20T23:00:00.000Z');
+  const harness = firstAccessHarness({
+    createdAt: historicalAt,
+    identityMigratedAt: historicalAt,
+    lastPasswordResetAt: historicalAt
+  });
+  const result = await runMiddleware(harness.middleware, { method: 'GET', path: '/admin', originalUrl: '/admin' });
+  assert.deepEqual(result.events.at(-1), ['next']);
+});
+
+test('la vista de primer acceso no precarga contraseñas y usa autocompletado seguro', () => {
+  const view = fs.readFileSync('src/views/identityMigration.ejs', 'utf8');
+  assert.match(view, /name="currentPassword"[^>]*autocomplete="current-password"/);
+  assert.match(view, /name="newPassword"[^>]*autocomplete="new-password"/);
+  assert.match(view, /name="confirmNewPassword"[^>]*autocomplete="new-password"/);
+  assert.doesNotMatch(view, /value="<%=\s*(?:currentPassword|newPassword|confirmNewPassword)/);
 });
