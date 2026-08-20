@@ -44,11 +44,7 @@
     <% } %>
     <% if (error) { %><div class="error"><%= error %></div><% } %>
     <form method="post" action="/account/identity" autocomplete="on">
-      <% if (forcePasswordChange) { %>
-        <input name="displayName" type="hidden" value="<%= displayName || '' %>" />
-        <input name="email" type="hidden" value="<%= email || '' %>" />
-        <input name="confirmEmail" type="hidden" value="<%= email || '' %>" />
-      <% } else { %>
+      <% if (!forcePasswordChange) { %>
         <label>Nombre completo
           <input name="displayName" type="text" minlength="3" maxlength="120" autocomplete="name" value="<%= displayName || '' %>" required />
           <span class="hint">Este es el nombre que aparecerá dentro del panel.</span>
