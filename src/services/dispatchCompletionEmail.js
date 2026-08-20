@@ -1,3 +1,4 @@
+import { dispatchServiceDateKey } from './dispatchDate.js';
 import {
   buildGroupedWhereClauseForRequest,
   countAssignments,
@@ -290,7 +291,7 @@ async function buildCompletionPackageFromGroup(prisma, requestGroup, options = {
   const managedBy = normalizeString(options.managedBy || options.managedByUsername);
   const pdfBuilder = typeof options.pdfBuilder === 'function' ? options.pdfBuilder : buildProgrammingPdfBuffer;
   const pdf = await pdfBuilder(prisma, {
-    fecha: state.firstRequest.serviceDate,
+    fecha: dispatchServiceDateKey(state.firstRequest.serviceDate),
     requestIds: state.requestIds,
     managedBy: managedBy || 'LoginPro Operaciones',
     includePending: false
