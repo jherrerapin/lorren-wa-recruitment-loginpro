@@ -32,6 +32,11 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeRequestIds(value) {
+  const entries = Array.isArray(value) ? value : [];
+  return [...new Set(entries.map((item) => normalizeString(item)).filter(Boolean))];
+}
+
 function escapeHtml(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -148,8 +153,10 @@ function resolveBrowserExecutablePath() {
 export async function loadProgrammingRequests(prisma, selectedDate, options = {}) {
   const normalizedDate = normalizeProgrammingDate(selectedDate);
   const requestId = normalizeString(options.requestId);
+  const requestIds = normalizeRequestIds(options.requestIds);
+  const explicitRequestScope = requestIds.length ? { id: { in: requestIds } } : requestId ? { id: requestId } : null;
   const requests = await prisma.dispatchServiceRequest.findMany({
-    where: requestId ? { id: requestId } : buildDispatchServiceDateWhere(normalizedDate),
+    where: explicitRequestScope || buildDispatchServiceDateWhere(normalizedDate),
     include: {
       service: true,
       assignments: {
@@ -161,7 +168,7 @@ export async function loadProgrammingRequests(prisma, selectedDate, options = {}
   });
   return {
     selectedDate: normalizedDate,
-    requests: requestId ? requests : filterDispatchServiceRequestsByDate(requests, normalizedDate)
+    requests: explicitRequestScope ? requests : filterDispatchServiceRequestsByDate(requests, normalizedDate)
   };
 }
 
@@ -207,18 +214,20 @@ export function buildProgrammingCompletionSummary(requests) {
 
 export function selectProgrammingRequests(requests = [], options = {}) {
   const includePending = normalizeProgrammingIncludePending(options.includePending, true);
-  if (options.requestId || includePending) return [...requests];
+  const hasExplicitRequestScope = Boolean(normalizeString(options.requestId) || normalizeRequestIds(options.requestIds).length);
+  if (hasExplicitRequestScope || includePending) return [...requests];
   return requests.filter((request) => effectiveRequestStatus(request) === COMPLETE_REQUEST_STATUS);
 }
 
 export async function loadProgrammingReportData(prisma, options = {}) {
   const requestId = normalizeString(options.requestId);
-  const loaded = await loadProgrammingRequests(prisma, options.selectedDate || options.fecha || options.date, { requestId });
+  const requestIds = normalizeRequestIds(options.requestIds);
+  const loaded = await loadProgrammingRequests(prisma, options.selectedDate || options.fecha || options.date, { requestId, requestIds });
   const includePending = normalizeProgrammingIncludePending(options.includePending, true);
-  const requests = selectProgrammingRequests(loaded.requests, { includePending, requestId });
+  const requests = selectProgrammingRequests(loaded.requests, { includePending, requestId, requestIds });
   const summary = buildProgrammingCompletionSummary(loaded.requests);
   const includedSummary = buildProgrammingCompletionSummary(requests);
-  const includeWorkerAbsences = !requestId;
+  const includeWorkerAbsences = !requestId && !requestIds.length;
   const workerAbsences = includeWorkerAbsences
     ? await loadProgrammingWorkerAbsences(prisma, loaded.selectedDate)
     : [];
@@ -310,6 +319,9 @@ export function buildProgrammingReportHtml({
     `;
   }).join('') : `<section class="client-section"><h2>Sin solicitudes para este alcance</h2><p>${includePending ? 'No hay solicitudes programadas para esta fecha.' : 'No hay solicitudes con asignación completa para esta fecha.'}</p></section>`;
   const workerAbsenceSection = buildWorkerAbsencesHtml(workerAbsences, includeWorkerAbsences);
+  const footerScope = includeWorkerAbsences
+    ? 'Incluye programación y novedades activas de descanso/incapacidad reportadas para la fecha.'
+    : 'Documento limitado a la solicitud o grupo de solicitudes seleccionado.';
 
   return `<!doctype html>
 <html lang="es">
@@ -377,7 +389,7 @@ export function buildProgrammingReportHtml({
   </section>
   ${clientSections}
   ${workerAbsenceSection}
-  <footer class="footer"><span>Documento generado por LoginPro Operaciones.</span><span>Incluye programación y novedades activas de descanso/incapacidad reportadas para la fecha.</span></footer>
+  <footer class="footer"><span>Documento generado por LoginPro Operaciones.</span><span>${escapeHtml(footerScope)}</span></footer>
 </body>
 </html>`;
 }
