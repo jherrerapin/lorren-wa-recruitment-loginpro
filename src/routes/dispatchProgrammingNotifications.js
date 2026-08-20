@@ -1,5 +1,9 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
+import {
+  getDispatchCompletionPackage,
+  sendDispatchCompletionEmail
+} from '../services/dispatchCompletionEmail.js';
 import { todayIsoDateCO } from '../services/dispatchDate.js';
 import {
   buildProgrammingFilename,
@@ -292,6 +296,29 @@ export function resolveProgrammingAccess(settings = {}, source = {}) {
 function programmingActor(req) {
   return { userId: req.session?.userId || req.userId || null, username: requestUsername(req), role: userRole(req) };
 }
+function completionManagedBy(req) {
+  return normalizeString(req.session?.displayName || req.displayName) || requestUsername(req) || 'LoginPro Operaciones';
+}
+function completionReplyTo(req) {
+  return normalizeProgrammingEmail(req.session?.userEmail || req.userEmail);
+}
+function completionDeliveryRedirect(serviceRequestId, message) {
+  const params = new URLSearchParams();
+  params.set('serviceRequestId', serviceRequestId);
+  if (message) params.set('message', message);
+  return `/admin/operaciones/asignaciones?${params.toString()}`;
+}
+function completionEmailResultMessage(result) {
+  if (result?.sent) return 'Correo enviado al solicitante con el PDF de auxiliares adjunto.';
+  if (result?.reason === 'already_sent') return 'El correo de auxiliares ya había sido enviado para esta solicitud.';
+  if (result?.reason === 'missing_requested_by_email') return 'La solicitud no tiene correo del solicitante registrado.';
+  if (result?.reason === 'service_request_not_complete') return 'Faltan auxiliares por confirmar antes de enviar la información al cliente.';
+  if (result?.reason === 'service_request_not_found') return 'La solicitud ya no existe.';
+  if (result?.reason === 'missing_email_config') return 'Falta configurar el correo de salida para enviar el PDF.';
+  if (result?.reason === 'unsupported_provider') return 'El proveedor de correo configurado no está soportado para este envío.';
+  if (result?.error) return 'No fue posible enviar el correo al solicitante.';
+  return 'No fue posible enviar el correo al solicitante.';
+}
 
 function buildProgrammingTemplateValues({ selectedDate, summary, includedSummary, managedBy, includePending }) {
   const manager = normalizeString(managedBy) || 'Julián Herrera';
@@ -510,6 +537,45 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
     }
     const userAccess = await saveProgrammingUserAccess(prisma, { username, enabled, actor: programmingActor(req) });
     return res.json({ ok: true, username, enabled: userAccess.includes(username) });
+  });
+
+  router.get('/asignaciones/entrega/:serviceRequestId/pdf', async (req, res) => {
+    try {
+      const completionPackage = await getDispatchCompletionPackage(prisma, req.params.serviceRequestId, {
+        managedBy: completionManagedBy(req)
+      });
+      if (!completionPackage.ready) {
+        const status = completionPackage.reason === 'service_request_not_found' ? 404 : 409;
+        const message = completionPackage.reason === 'service_request_not_found'
+          ? 'Solicitud no encontrada.'
+          : 'El PDF solo está disponible cuando todos los auxiliares de la solicitud están confirmados.';
+        return res.status(status).send(message);
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${completionPackage.pdfFilename}"`);
+      return res.send(completionPackage.pdfBuffer);
+    } catch (error) {
+      console.error('[Dispatch completion PDF]', error?.message || error);
+      return res.status(error?.statusCode || 500).send('No fue posible generar el PDF de auxiliares confirmados.');
+    }
+  });
+
+  router.post('/asignaciones/entrega/email', async (req, res) => {
+    const serviceRequestId = normalizeString(req.body?.serviceRequestId);
+    if (!serviceRequestId) return res.status(400).send('serviceRequestId es requerido.');
+    let result;
+    try {
+      result = await sendDispatchCompletionEmail(prisma, serviceRequestId, {
+        manual: true,
+        replyTo: completionReplyTo(req),
+        managedBy: completionManagedBy(req)
+      });
+    } catch (error) {
+      console.error('[Dispatch completion email]', error?.message || error);
+      result = { sent: false, error: 'completion_delivery_failed' };
+    }
+    return res.redirect(completionDeliveryRedirect(serviceRequestId, completionEmailResultMessage(result)));
   });
 
   router.use(async (req, res, next) => {
