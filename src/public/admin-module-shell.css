@@ -38,6 +38,68 @@
   margin-left: auto !important;
 }
 
+.admin-session-identity {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 260px;
+  min-height: 36px;
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 9px;
+  color: #edf3f7;
+  font-size: 12px;
+  line-height: 1.2;
+  position: relative;
+  z-index: 1300;
+}
+
+.admin-session-user-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-session-mode {
+  color: #a7f3d0;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+
+.admin-session-identity.is-impersonating {
+  border-color: rgba(94, 234, 212, .5);
+  background: rgba(13, 122, 107, .26);
+  max-width: 430px;
+}
+
+.admin-session-identity form {
+  margin: 0;
+}
+
+.admin-session-return {
+  border: 1px solid rgba(255, 255, 255, .3);
+  border-radius: 7px;
+  padding: 5px 8px;
+  background: transparent;
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.admin-session-return:hover,
+.admin-session-return:focus-visible {
+  background: rgba(255, 255, 255, .1);
+  outline: none;
+}
+
 @media (min-width: 901px) and (max-width: 1180px) {
   .admin-module-navbar .admin-module-nav-links {
     flex: 1 1 auto;
@@ -54,8 +116,35 @@
     padding-right: var(--admin-shell-gutter) !important;
   }
 
+  .admin-module-navbar .admin-module-brand,
+  .admin-module-navbar > form {
+    order: 1;
+  }
+
   .admin-module-navbar > form {
     margin-left: auto !important;
+  }
+
+  .admin-module-navbar .spacer {
+    display: none;
+  }
+
+  .admin-session-identity {
+    order: 2;
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
+  }
+
+  .admin-session-identity.is-impersonating {
+    max-width: none;
+    flex-wrap: wrap;
+  }
+
+  .admin-module-navbar .admin-module-nav-links {
+    order: 3;
+    width: 100%;
+    min-width: 0;
   }
 
   .admin-module-navbar a.admin-module-standalone-link {
@@ -64,8 +153,8 @@
     justify-content: center;
   }
 
-  .admin-module-navbar .admin-module-nav-links {
-    min-width: 0;
+  .admin-session-user-name {
+    white-space: normal;
   }
 }
 

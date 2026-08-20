@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Actualiza tu acceso | LoginPro</title>
+  <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #f3f6f8; color: #1e2d3d; font-family: Arial, Helvetica, sans-serif; }
+    .card { width: min(100%, 500px); background: #fff; border: 1px solid #dbe2e8; border-radius: 16px; padding: 30px; box-shadow: 0 18px 45px rgba(15, 23, 42, .10); }
+    .brand { display: flex; justify-content: center; margin-bottom: 24px; }
+    .brand img { height: 38px; width: auto; }
+    h1 { margin: 0 0 10px; font-size: 24px; text-align: center; }
+    .lead { margin: 0 0 22px; color: #596776; font-size: 14px; line-height: 1.55; text-align: center; }
+    .notice { margin-bottom: 20px; padding: 12px 14px; border-radius: 10px; background: #eef6f4; color: #0d675b; font-size: 13px; line-height: 1.45; }
+    .error { margin-bottom: 16px; padding: 11px 13px; border-radius: 9px; background: #fee2e2; color: #991b1b; font-size: 13px; font-weight: 700; }
+    form { display: grid; gap: 15px; }
+    label { display: grid; gap: 6px; color: #475569; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; }
+    input { width: 100%; border: 1px solid #cfd8e1; border-radius: 9px; padding: 11px 12px; background: #fbfcfd; color: #1e2d3d; font: inherit; font-size: 14px; outline: none; }
+    input:focus { border-color: #0d7a6b; box-shadow: 0 0 0 3px rgba(13, 122, 107, .12); }
+    .hint { color: #748191; font-size: 12px; font-weight: 400; text-transform: none; letter-spacing: 0; line-height: 1.4; }
+    button { margin-top: 4px; border: 0; border-radius: 9px; padding: 12px 16px; background: #0d7a6b; color: #fff; font: inherit; font-weight: 800; cursor: pointer; }
+    button:hover, button:focus-visible { background: #0a6257; outline: none; }
+    .logout { margin-top: 14px; text-align: center; }
+    .logout button { margin: 0; padding: 8px 12px; background: transparent; color: #596776; font-size: 12px; }
+    @media (max-width: 520px) { body { padding: 14px; align-items: start; } .card { margin-top: 22px; padding: 24px 18px; } h1 { font-size: 21px; } }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></div>
+    <h1>Actualiza tu acceso a LoginPro</h1>
+    <p class="lead">Desde ahora tu acceso será personal y estará asociado a tu nombre y correo electrónico.</p>
+    <div class="notice">Debes completar esta actualización para continuar al panel. El correo anterior de recuperación no se toma como válido automáticamente.</div>
+    <% if (error) { %><div class="error"><%= error %></div><% } %>
+    <form method="post" action="/account/identity" autocomplete="on">
+      <label>Nombre completo
+        <input name="displayName" type="text" minlength="3" maxlength="120" autocomplete="name" value="<%= displayName || '' %>" required />
+        <span class="hint">Este es el nombre que aparecerá dentro del panel.</span>
+      </label>
+      <label>Correo electrónico
+        <input name="email" type="email" maxlength="254" autocomplete="email" value="<%= email || '' %>" required />
+      </label>
+      <label>Confirmar correo electrónico
+        <input name="confirmEmail" type="email" maxlength="254" autocomplete="email" required />
+      </label>
+      <label>Contraseña actual
+        <input name="currentPassword" type="password" autocomplete="current-password" required />
+        <span class="hint">Tu contraseña no cambia. Solo la usamos para confirmar esta actualización.</span>
+      </label>
+      <button type="submit">Guardar y continuar</button>
+    </form>
+    <form class="logout" method="post" action="/logout"><button type="submit">Cerrar sesión</button></form>
+  </main>
+</body>
+</html>
