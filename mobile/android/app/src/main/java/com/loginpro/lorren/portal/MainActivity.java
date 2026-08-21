@@ -315,7 +315,7 @@ public final class MainActivity extends Activity {
     }
 
     private boolean requiresNearbyWifiPermission() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2;
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
     }
 
     private List<String> attendancePermissions(boolean includeCamera) {
