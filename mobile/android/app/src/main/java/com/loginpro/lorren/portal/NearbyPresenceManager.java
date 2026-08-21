@@ -88,7 +88,7 @@ final class NearbyPresenceManager {
     private void startReadyDiscovery(String normalizedService, int retryCount) {
         DiscoveryOptions options = new DiscoveryOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(true)
+            .setLowPower(false)
             .build();
         try {
             client.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
@@ -151,7 +151,7 @@ final class NearbyPresenceManager {
     ) {
         AdvertisingOptions options = new AdvertisingOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(true)
+            .setLowPower(false)
             .setConnectionType(ConnectionType.NON_DISRUPTIVE)
             .build();
         try {
@@ -268,7 +268,7 @@ final class NearbyPresenceManager {
                 if (!requestedEndpoints.add(endpointId)) return;
                 emit("leader_found", event -> event.put("candidateCount", requestedEndpoints.size()));
                 ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
-                    .setLowPower(true)
+                    .setLowPower(false)
                     .setConnectionType(ConnectionType.NON_DISRUPTIVE)
                     .build();
                 client.requestConnection(ENDPOINT_NAME, endpointId, connectionLifecycleCallback, connectionOptions)

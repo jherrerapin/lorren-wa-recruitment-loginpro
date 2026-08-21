@@ -8,7 +8,10 @@ import { createPrismaWorkerPortalSessionRepository } from '../modules/dispatch-a
 import { WORKER_PORTAL_SESSION_COOKIE_NAME } from '../modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
 import { resolveAttendanceOperationGeofence } from '../modules/dispatch-attendance/application/attendanceGeofenceResolver.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../modules/dispatch-attendance/application/registerArrival.js';
-import { registerCrewArrivalForLeader } from '../modules/dispatch-attendance/application/registerCrewArrival.js';
+import {
+  registerCrewArrivalForLeader,
+  registerCrewMarkForLeader
+} from '../modules/dispatch-attendance/application/registerCrewArrival.js';
 import {
   issueCrewPresenceCredential,
   verifyCrewPresenceBundle,
@@ -41,6 +44,7 @@ const NATIVE_ANDROID_USER_AGENT_TOKEN = 'LorrenNative/1';
 const ONLINE_WEB_CAPTURE_MODE = 'ONLINE_WEB';
 const OFFLINE_WEB_CAPTURE_MODE = 'OFFLINE_WEB';
 const BIOMETRIC_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
+const CREW_MARK_CHALLENGE_PREFIX = 'lorren-mark-v1';
 const CREW_PHONE_EXCEPTION_ENTITY_TYPE = 'DISPATCH_CREW_PHONE_EXCEPTION';
 const CREW_PHONE_EXCEPTION_ACTION = 'CREW_PHONE_EXCEPTION_DECLARED';
 const CREW_PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
@@ -69,6 +73,36 @@ function normalizeBiometricMarkType(value) {
   const markType = normalizedString(value, 40)?.toUpperCase();
   if (!BIOMETRIC_MARK_TYPES.has(markType)) throw new Error('attendance_biometric_mark_type_invalid');
   return markType;
+}
+
+function resolveCrewPresenceMarkType(proofBundle) {
+  const explicitMarkType = normalizedString(proofBundle?.markType, 40)?.toUpperCase();
+  if (!explicitMarkType) return { markType: 'ARRIVAL', legacyArrival: true };
+  if (!BIOMETRIC_MARK_TYPES.has(explicitMarkType)) throw new Error('crew_presence_mark_type_invalid');
+  return { markType: explicitMarkType, legacyArrival: false };
+}
+
+function assertCrewMarkChallenge(proofBundle, markType, options = {}) {
+  const challenge = normalizedString(proofBundle?.challenge, 2048);
+  if (!challenge) throw new Error('crew_presence_mark_challenge_invalid');
+  const legacyArrival = options.legacyArrival === true && markType === 'ARRIVAL';
+  if (!legacyArrival && !challenge.startsWith(`${CREW_MARK_CHALLENGE_PREFIX}:${markType}:`)) {
+    throw new Error('crew_presence_mark_challenge_invalid');
+  }
+  if (
+    markType !== 'ARRIVAL'
+    && Array.isArray(proofBundle?.phoneExceptions)
+    && proofBundle.phoneExceptions.length > 0
+  ) {
+    throw new Error('crew_presence_phone_exception_mark_invalid');
+  }
+}
+
+function crewMarkLabel(markType) {
+  if (markType === 'BREAK_START') return 'Inicio de almuerzo';
+  if (markType === 'BREAK_END') return 'Fin de almuerzo';
+  if (markType === 'DEPARTURE') return 'Salida';
+  return 'Entrada';
 }
 
 function isNativeAndroidRequest(req) {
@@ -291,6 +325,8 @@ function crewPresencePublicError(error) {
     || code === 'crew_presence_native_location_time_mismatch'
     || code === 'crew_presence_mock_location_detected'
     || code === 'crew_group_arrival_leader_presence_required'
+    || code === 'crew_group_mark_leader_presence_required'
+    || code === 'crew_group_mark_leader_not_assigned'
   ) return [409, code];
   return [400, code];
 }
@@ -318,6 +354,8 @@ export function workerPortalRouter(prisma, options = {}) {
     || ((input, verifyOptions) => verifyNativeAttendanceLocationProof(input, verifyOptions));
   const registerCrewPresenceArrivalFn = options.registerCrewPresenceArrivalFn
     || ((input) => registerCrewArrivalForLeader(prisma, input));
+  const registerCrewPresenceMarkFn = options.registerCrewPresenceMarkFn
+    || ((input) => registerCrewMarkForLeader(prisma, input));
   const auditCrewPhoneExceptionFn = options.auditCrewPhoneExceptionFn
     || ((input) => auditCrewPhoneException(prisma, input));
   const loadBiometricAssignmentFn = options.loadBiometricAssignmentFn || (async (workerId, assignmentId) => (
@@ -676,6 +714,9 @@ export function workerPortalRouter(prisma, options = {}) {
       const serviceRequestId = normalizedString(req.body?.serviceRequestId, 160);
       const idempotencyKey = normalizedString(req.body?.idempotencyKey, 100);
       const clientCapturedAt = new Date(req.body?.clientCapturedAt);
+      const proofBundle = req.body?.proofBundle;
+      const { markType, legacyArrival } = resolveCrewPresenceMarkType(proofBundle);
+      assertCrewMarkChallenge(proofBundle, markType, { legacyArrival });
       if (!assignmentId || !serviceRequestId || !idempotencyKey || Number.isNaN(clientCapturedAt.getTime())) {
         return strictError(res, 400, 'crew_presence_sync_invalid', 'La comprobación de cuadrilla no es válida.');
       }
@@ -686,7 +727,7 @@ export function workerPortalRouter(prisma, options = {}) {
         || assignment.serviceRequest?.id !== serviceRequestId
         || assignment.serviceRequest?.operationPoint?.attendanceEnabled !== true
       ) {
-        return strictError(res, 409, 'assignment_not_available', 'La cuadrilla ya no está disponible para marcar llegada.');
+        return strictError(res, 409, 'assignment_not_available', 'La cuadrilla ya no está disponible para esta marcación.');
       }
 
       const verified = await verifyCrewPresenceBundleFn({
@@ -696,7 +737,7 @@ export function workerPortalRouter(prisma, options = {}) {
         serviceRequestId,
         idempotencyKey,
         clientCapturedAt,
-        proofBundle: req.body?.proofBundle,
+        proofBundle,
         now
       }, {
         env: options.env || process.env,
@@ -714,22 +755,24 @@ export function workerPortalRouter(prisma, options = {}) {
 
       const verifiedMembers = Array.isArray(verified.members) ? verified.members : [];
       const memberByWorkerId = new Map(verifiedMembers.map((member) => [member.workerId, member]));
-      await Promise.all((verified.phoneExceptionWorkerIds || []).map(async (workerId) => {
-        const member = memberByWorkerId.get(workerId);
-        if (!member) throw new Error('crew_phone_exception_member_contract_invalid');
-        await auditCrewPhoneExceptionFn({
-          leaderWorkerId: portalSession.workerId,
-          serviceRequestId,
-          assignmentId: member.assignmentId,
-          workerId,
-          idempotencyKey,
-          clientCapturedAt: verified.clientCapturedAt,
-          ipAddress: normalizedString(req.ip, 120),
-          userAgent: normalizedString(req.get?.('user-agent'), 500)
-        });
-      }));
+      if (markType === 'ARRIVAL') {
+        await Promise.all((verified.phoneExceptionWorkerIds || []).map(async (workerId) => {
+          const member = memberByWorkerId.get(workerId);
+          if (!member) throw new Error('crew_phone_exception_member_contract_invalid');
+          await auditCrewPhoneExceptionFn({
+            leaderWorkerId: portalSession.workerId,
+            serviceRequestId,
+            assignmentId: member.assignmentId,
+            workerId,
+            idempotencyKey,
+            clientCapturedAt: verified.clientCapturedAt,
+            ipAddress: normalizedString(req.ip, 120),
+            userAgent: normalizedString(req.get?.('user-agent'), 500)
+          });
+        }));
+      }
 
-      const result = await registerCrewPresenceArrivalFn({
+      const commonInput = {
         leaderWorkerId: portalSession.workerId,
         assignmentId,
         idempotencyKey,
@@ -740,31 +783,47 @@ export function workerPortalRouter(prisma, options = {}) {
         longitude: location.longitude,
         accuracyMeters: location.accuracyMeters,
         installationIdHash: verified.leaderInstallationIdHash,
+        persistentStorageAvailable: true,
         presenceValidated: true,
         validatedWorkerIds: verified.validatedWorkerIds,
-        forceMajeure: false,
         ipAddress: normalizedString(req.ip, 120),
         userAgent: normalizedString(req.get?.('user-agent'), 500)
-      });
+      };
+      const result = markType === 'ARRIVAL'
+        ? await registerCrewPresenceArrivalFn({
+            ...commonInput,
+            forceMajeure: false
+          })
+        : await registerCrewPresenceMarkFn({
+            ...commonInput,
+            markType
+          });
 
       if (!result?.applied) {
         return strictError(res, 409, 'crew_presence_group_not_available', 'La marcación por cuadrilla ya no está disponible.');
       }
       if (!result.summary) {
-        return strictError(res, 409, 'crew_presence_leader_arrival_conflict', 'La llegada del encargado no permitió completar esta marcación grupal.');
+        return strictError(res, 409, 'crew_presence_leader_mark_conflict', 'La marcación del encargado no permitió completar esta acción de cuadrilla.');
       }
 
       const summary = result.summary;
-      const processedCount = summary.newlyRecordedCount + summary.replayedCount + summary.alreadyRecordedCount;
+      const alreadyRecordedCount = Number(summary.alreadyRecordedCount || 0);
+      const processedCount = Number.isFinite(Number(summary.processedCount))
+        ? Number(summary.processedCount)
+        : Number(summary.newlyRecordedCount || 0) + Number(summary.replayedCount || 0) + alreadyRecordedCount;
       const validatedSet = new Set(verified.validatedWorkerIds || []);
-      const phoneExceptionSet = new Set(verified.phoneExceptionWorkerIds || []);
+      const phoneExceptionSet = markType === 'ARRIVAL'
+        ? new Set(verified.phoneExceptionWorkerIds || [])
+        : new Set();
       const resultByAssignment = new Map((summary.results || []).map((item) => [item.assignmentId, item]));
       const memberStatuses = verifiedMembers.map((member) => {
         const canonicalResult = resultByAssignment.get(member.assignmentId);
         let status = 'PENDING';
-        if (validatedSet.has(member.workerId)) status = 'VERIFIED';
+        if (['RECORDED', 'REPLAYED', 'ALREADY_RECORDED'].includes(canonicalResult?.status)) status = 'REGISTERED';
+        else if (canonicalResult?.status === 'NOT_RECORDED') status = 'PENDING';
+        else if (validatedSet.has(member.workerId)) status = 'VERIFIED';
         else if (phoneExceptionSet.has(member.workerId)) status = 'NO_PHONE_REVIEW';
-        else if (member.arrivalReported || canonicalResult?.status === 'ALREADY_RECORDED') status = 'REGISTERED';
+        else if (markType === 'ARRIVAL' && member.arrivalReported) status = 'REGISTERED';
         return {
           assignmentId: member.assignmentId,
           workerId: member.workerId,
@@ -780,9 +839,10 @@ export function workerPortalRouter(prisma, options = {}) {
       const requiresReview = summary.failedCount > 0
         || summary.reviewPendingCount > 0
         || phoneExceptionCount > 0;
-      let message = `${verifiedCount} integrante${verifiedCount === 1 ? '' : 's'} verificado${verifiedCount === 1 ? '' : 's'}.`;
-      if (registeredCount > 0) message += ` ${registeredCount} ya estaba${registeredCount === 1 ? '' : 'n'} registrado${registeredCount === 1 ? '' : 's'}.`;
-      if (pendingCount > 0) message += ` ${pendingCount} queda${pendingCount === 1 ? '' : 'n'} pendiente${pendingCount === 1 ? '' : 's'}.`;
+      const actionLabel = crewMarkLabel(markType);
+      let message = `${actionLabel} de cuadrilla: ${registeredCount} integrante${registeredCount === 1 ? '' : 's'} registrado${registeredCount === 1 ? '' : 's'}.`;
+      if (verifiedCount > 0) message += ` ${verifiedCount} detectado${verifiedCount === 1 ? '' : 's'} no pudo${verifiedCount === 1 ? '' : 'ieron'} completar la marca.`;
+      if (pendingCount > 0) message += ` ${pendingCount} queda${pendingCount === 1 ? '' : 'n'} pendiente${pendingCount === 1 ? '' : 's'} por no ser detectado${pendingCount === 1 ? '' : 's'}.`;
       if (phoneExceptionCount > 0) message += ` ${phoneExceptionCount} sin teléfono queda${phoneExceptionCount === 1 ? '' : 'n'} por revisar.`;
       if (summary.failedCount > 0 || summary.reviewPendingCount > 0) {
         message += ' Una o más marcaciones requieren revisión.';
@@ -790,22 +850,23 @@ export function workerPortalRouter(prisma, options = {}) {
 
       return res.status(200).json({
         ok: true,
+        markType,
         crewGroup: true,
         presenceValidated: true,
         serviceRequestId,
         totalMembers: summary.totalMembers,
-        detectedMembers: summary.eligibleMembers,
+        detectedMembers: summary.eligibleMembers ?? validatedSet.size,
         processedCount,
         newlyRecordedCount: summary.newlyRecordedCount,
         replayedCount: summary.replayedCount,
-        alreadyRecordedCount: summary.alreadyRecordedCount,
+        alreadyRecordedCount,
         failedCount: summary.failedCount,
         reviewPendingCount: summary.reviewPendingCount,
         notDetectedCount,
         verifiedProofCount: verified.verifiedProofCount,
         rejectedProofCount: verified.rejectedProofCount,
         phoneExceptionCount,
-        rejectedPhoneExceptionCount: verified.rejectedPhoneExceptionCount || 0,
+        rejectedPhoneExceptionCount: markType === 'ARRIVAL' ? (verified.rejectedPhoneExceptionCount || 0) : 0,
         memberStatuses,
         requiresReview,
         message
@@ -813,7 +874,7 @@ export function workerPortalRouter(prisma, options = {}) {
     } catch (error) {
       const [status, code] = crewPresencePublicError(error);
       if (status >= 500) console.error('[WORKER_PORTAL_CREW_PRESENCE_SYNC_FAILED]', { code });
-      return strictError(res, status, code, 'No fue posible sincronizar la llegada de la cuadrilla.');
+      return strictError(res, status, code, 'No fue posible sincronizar la marcación de la cuadrilla.');
     }
   });
 

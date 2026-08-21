@@ -14,6 +14,7 @@
   const AUTO_RETRY_DELAY_MS = 1_500;
   const CREDENTIAL_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
   const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
+  const MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
   const TRANSIENT_SCAN_ERRORS = new Set([
     'connection_failed',
     'connection_request_failed',
@@ -29,6 +30,7 @@
   let scanPendingCount = 0;
   let activeAttempt = null;
   let retryNotDetectedCount = 0;
+  let retryMarkType = '';
   let hasCompletedLeaderScan = false;
   let scanTransientFailureCount = 0;
   let autoRetryRemaining = 1;
@@ -37,7 +39,8 @@
   let pendingPhoneExceptionWorkerId = '';
   let pendingCompletedScan = null;
   const phoneExceptionsByService = new Map();
-  const serverMemberStatusesByService = new Map();
+  const serverMemberStatusesByScope = new Map();
+  const localQueuedMarksByService = new Map();
 
   function parseBridgeResult(value) {
     if (typeof value !== 'string') return null;
@@ -57,6 +60,40 @@
 
   function capabilities() {
     return bridgeCall('getCapabilities');
+  }
+
+  function normalizeMarkType(value) {
+    const markType = String(value || '').trim().toUpperCase();
+    return MARK_TYPES.has(markType) ? markType : null;
+  }
+
+  function markInfo(markType) {
+    return ({
+      ARRIVAL: {
+        action: 'Marcar entrada de la cuadrilla',
+        retry: 'Reintentar entrada pendiente',
+        noun: 'entrada',
+        title: 'Entrada'
+      },
+      BREAK_START: {
+        action: 'Iniciar almuerzo de la cuadrilla',
+        retry: 'Reintentar inicio de almuerzo',
+        noun: 'inicio de almuerzo',
+        title: 'Inicio de almuerzo'
+      },
+      BREAK_END: {
+        action: 'Finalizar almuerzo de la cuadrilla',
+        retry: 'Reintentar regreso de almuerzo',
+        noun: 'regreso de almuerzo',
+        title: 'Fin de almuerzo'
+      },
+      DEPARTURE: {
+        action: 'Registrar salida de la cuadrilla',
+        retry: 'Reintentar salida pendiente',
+        noun: 'salida',
+        title: 'Salida'
+      }
+    })[normalizeMarkType(markType) || 'ARRIVAL'];
   }
 
   function safeMember(value) {
@@ -210,6 +247,34 @@
     return provisioningPromise;
   }
 
+  function queuedMarkSet(serviceRequestId) {
+    if (!localQueuedMarksByService.has(serviceRequestId)) {
+      localQueuedMarksByService.set(serviceRequestId, new Set());
+    }
+    return localQueuedMarksByService.get(serviceRequestId);
+  }
+
+  function rememberQueuedMark(serviceRequestId, markType) {
+    const normalized = normalizeMarkType(markType);
+    if (serviceRequestId && normalized) queuedMarkSet(serviceRequestId).add(normalized);
+  }
+
+  async function hydrateLocalQueuedMarks() {
+    localQueuedMarksByService.clear();
+    const offline = window.LorrenWorkerPortalOffline;
+    if (typeof offline?.getState !== 'function') return;
+    try {
+      const state = await offline.getState();
+      (Array.isArray(state?.crewQueue) ? state.crewQueue : []).forEach((record) => {
+        const serviceRequestId = String(record?.serviceRequestId || '').trim();
+        const markType = normalizeMarkType(record?.proofBundle?.markType) || 'ARRIVAL';
+        if (serviceRequestId) rememberQueuedMark(serviceRequestId, markType);
+      });
+    } catch (_error) {
+      // El backend sigue siendo la autoridad; este estado solo optimiza la etapa visible offline.
+    }
+  }
+
   function element(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -224,8 +289,8 @@
     style.textContent = `
       #${PANEL_ID}{margin:12px 0 16px;padding:14px;border:1px solid #99c8aa;border-radius:16px;background:#f1faf4;display:grid;gap:11px;color:#173b25}
       #${PANEL_ID} h3{margin:0;font-size:16px;color:#176c36}#${PANEL_ID} p{margin:0;font-size:12px;line-height:1.5;color:#55705f}
-      .native-presence-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end}.native-presence-field{display:grid;gap:4px}.native-presence-field label{font-size:11px;font-weight:850;color:#34553e}.native-presence-field select{width:100%;min-height:42px;border:1px solid #b9c9bd;border-radius:10px;background:#fff;padding:8px 10px;color:#173b25;font:inherit}
-      .native-presence-btn{min-height:44px;border:0;border-radius:11px;padding:9px 13px;background:#176c36;color:#fff;font:inherit;font-size:13px;font-weight:850;cursor:pointer}.native-presence-btn.secondary{background:#e4ece7;color:#234a30}.native-presence-btn:disabled{opacity:.55;cursor:wait}
+      .native-presence-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:end}.native-presence-field{display:grid;gap:4px}.native-presence-field label{font-size:11px;font-weight:850;color:#34553e}.native-presence-field select{width:100%;min-height:42px;border:1px solid #b9c9bd;border-radius:10px;background:#fff;padding:8px 10px;color:#173b25;font:inherit}
+      .native-presence-actions{display:grid;gap:7px}.native-presence-btn{min-height:44px;border:0;border-radius:11px;padding:9px 13px;background:#176c36;color:#fff;font:inherit;font-size:13px;font-weight:850;cursor:pointer}.native-presence-btn.secondary{background:#e4ece7;color:#234a30}.native-presence-btn:disabled{opacity:.55;cursor:wait}
       .native-presence-status{padding:10px 11px;border-radius:11px;background:#eaf8ef;color:#176c36;font-size:12px;font-weight:800;line-height:1.45}.native-presence-status.warning{background:#fff6df;color:#76520b}.native-presence-status.error{background:#fff1f2;color:#9f1239}
       .native-presence-count{font-size:26px;font-weight:900;color:#176c36;line-height:1}.native-presence-small{font-size:11px;color:#647568}
       .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
@@ -234,18 +299,27 @@
     document.head.appendChild(style);
   }
 
-  function hideLeaderIndividualArrival() {
+  function currentContext() {
+    return contexts.find((item) => item.serviceRequestId === selectedServiceRequestId) || contexts[0] || null;
+  }
+
+  function hideIndividualCrewMarks() {
     const context = currentContext();
-    if (!context?.isCrewLeader) return;
-    document.querySelectorAll('.mark-button[data-assignment-id][data-mark-type="ARRIVAL"]').forEach((button) => {
-      if (String(button.dataset.assignmentId || '') === context.assignmentId && !button.hidden) button.hidden = true;
+    if (!context) return;
+    document.querySelectorAll('.mark-button[data-assignment-id][data-mark-type]').forEach((button) => {
+      const markType = normalizeMarkType(button.dataset.markType);
+      if (
+        markType
+        && String(button.dataset.assignmentId || '') === context.assignmentId
+        && !button.hidden
+      ) button.hidden = true;
     });
   }
 
   function hideLegacyCrewBluetooth() {
     document.querySelectorAll('[data-crew-group-arrival="true"], [data-crew-force-majeure-wrap], #crew-without-face-access, [data-crew-bluetooth-status]')
       .forEach((node) => { if (!node.hidden) node.hidden = true; });
-    hideLeaderIndividualArrival();
+    hideIndividualCrewMarks();
   }
 
   function observeLegacyControls() {
@@ -255,7 +329,7 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-crew-group-arrival', 'data-assignment-id', 'data-mark-type', 'hidden']
+      attributeFilter: ['data-crew-group-arrival', 'data-assignment-id', 'data-mark-type', 'hidden', 'disabled']
     });
   }
 
@@ -286,8 +360,41 @@
         : 'Aún sin respuestas';
   }
 
-  function currentContext() {
-    return contexts.find((item) => item.serviceRequestId === selectedServiceRequestId) || contexts[0] || null;
+  function domCrewMarkActions(context) {
+    if (!context?.isCrewLeader) return [];
+    const seen = new Set();
+    const actions = [];
+    document.querySelectorAll('.mark-button[data-assignment-id][data-mark-type]').forEach((button) => {
+      if (String(button.dataset.assignmentId || '') !== context.assignmentId) return;
+      const markType = normalizeMarkType(button.dataset.markType);
+      if (!markType || seen.has(markType) || button.disabled) return;
+      seen.add(markType);
+      actions.push(markType);
+    });
+    return actions;
+  }
+
+  function optimisticOfflineActions(context) {
+    const queued = queuedMarkSet(context.serviceRequestId);
+    if (!queued.size) return null;
+    if (queued.has('DEPARTURE')) return [];
+    if (queued.has('BREAK_END')) return ['DEPARTURE'];
+    if (queued.has('BREAK_START')) return ['BREAK_END', 'DEPARTURE'];
+    if (queued.has('ARRIVAL')) return ['BREAK_START', 'DEPARTURE'];
+    return null;
+  }
+
+  function availableCrewMarkActions(context) {
+    if (!context?.isCrewLeader) return [];
+    if (retryNotDetectedCount > 0 && normalizeMarkType(retryMarkType)) return [retryMarkType];
+    return optimisticOfflineActions(context) ?? domCrewMarkActions(context);
+  }
+
+  function activePresentationMarkType(context) {
+    return normalizeMarkType(activeAttempt?.markType)
+      || normalizeMarkType(retryMarkType)
+      || availableCrewMarkActions(context)[0]
+      || 'ARRIVAL';
   }
 
   function phoneExceptionSet(serviceRequestId) {
@@ -297,56 +404,76 @@
     return phoneExceptionsByService.get(serviceRequestId);
   }
 
-  function serverStatusMap(serviceRequestId) {
-    if (!serverMemberStatusesByService.has(serviceRequestId)) {
-      serverMemberStatusesByService.set(serviceRequestId, new Map());
-    }
-    return serverMemberStatusesByService.get(serviceRequestId);
+  function statusScopeKey(serviceRequestId, markType) {
+    return `${serviceRequestId}:${normalizeMarkType(markType) || 'ARRIVAL'}`;
   }
 
-  function memberStatus(context, member) {
-    const serverStatus = serverStatusMap(context.serviceRequestId).get(member.workerId);
+  function serverStatusMap(serviceRequestId, markType) {
+    const key = statusScopeKey(serviceRequestId, markType);
+    if (!serverMemberStatusesByScope.has(key)) serverMemberStatusesByScope.set(key, new Map());
+    return serverMemberStatusesByScope.get(key);
+  }
+
+  function memberStatus(context, member, markType) {
+    const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    const serverStatus = serverStatusMap(context.serviceRequestId, normalizedMark).get(member.workerId);
     if (serverStatus === 'VERIFIED' || serverStatus === 'REGISTERED') return serverStatus;
-    if (member.arrivalReported) return 'REGISTERED';
+    if (normalizedMark === 'ARRIVAL' && member.arrivalReported) return 'REGISTERED';
     if (member.isLeader) return 'LEADER_DEVICE';
     if (serverStatus) return serverStatus;
-    if (phoneExceptionSet(context.serviceRequestId).has(member.workerId)) return 'NO_PHONE_REVIEW';
+    if (normalizedMark === 'ARRIVAL' && phoneExceptionSet(context.serviceRequestId).has(member.workerId)) {
+      return 'NO_PHONE_REVIEW';
+    }
     return 'PENDING';
   }
 
-  function expectedAuxiliaryProofCount(context) {
+  function expectedAuxiliaryProofCount(context, markType) {
     if (!context?.isCrewLeader || !Array.isArray(context.members)) return 0;
-    return context.members.filter((member) => !member.isLeader && memberStatus(context, member) === 'PENDING').length;
+    return context.members.filter((member) => (
+      !member.isLeader && memberStatus(context, member, markType) === 'PENDING'
+    )).length;
+  }
+
+  function pendingAuxiliaryCount(context, markType) {
+    if (!context?.isCrewLeader || !Array.isArray(context.members)) return 0;
+    return context.members.filter((member) => (
+      !member.isLeader && memberStatus(context, member, markType) === 'PENDING'
+    )).length;
   }
 
   function memberStatusPresentation(status) {
-    if (status === 'VERIFIED') return { label: '✓ Verificado', className: 'verified' };
+    if (status === 'VERIFIED') return { label: '✓ Detectado', className: 'verified' };
     if (status === 'REGISTERED') return { label: '✓ Registrado', className: 'registered' };
     if (status === 'LEADER_DEVICE') return { label: 'Este teléfono', className: 'self' };
     if (status === 'NO_PHONE_REVIEW') return { label: 'Sin teléfono · por revisar', className: 'no-phone' };
     return { label: 'Pendiente', className: 'pending' };
   }
 
-  function setMemberServerStatuses(serviceRequestId, statuses) {
-    const map = new Map();
+  function setMemberServerStatuses(serviceRequestId, markType, statuses) {
+    const map = serverStatusMap(serviceRequestId, markType);
     const phoneSet = phoneExceptionSet(serviceRequestId);
     (Array.isArray(statuses) ? statuses : []).forEach((item) => {
       const workerId = String(item?.workerId || '').trim();
       const status = String(item?.status || '').trim().toUpperCase();
       if (!workerId || !['VERIFIED', 'REGISTERED', 'NO_PHONE_REVIEW', 'PENDING'].includes(status)) return;
+      const previous = map.get(workerId);
+      if (status === 'PENDING' && ['VERIFIED', 'REGISTERED'].includes(previous)) return;
+      if (status === 'VERIFIED' && previous === 'REGISTERED') return;
       map.set(workerId, status);
-      if (status === 'NO_PHONE_REVIEW') phoneSet.add(workerId);
-      else if (status === 'VERIFIED' || status === 'REGISTERED') phoneSet.delete(workerId);
+      if (normalizeMarkType(markType) === 'ARRIVAL') {
+        if (status === 'NO_PHONE_REVIEW') phoneSet.add(workerId);
+        else if (status === 'VERIFIED' || status === 'REGISTERED') phoneSet.delete(workerId);
+      }
     });
-    serverMemberStatusesByService.set(serviceRequestId, map);
   }
 
-  function renderCrewMembers(panel, context) {
+  function renderCrewMembers(panel, context, markType) {
     if (!context?.isCrewLeader || !Array.isArray(context.members) || !context.members.length) return;
+    const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
     const list = element('div', 'native-presence-members');
     list.setAttribute('aria-label', 'Integrantes de la cuadrilla');
     context.members.forEach((member) => {
-      const status = memberStatus(context, member);
+      const status = memberStatus(context, member, normalizedMark);
       const presentation = memberStatusPresentation(status);
       const row = element('div', 'native-presence-member');
       row.dataset.nativePresenceMember = member.workerId;
@@ -358,8 +485,13 @@
       const side = element('div', 'native-presence-member-side');
       side.appendChild(element('span', `native-presence-badge ${presentation.className}`, presentation.label));
 
-      if (!member.isLeader && status === 'PENDING') {
-        const button = element('button', 'native-presence-member-action', 'Sin teléfono');
+      if (
+        normalizedMark === 'ARRIVAL'
+        && hasCompletedLeaderScan
+        && !member.isLeader
+        && status === 'PENDING'
+      ) {
+        const button = element('button', 'native-presence-member-action', 'Reportar sin teléfono');
         button.type = 'button';
         button.dataset.nativePresenceNoPhone = member.workerId;
         button.addEventListener('click', () => {
@@ -372,9 +504,10 @@
         restore.type = 'button';
         restore.addEventListener('click', () => {
           phoneExceptionSet(context.serviceRequestId).delete(member.workerId);
-          serverStatusMap(context.serviceRequestId).set(member.workerId, 'PENDING');
+          serverStatusMap(context.serviceRequestId, 'ARRIVAL').set(member.workerId, 'PENDING');
           pendingPhoneExceptionWorkerId = '';
           retryNotDetectedCount = Math.max(1, retryNotDetectedCount);
+          retryMarkType = 'ARRIVAL';
           hasCompletedLeaderScan = true;
           renderPanel();
           setStatus('Este auxiliar volverá a comprobarse en el próximo intento.', 'warning');
@@ -383,7 +516,11 @@
       }
       row.append(copy, side);
 
-      if (pendingPhoneExceptionWorkerId === member.workerId && status === 'PENDING') {
+      if (
+        normalizedMark === 'ARRIVAL'
+        && pendingPhoneExceptionWorkerId === member.workerId
+        && status === 'PENDING'
+      ) {
         const confirm = element('div', 'native-presence-confirm');
         confirm.appendChild(element('div', 'native-presence-confirm-copy', '¿Confirmar que está presente pero no tiene su teléfono?'));
         const actions = element('div', 'native-presence-confirm-actions');
@@ -391,7 +528,7 @@
         yes.type = 'button';
         yes.addEventListener('click', () => {
           phoneExceptionSet(context.serviceRequestId).add(member.workerId);
-          serverStatusMap(context.serviceRequestId).delete(member.workerId);
+          serverStatusMap(context.serviceRequestId, 'ARRIVAL').delete(member.workerId);
           pendingPhoneExceptionWorkerId = '';
           renderPanel();
           setStatus('Quedará como “Sin teléfono · por revisar” al confirmar esta entrada.', 'warning');
@@ -430,7 +567,7 @@
       permissions_required: 'Autoriza los permisos solicitados por Android para continuar.',
       bluetooth_disabled: 'Bluetooth está apagado. Actívalo para continuar.',
       bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible para verificar la cuadrilla.',
-      advertising_failed: 'No fue posible iniciar la verificación. Intenta nuevamente.',
+      advertising_failed: 'No fue posible iniciar la comprobación. Intenta nuevamente.',
       discovery_failed: 'No fue posible dejar este teléfono listo para asistencia. Intenta nuevamente.',
       connection_failed: 'Una conexión cercana falló. La comprobación continuará con los demás teléfonos.',
       connection_request_failed: 'No fue posible conectar este teléfono con el encargado.',
@@ -445,7 +582,7 @@
       native_bridge_failed: 'La aplicación no pudo comunicarse con Android.',
       native_location_unavailable: 'Android no pudo obtener una ubicación válida del encargado.',
       native_location_proof_failed: 'Android no pudo firmar la ubicación del encargado.',
-      mock_location_detected: 'Android detectó una ubicación simulada. La entrada de cuadrilla no puede continuar.',
+      mock_location_detected: 'Android detectó una ubicación simulada. La marcación de cuadrilla no puede continuar.',
       offline_queue_unavailable: 'La cola segura sin conexión no está disponible. Cierra y vuelve a abrir Lórren.'
     };
     return messages[code] || 'La comprobación local tuvo un inconveniente. Puedes volver a intentarlo.';
@@ -465,19 +602,27 @@
     return `${details}${suffix}`;
   }
 
-  function retryActionNode() {
-    return document.querySelector(`#${PANEL_ID} [data-native-presence-leader-scan]`);
-  }
-
-  function markRetryAvailable() {
+  function markRetryAvailable(markType) {
+    const normalized = normalizeMarkType(markType) || 'ARRIVAL';
     hasCompletedLeaderScan = true;
-    const action = retryActionNode();
-    if (action) action.textContent = 'Reintentar no detectados';
+    retryMarkType = normalized;
+    const action = document.querySelector(`#${PANEL_ID} [data-native-presence-leader-scan="${normalized}"]`);
+    if (action) action.textContent = markInfo(normalized).retry;
   }
 
   function clearAutoRetry() {
     if (autoRetryTimer !== null) window.clearTimeout(autoRetryTimer);
     autoRetryTimer = null;
+  }
+
+  function resetLeaderAttemptState() {
+    pendingPhoneExceptionWorkerId = '';
+    retryNotDetectedCount = 0;
+    retryMarkType = '';
+    hasCompletedLeaderScan = false;
+    autoRetryRemaining = 1;
+    scanVerifiedCount = 0;
+    scanPendingCount = 0;
   }
 
   function renderPanel() {
@@ -488,10 +633,10 @@
 
     panel = element('section');
     panel.id = PANEL_ID;
-    panel.setAttribute('aria-label', 'Entrada de cuadrilla');
+    panel.setAttribute('aria-label', 'Marcación de cuadrilla');
     panel.append(
-      element('h3', '', 'Entrada de cuadrilla'),
-      element('p', '', 'Detecta a los auxiliares presentes y registra su entrada con la del encargado.')
+      element('h3', '', 'Marcación de cuadrilla'),
+      element('p', '', 'Cada marcación comprueba localmente a los auxiliares presentes y registra únicamente a quienes fueron detectados con el encargado.')
     );
 
     if (!selectedServiceRequestId || !contexts.some((item) => item.serviceRequestId === selectedServiceRequestId)) {
@@ -513,39 +658,45 @@
     select.addEventListener('change', () => {
       stopNativeModes();
       selectedServiceRequestId = select.value;
-      pendingPhoneExceptionWorkerId = '';
-      retryNotDetectedCount = 0;
-      hasCompletedLeaderScan = false;
-      autoRetryRemaining = 1;
+      resetLeaderAttemptState();
       renderPanel();
-      ensureAuxiliaryReady().catch(() => {});
+      ensureAuxiliaryReady(true).catch(() => {});
     });
     field.append(label, select);
     row.appendChild(field);
 
     const context = currentContext();
+    const markActions = availableCrewMarkActions(context);
     if (context?.isCrewLeader) {
-      const action = element('button', 'native-presence-btn');
-      action.type = 'button';
-      action.textContent = retryNotDetectedCount > 0 || hasCompletedLeaderScan
-        ? 'Reintentar no detectados'
-        : 'Marcar entrada de la cuadrilla';
-      action.dataset.nativePresenceLeaderScan = 'true';
-      action.addEventListener('click', () => startLeaderScan(false));
-      row.appendChild(action);
+      const actions = element('div', 'native-presence-actions');
+      markActions.forEach((markType) => {
+        const action = element('button', 'native-presence-btn');
+        action.type = 'button';
+        action.textContent = retryNotDetectedCount > 0 && retryMarkType === markType
+          ? markInfo(markType).retry
+          : markInfo(markType).action;
+        action.dataset.nativePresenceLeaderScan = markType;
+        action.disabled = activeMode === 'LEADER';
+        action.addEventListener('click', () => startLeaderScan(markType, false));
+        actions.appendChild(action);
+      });
+      row.appendChild(actions);
     }
     panel.appendChild(row);
 
+    const presentationMarkType = activePresentationMarkType(context);
     const status = element('div', 'native-presence-status warning', context?.isCrewLeader
-      ? 'Listo para marcar la entrada de la cuadrilla.'
+      ? markActions.length
+        ? `Listo para ${markInfo(presentationMarkType).noun}. La app comprobará la cuadrilla antes de guardar la marca.`
+        : 'No hay una marcación de cuadrilla disponible en este momento.'
       : credentialPrepared()
-        ? 'Listo para asistencia.'
+        ? 'Listo para asistencia. Mantén la app abierta durante la comprobación del encargado.'
         : 'Conéctate una vez para preparar este teléfono.');
     status.dataset.nativePresenceStatus = 'true';
     panel.appendChild(status);
 
     if (context?.isCrewLeader) {
-      renderCrewMembers(panel, context);
+      renderCrewMembers(panel, context, presentationMarkType);
       const countWrap = element('div');
       const count = element('div', 'native-presence-count', '0');
       count.dataset.nativePresenceCount = 'true';
@@ -567,7 +718,7 @@
     }
 
     insertPanel(panel);
-    hideLeaderIndividualArrival();
+    hideIndividualCrewMarks();
     updateCount();
   }
 
@@ -584,10 +735,15 @@
     if (stop) stop.hidden = false;
   }
 
-  async function ensureAuxiliaryReady() {
+  async function ensureAuxiliaryReady(forceRestart = false) {
     const context = currentContext();
-    if (!context || context.isCrewLeader || ['PREPARING', 'READY'].includes(activeMode)) return;
+    if (!context || context.isCrewLeader || activeMode === 'PREPARING') return;
     if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
+    if (forceRestart && activeMode === 'READY') {
+      bridgeCall('stopReady');
+      activeMode = 'IDLE';
+    }
+    if (activeMode === 'READY') return;
     await startReady();
   }
 
@@ -610,28 +766,35 @@
       return;
     }
     activeMode = 'READY';
-    setStatus('Listo para asistencia.', '');
+    setStatus('Listo para asistencia. Mantén la app abierta durante la comprobación del encargado.', '');
   }
 
-  async function startLeaderScan(automaticRetry = false) {
+  async function startLeaderScan(markType, automaticRetry = false) {
     const context = currentContext();
-    if (!context?.isCrewLeader || activeMode === 'LEADER') return;
+    const normalizedMark = normalizeMarkType(markType);
+    if (!context?.isCrewLeader || !normalizedMark || activeMode === 'LEADER') return;
     clearAutoRetry();
     pendingPhoneExceptionWorkerId = '';
     pendingCompletedScan = null;
-    if (!automaticRetry) autoRetryRemaining = 1;
+    retryMarkType = normalizedMark;
+    if (normalizedMark !== 'ARRIVAL') phoneExceptionSet(context.serviceRequestId).clear();
+    if (!automaticRetry) {
+      autoRetryRemaining = 1;
+      retryNotDetectedCount = 0;
+      hasCompletedLeaderScan = false;
+    }
     scanTransientFailureCount = 0;
     scanVerifiedCount = 0;
     scanPendingCount = 0;
     updateCount();
 
     const attemptId = newAttemptId();
-    const expectedProofCount = expectedAuxiliaryProofCount(context);
+    const expectedProofCount = expectedAuxiliaryProofCount(context, normalizedMark);
     const payload = {
       version: 1,
       serviceRequestId: context.serviceRequestId,
       attemptId,
-      challenge: randomToken(32),
+      challenge: `lorren-mark-v1:${normalizedMark}:${randomToken(32)}`,
       timeoutMs: DEFAULT_SCAN_MS,
       expectedProofCount
     };
@@ -639,6 +802,7 @@
       idempotencyKey: attemptId,
       assignmentId: context.assignmentId,
       serviceRequestId: context.serviceRequestId,
+      markType: normalizedMark,
       expectedProofCount
     };
     const result = bridgeCall('startCrewScan', JSON.stringify(payload));
@@ -648,8 +812,14 @@
       return;
     }
     activeMode = 'LEADER';
+    renderPanel();
     showStop();
-    setStatus(automaticRetry ? 'Reintentando automáticamente a quienes faltan…' : 'Comprobando la cuadrilla para marcar la entrada…', 'warning');
+    setStatus(
+      automaticRetry
+        ? `Reintentando automáticamente la ${markInfo(normalizedMark).noun} para quienes faltan…`
+        : `Comprobando la cuadrilla para ${markInfo(normalizedMark).noun}…`,
+      'warning'
+    );
   }
 
   function stopNativeModes() {
@@ -697,50 +867,63 @@
     ) {
       throw new Error('crew_proof_bundle_invalid');
     }
-    proofBundle.phoneExceptions = [...phoneExceptionSet(attempt.serviceRequestId)].map((workerId) => ({
-      workerId,
-      reason: PHONE_EXCEPTION_REASON
-    }));
+    proofBundle.markType = attempt.markType;
+    proofBundle.phoneExceptions = attempt.markType === 'ARRIVAL'
+      ? [...phoneExceptionSet(attempt.serviceRequestId)].map((workerId) => ({
+          workerId,
+          reason: PHONE_EXCEPTION_REASON
+        }))
+      : [];
     const nativeLocation = nativeLocationFromBundle(proofBundle);
     const offline = window.LorrenWorkerPortalOffline;
     if (typeof offline?.queueCrewPresence !== 'function') throw new Error('offline_queue_unavailable');
     const queued = await offline.queueCrewPresence({ ...attempt, ...nativeLocation, proofBundle });
+    rememberQueuedMark(attempt.serviceRequestId, attempt.markType);
     if (navigator.onLine && typeof offline.syncNow === 'function') offline.syncNow().catch(() => {});
-    return { queued, proofCount: proofBundle.proofs.length };
+    return { queued, proofCount: proofBundle.proofs.length, markType: attempt.markType };
   }
 
   function finishCompletedScan(completion) {
     if (!completion || !activeAttempt) return;
+    const completionMarkType = normalizeMarkType(completion.markType || activeAttempt.markType) || 'ARRIVAL';
     queueCompletedAttempt()
       .then(({ proofCount }) => {
         activeAttempt = null;
         pendingCompletedScan = null;
-        const incomplete = completion.expectedProofCount > 0 && proofCount < completion.expectedProofCount;
+        retryNotDetectedCount = Math.max(0, completion.expectedProofCount - proofCount);
+        const incomplete = retryNotDetectedCount > 0;
+        hasCompletedLeaderScan = incomplete;
+        retryMarkType = incomplete ? completionMarkType : '';
+        renderPanel();
         if ((completion.transientFailures > 0 || incomplete) && autoRetryRemaining > 0) {
           autoRetryRemaining -= 1;
           setStatus(
             incomplete
-              ? 'Faltan respuestas. Lórren reintentará automáticamente una vez.'
-              : 'Entrada guardada. Hubo un problema de conexión local; Lórren reintentará automáticamente.',
+              ? `Faltan respuestas para la ${markInfo(completionMarkType).noun}. Lórren reintentará automáticamente una vez.`
+              : `Marcación guardada. Hubo un problema de conexión local; Lórren reintentará automáticamente.`,
             'warning'
           );
           autoRetryTimer = window.setTimeout(() => {
             autoRetryTimer = null;
-            startLeaderScan(true);
+            startLeaderScan(completionMarkType, true);
           }, AUTO_RETRY_DELAY_MS);
           return;
         }
         setStatus(
           navigator.onLine
-            ? 'Entrada de cuadrilla enviada; esperando confirmación.'
-            : 'Entrada de cuadrilla guardada sin conexión; se sincronizará cuando vuelva Internet.',
+            ? `${markInfo(completionMarkType).title} de cuadrilla enviada; esperando confirmación.`
+            : `${markInfo(completionMarkType).title} de cuadrilla guardada sin conexión; se sincronizará cuando vuelva Internet.`,
           navigator.onLine ? '' : 'warning'
         );
+        if (incomplete) markRetryAvailable(completionMarkType);
       })
       .catch((error) => {
         if (error?.message === 'native_location_unavailable' && activeAttempt) {
           pendingCompletedScan = completion;
-          setStatus('Teléfonos comprobados. Esperando la ubicación GPS del encargado para guardar la entrada…', 'warning');
+          setStatus(
+            `Teléfonos comprobados. Esperando la mejor ubicación del encargado para guardar la ${markInfo(completionMarkType).noun}…`,
+            'warning'
+          );
           return;
         }
         pendingCompletedScan = null;
@@ -756,7 +939,7 @@
       const context = currentContext();
       if (detail.granted && context && !context.isCrewLeader) {
         setStatus('Permisos listos. Preparando asistencia…', 'warning');
-        ensureAuxiliaryReady().catch(() => {});
+        ensureAuxiliaryReady(true).catch(() => {});
       } else {
         setStatus(detail.granted
           ? 'Permisos listos. Pulsa nuevamente para continuar.'
@@ -768,7 +951,7 @@
       const context = currentContext();
       if (detail.enabled && context && !context.isCrewLeader) {
         setStatus('Bluetooth listo. Preparando asistencia…', 'warning');
-        ensureAuxiliaryReady().catch(() => {});
+        ensureAuxiliaryReady(true).catch(() => {});
       } else {
         setStatus(detail.enabled
           ? 'Bluetooth listo. Pulsa nuevamente para continuar.'
@@ -778,13 +961,14 @@
     }
     if (type === 'ready') {
       activeMode = 'READY';
-      setStatus('Listo para asistencia.', '');
+      setStatus('Listo para asistencia. Mantén la app abierta durante la comprobación del encargado.', '');
       showStop();
       return;
     }
     if (type === 'scan_started') {
       activeMode = 'LEADER';
-      setStatus('Comprobando la cuadrilla para marcar la entrada…', 'warning');
+      const markType = normalizeMarkType(activeAttempt?.markType) || 'ARRIVAL';
+      setStatus(`Comprobando la cuadrilla para ${markInfo(markType).noun}…`, 'warning');
       showStop();
       return;
     }
@@ -801,14 +985,15 @@
       return;
     }
     if (type === 'proof_sent') {
-      setStatus('Presencia enviada al encargado para la entrada.', '');
+      setStatus('Presencia enviada al encargado para esta marcación.', '');
       return;
     }
     if (type === 'native_location_ready') {
       if (pendingCompletedScan && activeAttempt) {
         const completion = pendingCompletedScan;
+        const markType = normalizeMarkType(completion.markType || activeAttempt.markType) || 'ARRIVAL';
         pendingCompletedScan = null;
-        setStatus('Ubicación lista. Guardando la entrada de la cuadrilla…', 'warning');
+        setStatus(`Ubicación lista. Guardando la ${markInfo(markType).noun} de la cuadrilla…`, 'warning');
         finishCompletedScan(completion);
       }
       return;
@@ -818,10 +1003,11 @@
       scanPendingCount = 0;
       updateCount();
       activeMode = 'IDLE';
-      markRetryAvailable();
+      const markType = normalizeMarkType(activeAttempt?.markType) || 'ARRIVAL';
       const stop = document.querySelector(`#${PANEL_ID} [data-native-presence-stop]`);
       if (stop) stop.hidden = true;
       const completion = {
+        markType,
         transientFailures: scanTransientFailureCount,
         expectedProofCount: Math.max(0, Number(activeAttempt?.expectedProofCount ?? detail.expectedProofCount ?? 0))
       };
@@ -850,22 +1036,31 @@
     if (message.type === 'CREW_PRESENCE_SYNCED') {
       const payload = message.payload || {};
       const serviceRequestId = String(payload.serviceRequestId || selectedServiceRequestId || '').trim();
-      if (serviceRequestId) setMemberServerStatuses(serviceRequestId, payload.memberStatuses);
-      retryNotDetectedCount = Math.max(0, Number(payload.notDetectedCount || 0));
+      const markType = normalizeMarkType(payload.markType) || 'ARRIVAL';
+      if (serviceRequestId) setMemberServerStatuses(serviceRequestId, markType, payload.memberStatuses);
+      const context = contexts.find((item) => item.serviceRequestId === serviceRequestId) || currentContext();
+      retryNotDetectedCount = pendingAuxiliaryCount(context, markType);
+      retryMarkType = retryNotDetectedCount > 0 ? markType : '';
       hasCompletedLeaderScan = retryNotDetectedCount > 0;
       pendingPhoneExceptionWorkerId = '';
       renderPanel();
-      setStatus(`Entrada de cuadrilla actualizada. ${payload.message || ''}`.trim(), payload.requiresReview ? 'warning' : '');
-      if (retryNotDetectedCount > 0) markRetryAvailable();
+      setStatus(`${markInfo(markType).title} de cuadrilla actualizada. ${payload.message || ''}`.trim(), payload.requiresReview ? 'warning' : '');
+      if (retryNotDetectedCount > 0) {
+        markRetryAvailable(markType);
+      } else if (navigator.onLine) {
+        window.setTimeout(() => window.location.reload(), 350);
+      }
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {
-      setStatus('No fue posible registrar la entrada de la cuadrilla. Revisa a quienes siguen pendientes e intenta nuevamente.', 'error');
+      const markType = normalizeMarkType(message.payload?.markType) || normalizeMarkType(retryMarkType) || 'ARRIVAL';
+      setStatus(`No fue posible registrar la ${markInfo(markType).noun} de la cuadrilla. Revisa el estado e intenta nuevamente.`, 'error');
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_RETRY') {
       if (Number(message.retryAfterMs || 0) > 0) {
-        setStatus('La entrada de cuadrilla sigue pendiente y Lórren la reintentará automáticamente.', 'warning');
+        const markType = normalizeMarkType(retryMarkType) || 'ARRIVAL';
+        setStatus(`La ${markInfo(markType).noun} de cuadrilla sigue pendiente y Lórren la reintentará automáticamente.`, 'warning');
       }
     }
   }
@@ -875,6 +1070,7 @@
     if (!caps?.androidNative || caps?.offlineNearby !== true || caps?.attendanceWriter !== false) return;
     observeLegacyControls();
     contexts = await loadContexts();
+    await hydrateLocalQueuedMarks();
     if (navigator.onLine) await provisionCredential();
     renderPanel();
     await ensureAuxiliaryReady();
@@ -885,12 +1081,16 @@
   window.addEventListener('online', async () => {
     contexts = await loadContexts();
     await provisionCredential();
+    await hydrateLocalQueuedMarks();
     renderPanel();
-    await ensureAuxiliaryReady();
+    await ensureAuxiliaryReady(true);
     window.LorrenWorkerPortalOffline?.syncNow?.().catch(() => {});
   });
   window.addEventListener('focus', () => {
-    ensureAuxiliaryReady().catch(() => {});
+    ensureAuxiliaryReady(true).catch(() => {});
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') ensureAuxiliaryReady(true).catch(() => {});
   });
   window.addEventListener('beforeunload', stopNativeModes, { once: true });
 

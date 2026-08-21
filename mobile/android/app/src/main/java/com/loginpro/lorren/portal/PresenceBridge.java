@@ -23,6 +23,7 @@ final class PresenceBridge {
     private static final String NATIVE_ATTENDANCE_LOCATION_CONTEXT = "lorren-native-attendance-location-v1";
     private static final long MAX_LAST_LOCATION_AGE_MS = 30_000L;
     private static final long LOCATION_TIMEOUT_MS = 15_000L;
+    private static final float TARGET_LOCATION_ACCURACY_METERS = 50f;
 
     private interface NativeLocationSink {
         void onLocation(Location location);
@@ -212,12 +213,18 @@ final class PresenceBridge {
         }
 
         Location recent = allowRecent ? freshestLastKnownLocation() : null;
-        boolean deliveredRecent = recent != null;
-        if (deliveredRecent) sink.onLocation(recent);
+        if (locationAccuracyAcceptable(recent)) {
+            sink.onLocation(new Location(recent));
+            return;
+        }
+        final Location[] bestLocation = new Location[] {
+            recent == null ? null : new Location(recent)
+        };
 
         String[] providers = enabledLocationProviders();
         if (providers.length == 0) {
-            if (!deliveredRecent) sink.onError("native_location_unavailable");
+            if (bestLocation[0] != null) sink.onLocation(new Location(bestLocation[0]));
+            else sink.onError("native_location_unavailable");
             return;
         }
 
@@ -225,11 +232,19 @@ final class PresenceBridge {
         LocationListener listener = new LocationListener() {
             @Override
             public void onLocationChanged(Location location) {
+                Location selected = null;
                 synchronized (PresenceBridge.this) {
                     if (pendingLocationListener != this) return;
+                    if (isBetterLocation(location, bestLocation[0])) {
+                        bestLocation[0] = new Location(location);
+                    }
+                    if (locationAccuracyAcceptable(bestLocation[0])) {
+                        selected = new Location(bestLocation[0]);
+                    }
                 }
+                if (selected == null) return;
                 cancelPendingLocation();
-                sink.onLocation(location);
+                sink.onLocation(selected);
             }
 
             @Override
@@ -248,8 +263,13 @@ final class PresenceBridge {
         synchronized (this) {
             pendingLocationListener = listener;
             pendingLocationTimeout = () -> {
+                Location selected;
+                synchronized (PresenceBridge.this) {
+                    selected = bestLocation[0] == null ? null : new Location(bestLocation[0]);
+                }
                 cancelPendingLocation();
-                if (!deliveredRecent) sink.onError("native_location_unavailable");
+                if (selected != null) sink.onLocation(selected);
+                else sink.onError("native_location_unavailable");
             };
         }
         try {
@@ -267,8 +287,13 @@ final class PresenceBridge {
                     }
                 }
                 if (requestedProviders == 0) {
+                    Location selected;
+                    synchronized (PresenceBridge.this) {
+                        selected = bestLocation[0] == null ? null : new Location(bestLocation[0]);
+                    }
                     cancelPendingLocation();
-                    if (!deliveredRecent) sink.onError("native_location_unavailable");
+                    if (selected != null) sink.onLocation(selected);
+                    else sink.onError("native_location_unavailable");
                     return;
                 }
                 Runnable timeout;
@@ -278,8 +303,13 @@ final class PresenceBridge {
                 if (timeout != null) mainHandler.postDelayed(timeout, LOCATION_TIMEOUT_MS);
             });
         } catch (Exception error) {
+            Location selected;
+            synchronized (this) {
+                selected = bestLocation[0] == null ? null : new Location(bestLocation[0]);
+            }
             cancelPendingLocation();
-            sink.onError("native_location_unavailable");
+            if (selected != null) sink.onLocation(selected);
+            else sink.onError("native_location_unavailable");
         }
     }
 
@@ -289,8 +319,12 @@ final class PresenceBridge {
             try {
                 if (!locationManager.isProviderEnabled(provider)) continue;
                 Location candidate = locationManager.getLastKnownLocation(provider);
-                if (candidate == null || locationAgeMs(candidate) > MAX_LAST_LOCATION_AGE_MS) continue;
-                if (best == null || candidate.getAccuracy() < best.getAccuracy()) best = candidate;
+                if (
+                    candidate == null
+                    || !candidate.hasAccuracy()
+                    || locationAgeMs(candidate) > MAX_LAST_LOCATION_AGE_MS
+                ) continue;
+                if (isBetterLocation(candidate, best)) best = new Location(candidate);
             } catch (SecurityException ignored) {
                 return null;
             } catch (Exception ignored) {
@@ -313,6 +347,22 @@ final class PresenceBridge {
         if (gpsEnabled) return new String[] { LocationManager.GPS_PROVIDER };
         if (networkEnabled) return new String[] { LocationManager.NETWORK_PROVIDER };
         return new String[0];
+    }
+
+    private static boolean locationAccuracyAcceptable(Location location) {
+        return location != null
+            && location.hasAccuracy()
+            && location.getAccuracy() <= TARGET_LOCATION_ACCURACY_METERS;
+    }
+
+    private static boolean isBetterLocation(Location candidate, Location current) {
+        if (candidate == null || !candidate.hasAccuracy()) return false;
+        if (current == null || !current.hasAccuracy()) return true;
+        float candidateAccuracy = candidate.getAccuracy();
+        float currentAccuracy = current.getAccuracy();
+        if (candidateAccuracy + 1f < currentAccuracy) return true;
+        return Math.abs(candidateAccuracy - currentAccuracy) <= 1f
+            && candidate.getTime() > current.getTime();
     }
 
     private static long locationAgeMs(Location location) {
