@@ -13,6 +13,11 @@ import {
 const mobile = fs.readFileSync('src/public/worker-biometric-mobile.js', 'utf8');
 const TEST_SECRET = 'TEST-biometric-secret-000000000000000000000000';
 
+test('cliente no muestra el aviso intermedio de rostro real', () => {
+  assert.doesNotMatch(mobile, /Validando que sea un rostro real/);
+  assert.match(mobile, /scores\.realScore < MIN_REAL_SCORE/);
+});
+
 function descriptor() {
   return Array.from({ length: 128 }, (_, index) => (index === 0 ? 1 : 0));
 }
