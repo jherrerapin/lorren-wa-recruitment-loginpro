@@ -300,16 +300,30 @@ public final class MainActivity extends Activity {
         permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
     }
 
+    private boolean hasNearbyBluetoothPermissions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
+        return hasPermission(Manifest.permission.BLUETOOTH_SCAN)
+            && hasPermission(Manifest.permission.BLUETOOTH_CONNECT)
+            && hasPermission(Manifest.permission.BLUETOOTH_ADVERTISE);
+    }
+
+    private void addNearbyBluetoothPermissionsIfNeeded(List<String> permissions) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || hasNearbyBluetoothPermissions()) return;
+        permissions.add(Manifest.permission.BLUETOOTH_SCAN);
+        permissions.add(Manifest.permission.BLUETOOTH_CONNECT);
+        permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE);
+    }
+
+    private boolean requiresNearbyWifiPermission() {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
+    }
+
     private List<String> attendancePermissions(boolean includeCamera) {
         List<String> missing = new ArrayList<>();
         if (includeCamera) addIfMissing(missing, Manifest.permission.CAMERA);
         addPreciseLocationPermissionsIfNeeded(missing);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            addIfMissing(missing, Manifest.permission.BLUETOOTH_SCAN);
-            addIfMissing(missing, Manifest.permission.BLUETOOTH_CONNECT);
-            addIfMissing(missing, Manifest.permission.BLUETOOTH_ADVERTISE);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        addNearbyBluetoothPermissionsIfNeeded(missing);
+        if (requiresNearbyWifiPermission()) {
             addIfMissing(missing, Manifest.permission.NEARBY_WIFI_DEVICES);
         }
         return missing;
@@ -409,12 +423,8 @@ public final class MainActivity extends Activity {
 
     private boolean nearbyPermissionsGranted() {
         if (!hasPreciseLocationPermission()) return false;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (!hasPermission(Manifest.permission.BLUETOOTH_SCAN)) return false;
-            if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) return false;
-            if (!hasPermission(Manifest.permission.BLUETOOTH_ADVERTISE)) return false;
-        }
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+        if (!hasNearbyBluetoothPermissions()) return false;
+        return !requiresNearbyWifiPermission()
             || hasPermission(Manifest.permission.NEARBY_WIFI_DEVICES);
     }
 
