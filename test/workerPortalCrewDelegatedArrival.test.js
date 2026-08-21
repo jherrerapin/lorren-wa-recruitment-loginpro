@@ -67,7 +67,7 @@ function crewContext(overrides = {}) {
 
 const contexts = (...items) => async () => items;
 
-test('auxiliar de cuadrilla disponible no recibe acción individual de llegada', async () => {
+test('auxiliar de cuadrilla disponible delega todas sus marcaciones al encargado', async () => {
   const [assignment] = await loadWorkerPortalAssignments(prismaFor(), {
     workerId: WORKER_ID,
     now: NOW,
@@ -75,9 +75,14 @@ test('auxiliar de cuadrilla disponible no recibe acción individual de llegada',
   });
 
   assert.equal(assignment.arrivalDelegatedToCrewLeader, true);
+  assert.equal(assignment.markDelegatedToCrewLeader, true);
   assert.equal(assignment.canRegisterArrival, false);
+  assert.equal(assignment.canStartBreak, false);
+  assert.equal(assignment.canEndBreak, false);
+  assert.equal(assignment.canRegisterDeparture, false);
+  assert.equal(assignment.breakActionType, null);
   assert.equal(assignment.actionType, 'BLOCKED');
-  assert.equal(assignment.actionLabel, 'La llegada la registra el encargado de cuadrilla');
+  assert.equal(assignment.actionLabel, 'Las marcaciones las registra el encargado de cuadrilla');
   assert.doesNotMatch(assignment.actionLabel, /registrar llegada|marcar entrada/i);
 });
 
@@ -94,14 +99,16 @@ test('encargado conserva la llegada de cuadrilla y un crew no disponible conserv
   });
 
   assert.equal(leader.arrivalDelegatedToCrewLeader, false);
+  assert.equal(leader.markDelegatedToCrewLeader, false);
   assert.equal(leader.canRegisterArrival, true);
   assert.equal(leader.actionLabel, 'Registrar llegada');
   assert.equal(unavailable.arrivalDelegatedToCrewLeader, false);
+  assert.equal(unavailable.markDelegatedToCrewLeader, false);
   assert.equal(unavailable.canRegisterArrival, true);
   assert.equal(unavailable.actionLabel, 'Registrar llegada');
 });
 
-test('consulta puntual de llegada bloquea al auxiliar crew pero no altera otras marcas', async () => {
+test('consulta puntual bloquea cualquier marcación individual del auxiliar crew disponible', async () => {
   const prisma = prismaFor();
   const input = {
     workerId: WORKER_ID,
@@ -114,8 +121,7 @@ test('consulta puntual de llegada bloquea al auxiliar crew pero no altera otras 
   const genericMark = await loadWorkerPortalAssignmentForMark(prisma, input);
 
   assert.equal(arrival, null);
-  assert.equal(genericMark?.id, ASSIGNMENT_ID);
-  assert.equal(genericMark?.canRegisterArrival, true);
+  assert.equal(genericMark, null);
 });
 
 test('la vista consume la proyección server-side y no inventa otra regla de cuadrilla', async () => {
