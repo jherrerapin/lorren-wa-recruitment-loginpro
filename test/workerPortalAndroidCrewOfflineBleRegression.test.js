@@ -44,23 +44,52 @@ test('encargado termina al recibir todas las proofs y hace como máximo un reint
   assert.match(nearby, /expectedProofCount > 0 && proofsByKey\.size\(\) >= expectedProofCount[\s\S]{0,120}completeLeaderScan\(attemptId\)/);
 
   assert.match(nativePresence, /let autoRetryRemaining = 1;/);
-  assert.match(nativePresence, /const incomplete = expectedProofCount > 0 && proofCount < expectedProofCount;/);
-  assert.match(nativePresence, /\(transientFailures > 0 \|\| incomplete\) && autoRetryRemaining > 0/);
+  assert.match(nativePresence, /const incomplete = completion\.expectedProofCount > 0 && proofCount < completion\.expectedProofCount;/);
+  assert.match(nativePresence, /\(completion\.transientFailures > 0 \|\| incomplete\) && autoRetryRemaining > 0/);
   assert.match(nativePresence, /autoRetryRemaining -= 1;/);
 });
 
-test('verificación local se encola offline y solo sincroniza cuando vuelve Internet', async () => {
+test('scan terminado espera GPS tardío y conserva el intento hasta poder encolar la entrada', async () => {
+  const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
+
+  assert.match(nativePresence, /let pendingCompletedScan = null;/);
+  assert.match(
+    nativePresence,
+    /error\?\.message === 'native_location_unavailable'[\s\S]{0,220}pendingCompletedScan = completion[\s\S]{0,220}Esperando la ubicación GPS del encargado/
+  );
+  assert.match(
+    nativePresence,
+    /type === 'native_location_ready'[\s\S]{0,260}pendingCompletedScan[\s\S]{0,260}finishCompletedScan\(completion\)/
+  );
+  assert.match(
+    nativePresence,
+    /type === 'scan_complete'[\s\S]{0,520}pendingCompletedScan = completion;[\s\S]{0,100}finishCompletedScan\(completion\)/
+  );
+});
+
+test('la comprobación nativa es la propia entrada de cuadrilla y oculta la llegada individual del encargado', async () => {
+  const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
+
+  assert.match(nativePresence, /Entrada de cuadrilla/);
+  assert.match(nativePresence, /Marcar entrada de la cuadrilla/);
+  assert.match(nativePresence, /function hideLeaderIndividualArrival\(\)/);
+  assert.match(nativePresence, /\.mark-button\[data-assignment-id\]\[data-mark-type="ARRIVAL"\]/);
+  assert.match(nativePresence, /button\.hidden = true/);
+  assert.match(nativePresence, /Entrada de cuadrilla actualizada\./);
+});
+
+test('entrada local se encola offline y solo sincroniza cuando vuelve Internet', async () => {
   const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
 
   const startLeaderScan = nativePresence.match(/async function startLeaderScan\(automaticRetry = false\) \{([\s\S]*?)\n  \}\n\n  function stopNativeModes/);
-  const queueCompletedAttempt = nativePresence.match(/async function queueCompletedAttempt\(\) \{([\s\S]*?)\n  \}\n\n  function handleNativeEvent/);
+  const queueCompletedAttempt = nativePresence.match(/async function queueCompletedAttempt\(\) \{([\s\S]*?)\n  \}\n\n  function finishCompletedScan/);
 
   assert.ok(startLeaderScan, 'falta startLeaderScan');
   assert.ok(queueCompletedAttempt, 'falta queueCompletedAttempt');
   assert.doesNotMatch(startLeaderScan[1], /navigator\.onLine/);
   assert.match(queueCompletedAttempt[1], /offline\.queueCrewPresence/);
-  assert.match(queueCompletedAttempt[1], /if \(navigator\.onLine && typeof offline\?\.syncNow === 'function'\) offline\.syncNow\(\)/);
+  assert.match(queueCompletedAttempt[1], /if \(navigator\.onLine && typeof offline\.syncNow === 'function'\) offline\.syncNow\(\)/);
   assert.match(nativePresence, /if \(!navigator\.onLine\) return readCachedContexts\(\);/);
   assert.match(nativePresence, /if \(!navigator\.onLine\) return credentialPrepared\(\);/);
-  assert.match(nativePresence, /Guardada sin conexión; se sincronizará cuando vuelva Internet\./);
+  assert.match(nativePresence, /Entrada de cuadrilla guardada sin conexión; se sincronizará cuando vuelva Internet\./);
 });
