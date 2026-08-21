@@ -41,6 +41,7 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.doesNotMatch(appBuild, /loginpro\.(com|co)|railway\.app|railway\.com/i);
 
   for (const permission of [
+    'ACCESS_COARSE_LOCATION',
     'ACCESS_FINE_LOCATION',
     'BLUETOOTH_ADVERTISE',
     'BLUETOOTH_CONNECT',
@@ -70,7 +71,17 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(mainActivity, /prepareAttendanceDeviceOnce\(\)/);
   assert.match(mainActivity, /attendancePermissions\(true\)/);
   assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.CAMERA\)/);
+  assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.ACCESS_COARSE_LOCATION\)/);
   assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.ACCESS_FINE_LOCATION\)/);
+  assert.match(mainActivity, /private String\[\] locationRuntimePermissions\(\)/);
+  assert.match(
+    mainActivity,
+    /locationRuntimePermissions\(\)[\s\S]{0,260}ACCESS_COARSE_LOCATION[\s\S]{0,120}ACCESS_FINE_LOCATION/
+  );
+  assert.match(
+    mainActivity,
+    /onGeolocationPermissionsShowPrompt[\s\S]{0,700}requestRuntimePermissions\(locationRuntimePermissions\(\), REQUEST_GEOLOCATION\)/
+  );
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
@@ -81,6 +92,10 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(mainActivity, /REQUEST_ENABLE_BLUETOOTH/);
   assert.match(mainActivity, /"bluetooth_unavailable"/);
   assert.match(mainActivity, /"bluetooth_disabled"/);
+  assert.match(
+    mainActivity,
+    /nearbyPermissionsGranted\(\)[\s\S]{0,700}ACCESS_COARSE_LOCATION[\s\S]{0,180}ACCESS_FINE_LOCATION/
+  );
 
   const stopLifecycle = mainActivity.match(/protected void onStop\(\) \{([\s\S]*?)\n    \}/);
   assert.ok(stopLifecycle, 'falta detectar una salida real de la app');
