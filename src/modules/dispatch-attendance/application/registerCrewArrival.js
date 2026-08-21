@@ -55,12 +55,12 @@ function normalizeCaptureMode(value) {
   return typeof value === 'string' ? value.trim().toUpperCase() : '';
 }
 
-function normalizeValidatedWorkerIds(value) {
-  if (!Array.isArray(value)) throw new Error('crew_group_arrival_validated_workers_required');
+function normalizeValidatedWorkerIds(value, prefix = 'crew_group_arrival') {
+  if (!Array.isArray(value)) throw new Error(`${prefix}_validated_workers_required`);
   const normalized = [];
   const seen = new Set();
   for (const workerId of value) {
-    const current = requireString(workerId, 'crew_group_arrival_validated_worker_id', 160);
+    const current = requireString(workerId, `${prefix}_validated_worker_id`, 160);
     if (seen.has(current)) continue;
     seen.add(current);
     normalized.push(current);
@@ -383,8 +383,15 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
   const markType = normalizeCrewDelegatedMarkType(input.markType);
   const captureMode = normalizeCaptureMode(input.captureMode);
   const now = requireDate(input.now ?? new Date(), 'crew_group_mark_now');
+  const presenceValidated = input.presenceValidated === true;
+  const validatedWorkerIds = presenceValidated
+    ? normalizeValidatedWorkerIds(input.validatedWorkerIds, 'crew_group_mark')
+    : null;
   if (![ONLINE_WEB_CAPTURE_MODE, OFFLINE_WEB_CAPTURE_MODE].includes(captureMode)) {
     throw new Error('crew_group_mark_capture_mode_invalid');
+  }
+  if (presenceValidated && !validatedWorkerIds.includes(leaderWorkerId)) {
+    throw new Error('crew_group_mark_leader_presence_required');
   }
 
   const options = {
@@ -415,12 +422,16 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
     throw new Error('crew_group_mark_leader_not_assigned');
   }
 
+  const selectedWorkerSet = presenceValidated ? new Set(validatedWorkerIds) : null;
+  const selectedMembers = presenceValidated
+    ? members.filter((member) => selectedWorkerSet.has(member.workerId))
+    : members;
   const registerMarkFn = markType === 'DEPARTURE'
     ? options.registerDepartureFn
     : options.registerBreakFn;
   const orderedMembers = [
-    ...members.filter((member) => member.id === leaderAssignmentId),
-    ...members.filter((member) => member.id !== leaderAssignmentId)
+    ...selectedMembers.filter((member) => member.id === leaderAssignmentId),
+    ...selectedMembers.filter((member) => member.id !== leaderAssignmentId)
   ];
   const results = [];
   let leaderResult = null;
@@ -479,6 +490,7 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
   const failedCount = results.filter((item) => item.status === 'NOT_RECORDED').length;
   const reviewPendingCount = results.filter((item) => item.pendingReview === true).length;
   const delegatedCount = results.filter((item) => item.isLeader === false && ['RECORDED', 'REPLAYED'].includes(item.status)).length;
+  const notDetectedCount = presenceValidated ? Math.max(0, members.length - selectedMembers.length) : 0;
 
   return {
     applied: true,
@@ -486,12 +498,15 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
     summary: {
       markType,
       totalMembers: members.length,
+      eligibleMembers: selectedMembers.length,
       processedCount: newlyRecordedCount + replayedCount,
+      notDetectedCount,
       newlyRecordedCount,
       replayedCount,
       failedCount,
       reviewPendingCount,
       delegatedCount,
+      presenceValidated,
       results
     }
   };
