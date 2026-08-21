@@ -15,6 +15,30 @@ const AUTO_VALIDATED = 'AUTO_VALIDATED';
 const MANUAL_VALIDATED = 'MANUAL_VALIDATED';
 const VALIDATED_STATUSES = new Set([AUTO_VALIDATED, MANUAL_VALIDATED]);
 const CREW_DELEGATED_MARK_TYPES = new Set(['BREAK_START', 'BREAK_END', 'DEPARTURE']);
+const CREW_MEMBER_MARK_REJECTION_CODES = new Set([
+  'attendance_assignment_not_found',
+  'attendance_assignment_inactive',
+  'attendance_not_enabled',
+  'attendance_break_arrival_required',
+  'attendance_break_after_departure',
+  'attendance_break_before_arrival',
+  'attendance_break_operational_window_invalid',
+  'attendance_break_already_started',
+  'attendance_break_start_required',
+  'attendance_break_already_completed',
+  'attendance_break_end_before_start',
+  'attendance_departure_arrival_required',
+  'attendance_departure_already_registered',
+  'attendance_departure_before_arrival',
+  'attendance_departure_break_end_required',
+  'attendance_departure_operational_window_invalid',
+  'attendance_offline_capture_expired',
+  'attendance_offline_capture_future_invalid',
+  'attendance_operation_geofence_required',
+  'attendance_location_required',
+  'attendance_outside_operation_range',
+  'attendance_location_accuracy_insufficient'
+]);
 
 function requireString(value, label, maxLength = 200) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label}_required`);
@@ -109,6 +133,10 @@ function publicErrorCode(error) {
     ? error.code
     : (typeof error?.message === 'string' ? error.message : 'crew_group_mark_failed');
   return /^[A-Za-z0-9_]{1,100}$/.test(code) ? code : 'crew_group_mark_failed';
+}
+
+function isCrewMemberMarkRejection(error) {
+  return CREW_MEMBER_MARK_REJECTION_CODES.has(publicErrorCode(error));
 }
 
 function resultValidationStatus(result) {
@@ -436,7 +464,7 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
         pendingReview: validationStatus === 'REVIEW_REQUIRED'
       });
     } catch (error) {
-      if (isLeader) throw error;
+      if (isLeader || !isCrewMemberMarkRejection(error)) throw error;
       results.push({
         assignmentId: member.id,
         isLeader: false,
