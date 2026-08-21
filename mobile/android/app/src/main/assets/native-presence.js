@@ -35,6 +35,7 @@
   let autoRetryTimer = null;
   let provisioningPromise = null;
   let pendingPhoneExceptionWorkerId = '';
+  let pendingCompletedScan = null;
   const phoneExceptionsByService = new Map();
   const serverMemberStatusesByService = new Map();
 
@@ -233,9 +234,18 @@
     document.head.appendChild(style);
   }
 
+  function hideLeaderIndividualArrival() {
+    const context = currentContext();
+    if (!context?.isCrewLeader) return;
+    document.querySelectorAll('.mark-button[data-assignment-id][data-mark-type="ARRIVAL"]').forEach((button) => {
+      if (String(button.dataset.assignmentId || '') === context.assignmentId && !button.hidden) button.hidden = true;
+    });
+  }
+
   function hideLegacyCrewBluetooth() {
     document.querySelectorAll('[data-crew-group-arrival="true"], [data-crew-force-majeure-wrap], #crew-without-face-access, [data-crew-bluetooth-status]')
-      .forEach((node) => { node.hidden = true; });
+      .forEach((node) => { if (!node.hidden) node.hidden = true; });
+    hideLeaderIndividualArrival();
   }
 
   function observeLegacyControls() {
@@ -245,7 +255,7 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-crew-group-arrival']
+      attributeFilter: ['data-crew-group-arrival', 'data-assignment-id', 'data-mark-type', 'hidden']
     });
   }
 
@@ -384,7 +394,7 @@
           serverStatusMap(context.serviceRequestId).delete(member.workerId);
           pendingPhoneExceptionWorkerId = '';
           renderPanel();
-          setStatus('Quedará como “Sin teléfono · por revisar” al confirmar este intento.', 'warning');
+          setStatus('Quedará como “Sin teléfono · por revisar” al confirmar esta entrada.', 'warning');
         });
         const no = element('button', 'native-presence-confirm-no', 'Cancelar');
         no.type = 'button';
@@ -435,7 +445,7 @@
       native_bridge_failed: 'La aplicación no pudo comunicarse con Android.',
       native_location_unavailable: 'Android no pudo obtener una ubicación válida del encargado.',
       native_location_proof_failed: 'Android no pudo firmar la ubicación del encargado.',
-      mock_location_detected: 'Android detectó una ubicación simulada. La marcación de cuadrilla no puede continuar.',
+      mock_location_detected: 'Android detectó una ubicación simulada. La entrada de cuadrilla no puede continuar.',
       offline_queue_unavailable: 'La cola segura sin conexión no está disponible. Cierra y vuelve a abrir Lórren.'
     };
     return messages[code] || 'La comprobación local tuvo un inconveniente. Puedes volver a intentarlo.';
@@ -478,10 +488,10 @@
 
     panel = element('section');
     panel.id = PANEL_ID;
-    panel.setAttribute('aria-label', 'Presencia de cuadrilla');
+    panel.setAttribute('aria-label', 'Entrada de cuadrilla');
     panel.append(
-      element('h3', '', 'Presencia de cuadrilla'),
-      element('p', '', 'Comprueba quiénes están presentes.')
+      element('h3', '', 'Entrada de cuadrilla'),
+      element('p', '', 'Detecta a los auxiliares presentes y registra su entrada con la del encargado.')
     );
 
     if (!selectedServiceRequestId || !contexts.some((item) => item.serviceRequestId === selectedServiceRequestId)) {
@@ -519,7 +529,7 @@
       action.type = 'button';
       action.textContent = retryNotDetectedCount > 0 || hasCompletedLeaderScan
         ? 'Reintentar no detectados'
-        : 'Verificar presencia';
+        : 'Marcar entrada de la cuadrilla';
       action.dataset.nativePresenceLeaderScan = 'true';
       action.addEventListener('click', () => startLeaderScan(false));
       row.appendChild(action);
@@ -527,7 +537,7 @@
     panel.appendChild(row);
 
     const status = element('div', 'native-presence-status warning', context?.isCrewLeader
-      ? 'Listo para verificar.'
+      ? 'Listo para marcar la entrada de la cuadrilla.'
       : credentialPrepared()
         ? 'Listo para asistencia.'
         : 'Conéctate una vez para preparar este teléfono.');
@@ -550,13 +560,14 @@
       stop.dataset.nativePresenceStop = 'true';
       stop.addEventListener('click', () => {
         stopNativeModes();
-        setStatus('Verificación detenida.', 'warning');
+        setStatus('Marcación detenida.', 'warning');
         stop.hidden = true;
       });
       panel.appendChild(stop);
     }
 
     insertPanel(panel);
+    hideLeaderIndividualArrival();
     updateCount();
   }
 
@@ -607,6 +618,7 @@
     if (!context?.isCrewLeader || activeMode === 'LEADER') return;
     clearAutoRetry();
     pendingPhoneExceptionWorkerId = '';
+    pendingCompletedScan = null;
     if (!automaticRetry) autoRetryRemaining = 1;
     scanTransientFailureCount = 0;
     scanVerifiedCount = 0;
@@ -637,7 +649,7 @@
     }
     activeMode = 'LEADER';
     showStop();
-    setStatus(automaticRetry ? 'Reintentando automáticamente a quienes faltan…' : 'Verificando presencia…', 'warning');
+    setStatus(automaticRetry ? 'Reintentando automáticamente a quienes faltan…' : 'Comprobando la cuadrilla para marcar la entrada…', 'warning');
   }
 
   function stopNativeModes() {
@@ -646,6 +658,7 @@
     bridgeCall('stopCrewScan');
     activeMode = 'IDLE';
     activeAttempt = null;
+    pendingCompletedScan = null;
   }
 
   function nativeLocationFromBundle(proofBundle) {
@@ -696,6 +709,45 @@
     return { queued, proofCount: proofBundle.proofs.length };
   }
 
+  function finishCompletedScan(completion) {
+    if (!completion || !activeAttempt) return;
+    queueCompletedAttempt()
+      .then(({ proofCount }) => {
+        activeAttempt = null;
+        pendingCompletedScan = null;
+        const incomplete = completion.expectedProofCount > 0 && proofCount < completion.expectedProofCount;
+        if ((completion.transientFailures > 0 || incomplete) && autoRetryRemaining > 0) {
+          autoRetryRemaining -= 1;
+          setStatus(
+            incomplete
+              ? 'Faltan respuestas. Lórren reintentará automáticamente una vez.'
+              : 'Entrada guardada. Hubo un problema de conexión local; Lórren reintentará automáticamente.',
+            'warning'
+          );
+          autoRetryTimer = window.setTimeout(() => {
+            autoRetryTimer = null;
+            startLeaderScan(true);
+          }, AUTO_RETRY_DELAY_MS);
+          return;
+        }
+        setStatus(
+          navigator.onLine
+            ? 'Entrada de cuadrilla enviada; esperando confirmación.'
+            : 'Entrada de cuadrilla guardada sin conexión; se sincronizará cuando vuelva Internet.',
+          navigator.onLine ? '' : 'warning'
+        );
+      })
+      .catch((error) => {
+        if (error?.message === 'native_location_unavailable' && activeAttempt) {
+          pendingCompletedScan = completion;
+          setStatus('Teléfonos comprobados. Esperando la ubicación GPS del encargado para guardar la entrada…', 'warning');
+          return;
+        }
+        pendingCompletedScan = null;
+        setStatus(publicNativeError(error?.message), 'error');
+      });
+  }
+
   function handleNativeEvent(event) {
     const detail = event?.detail;
     if (!detail || typeof detail !== 'object') return;
@@ -732,7 +784,7 @@
     }
     if (type === 'scan_started') {
       activeMode = 'LEADER';
-      setStatus('Verificando presencia…', 'warning');
+      setStatus('Comprobando la cuadrilla para marcar la entrada…', 'warning');
       showStop();
       return;
     }
@@ -749,7 +801,16 @@
       return;
     }
     if (type === 'proof_sent') {
-      setStatus('Presencia enviada al encargado.', '');
+      setStatus('Presencia enviada al encargado para la entrada.', '');
+      return;
+    }
+    if (type === 'native_location_ready') {
+      if (pendingCompletedScan && activeAttempt) {
+        const completion = pendingCompletedScan;
+        pendingCompletedScan = null;
+        setStatus('Ubicación lista. Guardando la entrada de la cuadrilla…', 'warning');
+        finishCompletedScan(completion);
+      }
       return;
     }
     if (type === 'scan_complete') {
@@ -758,46 +819,27 @@
       updateCount();
       activeMode = 'IDLE';
       markRetryAvailable();
-      const transientFailures = scanTransientFailureCount;
-      const expectedProofCount = Math.max(0, Number(activeAttempt?.expectedProofCount ?? detail.expectedProofCount ?? 0));
       const stop = document.querySelector(`#${PANEL_ID} [data-native-presence-stop]`);
       if (stop) stop.hidden = true;
-      queueCompletedAttempt()
-        .then(({ proofCount }) => {
-          activeAttempt = null;
-          const incomplete = expectedProofCount > 0 && proofCount < expectedProofCount;
-          if ((transientFailures > 0 || incomplete) && autoRetryRemaining > 0) {
-            autoRetryRemaining -= 1;
-            setStatus(
-              incomplete
-                ? 'Faltan respuestas. Lórren reintentará automáticamente una vez.'
-                : 'Verificación guardada. Hubo un problema de conexión; Lórren reintentará automáticamente.',
-              'warning'
-            );
-            autoRetryTimer = window.setTimeout(() => {
-              autoRetryTimer = null;
-              startLeaderScan(true);
-            }, AUTO_RETRY_DELAY_MS);
-            return;
-          }
-          const responses = proofCount;
-          setStatus(
-            `${responses} respuesta${responses === 1 ? '' : 's'} recibida${responses === 1 ? '' : 's'}. ${navigator.onLine ? 'Esperando validación.' : 'Guardada sin conexión; se sincronizará cuando vuelva Internet.'}`,
-            navigator.onLine ? '' : 'warning'
-          );
-        })
-        .catch((error) => {
-          setStatus(publicNativeError(error?.message), 'error');
-        });
+      const completion = {
+        transientFailures: scanTransientFailureCount,
+        expectedProofCount: Math.max(0, Number(activeAttempt?.expectedProofCount ?? detail.expectedProofCount ?? 0))
+      };
+      pendingCompletedScan = completion;
+      finishCompletedScan(completion);
       return;
     }
     if (type === 'stopped') {
       activeMode = 'IDLE';
+      pendingCompletedScan = null;
       return;
     }
     if (type === 'error') {
       const code = String(detail.code || 'native_error');
       if (activeMode === 'LEADER' && TRANSIENT_SCAN_ERRORS.has(code)) scanTransientFailureCount += 1;
+      if (pendingCompletedScan && ['native_location_unavailable', 'native_location_proof_failed'].includes(code)) {
+        pendingCompletedScan = null;
+      }
       setStatus(publicNativeError(code), TRANSIENT_SCAN_ERRORS.has(code) ? 'warning' : 'error');
     }
   }
@@ -813,17 +855,17 @@
       hasCompletedLeaderScan = retryNotDetectedCount > 0;
       pendingPhoneExceptionWorkerId = '';
       renderPanel();
-      setStatus(payload.message || 'Verificación actualizada.', payload.requiresReview ? 'warning' : '');
+      setStatus(`Entrada de cuadrilla actualizada. ${payload.message || ''}`.trim(), payload.requiresReview ? 'warning' : '');
       if (retryNotDetectedCount > 0) markRetryAvailable();
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {
-      setStatus('No fue posible completar la verificación. Revisa a quienes siguen pendientes e intenta nuevamente.', 'error');
+      setStatus('No fue posible registrar la entrada de la cuadrilla. Revisa a quienes siguen pendientes e intenta nuevamente.', 'error');
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_RETRY') {
       if (Number(message.retryAfterMs || 0) > 0) {
-        setStatus('La verificación sigue pendiente y Lórren la reintentará automáticamente.', 'warning');
+        setStatus('La entrada de cuadrilla sigue pendiente y Lórren la reintentará automáticamente.', 'warning');
       }
     }
   }

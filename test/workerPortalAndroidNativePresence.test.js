@@ -168,9 +168,9 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(bridge, /setReady[\s\S]{0,500}ensureNearbyRadioReady\(\)[\s\S]{0,500}manager\.startReady/);
   assert.match(bridge, /startCrewScan[\s\S]{0,500}ensureNearbyRadioReady\(\)[\s\S]{0,800}manager\.startLeaderScan/);
 
-  assert.match(nativePresence, /Presencia de cuadrilla/);
-  assert.match(nativePresence, /Comprueba quiénes están presentes\./);
-  assert.match(nativePresence, /Verificar presencia/);
+  assert.match(nativePresence, /Entrada de cuadrilla/);
+  assert.match(nativePresence, /Detecta a los auxiliares presentes y registra su entrada con la del encargado\./);
+  assert.match(nativePresence, /Marcar entrada de la cuadrilla/);
   assert.doesNotMatch(nativePresence, /Quedar listo para asistencia/);
   assert.match(nativePresence, /Reintentar no detectados/);
   assert.match(nativePresence, /cuadrillas\/proximidad\/contexto/);
@@ -199,7 +199,7 @@ test('auxiliares quedan listos automáticamente y el encargado no aparece pendie
   assert.ok(renderPanel, 'no se encontró la autoridad renderPanel');
   assert.ok(memberStatus, 'no se encontró la autoridad memberStatus');
   assert.doesNotMatch(renderPanel[1], /nativePresenceReady|Quedar listo para asistencia/);
-  assert.match(renderPanel[1], /if \(context\?\.isCrewLeader\)[\s\S]{0,500}Verificar presencia/);
+  assert.match(renderPanel[1], /if \(context\?\.isCrewLeader\)[\s\S]{0,500}Marcar entrada de la cuadrilla/);
   assert.match(
     nativePresence,
     /async function ensureAuxiliaryReady\(\)[\s\S]{0,500}!context \|\| context\.isCrewLeader[\s\S]{0,500}await startReady\(\)/
@@ -234,7 +234,7 @@ test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal
     /document\.getElementById\(PANEL_ID\)[\s\S]{0,160}if \(!contexts\.length\) return;[\s\S]{0,80}installStyles\(\);/
   );
   assert.doesNotMatch(nativePresence, /No hay una cuadrilla disponible para este teléfono en este momento\./);
-  assert.match(nativePresence, /Presencia de cuadrilla/);
+  assert.match(nativePresence, /Entrada de cuadrilla/);
   assert.match(nativePresence, /if \(!selectedServiceRequestId \|\| !contexts\.some/);
 });
 
