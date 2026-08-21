@@ -3,6 +3,8 @@ import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
   registerDispatchArrival
 } from './registerArrival.js';
+import { registerDispatchBreak } from './registerBreak.js';
+import { registerDispatchDeparture } from './registerDeparture.js';
 import { loadCrewAttendancePortalContexts } from './crewAttendanceConfig.js';
 import { reviewAttendanceSession } from './adminAttendance.js';
 
@@ -12,6 +14,31 @@ const DUPLICATE_ARRIVAL_FLAG = 'DUPLICATE_ARRIVAL';
 const AUTO_VALIDATED = 'AUTO_VALIDATED';
 const MANUAL_VALIDATED = 'MANUAL_VALIDATED';
 const VALIDATED_STATUSES = new Set([AUTO_VALIDATED, MANUAL_VALIDATED]);
+const CREW_DELEGATED_MARK_TYPES = new Set(['BREAK_START', 'BREAK_END', 'DEPARTURE']);
+const CREW_MEMBER_MARK_REJECTION_CODES = new Set([
+  'attendance_assignment_not_found',
+  'attendance_assignment_inactive',
+  'attendance_not_enabled',
+  'attendance_break_arrival_required',
+  'attendance_break_after_departure',
+  'attendance_break_before_arrival',
+  'attendance_break_operational_window_invalid',
+  'attendance_break_already_started',
+  'attendance_break_start_required',
+  'attendance_break_already_completed',
+  'attendance_break_end_before_start',
+  'attendance_departure_arrival_required',
+  'attendance_departure_already_registered',
+  'attendance_departure_before_arrival',
+  'attendance_departure_break_end_required',
+  'attendance_departure_operational_window_invalid',
+  'attendance_offline_capture_expired',
+  'attendance_offline_capture_future_invalid',
+  'attendance_operation_geofence_required',
+  'attendance_location_required',
+  'attendance_outside_operation_range',
+  'attendance_location_accuracy_insufficient'
+]);
 
 function requireString(value, label, maxLength = 200) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label}_required`);
@@ -93,6 +120,27 @@ function requirePrisma(prisma) {
     throw new Error('crew_group_arrival_assignment_contract_invalid');
   }
   return prisma;
+}
+
+function normalizeCrewDelegatedMarkType(value) {
+  const markType = requireString(value, 'crew_group_mark_type', 40).toUpperCase();
+  if (!CREW_DELEGATED_MARK_TYPES.has(markType)) throw new Error('crew_group_mark_type_invalid');
+  return markType;
+}
+
+function publicErrorCode(error) {
+  const code = typeof error?.code === 'string'
+    ? error.code
+    : (typeof error?.message === 'string' ? error.message : 'crew_group_mark_failed');
+  return /^[A-Za-z0-9_]{1,100}$/.test(code) ? code : 'crew_group_mark_failed';
+}
+
+function isCrewMemberMarkRejection(error) {
+  return CREW_MEMBER_MARK_REJECTION_CODES.has(publicErrorCode(error));
+}
+
+function resultValidationStatus(result) {
+  return result?.validation?.validationStatus || result?.attendanceSession?.validationStatus || null;
 }
 
 async function validateCrewArrival(prisma, result, input, options) {
@@ -322,6 +370,128 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       delegatedCount,
       forceMajeure,
       presenceValidated,
+      results
+    }
+  };
+}
+
+export async function registerCrewMarkForLeader(prisma, input = {}, injected = {}) {
+  requirePrisma(prisma);
+  const leaderWorkerId = requireString(input.leaderWorkerId, 'crew_group_mark_leader_worker_id', 160);
+  const leaderAssignmentId = requireString(input.assignmentId, 'crew_group_mark_assignment_id', 160);
+  const idempotencyKey = requireString(input.idempotencyKey, 'crew_group_mark_idempotency_key', 100);
+  const markType = normalizeCrewDelegatedMarkType(input.markType);
+  const captureMode = normalizeCaptureMode(input.captureMode);
+  const now = requireDate(input.now ?? new Date(), 'crew_group_mark_now');
+  if (![ONLINE_WEB_CAPTURE_MODE, OFFLINE_WEB_CAPTURE_MODE].includes(captureMode)) {
+    throw new Error('crew_group_mark_capture_mode_invalid');
+  }
+
+  const options = {
+    loadCrewContextsFn: injected.loadCrewContextsFn || loadCrewAttendancePortalContexts,
+    registerBreakFn: injected.registerBreakFn || registerDispatchBreak,
+    registerDepartureFn: injected.registerDepartureFn || registerDispatchDeparture
+  };
+  const contexts = await options.loadCrewContextsFn(prisma, { workerId: leaderWorkerId });
+  const leaderContext = (Array.isArray(contexts) ? contexts : [])
+    .find((context) => context?.assignmentId === leaderAssignmentId);
+  if (!leaderContext
+    || leaderContext.mode !== 'CREW'
+    || leaderContext.isCrewLeader !== true
+    || leaderContext.crewAvailable !== true
+    || !leaderContext.serviceRequestId) {
+    return { applied: false };
+  }
+
+  const members = await prisma.dispatchAssignment.findMany({
+    where: {
+      serviceRequestId: leaderContext.serviceRequestId,
+      status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
+    },
+    select: { id: true, workerId: true },
+    orderBy: { createdAt: 'asc' }
+  });
+  if (!members.some((member) => member.id === leaderAssignmentId && member.workerId === leaderWorkerId)) {
+    throw new Error('crew_group_mark_leader_not_assigned');
+  }
+
+  const registerMarkFn = markType === 'DEPARTURE'
+    ? options.registerDepartureFn
+    : options.registerBreakFn;
+  const orderedMembers = [
+    ...members.filter((member) => member.id === leaderAssignmentId),
+    ...members.filter((member) => member.id !== leaderAssignmentId)
+  ];
+  const results = [];
+  let leaderResult = null;
+
+  for (const member of orderedMembers) {
+    const isLeader = member.id === leaderAssignmentId;
+    const markInput = {
+      assignmentId: member.id,
+      expectedWorkerId: member.workerId,
+      idempotencyKey: isLeader ? idempotencyKey : memberIdempotencyKey(idempotencyKey, member.id),
+      markType,
+      now,
+      captureMode,
+      clientCapturedAt: input.clientCapturedAt ?? null,
+      latitude: input.latitude,
+      longitude: input.longitude,
+      accuracyMeters: input.accuracyMeters,
+      installationIdHash: isLeader ? (input.installationIdHash ?? null) : null,
+      persistentStorageAvailable: input.persistentStorageAvailable === true,
+      hasFreshPhoto: isLeader && input.hasFreshPhoto === true,
+      evidenceStorageKey: isLeader ? (input.evidenceStorageKey ?? null) : null,
+      evidenceMimeType: isLeader ? (input.evidenceMimeType ?? null) : null,
+      ipAddress: input.ipAddress ?? null,
+      userAgent: input.userAgent ?? null
+    };
+
+    try {
+      const memberResult = await registerMarkFn(prisma, markInput);
+      if (isLeader) leaderResult = memberResult;
+      if (!memberResult?.recorded) {
+        if (isLeader) return { applied: true, leaderResult, summary: null };
+        results.push({ assignmentId: member.id, isLeader: false, status: 'NOT_RECORDED' });
+        continue;
+      }
+      const validationStatus = resultValidationStatus(memberResult);
+      results.push({
+        assignmentId: member.id,
+        isLeader,
+        status: memberResult.replayed ? 'REPLAYED' : 'RECORDED',
+        validationStatus,
+        pendingReview: validationStatus === 'REVIEW_REQUIRED'
+      });
+    } catch (error) {
+      if (isLeader || !isCrewMemberMarkRejection(error)) throw error;
+      results.push({
+        assignmentId: member.id,
+        isLeader: false,
+        status: 'NOT_RECORDED',
+        error: publicErrorCode(error)
+      });
+    }
+  }
+
+  const newlyRecordedCount = results.filter((item) => item.status === 'RECORDED').length;
+  const replayedCount = results.filter((item) => item.status === 'REPLAYED').length;
+  const failedCount = results.filter((item) => item.status === 'NOT_RECORDED').length;
+  const reviewPendingCount = results.filter((item) => item.pendingReview === true).length;
+  const delegatedCount = results.filter((item) => item.isLeader === false && ['RECORDED', 'REPLAYED'].includes(item.status)).length;
+
+  return {
+    applied: true,
+    leaderResult,
+    summary: {
+      markType,
+      totalMembers: members.length,
+      processedCount: newlyRecordedCount + replayedCount,
+      newlyRecordedCount,
+      replayedCount,
+      failedCount,
+      reviewPendingCount,
+      delegatedCount,
       results
     }
   };
