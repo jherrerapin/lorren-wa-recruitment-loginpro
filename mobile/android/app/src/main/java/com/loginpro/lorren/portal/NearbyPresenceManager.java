@@ -13,6 +13,7 @@ import com.google.android.gms.nearby.connection.ConnectionInfo;
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback;
 import com.google.android.gms.nearby.connection.ConnectionOptions;
 import com.google.android.gms.nearby.connection.ConnectionResolution;
+import com.google.android.gms.nearby.connection.ConnectionType;
 import com.google.android.gms.nearby.connection.ConnectionsClient;
 import com.google.android.gms.nearby.connection.ConnectionsStatusCodes;
 import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo;
@@ -151,6 +152,7 @@ final class NearbyPresenceManager {
         AdvertisingOptions options = new AdvertisingOptions.Builder()
             .setStrategy(STRATEGY)
             .setLowPower(true)
+            .setConnectionType(ConnectionType.NON_DISRUPTIVE)
             .build();
         try {
             client.startAdvertising(ENDPOINT_NAME, SERVICE_ID, connectionLifecycleCallback, options)
@@ -267,6 +269,7 @@ final class NearbyPresenceManager {
                 emit("leader_found", event -> event.put("candidateCount", requestedEndpoints.size()));
                 ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
                     .setLowPower(true)
+                    .setConnectionType(ConnectionType.NON_DISRUPTIVE)
                     .build();
                 client.requestConnection(ENDPOINT_NAME, endpointId, connectionLifecycleCallback, connectionOptions)
                     .addOnFailureListener(error -> {
