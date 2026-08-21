@@ -171,7 +171,7 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(nativePresence, /Presencia de cuadrilla/);
   assert.match(nativePresence, /Comprueba quiénes están presentes\./);
   assert.match(nativePresence, /Verificar presencia/);
-  assert.match(nativePresence, /Quedar listo para asistencia/);
+  assert.doesNotMatch(nativePresence, /Quedar listo para asistencia/);
   assert.match(nativePresence, /Reintentar no detectados/);
   assert.match(nativePresence, /cuadrillas\/proximidad\/contexto/);
   assert.match(nativePresence, /attendanceWriter !== false/);
@@ -189,6 +189,39 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   for (const pattern of ['*.jks', '*.keystore', '*.apk', '*.aab']) {
     assert.ok(ignore.includes(pattern), `falta ignorar ${pattern}`);
   }
+});
+
+test('auxiliares quedan listos automáticamente y el encargado no aparece pendiente de sí mismo', async () => {
+  const nativePresence = await read('app/src/main/assets/native-presence.js');
+  const renderPanel = nativePresence.match(/function renderPanel\(\) \{([\s\S]*?)\n  \}\n\n  function insertPanel/);
+  const memberStatus = nativePresence.match(/function memberStatus\(context, member\) \{([\s\S]*?)\n  \}\n\n  function memberStatusPresentation/);
+
+  assert.ok(renderPanel, 'no se encontró la autoridad renderPanel');
+  assert.ok(memberStatus, 'no se encontró la autoridad memberStatus');
+  assert.doesNotMatch(renderPanel[1], /nativePresenceReady|Quedar listo para asistencia/);
+  assert.match(renderPanel[1], /if \(context\?\.isCrewLeader\)[\s\S]{0,500}Verificar presencia/);
+  assert.match(
+    nativePresence,
+    /async function ensureAuxiliaryReady\(\)[\s\S]{0,500}!context \|\| context\.isCrewLeader[\s\S]{0,500}await startReady\(\)/
+  );
+  assert.match(
+    nativePresence,
+    /async function initialize\(\)[\s\S]{0,700}renderPanel\(\);\s*await ensureAuxiliaryReady\(\);/
+  );
+  assert.match(
+    nativePresence,
+    /type === 'permissions'[\s\S]{0,500}!context\.isCrewLeader[\s\S]{0,300}ensureAuxiliaryReady\(\)/
+  );
+  assert.match(
+    nativePresence,
+    /type === 'bluetooth'[\s\S]{0,500}!context\.isCrewLeader[\s\S]{0,300}ensureAuxiliaryReady\(\)/
+  );
+  assert.match(
+    nativePresence,
+    /window\.addEventListener\('focus',[\s\S]{0,180}ensureAuxiliaryReady\(\)/
+  );
+  assert.match(memberStatus[1], /if \(member\.isLeader\) return 'LEADER_DEVICE';/);
+  assert.match(nativePresence, /status === 'LEADER_DEVICE'[\s\S]{0,120}label: 'Este teléfono'/);
 });
 
 test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal individual', async () => {

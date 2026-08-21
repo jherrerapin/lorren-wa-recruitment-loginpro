@@ -9,7 +9,8 @@ Esta carpeta contiene la primera fase de la aplicación Android privada del **mi
 - conserva las capacidades web ya existentes del Portal, incluido almacenamiento local, cámara y geolocalización;
 - genera en Android Keystore una clave EC P-256 no exportable para firmar respuestas de presencia;
 - usa Google Nearby Connections con `P2P_STAR` para que un encargado descubra varios teléfonos Lórren cercanos sin Internet;
-- permite que un auxiliar deje su app en estado `Listo para asistencia` y responda un challenge local firmado;
+- deja automáticamente a un auxiliar en estado `Listo para asistencia` mientras la app está ejecutándose, existe un contexto de cuadrilla válido y los permisos/radios necesarios están disponibles;
+- responde el challenge local firmado sin exigir al auxiliar un botón de preparación por cada verificación;
 - muestra en el Portal un panel de prueba con el conteo de teléfonos cuya firma local fue verificada.
 
 **Esta fase no registra asistencia.** El puente nativo declara `attendanceWriter: false`, el JavaScript nativo no llama endpoints de llegada y una prueba de contrato protege esa barrera.
@@ -70,13 +71,13 @@ La integración del botón de descarga/apertura automática pertenece a la fase 
 Prueba mínima prevista con tres Android reales:
 
 1. Instalar la misma build en los tres teléfonos.
-2. Abrir el Portal con conexión al menos una vez para que cada teléfono tenga sesión y contexto de cuadrilla almacenado.
-3. En los dos auxiliares, abrir Lórren y pulsar **Quedar listo para asistencia**.
+2. Abrir el Portal con conexión al menos una vez para que cada teléfono tenga sesión, contexto de cuadrilla y credencial de presencia preparados.
+3. En los dos auxiliares, abrir Lórren y comprobar que queden **Listos para asistencia** automáticamente, sin pulsar un botón de preparación.
 4. Desactivar datos móviles/Internet manteniendo Bluetooth y las radios locales habilitadas.
-5. En el teléfono marcado como encargado, abrir Lórren y pulsar **Comprobar teléfonos cercanos**.
+5. En el teléfono marcado como encargado, abrir Lórren y pulsar **Verificar presencia**.
 6. El encargado genera un `attemptId` y un `challenge` nuevos y descubre los auxiliares mediante Nearby Connections.
-7. Cada auxiliar responde con su clave pública y una firma ECDSA del challenge específico del intento.
-8. El encargado verifica la firma local y cuenta únicamente respuestas válidas.
+7. Cada auxiliar responde automáticamente con su clave pública y una firma ECDSA del challenge específico del intento.
+8. El encargado verifica la firma local y cuenta únicamente respuestas válidas; su propio teléfono no se trata como un auxiliar pendiente de detectar.
 9. Al terminar debe mostrar el número verificado y el mensaje **Ninguna asistencia fue registrada**.
 10. Verificar en el backend que la prueba no creó `DispatchAttendanceMark` ni alteró una sesión de asistencia.
 
