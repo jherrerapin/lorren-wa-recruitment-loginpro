@@ -77,10 +77,12 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
     mainActivity,
     /locationRuntimePermissions\(\)[\s\S]{0,260}ACCESS_COARSE_LOCATION[\s\S]{0,120}ACCESS_FINE_LOCATION/
   );
-  assert.match(
-    mainActivity,
-    /private boolean hasPreciseLocationPermission\(\)[\s\S]{0,260}ACCESS_COARSE_LOCATION[\s\S]{0,160}ACCESS_FINE_LOCATION/
+  const preciseLocationCheck = mainActivity.match(
+    /private boolean hasPreciseLocationPermission\(\) \{([\s\S]*?)\n    \}/
   );
+  assert.ok(preciseLocationCheck, 'falta la autoridad de ubicación precisa');
+  assert.match(preciseLocationCheck[1], /ACCESS_FINE_LOCATION/);
+  assert.doesNotMatch(preciseLocationCheck[1], /ACCESS_COARSE_LOCATION/);
   assert.match(
     mainActivity,
     /addPreciseLocationPermissionsIfNeeded\(List<String> permissions\)[\s\S]{0,380}hasPreciseLocationPermission\(\)[\s\S]{0,180}permissions\.add\(Manifest\.permission\.ACCESS_COARSE_LOCATION\)[\s\S]{0,180}permissions\.add\(Manifest\.permission\.ACCESS_FINE_LOCATION\)/
