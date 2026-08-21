@@ -355,6 +355,7 @@ final class PresenceBridge {
             synchronized (this) {
                 leaderLocationProof = proof;
             }
+            manager.markLeaderLocationReady(attemptId);
             JSONObject event = new JSONObject();
             event.put("type", "native_location_ready");
             event.put("mock", mock);
