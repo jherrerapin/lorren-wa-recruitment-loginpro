@@ -99,8 +99,10 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
 
   assert.match(nearby, /Strategy\.P2P_STAR/);
   assert.match(nearby, /ENDPOINT_NAME = "LORREN"/);
-  assert.match(nearby, /synchronized void startReady[\s\S]{0,1200}startDiscovery/);
-  assert.match(nearby, /synchronized void startLeaderScan[\s\S]{0,2200}startAdvertising/);
+  assert.match(nearby, /synchronized void startReady[\s\S]{0,1200}startReadyDiscovery/);
+  assert.match(nearby, /private void startReadyDiscovery[\s\S]{0,1800}startDiscovery/);
+  assert.match(nearby, /synchronized void startLeaderScan[\s\S]{0,2200}startLeaderAdvertising/);
+  assert.match(nearby, /private void startLeaderAdvertising[\s\S]{0,2200}startAdvertising/);
   assert.match(nearby, /role != Role\.READY/);
   assert.match(nearby, /role == Role\.LEADER && requestedEndpoints\.add/);
   assert.match(nearby, /"attemptId"/);
@@ -110,6 +112,29 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(nearby, /DeviceKeyStore\.verifyBase64/);
   assert.match(nearby, /proofsByKey/);
   assert.doesNotMatch(nearby, /fullName|phone|document|documentNumber|workerName/i);
+
+  assert.match(nearby, /com\.google\.android\.gms\.common\.api\.ApiException/);
+  assert.match(nearby, /ConnectionsStatusCodes/);
+  assert.match(nearby, /MAX_START_RETRIES = 1/);
+  assert.match(nearby, /NEARBY_RESTART_DELAY_MS = 350L/);
+  for (const status of [
+    'STATUS_ALREADY_ADVERTISING',
+    'STATUS_ALREADY_DISCOVERING',
+    'STATUS_ALREADY_HAVE_ACTIVE_STRATEGY',
+    'STATUS_OUT_OF_ORDER_API_CALL'
+  ]) {
+    assert.match(nearby, new RegExp(`ConnectionsStatusCodes\\.${status}`));
+  }
+  assert.match(nearby, /STATUS_RADIO_ERROR[\s\S]{0,120}"nearby_radio_error"/);
+  assert.match(nearby, /MISSING_PERMISSION_BLUETOOTH_ADVERTISE/);
+  assert.match(nearby, /MISSING_PERMISSION_BLUETOOTH_SCAN/);
+  assert.match(nearby, /MISSING_PERMISSION_NEARBY_WIFI_DEVICES/);
+  assert.match(nearby, /isRecoverableStartFailure\(error\)[\s\S]{0,260}resetNearbyClientForRetry\(\)[\s\S]{0,420}retryCount \+ 1/);
+  assert.match(nearby, /resetNearbyClientForRetry\(\)[\s\S]{0,500}stopAdvertising\(\)[\s\S]{0,220}stopDiscovery\(\)[\s\S]{0,220}stopAllEndpoints\(\)/);
+  assert.match(nearby, /emit\("scan_started"[\s\S]{0,500}scheduleLeaderScanTimeout\(nextAttemptId, timeoutMs\)/);
+  const leaderStart = nearby.match(/synchronized void startLeaderScan\(JSONObject input\) \{([\s\S]*?)\n    \}\n\n    private void startLeaderAdvertising/);
+  assert.ok(leaderStart, 'falta autoridad startLeaderScan');
+  assert.doesNotMatch(leaderStart[1], /handler\.postDelayed\(scanTimeout/);
 
   assert.match(bridge, /JS_NAME = "LorrenAndroidPresence"/);
   assert.match(bridge, /"attendanceWriter", false/);
