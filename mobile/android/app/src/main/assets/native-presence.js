@@ -12,6 +12,7 @@
   const PANEL_ID = 'lorren-native-presence-panel';
   const DEFAULT_SCAN_MS = 12_000;
   const AUTO_RETRY_DELAY_MS = 1_500;
+  const MAX_AUTOMATIC_RETRIES = 2;
   const CREDENTIAL_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
   const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
   const TRANSIENT_SCAN_ERRORS = new Set([
@@ -31,7 +32,7 @@
   let retryNotDetectedCount = 0;
   let hasCompletedLeaderScan = false;
   let scanTransientFailureCount = 0;
-  let autoRetryRemaining = 1;
+  let autoRetryRemaining = MAX_AUTOMATIC_RETRIES;
   let autoRetryTimer = null;
   let provisioningPromise = null;
   let pendingPhoneExceptionWorkerId = '';
@@ -234,8 +235,8 @@
   }
 
   function hideLegacyCrewBluetooth() {
-    document.querySelectorAll('[data-crew-group-arrival="true"], [data-crew-force-majeure-wrap], #crew-without-face-access')
-      .forEach((node) => { node.hidden = true; });
+    document.querySelectorAll('[data-crew-group-arrival="true"], [data-crew-force-majeure-wrap], #crew-without-face-access, [data-crew-bluetooth-status]')
+      .forEach((node) => { if (!node.hidden) node.hidden = true; });
   }
 
   function observeLegacyControls() {
@@ -245,7 +246,7 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ['data-crew-group-arrival']
+      attributeFilter: ['data-crew-group-arrival', 'hidden']
     });
   }
 
@@ -302,6 +303,12 @@
     if (serverStatus) return serverStatus;
     if (phoneExceptionSet(context.serviceRequestId).has(member.workerId)) return 'NO_PHONE_REVIEW';
     return 'PENDING';
+  }
+
+  function pendingAuxiliaryCount(context) {
+    return (Array.isArray(context?.members) ? context.members : [])
+      .filter((member) => !member.isLeader && memberStatus(context, member) === 'PENDING')
+      .length;
   }
 
   function memberStatusPresentation(status) {
@@ -501,7 +508,7 @@
       pendingPhoneExceptionWorkerId = '';
       retryNotDetectedCount = 0;
       hasCompletedLeaderScan = false;
-      autoRetryRemaining = 1;
+      autoRetryRemaining = MAX_AUTOMATIC_RETRIES;
       renderPanel();
       ensureAuxiliaryReady().catch(() => {});
     });
@@ -602,24 +609,27 @@
     if (!context?.isCrewLeader || activeMode === 'LEADER') return;
     clearAutoRetry();
     pendingPhoneExceptionWorkerId = '';
-    if (!automaticRetry) autoRetryRemaining = 1;
+    if (!automaticRetry) autoRetryRemaining = MAX_AUTOMATIC_RETRIES;
     scanTransientFailureCount = 0;
     scanVerifiedCount = 0;
     scanPendingCount = 0;
     updateCount();
 
     const attemptId = newAttemptId();
+    const expectedProofCount = pendingAuxiliaryCount(context);
     const payload = {
       version: 1,
       serviceRequestId: context.serviceRequestId,
       attemptId,
       challenge: randomToken(32),
-      timeoutMs: DEFAULT_SCAN_MS
+      timeoutMs: DEFAULT_SCAN_MS,
+      expectedProofCount
     };
     activeAttempt = {
       idempotencyKey: attemptId,
       assignmentId: context.assignmentId,
-      serviceRequestId: context.serviceRequestId
+      serviceRequestId: context.serviceRequestId,
+      expectedProofCount
     };
     const result = bridgeCall('startCrewScan', JSON.stringify(payload));
     if (!result?.ok) {
@@ -629,7 +639,7 @@
     }
     activeMode = 'LEADER';
     showStop();
-    setStatus(automaticRetry ? 'Reintentando a quienes faltan…' : 'Verificando presencia…', 'warning');
+    setStatus(automaticRetry ? 'Reintentando automáticamente a quienes faltan…' : 'Verificando presencia…', 'warning');
   }
 
   function stopNativeModes() {
@@ -684,8 +694,12 @@
     const offline = window.LorrenWorkerPortalOffline;
     if (typeof offline?.queueCrewPresence !== 'function') throw new Error('offline_queue_unavailable');
     const queued = await offline.queueCrewPresence({ ...attempt, ...nativeLocation, proofBundle });
-    if (navigator.onLine && typeof offline.syncNow === 'function') offline.syncNow().catch(() => {});
-    return { queued, proofCount: proofBundle.proofs.length };
+    if (navigator.onLine && typeof offline?.syncNow === 'function') offline.syncNow().catch(() => {});
+    return {
+      queued,
+      proofCount: proofBundle.proofs.length,
+      expectedProofCount: Math.max(0, Number(attempt.expectedProofCount || 0))
+    };
   }
 
   function handleNativeEvent(event) {
@@ -754,11 +768,17 @@
       const stop = document.querySelector(`#${PANEL_ID} [data-native-presence-stop]`);
       if (stop) stop.hidden = true;
       queueCompletedAttempt()
-        .then(({ proofCount }) => {
+        .then(({ proofCount, expectedProofCount }) => {
           activeAttempt = null;
-          if (transientFailures > 0 && autoRetryRemaining > 0) {
+          const incompleteDetection = proofCount < expectedProofCount;
+          if ((transientFailures > 0 || incompleteDetection) && autoRetryRemaining > 0) {
             autoRetryRemaining -= 1;
-            setStatus('Verificación guardada. Hubo un problema de conexión; Lórren reintentará automáticamente.', 'warning');
+            setStatus(
+              incompleteDetection
+                ? 'Verificación guardada. Faltan teléfonos por detectar; Lórren reintentará automáticamente.'
+                : 'Verificación guardada. Hubo un problema de conexión; Lórren reintentará automáticamente.',
+              'warning'
+            );
             autoRetryTimer = window.setTimeout(() => {
               autoRetryTimer = null;
               startLeaderScan(true);
@@ -767,8 +787,10 @@
           }
           const responses = proofCount;
           setStatus(
-            `${responses} respuesta${responses === 1 ? '' : 's'} recibida${responses === 1 ? '' : 's'}. Esperando validación.`,
-            navigator.onLine ? '' : 'warning'
+            incompleteDetection
+              ? `${responses} respuesta${responses === 1 ? '' : 's'} recibida${responses === 1 ? '' : 's'}. Aún faltan teléfonos; puedes reintentar los no detectados.`
+              : `${responses} respuesta${responses === 1 ? '' : 's'} recibida${responses === 1 ? '' : 's'}. Esperando validación.`,
+            navigator.onLine && !incompleteDetection ? '' : 'warning'
           );
         })
         .catch((error) => {
