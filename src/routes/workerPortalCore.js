@@ -17,7 +17,10 @@ import {
   resolveWorkerPortalSession
 } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
 import { registerDispatchArrival } from '../modules/dispatch-attendance/application/registerArrival.js';
-import { registerCrewArrivalForLeader } from '../modules/dispatch-attendance/application/registerCrewArrival.js';
+import {
+  registerCrewArrivalForLeader,
+  registerCrewMarkForLeader
+} from '../modules/dispatch-attendance/application/registerCrewArrival.js';
 import { registerDispatchDeparture } from '../modules/dispatch-attendance/application/registerDeparture.js';
 import { registerDispatchBreak } from '../modules/dispatch-attendance/application/registerBreak.js';
 import {
@@ -303,6 +306,51 @@ function breakPublicResult(result, markType) {
   };
 }
 
+function crewMarkPublicResult(result, markType) {
+  const summary = result?.summary;
+  if (!summary) {
+    return markType === 'DEPARTURE'
+      ? departurePublicResult(result?.leaderResult)
+      : breakPublicResult(result?.leaderResult, markType);
+  }
+  const leaderValidationStatus = result?.leaderResult?.validation?.validationStatus
+    || result?.leaderResult?.attendanceSession?.validationStatus
+    || null;
+  const action = markType === 'BREAK_START'
+    ? 'Inicio de almuerzo'
+    : (markType === 'BREAK_END' ? 'Fin de almuerzo' : 'Salida');
+  const processedCount = Number(summary.processedCount || 0);
+  let message = `${action} de cuadrilla registrado para ${processedCount} integrante${processedCount === 1 ? '' : 's'}.`;
+  if (summary.failedCount > 0) {
+    message += ` ${summary.failedCount} integrante${summary.failedCount === 1 ? '' : 's'} no pudo${summary.failedCount === 1 ? '' : 'ieron'} registrarse.`;
+  }
+  if (summary.reviewPendingCount > 0) {
+    message += ` ${summary.reviewPendingCount} marcación${summary.reviewPendingCount === 1 ? '' : 'es'} quedó${summary.reviewPendingCount === 1 ? '' : 'aron'} pendiente${summary.reviewPendingCount === 1 ? '' : 's'} de revisión.`;
+  }
+  return {
+    status: 200,
+    payload: {
+      ok: true,
+      markType,
+      crewGroup: true,
+      recorded: processedCount > 0,
+      replayed: summary.newlyRecordedCount === 0 && summary.replayedCount > 0,
+      validationStatus: leaderValidationStatus,
+      requiresReview: leaderValidationStatus === 'REVIEW_REQUIRED'
+        || summary.reviewPendingCount > 0
+        || summary.failedCount > 0,
+      totalMembers: summary.totalMembers,
+      processedCount,
+      newlyRecordedCount: summary.newlyRecordedCount,
+      replayedCount: summary.replayedCount,
+      failedCount: summary.failedCount,
+      reviewPendingCount: summary.reviewPendingCount,
+      delegatedCount: summary.delegatedCount,
+      message
+    }
+  };
+}
+
 export function workerPortalCookieOptions(maxAge) {
   if (!Number.isFinite(maxAge) || maxAge <= 0) throw new Error('worker_portal_cookie_max_age_invalid');
   return { httpOnly: true, secure: true, sameSite: 'strict', path: WORKER_PORTAL_SESSION_COOKIE_PATH, maxAge };
@@ -416,6 +464,7 @@ export function workerPortalRouter(prisma, options = {}) {
   const loadAssignmentForBreakFn = options.loadAssignmentForBreakFn || loadWorkerPortalAssignmentForMark;
   const registerArrivalFn = options.registerArrivalFn || registerDispatchArrival;
   const registerCrewArrivalFn = options.registerCrewArrivalFn || registerCrewArrivalForLeader;
+  const registerCrewMarkFn = options.registerCrewMarkFn || registerCrewMarkForLeader;
   const registerDepartureFn = options.registerDepartureFn || registerDispatchDeparture;
   const registerBreakFn = options.registerBreakFn || registerDispatchBreak;
   const storeArrivalEvidenceFn = options.storeArrivalEvidenceFn || storeAttendanceArrivalEvidence;
@@ -486,6 +535,9 @@ export function workerPortalRouter(prisma, options = {}) {
       });
       if (!assignment) return res.status(404).json({ ok: false, error: 'assignment_not_available' });
       if (!assignment.attendanceEnabled) return res.status(409).json({ ok: false, error: 'attendance_not_enabled' });
+      const isCrewGroupMark = !isArrival
+        && assignment.crewAvailable === true
+        && assignment.isCrewLeader === true;
 
       if (isDeparture) {
         if (!assignment.arrivalReported) return res.status(409).json({ ok: false, error: 'departure_arrival_required' });
@@ -565,14 +617,29 @@ export function workerPortalRouter(prisma, options = {}) {
           return res.status(409).json({ ok: false, error: 'crew_group_not_available' });
         }
         result = crewResult.leaderResult;
+      } else if (isCrewGroupMark) {
+        crewResult = await registerCrewMarkFn(prisma, {
+          ...markInput,
+          markType,
+          leaderWorkerId: portalSession.workerId
+        }, {
+          registerBreakFn,
+          registerDepartureFn
+        });
+        if (!crewResult?.applied) {
+          return res.status(409).json({ ok: false, error: 'crew_group_not_available' });
+        }
+        result = crewResult.leaderResult;
       } else {
         result = await register(prisma, markInput);
       }
 
-      if (!result.recorded && evidence?.created) await discardEvidence(evidence).catch(() => {});
+      if (!result?.recorded && evidence?.created) await discardEvidence(evidence).catch(() => {});
       const publicResult = isArrival
         ? (isCrewGroupArrival ? crewArrivalPublicResult(crewResult) : arrivalPublicResult(result))
-        : (isDeparture ? departurePublicResult(result) : breakPublicResult(result, markType));
+        : (isCrewGroupMark
+          ? crewMarkPublicResult(crewResult, markType)
+          : (isDeparture ? departurePublicResult(result) : breakPublicResult(result, markType)));
       return res.status(publicResult.status).json(publicResult.payload);
     } catch (error) {
       const code = errorCode(error);
@@ -601,7 +668,8 @@ export function workerPortalRouter(prisma, options = {}) {
         attendance_break_end_before_start: [409, 'break_end_before_start'],
         attendance_offline_capture_expired: [409, 'offline_capture_expired'],
         attendance_offline_capture_future_invalid: [400, 'offline_capture_time_invalid'],
-        crew_group_arrival_leader_not_assigned: [409, 'assignment_not_available']
+        crew_group_arrival_leader_not_assigned: [409, 'assignment_not_available'],
+        crew_group_mark_leader_not_assigned: [409, 'assignment_not_available']
       };
       if (publicCodes[code]) {
         return res.status(publicCodes[code][0]).json({ ok: false, error: publicCodes[code][1] });
