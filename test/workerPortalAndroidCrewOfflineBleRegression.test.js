@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { registerCrewMarkForLeader } from '../src/modules/dispatch-attendance/application/registerCrewArrival.js';
+import { loadCrewAttendancePortalContexts } from '../src/modules/dispatch-attendance/application/crewAttendanceConfig.js';
 
 function read(relativePath) {
   return readFile(new URL(`../${relativePath}`, import.meta.url), 'utf8');
@@ -40,7 +41,7 @@ test('cada marcación CREW genera una comprobación local nueva ligada al tipo d
   assert.match(nativePresence, /challenge: `lorren-mark-v1:\$\{normalizedMark\}:\$\{randomToken\(32\)\}`/);
   assert.match(nativePresence, /proofBundle\.markType = attempt\.markType/);
   assert.match(nativePresence, /expectedAuxiliaryProofCount\(context, normalizedMark\)/);
-  assert.match(nativePresence, /normalizedMark === 'ARRIVAL' && member\.arrivalReported/);
+  assert.match(nativePresence, /memberHasPersistedMark\(member, normalizedMark\)/);
   assert.match(nativePresence, /Iniciar almuerzo de la cuadrilla/);
   assert.match(nativePresence, /Finalizar almuerzo de la cuadrilla/);
   assert.match(nativePresence, /Registrar salida de la cuadrilla/);
@@ -130,7 +131,126 @@ test('sin Internet una marcación CREW se encola y solo sincroniza cuando vuelve
   assert.match(queueCompletedAttempt[1], /if \(navigator\.onLine && typeof offline\.syncNow === 'function'\) offline\.syncNow\(\)/);
   assert.match(nativePresence, /if \(!navigator\.onLine\) return readCachedContexts\(\);/);
   assert.match(nativePresence, /if \(!navigator\.onLine\) return credentialPrepared\(\);/);
-  assert.match(nativePresence, /de cuadrilla guardada sin conexión; se sincronizará cuando vuelva Internet/);
+  assert.match(nativePresence, /guardada sin conexión; pendiente de sincronizar cuando vuelva Internet/);
+});
+
+test('online no avanza por una marca solamente encolada y espera confirmación server-side', async () => {
+  const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
+
+  assert.match(nativePresence, /function optimisticOfflineActions\(context\) \{\s*if \(navigator\.onLine\) return null;/);
+  assert.match(nativePresence, /function onlineQueuedMarkType\(context\)/);
+  assert.match(nativePresence, /if \(onlineQueuedMarkType\(context\)\) return \[\];/);
+  assert.match(nativePresence, /enviada · esperando confirmación del servidor/);
+  assert.match(nativePresence, /forgetQueuedMark\(serviceRequestId, markType\)/);
+  assert.match(nativePresence, /if \(navigator\.onLine\) contexts = await loadContexts\(\)/);
+  assert.match(nativePresence, /window\.location\.reload\(\)/);
+});
+
+test('panel de cuadrilla diferencia la próxima detección del historial confirmado', async () => {
+  const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
+
+  assert.match(nativePresence, /function safeAttendance\(value\)/);
+  assert.match(nativePresence, /function memberHasPersistedMark\(member, markType\)/);
+  assert.match(nativePresence, /function appendMemberHistory\(copy, member\)/);
+  assert.match(nativePresence, /Entrada · \$\{time\}/);
+  assert.match(nativePresence, /Por detectar · \$\{markInfo\(markType\)\.noun\}/);
+});
+
+test('contexto de cuadrilla proyecta las cuatro horas persistidas por integrante', async () => {
+  let assignmentQuery;
+  const serviceCreatedAt = new Date('2026-08-21T12:00:00.000Z');
+  const prisma = {
+    dispatchAssignment: {
+      async findMany(query) {
+        assignmentQuery = query;
+        return [{
+          id: 'TEST-ASSIGNMENT-LEADER',
+          workerId: 'TEST-WORKER-LEADER',
+          serviceRequest: {
+            id: 'TEST-SERVICE-CREW',
+            operationPointId: 'TEST-OPERATION',
+            operationPointName: 'Operación de prueba',
+            serviceDate: new Date('2026-08-21T00:00:00.000Z'),
+            startTime: '08:00',
+            endTime: '17:00',
+            createdAt: serviceCreatedAt,
+            operationPoint: { id: 'TEST-OPERATION', isActive: true, attendanceEnabled: true },
+            assignments: [
+              {
+                id: 'TEST-ASSIGNMENT-LEADER',
+                workerId: 'TEST-WORKER-LEADER',
+                worker: { fullName: 'Encargado Prueba' },
+                attendanceSession: {
+                  arrivalReportedAt: new Date('2026-08-21T13:01:00.000Z'),
+                  departureReportedAt: new Date('2026-08-21T22:03:00.000Z'),
+                  marks: [
+                    { markType: 'BREAK_START', clientCapturedAt: new Date('2026-08-21T17:02:00.000Z'), serverReceivedAt: new Date('2026-08-21T17:02:03.000Z') },
+                    { markType: 'BREAK_END', clientCapturedAt: new Date('2026-08-21T18:01:00.000Z'), serverReceivedAt: new Date('2026-08-21T18:01:02.000Z') }
+                  ]
+                }
+              },
+              {
+                id: 'TEST-ASSIGNMENT-A',
+                workerId: 'TEST-WORKER-A',
+                worker: { fullName: 'Auxiliar Prueba' },
+                attendanceSession: {
+                  arrivalReportedAt: new Date('2026-08-21T13:01:30.000Z'),
+                  departureReportedAt: null,
+                  marks: []
+                }
+              }
+            ]
+          }
+        }];
+      }
+    },
+    devAuditEvent: {
+      async findMany(query) {
+        if (query.where.entityType === 'DISPATCH_CREW_ATTENDANCE_SERVICE') {
+          return [{
+            entityId: 'TEST-SERVICE-CREW',
+            createdAt: new Date('2026-08-21T12:01:00.000Z'),
+            metadata: { mode: 'CREW', crewLeaderWorkerId: 'TEST-WORKER-LEADER' }
+          }];
+        }
+        return [{
+          entityId: 'TEST-OPERATION',
+          createdAt: new Date('2026-08-21T11:00:00.000Z'),
+          metadata: { allowed: true }
+        }];
+      }
+    }
+  };
+
+  const [context] = await loadCrewAttendancePortalContexts(prisma, { workerId: 'TEST-WORKER-LEADER' });
+  const leader = context.members.find((member) => member.workerId === 'TEST-WORKER-LEADER');
+  const auxiliary = context.members.find((member) => member.workerId === 'TEST-WORKER-A');
+
+  assert.equal(assignmentQuery.select.serviceRequest.select.assignments.select.attendanceSession.select.departureReportedAt, true);
+  assert.deepEqual(assignmentQuery.select.serviceRequest.select.assignments.select.attendanceSession.select.marks.where.markType.in, ['BREAK_START', 'BREAK_END']);
+  assert.deepEqual(leader.attendance, {
+    arrivalAt: '2026-08-21T13:01:00.000Z',
+    breakStartAt: '2026-08-21T17:02:00.000Z',
+    breakEndAt: '2026-08-21T18:01:00.000Z',
+    departureAt: '2026-08-21T22:03:00.000Z'
+  });
+  assert.deepEqual(auxiliary.attendance, {
+    arrivalAt: '2026-08-21T13:01:30.000Z',
+    breakStartAt: null,
+    breakEndAt: null,
+    departureAt: null
+  });
+});
+
+test('tarjeta de cada trabajador muestra las cuatro marcaciones persistidas con hora', async () => {
+  const view = await read('src/views/workerPortal.ejs');
+
+  assert.match(view, /Marcaciones registradas/);
+  assert.match(view, /data-assignment-history-mark="ARRIVAL"[\s\S]{0,180}assignment\.arrivalReportedLabel/);
+  assert.match(view, /data-assignment-history-mark="BREAK_START"[\s\S]{0,180}assignment\.breakStartLabel/);
+  assert.match(view, /data-assignment-history-mark="BREAK_END"[\s\S]{0,180}assignment\.breakEndLabel/);
+  assert.match(view, /data-assignment-history-mark="DEPARTURE"[\s\S]{0,180}assignment\.departureReportedLabel/);
+  assert.match(view, /Sin registrar/);
 });
 
 test('endpoint de presencia usa la misma puerta para las cuatro marcas y exige challenge ligado a markType', async () => {
