@@ -75,15 +75,18 @@ function normalizeBiometricMarkType(value) {
   return markType;
 }
 
-function normalizeCrewPresenceMarkType(value) {
-  const markType = normalizedString(value, 40)?.toUpperCase();
-  if (!BIOMETRIC_MARK_TYPES.has(markType)) throw new Error('crew_presence_mark_type_invalid');
-  return markType;
+function resolveCrewPresenceMarkType(proofBundle) {
+  const explicitMarkType = normalizedString(proofBundle?.markType, 40)?.toUpperCase();
+  if (!explicitMarkType) return { markType: 'ARRIVAL', legacyArrival: true };
+  if (!BIOMETRIC_MARK_TYPES.has(explicitMarkType)) throw new Error('crew_presence_mark_type_invalid');
+  return { markType: explicitMarkType, legacyArrival: false };
 }
 
-function assertCrewMarkChallenge(proofBundle, markType) {
+function assertCrewMarkChallenge(proofBundle, markType, options = {}) {
   const challenge = normalizedString(proofBundle?.challenge, 2048);
-  if (!challenge || !challenge.startsWith(`${CREW_MARK_CHALLENGE_PREFIX}:${markType}:`)) {
+  if (!challenge) throw new Error('crew_presence_mark_challenge_invalid');
+  const legacyArrival = options.legacyArrival === true && markType === 'ARRIVAL';
+  if (!legacyArrival && !challenge.startsWith(`${CREW_MARK_CHALLENGE_PREFIX}:${markType}:`)) {
     throw new Error('crew_presence_mark_challenge_invalid');
   }
   if (
@@ -712,8 +715,8 @@ export function workerPortalRouter(prisma, options = {}) {
       const idempotencyKey = normalizedString(req.body?.idempotencyKey, 100);
       const clientCapturedAt = new Date(req.body?.clientCapturedAt);
       const proofBundle = req.body?.proofBundle;
-      const markType = normalizeCrewPresenceMarkType(proofBundle?.markType);
-      assertCrewMarkChallenge(proofBundle, markType);
+      const { markType, legacyArrival } = resolveCrewPresenceMarkType(proofBundle);
+      assertCrewMarkChallenge(proofBundle, markType, { legacyArrival });
       if (!assignmentId || !serviceRequestId || !idempotencyKey || Number.isNaN(clientCapturedAt.getTime())) {
         return strictError(res, 400, 'crew_presence_sync_invalid', 'La comprobación de cuadrilla no es válida.');
       }
@@ -817,6 +820,7 @@ export function workerPortalRouter(prisma, options = {}) {
         const canonicalResult = resultByAssignment.get(member.assignmentId);
         let status = 'PENDING';
         if (['RECORDED', 'REPLAYED', 'ALREADY_RECORDED'].includes(canonicalResult?.status)) status = 'REGISTERED';
+        else if (canonicalResult?.status === 'NOT_RECORDED') status = 'PENDING';
         else if (validatedSet.has(member.workerId)) status = 'VERIFIED';
         else if (phoneExceptionSet.has(member.workerId)) status = 'NO_PHONE_REVIEW';
         else if (markType === 'ARRIVAL' && member.arrivalReported) status = 'REGISTERED';
