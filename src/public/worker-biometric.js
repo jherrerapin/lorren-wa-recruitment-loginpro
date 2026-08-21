@@ -30,6 +30,7 @@ if ('serviceWorker' in navigator) {
   const CREW_IDEMPOTENCY_PREFIX = 'lorren-crew-arrival:';
   const CREW_FORCE_MAJEURE_PREFIX = 'lorren-crew-force-majeure:';
   if (!PORTAL_PATH_PATTERN.test(window.location.pathname)) return;
+  if (window.LorrenAndroidPresence || /LorrenNative\/1/.test(WORKER_PORTAL_USER_AGENT)) return;
 
   let contextReady = false;
   let contextLoadPromise = null;

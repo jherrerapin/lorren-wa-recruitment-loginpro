@@ -11,7 +11,9 @@ import com.google.android.gms.nearby.Nearby;
 import com.google.android.gms.nearby.connection.AdvertisingOptions;
 import com.google.android.gms.nearby.connection.ConnectionInfo;
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback;
+import com.google.android.gms.nearby.connection.ConnectionOptions;
 import com.google.android.gms.nearby.connection.ConnectionResolution;
+import com.google.android.gms.nearby.connection.ConnectionType;
 import com.google.android.gms.nearby.connection.ConnectionsClient;
 import com.google.android.gms.nearby.connection.ConnectionsStatusCodes;
 import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo;
@@ -65,6 +67,7 @@ final class NearbyPresenceManager {
     private String scanServiceRequestId = "";
     private String challenge = "";
     private long challengeSentAt = 0L;
+    private int expectedProofCount = 0;
     private Runnable scanTimeout;
     private Runnable scanCompleteTimeout;
 
@@ -83,7 +86,10 @@ final class NearbyPresenceManager {
     }
 
     private void startReadyDiscovery(String normalizedService, int retryCount) {
-        DiscoveryOptions options = new DiscoveryOptions.Builder().setStrategy(STRATEGY).build();
+        DiscoveryOptions options = new DiscoveryOptions.Builder()
+            .setStrategy(STRATEGY)
+            .setLowPower(true)
+            .build();
         try {
             client.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
                 .addOnSuccessListener(unused -> {
@@ -123,6 +129,7 @@ final class NearbyPresenceManager {
         String serviceRequestId = requiredToken(input.optString("serviceRequestId"), "serviceRequestId");
         String nextChallenge = requiredToken(input.optString("challenge"), "challenge");
         long timeoutMs = Math.max(MIN_SCAN_MS, Math.min(MAX_SCAN_MS, input.optLong("timeoutMs", 12_000L)));
+        int nextExpectedProofCount = Math.max(0, input.optInt("expectedProofCount", 0));
 
         stopAllInternal(false);
         role = Role.LEADER;
@@ -130,6 +137,7 @@ final class NearbyPresenceManager {
         scanServiceRequestId = serviceRequestId;
         challenge = nextChallenge;
         challengeSentAt = System.currentTimeMillis();
+        expectedProofCount = nextExpectedProofCount;
         proofsByKey.clear();
         requestedEndpoints.clear();
         startLeaderAdvertising(nextAttemptId, serviceRequestId, timeoutMs, 0);
@@ -141,7 +149,11 @@ final class NearbyPresenceManager {
         long timeoutMs,
         int retryCount
     ) {
-        AdvertisingOptions options = new AdvertisingOptions.Builder().setStrategy(STRATEGY).build();
+        AdvertisingOptions options = new AdvertisingOptions.Builder()
+            .setStrategy(STRATEGY)
+            .setLowPower(true)
+            .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+            .build();
         try {
             client.startAdvertising(ENDPOINT_NAME, SERVICE_ID, connectionLifecycleCallback, options)
                 .addOnSuccessListener(unused -> {
@@ -155,7 +167,12 @@ final class NearbyPresenceManager {
                         event.put("attemptId", nextAttemptId);
                         event.put("serviceRequestId", serviceRequestId);
                         event.put("timeoutMs", timeoutMs);
+                        event.put("expectedProofCount", expectedProofCount);
                     });
+                    if (expectedProofCount == 0) {
+                        completeLeaderScan(nextAttemptId);
+                        return;
+                    }
                     scheduleLeaderScanTimeout(nextAttemptId, timeoutMs);
                 })
                 .addOnFailureListener(error -> handleAdvertisingStartFailure(
@@ -250,7 +267,11 @@ final class NearbyPresenceManager {
                 if (role != Role.READY || !SERVICE_ID.equals(info.getServiceId())) return;
                 if (!requestedEndpoints.add(endpointId)) return;
                 emit("leader_found", event -> event.put("candidateCount", requestedEndpoints.size()));
-                client.requestConnection(ENDPOINT_NAME, endpointId, connectionLifecycleCallback)
+                ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
+                    .setLowPower(true)
+                    .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+                    .build();
+                client.requestConnection(ENDPOINT_NAME, endpointId, connectionLifecycleCallback, connectionOptions)
                     .addOnFailureListener(error -> {
                         synchronized (NearbyPresenceManager.this) {
                             requestedEndpoints.remove(endpointId);
@@ -433,7 +454,11 @@ final class NearbyPresenceManager {
                 event.put("pendingCount", requestedEndpoints.size());
                 event.put("credentialProvisioned", !stored.optString("credential").isEmpty());
             });
-            client.disconnectFromEndpoint(endpointId);
+            if (expectedProofCount > 0 && proofsByKey.size() >= expectedProofCount) {
+                completeLeaderScan(attemptId);
+            } else {
+                client.disconnectFromEndpoint(endpointId);
+            }
         } catch (Exception ignored) {
             emitError("proof_invalid");
         }
@@ -446,16 +471,17 @@ final class NearbyPresenceManager {
 
     private synchronized void completeLeaderScan(String completedAttemptId) {
         if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
-        scanTimeout = null;
+        cancelLeaderTimers();
+        client.stopAdvertising();
         emit("scan_complete", event -> {
             event.put("attemptId", completedAttemptId);
             event.put("verifiedCount", proofsByKey.size());
             event.put("pendingCount", requestedEndpoints.size());
+            event.put("expectedProofCount", expectedProofCount);
         });
         client.stopAllEndpoints();
         requestedEndpoints.clear();
         role = Role.IDLE;
-        scanCompleteTimeout = null;
     }
 
     private synchronized void cancelLeaderTimers() {
@@ -480,6 +506,7 @@ final class NearbyPresenceManager {
         client.stopAllEndpoints();
         requestedEndpoints.clear();
         readyServiceRequestId = "";
+        expectedProofCount = 0;
         role = Role.IDLE;
         if (notify) emit("stopped", event -> {});
     }

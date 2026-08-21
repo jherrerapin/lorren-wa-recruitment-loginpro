@@ -234,7 +234,7 @@
   }
 
   function hideLegacyCrewBluetooth() {
-    document.querySelectorAll('[data-crew-group-arrival="true"], [data-crew-force-majeure-wrap], #crew-without-face-access')
+    document.querySelectorAll('[data-crew-group-arrival="true"], [data-crew-force-majeure-wrap], #crew-without-face-access, [data-crew-bluetooth-status]')
       .forEach((node) => { node.hidden = true; });
   }
 
@@ -302,6 +302,11 @@
     if (serverStatus) return serverStatus;
     if (phoneExceptionSet(context.serviceRequestId).has(member.workerId)) return 'NO_PHONE_REVIEW';
     return 'PENDING';
+  }
+
+  function expectedAuxiliaryProofCount(context) {
+    if (!context?.isCrewLeader || !Array.isArray(context.members)) return 0;
+    return context.members.filter((member) => !member.isLeader && memberStatus(context, member) === 'PENDING').length;
   }
 
   function memberStatusPresentation(status) {
@@ -609,17 +614,20 @@
     updateCount();
 
     const attemptId = newAttemptId();
+    const expectedProofCount = expectedAuxiliaryProofCount(context);
     const payload = {
       version: 1,
       serviceRequestId: context.serviceRequestId,
       attemptId,
       challenge: randomToken(32),
-      timeoutMs: DEFAULT_SCAN_MS
+      timeoutMs: DEFAULT_SCAN_MS,
+      expectedProofCount
     };
     activeAttempt = {
       idempotencyKey: attemptId,
       assignmentId: context.assignmentId,
-      serviceRequestId: context.serviceRequestId
+      serviceRequestId: context.serviceRequestId,
+      expectedProofCount
     };
     const result = bridgeCall('startCrewScan', JSON.stringify(payload));
     if (!result?.ok) {
@@ -629,7 +637,7 @@
     }
     activeMode = 'LEADER';
     showStop();
-    setStatus(automaticRetry ? 'Reintentando a quienes faltan…' : 'Verificando presencia…', 'warning');
+    setStatus(automaticRetry ? 'Reintentando automáticamente a quienes faltan…' : 'Verificando presencia…', 'warning');
   }
 
   function stopNativeModes() {
@@ -751,14 +759,21 @@
       activeMode = 'IDLE';
       markRetryAvailable();
       const transientFailures = scanTransientFailureCount;
+      const expectedProofCount = Math.max(0, Number(activeAttempt?.expectedProofCount ?? detail.expectedProofCount ?? 0));
       const stop = document.querySelector(`#${PANEL_ID} [data-native-presence-stop]`);
       if (stop) stop.hidden = true;
       queueCompletedAttempt()
         .then(({ proofCount }) => {
           activeAttempt = null;
-          if (transientFailures > 0 && autoRetryRemaining > 0) {
+          const incomplete = expectedProofCount > 0 && proofCount < expectedProofCount;
+          if ((transientFailures > 0 || incomplete) && autoRetryRemaining > 0) {
             autoRetryRemaining -= 1;
-            setStatus('Verificación guardada. Hubo un problema de conexión; Lórren reintentará automáticamente.', 'warning');
+            setStatus(
+              incomplete
+                ? 'Faltan respuestas. Lórren reintentará automáticamente una vez.'
+                : 'Verificación guardada. Hubo un problema de conexión; Lórren reintentará automáticamente.',
+              'warning'
+            );
             autoRetryTimer = window.setTimeout(() => {
               autoRetryTimer = null;
               startLeaderScan(true);
@@ -767,7 +782,7 @@
           }
           const responses = proofCount;
           setStatus(
-            `${responses} respuesta${responses === 1 ? '' : 's'} recibida${responses === 1 ? '' : 's'}. Esperando validación.`,
+            `${responses} respuesta${responses === 1 ? '' : 's'} recibida${responses === 1 ? '' : 's'}. ${navigator.onLine ? 'Esperando validación.' : 'Guardada sin conexión; se sincronizará cuando vuelva Internet.'}`,
             navigator.onLine ? '' : 'warning'
           );
         })
