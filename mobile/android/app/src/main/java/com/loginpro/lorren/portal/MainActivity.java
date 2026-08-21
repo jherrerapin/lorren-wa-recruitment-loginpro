@@ -136,16 +136,13 @@ public final class MainActivity extends Activity {
                     callback.invoke(origin, false, false);
                     return;
                 }
-                if (hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                if (hasPreciseLocationPermission()) {
                     callback.invoke(origin, true, false);
                     return;
                 }
                 pendingGeoCallback = callback;
                 pendingGeoOrigin = origin;
-                requestRuntimePermissions(
-                    new String[] { Manifest.permission.ACCESS_FINE_LOCATION },
-                    REQUEST_GEOLOCATION
-                );
+                requestRuntimePermissions(locationRuntimePermissions(), REQUEST_GEOLOCATION);
             }
 
             @Override
@@ -285,10 +282,28 @@ public final class MainActivity extends Activity {
         return "bluetooth_disabled";
     }
 
+    private String[] locationRuntimePermissions() {
+        return new String[] {
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        };
+    }
+
+    private boolean hasPreciseLocationPermission() {
+        return hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+            && hasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
+    }
+
+    private void addPreciseLocationPermissionsIfNeeded(List<String> permissions) {
+        if (hasPreciseLocationPermission()) return;
+        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
+        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+    }
+
     private List<String> attendancePermissions(boolean includeCamera) {
         List<String> missing = new ArrayList<>();
         if (includeCamera) addIfMissing(missing, Manifest.permission.CAMERA);
-        addIfMissing(missing, Manifest.permission.ACCESS_FINE_LOCATION);
+        addPreciseLocationPermissionsIfNeeded(missing);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             addIfMissing(missing, Manifest.permission.BLUETOOTH_SCAN);
             addIfMissing(missing, Manifest.permission.BLUETOOTH_CONNECT);
@@ -351,7 +366,7 @@ public final class MainActivity extends Activity {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         systemPromptInFlight = false;
         if (requestCode == REQUEST_GEOLOCATION && pendingGeoCallback != null) {
-            boolean allowed = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
+            boolean allowed = hasPreciseLocationPermission();
             pendingGeoCallback.invoke(pendingGeoOrigin, allowed, false);
             pendingGeoCallback = null;
             pendingGeoOrigin = null;
@@ -393,7 +408,7 @@ public final class MainActivity extends Activity {
     }
 
     private boolean nearbyPermissionsGranted() {
-        if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) return false;
+        if (!hasPreciseLocationPermission()) return false;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (!hasPermission(Manifest.permission.BLUETOOTH_SCAN)) return false;
             if (!hasPermission(Manifest.permission.BLUETOOTH_CONNECT)) return false;
