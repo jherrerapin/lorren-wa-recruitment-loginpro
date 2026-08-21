@@ -96,16 +96,34 @@
     })[normalizeMarkType(markType) || 'ARRIVAL'];
   }
 
+  function safeIsoDate(value) {
+    if (!value) return null;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  function safeAttendance(value) {
+    const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+    return {
+      arrivalAt: safeIsoDate(input.arrivalAt),
+      breakStartAt: safeIsoDate(input.breakStartAt),
+      breakEndAt: safeIsoDate(input.breakEndAt),
+      departureAt: safeIsoDate(input.departureAt)
+    };
+  }
+
   function safeMember(value) {
     if (!value || typeof value !== 'object') return null;
     const assignmentId = String(value.assignmentId || '').trim();
     const workerId = String(value.workerId || '').trim();
     if (!assignmentId || !workerId) return null;
+    const attendance = safeAttendance(value.attendance);
     return {
       assignmentId,
       workerId,
       displayName: String(value.displayName || 'Auxiliar').trim().slice(0, 160) || 'Auxiliar',
-      arrivalReported: value.arrivalReported === true,
+      arrivalReported: value.arrivalReported === true || Boolean(attendance.arrivalAt),
+      attendance,
       isLeader: value.isLeader === true
     };
   }
@@ -259,6 +277,12 @@
     if (serviceRequestId && normalized) queuedMarkSet(serviceRequestId).add(normalized);
   }
 
+  function forgetQueuedMark(serviceRequestId, markType) {
+    const normalized = normalizeMarkType(markType);
+    if (!serviceRequestId || !normalized) return;
+    queuedMarkSet(serviceRequestId).delete(normalized);
+  }
+
   async function hydrateLocalQueuedMarks() {
     localQueuedMarksByService.clear();
     const offline = window.LorrenWorkerPortalOffline;
@@ -293,7 +317,7 @@
       .native-presence-actions{display:grid;gap:7px}.native-presence-btn{min-height:44px;border:0;border-radius:11px;padding:9px 13px;background:#176c36;color:#fff;font:inherit;font-size:13px;font-weight:850;cursor:pointer}.native-presence-btn.secondary{background:#e4ece7;color:#234a30}.native-presence-btn:disabled{opacity:.55;cursor:wait}
       .native-presence-status{padding:10px 11px;border-radius:11px;background:#eaf8ef;color:#176c36;font-size:12px;font-weight:800;line-height:1.45}.native-presence-status.warning{background:#fff6df;color:#76520b}.native-presence-status.error{background:#fff1f2;color:#9f1239}
       .native-presence-count{font-size:26px;font-weight:900;color:#176c36;line-height:1}.native-presence-small{font-size:11px;color:#647568}
-      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
+      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-history{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.native-presence-member-mark{display:inline-flex;padding:4px 6px;border-radius:8px;background:#eaf8ef;color:#176c36;font-size:9px;font-weight:850;white-space:nowrap}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
       @media(max-width:620px){.native-presence-row{grid-template-columns:1fr}.native-presence-btn{width:100%}.native-presence-member{grid-template-columns:minmax(0,1fr)}.native-presence-member-side{justify-content:flex-start}}
     `;
     document.head.appendChild(style);
@@ -375,6 +399,7 @@
   }
 
   function optimisticOfflineActions(context) {
+    if (navigator.onLine) return null;
     const queued = queuedMarkSet(context.serviceRequestId);
     if (!queued.size) return null;
     if (queued.has('DEPARTURE')) return [];
@@ -384,15 +409,25 @@
     return null;
   }
 
+  function onlineQueuedMarkType(context) {
+    if (!navigator.onLine || !context?.serviceRequestId) return null;
+    const queued = queuedMarkSet(context.serviceRequestId);
+    return domCrewMarkActions(context).find((markType) => queued.has(markType))
+      || [...queued].map(normalizeMarkType).find(Boolean)
+      || null;
+  }
+
   function availableCrewMarkActions(context) {
     if (!context?.isCrewLeader) return [];
     if (retryNotDetectedCount > 0 && normalizeMarkType(retryMarkType)) return [retryMarkType];
+    if (onlineQueuedMarkType(context)) return [];
     return optimisticOfflineActions(context) ?? domCrewMarkActions(context);
   }
 
   function activePresentationMarkType(context) {
     return normalizeMarkType(activeAttempt?.markType)
       || normalizeMarkType(retryMarkType)
+      || onlineQueuedMarkType(context)
       || availableCrewMarkActions(context)[0]
       || 'ARRIVAL';
   }
@@ -414,11 +449,37 @@
     return serverMemberStatusesByScope.get(key);
   }
 
+  function persistedMarkAt(member, markType) {
+    const attendance = member?.attendance || {};
+    return ({
+      ARRIVAL: attendance.arrivalAt,
+      BREAK_START: attendance.breakStartAt,
+      BREAK_END: attendance.breakEndAt,
+      DEPARTURE: attendance.departureAt
+    })[normalizeMarkType(markType) || 'ARRIVAL'] || null;
+  }
+
+  function memberHasPersistedMark(member, markType) {
+    return Boolean(persistedMarkAt(member, markType));
+  }
+
+  function formatPersistedMarkTime(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    }).format(date);
+  }
+
   function memberStatus(context, member, markType) {
     const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    if (memberHasPersistedMark(member, normalizedMark)) return 'REGISTERED';
     const serverStatus = serverStatusMap(context.serviceRequestId, normalizedMark).get(member.workerId);
     if (serverStatus === 'VERIFIED' || serverStatus === 'REGISTERED') return serverStatus;
-    if (normalizedMark === 'ARRIVAL' && member.arrivalReported) return 'REGISTERED';
     if (member.isLeader) return 'LEADER_DEVICE';
     if (serverStatus) return serverStatus;
     if (normalizedMark === 'ARRIVAL' && phoneExceptionSet(context.serviceRequestId).has(member.workerId)) {
@@ -441,12 +502,12 @@
     )).length;
   }
 
-  function memberStatusPresentation(status) {
+  function memberStatusPresentation(status, markType) {
     if (status === 'VERIFIED') return { label: '✓ Detectado', className: 'verified' };
     if (status === 'REGISTERED') return { label: '✓ Registrado', className: 'registered' };
     if (status === 'LEADER_DEVICE') return { label: 'Este teléfono', className: 'self' };
     if (status === 'NO_PHONE_REVIEW') return { label: 'Sin teléfono · por revisar', className: 'no-phone' };
-    return { label: 'Pendiente', className: 'pending' };
+    return { label: `Por detectar · ${markInfo(markType).noun}`, className: 'pending' };
   }
 
   function setMemberServerStatuses(serviceRequestId, markType, statuses) {
@@ -467,6 +528,22 @@
     });
   }
 
+  function appendMemberHistory(copy, member) {
+    const history = element('div', 'native-presence-member-history');
+    const rows = [
+      ['ARRIVAL', member?.attendance?.arrivalAt],
+      ['BREAK_START', member?.attendance?.breakStartAt],
+      ['BREAK_END', member?.attendance?.breakEndAt],
+      ['DEPARTURE', member?.attendance?.departureAt]
+    ];
+    rows.forEach(([markType, at]) => {
+      const time = formatPersistedMarkTime(at);
+      if (!time) return;
+      history.appendChild(element('span', 'native-presence-member-mark', `${markInfo(markType).title} · ${time}`));
+    });
+    if (history.childNodes.length) copy.appendChild(history);
+  }
+
   function renderCrewMembers(panel, context, markType) {
     if (!context?.isCrewLeader || !Array.isArray(context.members) || !context.members.length) return;
     const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
@@ -474,7 +551,7 @@
     list.setAttribute('aria-label', 'Integrantes de la cuadrilla');
     context.members.forEach((member) => {
       const status = memberStatus(context, member, normalizedMark);
-      const presentation = memberStatusPresentation(status);
+      const presentation = memberStatusPresentation(status, normalizedMark);
       const row = element('div', 'native-presence-member');
       row.dataset.nativePresenceMember = member.workerId;
       const copy = element('div', 'native-presence-member-copy');
@@ -482,6 +559,7 @@
         element('strong', 'native-presence-member-name', member.displayName),
         element('span', 'native-presence-member-role', member.isLeader ? 'Encargado' : 'Auxiliar')
       );
+      appendMemberHistory(copy, member);
       const side = element('div', 'native-presence-member-side');
       side.appendChild(element('span', `native-presence-badge ${presentation.className}`, presentation.label));
 
@@ -666,6 +744,7 @@
     row.appendChild(field);
 
     const context = currentContext();
+    const waitingServerMarkType = onlineQueuedMarkType(context);
     const markActions = availableCrewMarkActions(context);
     if (context?.isCrewLeader) {
       const actions = element('div', 'native-presence-actions');
@@ -685,10 +764,15 @@
     panel.appendChild(row);
 
     const presentationMarkType = activePresentationMarkType(context);
+    const offlineQueued = !navigator.onLine && queuedMarkSet(context?.serviceRequestId || '').size > 0;
     const status = element('div', 'native-presence-status warning', context?.isCrewLeader
-      ? markActions.length
-        ? `Listo para ${markInfo(presentationMarkType).noun}. La app comprobará la cuadrilla antes de guardar la marca.`
-        : 'No hay una marcación de cuadrilla disponible en este momento.'
+      ? waitingServerMarkType
+        ? `${markInfo(waitingServerMarkType).title} enviada · esperando confirmación del servidor. La siguiente marcación se habilitará cuando quede registrada.`
+        : offlineQueued
+          ? 'Hay marcaciones guardadas sin conexión y pendientes de sincronizar. Puedes continuar localmente; se confirmarán cuando vuelva Internet.'
+          : markActions.length
+            ? `Listo para ${markInfo(presentationMarkType).noun}. La app comprobará la cuadrilla antes de guardar la marca.`
+            : 'No hay una marcación de cuadrilla disponible en este momento.'
       : credentialPrepared()
         ? 'Listo para asistencia. Mantén la app abierta durante la comprobación del encargado.'
         : 'Conéctate una vez para preparar este teléfono.');
@@ -900,7 +984,7 @@
           setStatus(
             incomplete
               ? `Faltan respuestas para la ${markInfo(completionMarkType).noun}. Lórren reintentará automáticamente una vez.`
-              : `Marcación guardada. Hubo un problema de conexión local; Lórren reintentará automáticamente.`,
+              : 'Marcación guardada. Hubo un problema de conexión local; Lórren reintentará automáticamente.',
             'warning'
           );
           autoRetryTimer = window.setTimeout(() => {
@@ -911,9 +995,9 @@
         }
         setStatus(
           navigator.onLine
-            ? `${markInfo(completionMarkType).title} de cuadrilla enviada; esperando confirmación.`
-            : `${markInfo(completionMarkType).title} de cuadrilla guardada sin conexión; se sincronizará cuando vuelva Internet.`,
-          navigator.onLine ? '' : 'warning'
+            ? `${markInfo(completionMarkType).title} de cuadrilla enviada; esperando confirmación del servidor.`
+            : `${markInfo(completionMarkType).title} de cuadrilla guardada sin conexión; pendiente de sincronizar cuando vuelva Internet.`,
+          'warning'
         );
         if (incomplete) markRetryAvailable(completionMarkType);
       })
@@ -1030,37 +1114,43 @@
     }
   }
 
-  function handleServiceWorkerMessage(event) {
+  async function handleServiceWorkerMessage(event) {
     const message = event?.data;
     if (!message || typeof message !== 'object') return;
     if (message.type === 'CREW_PRESENCE_SYNCED') {
       const payload = message.payload || {};
       const serviceRequestId = String(payload.serviceRequestId || selectedServiceRequestId || '').trim();
       const markType = normalizeMarkType(payload.markType) || 'ARRIVAL';
+      forgetQueuedMark(serviceRequestId, markType);
       if (serviceRequestId) setMemberServerStatuses(serviceRequestId, markType, payload.memberStatuses);
+      if (navigator.onLine) contexts = await loadContexts();
       const context = contexts.find((item) => item.serviceRequestId === serviceRequestId) || currentContext();
       retryNotDetectedCount = pendingAuxiliaryCount(context, markType);
       retryMarkType = retryNotDetectedCount > 0 ? markType : '';
       hasCompletedLeaderScan = retryNotDetectedCount > 0;
       pendingPhoneExceptionWorkerId = '';
       renderPanel();
-      setStatus(`${markInfo(markType).title} de cuadrilla actualizada. ${payload.message || ''}`.trim(), payload.requiresReview ? 'warning' : '');
-      if (retryNotDetectedCount > 0) {
-        markRetryAvailable(markType);
-      } else if (navigator.onLine) {
-        window.setTimeout(() => window.location.reload(), 350);
-      }
+      setStatus(`${markInfo(markType).title} de cuadrilla confirmada por el servidor. ${payload.message || ''}`.trim(), payload.requiresReview ? 'warning' : '');
+      if (retryNotDetectedCount > 0) markRetryAvailable(markType);
+      if (navigator.onLine) window.setTimeout(() => window.location.reload(), 500);
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {
-      const markType = normalizeMarkType(message.payload?.markType) || normalizeMarkType(retryMarkType) || 'ARRIVAL';
-      setStatus(`No fue posible registrar la ${markInfo(markType).noun} de la cuadrilla. Revisa el estado e intenta nuevamente.`, 'error');
+      const serviceRequestId = String(message.serviceRequestId || message.payload?.serviceRequestId || selectedServiceRequestId || '').trim();
+      const queuedMarkType = [...queuedMarkSet(serviceRequestId)].map(normalizeMarkType).find(Boolean) || null;
+      const markType = normalizeMarkType(message.payload?.markType)
+        || queuedMarkType
+        || normalizeMarkType(retryMarkType)
+        || 'ARRIVAL';
+      forgetQueuedMark(serviceRequestId, markType);
+      renderPanel();
+      setStatus(`No fue posible registrar la ${markInfo(markType).noun} de la cuadrilla. La marca no quedó confirmada; puedes intentarlo nuevamente.`, 'error');
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_RETRY') {
       if (Number(message.retryAfterMs || 0) > 0) {
-        const markType = normalizeMarkType(retryMarkType) || 'ARRIVAL';
-        setStatus(`La ${markInfo(markType).noun} de cuadrilla sigue pendiente y Lórren la reintentará automáticamente.`, 'warning');
+        const markType = normalizeMarkType(retryMarkType) || onlineQueuedMarkType(currentContext()) || 'ARRIVAL';
+        setStatus(`La ${markInfo(markType).noun} de cuadrilla sigue enviada pero aún no está confirmada. Lórren la reintentará automáticamente.`, 'warning');
       }
     }
   }
@@ -1077,7 +1167,9 @@
   }
 
   window.addEventListener('lorren-native-presence', handleNativeEvent);
-  navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage);
+  navigator.serviceWorker?.addEventListener('message', (event) => {
+    handleServiceWorkerMessage(event).catch(() => {});
+  });
   window.addEventListener('online', async () => {
     contexts = await loadContexts();
     await provisionCredential();
