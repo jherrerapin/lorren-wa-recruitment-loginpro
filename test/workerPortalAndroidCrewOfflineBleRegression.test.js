@@ -152,7 +152,7 @@ test('panel de cuadrilla diferencia la próxima detección del historial confirm
   assert.match(nativePresence, /function safeAttendance\(value\)/);
   assert.match(nativePresence, /function memberHasPersistedMark\(member, markType\)/);
   assert.match(nativePresence, /function appendMemberHistory\(copy, member\)/);
-  assert.match(nativePresence, /Entrada · \$\{time\}/);
+  assert.match(nativePresence, /\$\{markInfo\(markType\)\.title\} · \$\{time\}/);
   assert.match(nativePresence, /Por detectar · \$\{markInfo\(markType\)\.noun\}/);
 });
 
