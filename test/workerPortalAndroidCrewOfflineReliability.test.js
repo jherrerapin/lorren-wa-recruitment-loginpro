@@ -25,7 +25,10 @@ test('Nearby de cuadrilla usa transporte local no disruptivo y low-power', async
     nearby,
     /ConnectionOptions\.Builder\(\)[\s\S]{0,240}setLowPower\(true\)[\s\S]{0,180}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/
   );
-  assert.match(nearby, /requestConnection\(ENDPOINT_NAME, endpointId, connectionLifecycleCallback, LOCAL_CONNECTION_OPTIONS\)/);
+  assert.match(
+    nearby,
+    /requestConnection\([\s\S]{0,120}ENDPOINT_NAME[\s\S]{0,100}endpointId[\s\S]{0,100}connectionLifecycleCallback[\s\S]{0,100}LOCAL_CONNECTION_OPTIONS[\s\S]{0,60}\)/
+  );
   assert.doesNotMatch(nearby, /WifiManager|setWifiEnabled\s*\(/);
 });
 
@@ -41,10 +44,11 @@ test('scan termina temprano cuando ya tiene proofs esperadas y ubicación del en
   assert.match(nearby, /markLeaderLocationReady\(String locationAttemptId\)/);
   assert.match(
     nearby,
-    /maybeCompleteLeaderScan\(\)[\s\S]{0,500}leaderLocationReady[\s\S]{0,260}proofsByKey\.size\(\) >= expectedProofCount[\s\S]{0,300}completeLeaderScan/
+    /maybeCompleteLeaderScan\(\)[\s\S]{0,500}leaderLocationReady[\s\S]{0,260}proofsByKey\.size\(\) < expectedProofCount[\s\S]{0,300}completeLeaderScan/
   );
   assert.match(bridge, /manager\.markLeaderLocationReady\(attemptId\)/);
-  assert.match(nativePresence, /expectedProofCount:\s*pendingAuxiliaryCount\(context\)/);
+  assert.match(nativePresence, /const expectedProofCount = pendingAuxiliaryCount\(context\);/);
+  assert.match(nativePresence, /timeoutMs: DEFAULT_SCAN_MS,\s*expectedProofCount/);
 });
 
 test('APK oculta Web Bluetooth legacy y reintenta automáticamente una detección incompleta', async () => {
@@ -55,7 +59,7 @@ test('APK oculta Web Bluetooth legacy y reintenta automáticamente una detecció
   assert.match(nativePresence, /\[data-crew-bluetooth-status\]/);
   assert.match(
     nativePresence,
-    /proofCount < expectedProofCount[\s\S]{0,500}autoRetryRemaining > 0[\s\S]{0,700}startLeaderScan\(true\)/
+    /proofCount < expectedProofCount[\s\S]{0,500}autoRetryRemaining > 0[\s\S]{0,900}startLeaderScan\(true\)/
   );
 });
 
