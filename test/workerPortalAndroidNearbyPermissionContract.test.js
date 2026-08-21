@@ -16,13 +16,23 @@ function methodBody(source, signature, nextSignature) {
   return source.slice(start, end);
 }
 
-test('Nearby solicita su permiso Wi-Fi desde API 32 y mantiene coherente el grupo Bluetooth', async () => {
+test('Nearby conserva Wi-Fi state en API 32 y pide Nearby Wi-Fi solo desde API 33', async () => {
   const [manifest, mainActivity] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
     read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java')
   ]);
 
+  assert.match(manifest, /<uses-permission android:name="android\.permission\.ACCESS_WIFI_STATE" \/>/);
+  assert.match(manifest, /<uses-permission android:name="android\.permission\.CHANGE_WIFI_STATE" \/>/);
+  assert.doesNotMatch(
+    manifest,
+    /android:maxSdkVersion="31" android:name="android\.permission\.(?:ACCESS_WIFI_STATE|CHANGE_WIFI_STATE)"/
+  );
   assert.match(
+    manifest,
+    /android:minSdkVersion="33" android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
+  );
+  assert.doesNotMatch(
     manifest,
     /android:minSdkVersion="32" android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
   );
@@ -32,8 +42,8 @@ test('Nearby solicita su permiso Wi-Fi desde API 32 y mantiene coherente el grup
     'private boolean requiresNearbyWifiPermission()',
     'private List<String> attendancePermissions'
   );
-  assert.match(wifiGate, /Build\.VERSION_CODES\.S_V2/);
-  assert.doesNotMatch(wifiGate, /Build\.VERSION_CODES\.TIRAMISU/);
+  assert.match(wifiGate, /Build\.VERSION_CODES\.TIRAMISU/);
+  assert.doesNotMatch(wifiGate, /Build\.VERSION_CODES\.S_V2/);
 
   const bluetoothGroup = methodBody(
     mainActivity,
