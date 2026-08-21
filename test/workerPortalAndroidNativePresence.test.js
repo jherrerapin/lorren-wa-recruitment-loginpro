@@ -71,12 +71,19 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(mainActivity, /prepareAttendanceDeviceOnce\(\)/);
   assert.match(mainActivity, /attendancePermissions\(true\)/);
   assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.CAMERA\)/);
-  assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.ACCESS_COARSE_LOCATION\)/);
-  assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.ACCESS_FINE_LOCATION\)/);
+  assert.match(mainActivity, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
   assert.match(mainActivity, /private String\[\] locationRuntimePermissions\(\)/);
   assert.match(
     mainActivity,
     /locationRuntimePermissions\(\)[\s\S]{0,260}ACCESS_COARSE_LOCATION[\s\S]{0,120}ACCESS_FINE_LOCATION/
+  );
+  assert.match(
+    mainActivity,
+    /private boolean hasPreciseLocationPermission\(\)[\s\S]{0,260}ACCESS_COARSE_LOCATION[\s\S]{0,160}ACCESS_FINE_LOCATION/
+  );
+  assert.match(
+    mainActivity,
+    /addPreciseLocationPermissionsIfNeeded\(List<String> permissions\)[\s\S]{0,380}hasPreciseLocationPermission\(\)[\s\S]{0,180}permissions\.add\(Manifest\.permission\.ACCESS_COARSE_LOCATION\)[\s\S]{0,180}permissions\.add\(Manifest\.permission\.ACCESS_FINE_LOCATION\)/
   );
   assert.match(
     mainActivity,
@@ -94,7 +101,7 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(mainActivity, /"bluetooth_disabled"/);
   assert.match(
     mainActivity,
-    /nearbyPermissionsGranted\(\)[\s\S]{0,700}ACCESS_COARSE_LOCATION[\s\S]{0,180}ACCESS_FINE_LOCATION/
+    /nearbyPermissionsGranted\(\)[\s\S]{0,320}hasPreciseLocationPermission\(\)/
   );
 
   const stopLifecycle = mainActivity.match(/protected void onStop\(\) \{([\s\S]*?)\n    \}/);
