@@ -150,7 +150,7 @@ function buildBreakSummary({ breakStartAt, breakEndAt, departureReported }) {
   };
 }
 
-function isCrewArrivalDelegatedToLeader(context) {
+function isCrewMarkDelegatedToLeader(context) {
   return Boolean(
     context?.mode === 'CREW'
     && context?.crewAvailable === true
@@ -198,27 +198,33 @@ function buildPortalAssignment(assignment, now, crewContext = null) {
   const departureReported = Boolean(session?.departureReportedAt);
   const attendanceEnabled = point?.attendanceEnabled === true;
   const sessionRejected = session?.validationStatus === 'REJECTED';
-  const arrivalDelegatedToCrewLeader = isCrewArrivalDelegatedToLeader(crewContext);
+  const crewAvailable = crewContext?.mode === 'CREW' && crewContext?.crewAvailable === true;
+  const isCrewLeader = Boolean(crewAvailable && crewContext?.isCrewLeader === true);
+  const markDelegatedToCrewLeader = isCrewMarkDelegatedToLeader(crewContext);
+  const arrivalDelegatedToCrewLeader = markDelegatedToCrewLeader;
   const canRegisterArrival = attendanceEnabled
     && arrivalWindow.open
     && !arrivalReported
-    && !arrivalDelegatedToCrewLeader;
+    && !markDelegatedToCrewLeader;
   const canStartBreak = attendanceEnabled
     && arrivalReported
     && !departureReported
     && !breakStarted
     && !sessionRejected
+    && !markDelegatedToCrewLeader
     && Boolean(operationalWindow && isDispatchBreakStartWithinOperationalWindow(operationalWindow, now));
   const canEndBreak = attendanceEnabled
     && arrivalReported
     && !departureReported
     && breakPending
     && !sessionRejected
+    && !markDelegatedToCrewLeader
     && Boolean(operationalWindow && isDispatchBreakEndWithinOperationalWindow(operationalWindow, now));
   const canRegisterDeparture = attendanceEnabled
     && arrivalReported
     && !departureReported
     && !sessionRejected
+    && !markDelegatedToCrewLeader
     && Boolean(operationalWindow && isDispatchDepartureWithinOperationalWindow(operationalWindow, now));
   const photoPolicy = normalizePhotoPolicy(point?.attendancePhotoPolicy);
   const breakSummary = buildBreakSummary({ breakStartAt, breakEndAt, departureReported });
@@ -235,17 +241,23 @@ function buildPortalAssignment(assignment, now, crewContext = null) {
   if (departureReported) {
     actionType = 'DONE';
     actionLabel = `Jornada finalizada · ${formatDispatchMinutes(workedMinutes)}`;
+  } else if (markDelegatedToCrewLeader) {
+    actionType = 'BLOCKED';
+    actionLabel = 'Las marcaciones las registra el encargado de cuadrilla';
   } else if (arrivalReported && !canRegisterDeparture) {
     actionType = 'BLOCKED';
     actionLabel = 'Jornada fuera de ventana · requiere coordinación';
   } else if (arrivalReported) {
     actionType = 'DEPARTURE';
-    actionLabel = breakPending
-      ? 'Registrar salida · se descontarán 1 h 30 min de almuerzo'
-      : 'Registrar salida';
-  } else if (arrivalDelegatedToCrewLeader) {
-    actionType = 'BLOCKED';
-    actionLabel = 'La llegada la registra el encargado de cuadrilla';
+    if (isCrewLeader) {
+      actionLabel = breakPending
+        ? 'Registrar salida de la cuadrilla · se descontarán 1 h 30 min de almuerzo'
+        : 'Registrar salida de la cuadrilla';
+    } else {
+      actionLabel = breakPending
+        ? 'Registrar salida · se descontarán 1 h 30 min de almuerzo'
+        : 'Registrar salida';
+    }
   } else if (!expectedStartAt) actionLabel = 'Horario pendiente';
   else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
   else if (!arrivalWindow.open) {
@@ -256,10 +268,10 @@ function buildPortalAssignment(assignment, now, crewContext = null) {
   let breakActionLabel = null;
   if (canStartBreak) {
     breakActionType = 'BREAK_START';
-    breakActionLabel = 'Iniciar almuerzo';
+    breakActionLabel = isCrewLeader ? 'Iniciar almuerzo de la cuadrilla' : 'Iniciar almuerzo';
   } else if (canEndBreak) {
     breakActionType = 'BREAK_END';
-    breakActionLabel = 'Finalizar almuerzo';
+    breakActionLabel = isCrewLeader ? 'Finalizar almuerzo de la cuadrilla' : 'Finalizar almuerzo';
   }
 
   return {
@@ -282,6 +294,9 @@ function buildPortalAssignment(assignment, now, crewContext = null) {
     arrivalWindowClosesAt: optionalIsoDate(arrivalWindow.closesAt),
     arrivalWindowExpired: arrivalWindow.expired,
     attendanceEnabled,
+    crewAvailable,
+    isCrewLeader,
+    markDelegatedToCrewLeader,
     arrivalReported,
     arrivalReportedAt: optionalIsoDate(session?.arrivalReportedAt),
     arrivalReportedLabel: formatDateTime(session?.arrivalReportedAt),
@@ -384,22 +399,23 @@ export async function loadWorkerPortalAssignmentForMark(prisma, input = {}) {
   const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
   const assignmentId = requireNonEmptyString(input.assignmentId, 'worker_portal_assignment_id');
   const now = input.now === undefined ? new Date() : requireDate(input.now, 'worker_portal_now');
-  const assignment = await prisma.dispatchAssignment.findFirst({
-    where: {
-      id: assignmentId,
-      workerId,
-      status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
-    },
-    include: assignmentInclude()
-  });
-  return assignment ? buildPortalAssignment(assignment, now) : null;
+  const [assignment, crewContexts] = await Promise.all([
+    prisma.dispatchAssignment.findFirst({
+      where: {
+        id: assignmentId,
+        workerId,
+        status: { in: [...ACTIVE_DISPATCH_ASSIGNMENT_STATUSES] }
+      },
+      include: assignmentInclude()
+    }),
+    loadCrewContextsForWorker(prisma, workerId, input.loadCrewContextsFn)
+  ]);
+  if (!assignment) return null;
+  const crewContext = crewContexts.find((context) => context?.assignmentId === assignment.id) || null;
+  if (isCrewMarkDelegatedToLeader(crewContext)) return null;
+  return buildPortalAssignment(assignment, now, crewContext);
 }
 
 export async function loadWorkerPortalAssignmentForArrival(prisma, input = {}) {
-  const assignment = await loadWorkerPortalAssignmentForMark(prisma, input);
-  if (!assignment) return null;
-  const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
-  const crewContexts = await loadCrewContextsForWorker(prisma, workerId, input.loadCrewContextsFn);
-  const crewContext = crewContexts.find((context) => context?.assignmentId === assignment.id) || null;
-  return isCrewArrivalDelegatedToLeader(crewContext) ? null : assignment;
+  return loadWorkerPortalAssignmentForMark(prisma, input);
 }
