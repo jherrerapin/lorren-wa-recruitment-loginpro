@@ -238,6 +238,39 @@ function serviceLabel(service) {
   return `${dateKey} · ${time}`;
 }
 
+function optionalIsoDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function attendanceMarkMoment(mark) {
+  const value = mark?.clientCapturedAt || mark?.serverReceivedAt;
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function latestAttendanceMarkAt(session, markType) {
+  let latest = null;
+  for (const mark of Array.isArray(session?.marks) ? session.marks : []) {
+    if (mark?.markType !== markType) continue;
+    const moment = attendanceMarkMoment(mark);
+    if (!moment || (latest && latest.getTime() >= moment.getTime())) continue;
+    latest = moment;
+  }
+  return latest;
+}
+
+function crewMemberAttendance(session) {
+  return {
+    arrivalAt: optionalIsoDate(session?.arrivalReportedAt),
+    breakStartAt: optionalIsoDate(latestAttendanceMarkAt(session, 'BREAK_START')),
+    breakEndAt: optionalIsoDate(latestAttendanceMarkAt(session, 'BREAK_END')),
+    departureAt: optionalIsoDate(session?.departureReportedAt)
+  };
+}
+
 export async function loadCrewAttendanceConfiguration(prisma, input = {}, options = {}) {
   requireReadContract(prisma);
   const range = resolveCrewAttendanceRange(input, options.now || new Date());
@@ -419,7 +452,17 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
               id: true,
               workerId: true,
               worker: { select: { fullName: true } },
-              attendanceSession: { select: { arrivalReportedAt: true } }
+              attendanceSession: {
+                select: {
+                  arrivalReportedAt: true,
+                  departureReportedAt: true,
+                  marks: {
+                    where: { markType: { in: ['BREAK_START', 'BREAK_END'] } },
+                    select: { markType: true, clientCapturedAt: true, serverReceivedAt: true },
+                    orderBy: { serverReceivedAt: 'asc' }
+                  }
+                }
+              }
             },
             orderBy: { createdAt: 'asc' }
           }
@@ -473,13 +516,17 @@ export async function loadCrewAttendancePortalContexts(prisma, input = {}) {
     const isCrewLeader = configuration.mode === CREW_ATTENDANCE_MODE.CREW
       && configuration.crewLeaderWorkerId === workerId;
     const members = isCrewLeader && crewAvailable
-      ? (service?.assignments || []).map((member) => ({
-          assignmentId: member.id,
-          workerId: member.workerId,
-          displayName: member.worker?.fullName || 'Auxiliar',
-          arrivalReported: Boolean(member.attendanceSession?.arrivalReportedAt),
-          isLeader: member.workerId === workerId
-        }))
+      ? (service?.assignments || []).map((member) => {
+          const attendance = crewMemberAttendance(member.attendanceSession);
+          return {
+            assignmentId: member.id,
+            workerId: member.workerId,
+            displayName: member.worker?.fullName || 'Auxiliar',
+            arrivalReported: Boolean(attendance.arrivalAt),
+            attendance,
+            isLeader: member.workerId === workerId
+          };
+        })
       : [];
     return {
       assignmentId: assignment.id,
