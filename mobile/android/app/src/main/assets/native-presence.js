@@ -227,7 +227,7 @@
       .native-presence-btn{min-height:44px;border:0;border-radius:11px;padding:9px 13px;background:#176c36;color:#fff;font:inherit;font-size:13px;font-weight:850;cursor:pointer}.native-presence-btn.secondary{background:#e4ece7;color:#234a30}.native-presence-btn:disabled{opacity:.55;cursor:wait}
       .native-presence-status{padding:10px 11px;border-radius:11px;background:#eaf8ef;color:#176c36;font-size:12px;font-weight:800;line-height:1.45}.native-presence-status.warning{background:#fff6df;color:#76520b}.native-presence-status.error{background:#fff1f2;color:#9f1239}
       .native-presence-count{font-size:26px;font-weight:900;color:#176c36;line-height:1}.native-presence-small{font-size:11px;color:#647568}
-      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
+      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
       @media(max-width:620px){.native-presence-row{grid-template-columns:1fr}.native-presence-btn{width:100%}.native-presence-member{grid-template-columns:minmax(0,1fr)}.native-presence-member-side{justify-content:flex-start}}
     `;
     document.head.appendChild(style);
@@ -296,8 +296,10 @@
 
   function memberStatus(context, member) {
     const serverStatus = serverStatusMap(context.serviceRequestId).get(member.workerId);
-    if (serverStatus) return serverStatus;
+    if (serverStatus === 'VERIFIED' || serverStatus === 'REGISTERED') return serverStatus;
     if (member.arrivalReported) return 'REGISTERED';
+    if (member.isLeader) return 'LEADER_DEVICE';
+    if (serverStatus) return serverStatus;
     if (phoneExceptionSet(context.serviceRequestId).has(member.workerId)) return 'NO_PHONE_REVIEW';
     return 'PENDING';
   }
@@ -305,6 +307,7 @@
   function memberStatusPresentation(status) {
     if (status === 'VERIFIED') return { label: '✓ Verificado', className: 'verified' };
     if (status === 'REGISTERED') return { label: '✓ Registrado', className: 'registered' };
+    if (status === 'LEADER_DEVICE') return { label: 'Este teléfono', className: 'self' };
     if (status === 'NO_PHONE_REVIEW') return { label: 'Sin teléfono · por revisar', className: 'no-phone' };
     return { label: 'Pendiente', className: 'pending' };
   }
@@ -500,25 +503,22 @@
       hasCompletedLeaderScan = false;
       autoRetryRemaining = 1;
       renderPanel();
+      ensureAuxiliaryReady().catch(() => {});
     });
     field.append(label, select);
     row.appendChild(field);
 
     const context = currentContext();
-    const action = element('button', 'native-presence-btn');
-    action.type = 'button';
     if (context?.isCrewLeader) {
+      const action = element('button', 'native-presence-btn');
+      action.type = 'button';
       action.textContent = retryNotDetectedCount > 0 || hasCompletedLeaderScan
         ? 'Reintentar no detectados'
         : 'Verificar presencia';
       action.dataset.nativePresenceLeaderScan = 'true';
       action.addEventListener('click', () => startLeaderScan(false));
-    } else {
-      action.textContent = 'Quedar listo para asistencia';
-      action.dataset.nativePresenceReady = 'true';
-      action.addEventListener('click', startReady);
+      row.appendChild(action);
     }
-    row.appendChild(action);
     panel.appendChild(row);
 
     const status = element('div', 'native-presence-status warning', context?.isCrewLeader
@@ -538,18 +538,18 @@
       pending.dataset.nativePresencePending = 'true';
       countWrap.append(count, pending);
       panel.appendChild(countWrap);
-    }
 
-    const stop = element('button', 'native-presence-btn secondary', 'Detener');
-    stop.type = 'button';
-    stop.hidden = activeMode === 'IDLE';
-    stop.dataset.nativePresenceStop = 'true';
-    stop.addEventListener('click', () => {
-      stopNativeModes();
-      setStatus('Verificación detenida.', 'warning');
-      stop.hidden = true;
-    });
-    panel.appendChild(stop);
+      const stop = element('button', 'native-presence-btn secondary', 'Detener');
+      stop.type = 'button';
+      stop.hidden = activeMode === 'IDLE';
+      stop.dataset.nativePresenceStop = 'true';
+      stop.addEventListener('click', () => {
+        stopNativeModes();
+        setStatus('Verificación detenida.', 'warning');
+        stop.hidden = true;
+      });
+      panel.appendChild(stop);
+    }
 
     insertPanel(panel);
     updateCount();
@@ -568,22 +568,32 @@
     if (stop) stop.hidden = false;
   }
 
+  async function ensureAuxiliaryReady() {
+    const context = currentContext();
+    if (!context || context.isCrewLeader || ['PREPARING', 'READY'].includes(activeMode)) return;
+    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
+    await startReady();
+  }
+
   async function startReady() {
     const context = currentContext();
-    if (!context || context.isCrewLeader) return;
+    if (!context || context.isCrewLeader || ['PREPARING', 'READY'].includes(activeMode)) return;
+    activeMode = 'PREPARING';
+    setStatus('Preparando asistencia…', 'warning');
     if (!credentialPrepared()) {
       if (!navigator.onLine || !(await provisionCredential())) {
+        activeMode = 'IDLE';
         setStatus('Conecta este teléfono a Internet una vez antes de usar la asistencia de cuadrilla.', 'warning');
         return;
       }
     }
     const result = bridgeCall('setReady', context.serviceRequestId);
     if (!result?.ok) {
+      activeMode = 'IDLE';
       setStatus(publicNativeError(result?.error), 'warning');
       return;
     }
     activeMode = 'READY';
-    showStop();
     setStatus('Listo para asistencia.', '');
   }
 
@@ -683,15 +693,27 @@
     if (!detail || typeof detail !== 'object') return;
     const type = String(detail.type || '');
     if (type === 'permissions') {
-      setStatus(detail.granted
-        ? 'Permisos listos. Pulsa nuevamente para continuar.'
-        : 'Android no autorizó los permisos necesarios para detectar teléfonos cercanos.', detail.granted ? 'warning' : 'error');
+      const context = currentContext();
+      if (detail.granted && context && !context.isCrewLeader) {
+        setStatus('Permisos listos. Preparando asistencia…', 'warning');
+        ensureAuxiliaryReady().catch(() => {});
+      } else {
+        setStatus(detail.granted
+          ? 'Permisos listos. Pulsa nuevamente para continuar.'
+          : 'Android no autorizó los permisos necesarios para detectar teléfonos cercanos.', detail.granted ? 'warning' : 'error');
+      }
       return;
     }
     if (type === 'bluetooth') {
-      setStatus(detail.enabled
-        ? 'Bluetooth listo. Pulsa nuevamente para continuar.'
-        : 'Bluetooth sigue apagado. Actívalo para continuar.', detail.enabled ? 'warning' : 'error');
+      const context = currentContext();
+      if (detail.enabled && context && !context.isCrewLeader) {
+        setStatus('Bluetooth listo. Preparando asistencia…', 'warning');
+        ensureAuxiliaryReady().catch(() => {});
+      } else {
+        setStatus(detail.enabled
+          ? 'Bluetooth listo. Pulsa nuevamente para continuar.'
+          : 'Bluetooth sigue apagado. Actívalo para continuar.', detail.enabled ? 'warning' : 'error');
+      }
       return;
     }
     if (type === 'ready') {
@@ -798,6 +820,7 @@
     contexts = await loadContexts();
     if (navigator.onLine) await provisionCredential();
     renderPanel();
+    await ensureAuxiliaryReady();
   }
 
   window.addEventListener('lorren-native-presence', handleNativeEvent);
@@ -806,7 +829,11 @@
     contexts = await loadContexts();
     await provisionCredential();
     renderPanel();
+    await ensureAuxiliaryReady();
     window.LorrenWorkerPortalOffline?.syncNow?.().catch(() => {});
+  });
+  window.addEventListener('focus', () => {
+    ensureAuxiliaryReady().catch(() => {});
   });
   window.addEventListener('beforeunload', stopNativeModes, { once: true });
 
