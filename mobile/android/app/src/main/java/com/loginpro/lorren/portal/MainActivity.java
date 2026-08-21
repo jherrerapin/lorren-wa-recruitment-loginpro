@@ -290,8 +290,7 @@ public final class MainActivity extends Activity {
     }
 
     private boolean hasPreciseLocationPermission() {
-        return hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
-            && hasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
+        return hasPermission(Manifest.permission.ACCESS_FINE_LOCATION);
     }
 
     private void addPreciseLocationPermissionsIfNeeded(List<String> permissions) {
