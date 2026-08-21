@@ -6,6 +6,7 @@ import {
   isDispatchDepartureWithinOperationalWindow,
   resolveDispatchAttendanceOperationalWindow
 } from './registerArrival.js';
+import { loadCrewAttendancePortalContexts } from './crewAttendanceConfig.js';
 import {
   INCOMPLETE_DISPATCH_BREAK_PENALTY_MINUTES,
   STANDARD_DISPATCH_BREAK_MINUTES,
@@ -149,7 +150,27 @@ function buildBreakSummary({ breakStartAt, breakEndAt, departureReported }) {
   };
 }
 
-function buildPortalAssignment(assignment, now) {
+function isCrewArrivalDelegatedToLeader(context) {
+  return Boolean(
+    context?.mode === 'CREW'
+    && context?.crewAvailable === true
+    && context?.isCrewLeader !== true
+  );
+}
+
+async function loadCrewContextsForWorker(prisma, workerId, injectedLoader) {
+  if (typeof injectedLoader === 'function') {
+    const contexts = await injectedLoader(prisma, { workerId });
+    return Array.isArray(contexts) ? contexts : [];
+  }
+  // Los dobles de prueba históricos del Portal no modelan DevAuditEvent. En runtime Prisma sí lo expone;
+  // cuando existe, la única autoridad de modalidad/encargado sigue siendo loadCrewAttendancePortalContexts.
+  if (!prisma?.devAuditEvent || typeof prisma.devAuditEvent.findMany !== 'function') return [];
+  const contexts = await loadCrewAttendancePortalContexts(prisma, { workerId });
+  return Array.isArray(contexts) ? contexts : [];
+}
+
+function buildPortalAssignment(assignment, now, crewContext = null) {
   const request = assignment?.serviceRequest;
   if (!request) throw new Error('worker_portal_assignment_service_request_required');
 
@@ -177,7 +198,11 @@ function buildPortalAssignment(assignment, now) {
   const departureReported = Boolean(session?.departureReportedAt);
   const attendanceEnabled = point?.attendanceEnabled === true;
   const sessionRejected = session?.validationStatus === 'REJECTED';
-  const canRegisterArrival = attendanceEnabled && arrivalWindow.open && !arrivalReported;
+  const arrivalDelegatedToCrewLeader = isCrewArrivalDelegatedToLeader(crewContext);
+  const canRegisterArrival = attendanceEnabled
+    && arrivalWindow.open
+    && !arrivalReported
+    && !arrivalDelegatedToCrewLeader;
   const canStartBreak = attendanceEnabled
     && arrivalReported
     && !departureReported
@@ -218,6 +243,9 @@ function buildPortalAssignment(assignment, now) {
     actionLabel = breakPending
       ? 'Registrar salida · se descontarán 1 h 30 min de almuerzo'
       : 'Registrar salida';
+  } else if (arrivalDelegatedToCrewLeader) {
+    actionType = 'BLOCKED';
+    actionLabel = 'La llegada la registra el encargado de cuadrilla';
   } else if (!expectedStartAt) actionLabel = 'Horario pendiente';
   else if (!attendanceEnabled) actionLabel = 'Marcación no habilitada';
   else if (!arrivalWindow.open) {
@@ -257,6 +285,7 @@ function buildPortalAssignment(assignment, now) {
     arrivalReported,
     arrivalReportedAt: optionalIsoDate(session?.arrivalReportedAt),
     arrivalReportedLabel: formatDateTime(session?.arrivalReportedAt),
+    arrivalDelegatedToCrewLeader,
     departureReported,
     departureReportedAt: optionalIsoDate(session?.departureReportedAt),
     departureReportedLabel: formatDateTime(session?.departureReportedAt),
@@ -309,7 +338,7 @@ export async function loadWorkerPortalAssignments(prisma, input = {}) {
   requireWorkerReader(prisma);
   const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
   const now = input.now === undefined ? new Date() : requireDate(input.now, 'worker_portal_now');
-  const [records, worker] = await Promise.all([
+  const [records, worker, crewContexts] = await Promise.all([
     prisma.dispatchAssignment.findMany({
       where: {
         workerId,
@@ -320,12 +349,18 @@ export async function loadWorkerPortalAssignments(prisma, input = {}) {
     prisma.dispatchWorker.findUnique({
       where: { id: workerId },
       select: { fullName: true, documentNumber: true }
-    })
+    }),
+    loadCrewContextsForWorker(prisma, workerId, input.loadCrewContextsFn)
   ]);
 
   if (!worker) throw new Error('worker_portal_worker_not_found');
+  const crewContextByAssignment = new Map(
+    crewContexts
+      .filter((context) => context?.assignmentId)
+      .map((context) => [context.assignmentId, context])
+  );
   const assignments = records
-    .map((record) => buildPortalAssignment(record, now))
+    .map((record) => buildPortalAssignment(record, now, crewContextByAssignment.get(record.id) || null))
     .sort((left, right) => {
       const leftTime = left.expectedStartAt ? new Date(left.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
       const rightTime = right.expectedStartAt ? new Date(right.expectedStartAt).getTime() : Number.MAX_SAFE_INTEGER;
@@ -360,4 +395,11 @@ export async function loadWorkerPortalAssignmentForMark(prisma, input = {}) {
   return assignment ? buildPortalAssignment(assignment, now) : null;
 }
 
-export const loadWorkerPortalAssignmentForArrival = loadWorkerPortalAssignmentForMark;
+export async function loadWorkerPortalAssignmentForArrival(prisma, input = {}) {
+  const assignment = await loadWorkerPortalAssignmentForMark(prisma, input);
+  if (!assignment) return null;
+  const workerId = requireNonEmptyString(input.workerId, 'worker_portal_worker_id');
+  const crewContexts = await loadCrewContextsForWorker(prisma, workerId, input.loadCrewContextsFn);
+  const crewContext = crewContexts.find((context) => context?.assignmentId === assignment.id) || null;
+  return isCrewArrivalDelegatedToLeader(crewContext) ? null : assignment;
+}
