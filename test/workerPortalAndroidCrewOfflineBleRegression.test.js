@@ -23,12 +23,12 @@ test('APK usa la autoridad nativa de cuadrilla y no inicia el Web Bluetooth here
   assert.match(nativePresence, /\[data-crew-bluetooth-status\]/);
 });
 
-test('Nearby conserva modo no disruptivo y Lórren no contiene autoridad para encender WiFi', async () => {
+test('Nearby prioriza descubrimiento disponible sin cambiar WiFi o Bluetooth por su cuenta', async () => {
   const nearby = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
-  assert.match(nearby, /DiscoveryOptions\.Builder\(\)[\s\S]{0,180}setLowPower\(true\)/);
-  assert.match(nearby, /AdvertisingOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(true\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
-  assert.match(nearby, /ConnectionOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(true\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
+  assert.match(nearby, /DiscoveryOptions\.Builder\(\)[\s\S]{0,180}setLowPower\(false\)/);
+  assert.match(nearby, /AdvertisingOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(false\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
+  assert.match(nearby, /ConnectionOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(false\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
   assert.doesNotMatch(nearby, /WifiManager|setWifiEnabled|ACTION_WIFI_STATE_CHANGED|startLocalOnlyHotspot/);
 });
 
