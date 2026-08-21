@@ -139,6 +139,15 @@ function isCrewMemberMarkRejection(error) {
   return CREW_MEMBER_MARK_REJECTION_CODES.has(publicErrorCode(error));
 }
 
+function isCurrentCrewMarkAlreadyRecorded(markType, error) {
+  const code = publicErrorCode(error);
+  return (
+    (markType === 'BREAK_START' && code === 'attendance_break_already_started')
+    || (markType === 'BREAK_END' && code === 'attendance_break_already_completed')
+    || (markType === 'DEPARTURE' && code === 'attendance_departure_already_registered')
+  );
+}
+
 function resultValidationStatus(result) {
   return result?.validation?.validationStatus || result?.attendanceSession?.validationStatus || null;
 }
@@ -475,6 +484,17 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
         pendingReview: validationStatus === 'REVIEW_REQUIRED'
       });
     } catch (error) {
+      if (presenceValidated && isCurrentCrewMarkAlreadyRecorded(markType, error)) {
+        if (isLeader) {
+          leaderResult = {
+            recorded: true,
+            replayed: true,
+            alreadyRecorded: true
+          };
+        }
+        results.push({ assignmentId: member.id, isLeader, status: 'ALREADY_RECORDED' });
+        continue;
+      }
       if (isLeader || !isCrewMemberMarkRejection(error)) throw error;
       results.push({
         assignmentId: member.id,
@@ -487,9 +507,12 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
 
   const newlyRecordedCount = results.filter((item) => item.status === 'RECORDED').length;
   const replayedCount = results.filter((item) => item.status === 'REPLAYED').length;
+  const alreadyRecordedCount = results.filter((item) => item.status === 'ALREADY_RECORDED').length;
   const failedCount = results.filter((item) => item.status === 'NOT_RECORDED').length;
   const reviewPendingCount = results.filter((item) => item.pendingReview === true).length;
-  const delegatedCount = results.filter((item) => item.isLeader === false && ['RECORDED', 'REPLAYED'].includes(item.status)).length;
+  const delegatedCount = results.filter((item) => (
+    item.isLeader === false && ['RECORDED', 'REPLAYED', 'ALREADY_RECORDED'].includes(item.status)
+  )).length;
   const notDetectedCount = presenceValidated ? Math.max(0, members.length - selectedMembers.length) : 0;
 
   return {
@@ -499,10 +522,11 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
       markType,
       totalMembers: members.length,
       eligibleMembers: selectedMembers.length,
-      processedCount: newlyRecordedCount + replayedCount,
+      processedCount: newlyRecordedCount + replayedCount + alreadyRecordedCount,
       notDetectedCount,
       newlyRecordedCount,
       replayedCount,
+      alreadyRecordedCount,
       failedCount,
       reviewPendingCount,
       delegatedCount,
