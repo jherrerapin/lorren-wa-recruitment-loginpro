@@ -769,7 +769,7 @@
       ? waitingServerMarkType
         ? `${markInfo(waitingServerMarkType).title} enviada · esperando confirmación del servidor. La siguiente marcación se habilitará cuando quede registrada.`
         : offlineQueued
-          ? `Hay marcaciones guardadas sin conexión y pendientes de sincronizar. Puedes continuar localmente; se confirmarán cuando vuelva Internet.`
+          ? 'Hay marcaciones guardadas sin conexión y pendientes de sincronizar. Puedes continuar localmente; se confirmarán cuando vuelva Internet.'
           : markActions.length
             ? `Listo para ${markInfo(presentationMarkType).noun}. La app comprobará la cuadrilla antes de guardar la marca.`
             : 'No hay una marcación de cuadrilla disponible en este momento.'
@@ -1137,7 +1137,11 @@
     }
     if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {
       const serviceRequestId = String(message.serviceRequestId || message.payload?.serviceRequestId || selectedServiceRequestId || '').trim();
-      const markType = normalizeMarkType(message.payload?.markType) || normalizeMarkType(retryMarkType) || 'ARRIVAL';
+      const queuedMarkType = [...queuedMarkSet(serviceRequestId)].map(normalizeMarkType).find(Boolean) || null;
+      const markType = normalizeMarkType(message.payload?.markType)
+        || queuedMarkType
+        || normalizeMarkType(retryMarkType)
+        || 'ARRIVAL';
       forgetQueuedMark(serviceRequestId, markType);
       renderPanel();
       setStatus(`No fue posible registrar la ${markInfo(markType).noun} de la cuadrilla. La marca no quedó confirmada; puedes intentarlo nuevamente.`, 'error');
