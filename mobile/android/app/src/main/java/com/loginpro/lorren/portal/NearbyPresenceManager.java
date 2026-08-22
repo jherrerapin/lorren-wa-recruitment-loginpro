@@ -167,7 +167,7 @@ final class NearbyPresenceManager {
             if (!gattServer.addService(service)) {
                 failReady("advertising_failed");
             }
-        } catch (SecurityException | RuntimeException error) {
+        } catch (RuntimeException error) {
             failReady("advertising_failed");
         }
     }
@@ -187,7 +187,7 @@ final class NearbyPresenceManager {
             .build();
         try {
             advertiser.startAdvertising(settings, data, advertiseCallback);
-        } catch (SecurityException | RuntimeException error) {
+        } catch (RuntimeException error) {
             failReady("advertising_failed");
         }
     }
@@ -247,7 +247,8 @@ final class NearbyPresenceManager {
                 return;
             }
             scheduleLeaderScanTimeout(nextAttemptId, timeoutMs);
-        } catch (SecurityException | RuntimeException error) {
+        } catch (RuntimeException error) {
+            stopLeaderScanner();
             role = Role.IDLE;
             emitError("discovery_failed");
         }
@@ -287,7 +288,6 @@ final class NearbyPresenceManager {
             for (JSONObject proof : proofsByKey.values()) proofs.put(new JSONObject(proof.toString()));
             result.put("proofs", proofs);
         } catch (Exception ignored) {
-            // Campos no nulos y primitivos; el bundle debe conservarse aun si la UI falla.
         }
         return result;
     }
@@ -361,7 +361,7 @@ final class NearbyPresenceManager {
                 return;
             }
             peer.gatt = gatt;
-        } catch (SecurityException | RuntimeException error) {
+        } catch (RuntimeException error) {
             failLeaderPeer(peer, "connection_request_failed");
         }
     }
@@ -390,7 +390,7 @@ final class NearbyPresenceManager {
                     };
                     handler.postDelayed(peer.serviceFallback, SERVICE_DISCOVERY_FALLBACK_MS);
                     if (!mtuRequested) requestServices(peer);
-                } catch (SecurityException | RuntimeException error) {
+                } catch (RuntimeException error) {
                     failLeaderPeer(peer, "connection_failed");
                 }
             }
@@ -434,7 +434,7 @@ final class NearbyPresenceManager {
                 cccd.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
                 try {
                     if (!gatt.writeDescriptor(cccd)) failLeaderPeer(peer, "connection_failed");
-                } catch (SecurityException | RuntimeException error) {
+                } catch (RuntimeException error) {
                     failLeaderPeer(peer, "connection_failed");
                 }
             }
@@ -506,7 +506,7 @@ final class NearbyPresenceManager {
         peer.serviceFallback = null;
         try {
             if (!peer.gatt.discoverServices()) failLeaderPeer(peer, "connection_failed");
-        } catch (SecurityException | RuntimeException error) {
+        } catch (RuntimeException error) {
             failLeaderPeer(peer, "connection_failed");
         }
     }
@@ -521,7 +521,7 @@ final class NearbyPresenceManager {
             if (!peer.gatt.writeCharacteristic(peer.challengeCharacteristic)) {
                 failLeaderPeer(peer, "payload_send_failed");
             }
-        } catch (SecurityException | RuntimeException error) {
+        } catch (RuntimeException error) {
             failLeaderPeer(peer, "payload_send_failed");
         }
     }
@@ -759,7 +759,7 @@ final class NearbyPresenceManager {
                 outgoingProofs.remove(safeAddress(device));
                 emitError("payload_send_failed");
             }
-        } catch (SecurityException | RuntimeException error) {
+        } catch (RuntimeException error) {
             outgoingProofs.remove(safeAddress(device));
             emitError("payload_send_failed");
         }
@@ -851,7 +851,7 @@ final class NearbyPresenceManager {
             try {
                 gattServer.clearServices();
                 gattServer.close();
-            } catch (SecurityException ignored) {
+            } catch (RuntimeException ignored) {
             }
         }
         gattServer = null;
@@ -867,7 +867,7 @@ final class NearbyPresenceManager {
         if (advertiser != null) {
             try {
                 advertiser.stopAdvertising(advertiseCallback);
-            } catch (SecurityException | RuntimeException ignored) {
+            } catch (RuntimeException ignored) {
             }
         }
         advertiser = null;
@@ -877,7 +877,7 @@ final class NearbyPresenceManager {
         if (scanner != null) {
             try {
                 scanner.stopScan(scanCallback);
-            } catch (SecurityException | RuntimeException ignored) {
+            } catch (RuntimeException ignored) {
             }
         }
         scanner = null;
@@ -908,7 +908,7 @@ final class NearbyPresenceManager {
         if (peer.gatt != null) {
             try {
                 peer.gatt.disconnect();
-            } catch (SecurityException | RuntimeException ignored) {
+            } catch (RuntimeException ignored) {
             }
             closeGatt(peer.gatt);
             peer.gatt = null;
@@ -953,7 +953,7 @@ final class NearbyPresenceManager {
         if (!responseNeeded || gattServer == null || device == null) return;
         try {
             gattServer.sendResponse(device, requestId, status, 0, null);
-        } catch (SecurityException | RuntimeException ignored) {
+        } catch (RuntimeException ignored) {
         }
     }
 
@@ -1043,7 +1043,6 @@ final class NearbyPresenceManager {
             writer.write(event);
             eventSink.emit(event);
         } catch (Exception ignored) {
-            // Eventos de UI no cambian la autoridad de presencia.
         }
     }
 
