@@ -1,11 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   buildVacancyApplicationCycleScript,
   normalizeVacancyHistoryScopes,
   resolveVacancyApplicationCycleStartedAt,
   scopeVacancyToApplicationCycle
 } from '../src/services/vacancyDashboardSearchExpansion.js';
+
+const adminSource = fs.readFileSync(
+  new URL('../src/routes/admin.js', import.meta.url),
+  'utf8'
+);
+const dashboardSource = fs.readFileSync(
+  new URL('../src/services/vacancyDashboardSearchExpansion.js', import.meta.url),
+  'utf8'
+);
 
 function candidate(id, createdAt) {
   return { id, createdAt: new Date(createdAt) };
@@ -23,6 +33,14 @@ function vacancy(overrides = {}) {
     ...overrides
   };
 }
+
+test('la fuente del ciclo sigue siendo la auditoría existente de creación, edición y toggle', () => {
+  assert.match(adminSource, /action:\s*'VACANCY_CREATED'/);
+  assert.match(adminSource, /action:\s*'VACANCY_UPDATED'[\s\S]*?fromValue:\s*previousAuditValue[\s\S]*?toValue:\s*nextAuditValue/);
+  assert.match(adminSource, /action:\s*'VACANCY_FLOW_TOGGLED'[\s\S]*?fromValue:\s*\{[\s\S]*?toValue:\s*nextValue/);
+  assert.match(dashboardSource, /prisma\.devAuditEvent\.findMany/);
+  assert.match(dashboardSource, /VACANCY_CYCLE_AUDIT_ACTIONS/);
+});
 
 test('el ciclo inicia en la última transición real de no abierta a abierta, no en una edición abierta', () => {
   const events = [
