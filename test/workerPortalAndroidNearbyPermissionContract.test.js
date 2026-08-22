@@ -16,44 +16,30 @@ function methodBody(source, signature, nextSignature) {
   return source.slice(start, end);
 }
 
-test('Nearby conserva Wi-Fi state en API 32 y pide Nearby Wi-Fi solo desde API 33', async () => {
-  const [manifest, mainActivity] = await Promise.all([
+test('BLE de cuadrilla no solicita Wi-Fi y conserva ubicación precisa porque usa proximidad física', async () => {
+  const [manifest, mainActivity, gradle] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
-    read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java')
+    read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
+    read('app/build.gradle')
   ]);
 
-  assert.match(manifest, /<uses-permission android:name="android\.permission\.ACCESS_WIFI_STATE" \/>/);
-  assert.match(manifest, /<uses-permission android:name="android\.permission\.CHANGE_WIFI_STATE" \/>/);
-  assert.doesNotMatch(
-    manifest,
-    /android:maxSdkVersion="31" android:name="android\.permission\.(?:ACCESS_WIFI_STATE|CHANGE_WIFI_STATE)"/
-  );
-  assert.match(
-    manifest,
-    /android:minSdkVersion="33" android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
-  );
-  assert.doesNotMatch(
-    manifest,
-    /android:minSdkVersion="32" android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
-  );
-
-  const wifiGate = methodBody(
-    mainActivity,
-    'private boolean requiresNearbyWifiPermission()',
-    'private List<String> attendancePermissions'
-  );
-  assert.match(wifiGate, /Build\.VERSION_CODES\.TIRAMISU/);
-  assert.doesNotMatch(wifiGate, /Build\.VERSION_CODES\.S_V2/);
+  assert.doesNotMatch(manifest, /android\.permission\.(?:ACCESS_WIFI_STATE|CHANGE_WIFI_STATE|NEARBY_WIFI_DEVICES)/);
+  assert.doesNotMatch(manifest, /BLUETOOTH_SCAN[^>]*neverForLocation/);
+  assert.match(manifest, /android\.permission\.ACCESS_COARSE_LOCATION/);
+  assert.match(manifest, /android\.permission\.ACCESS_FINE_LOCATION/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH_SCAN/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH_CONNECT/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH_ADVERTISE/);
+  assert.match(manifest, /android\.hardware\.bluetooth_le/);
 
   const bluetoothGroup = methodBody(
     mainActivity,
     'private boolean hasNearbyBluetoothPermissions()',
-    'private boolean requiresNearbyWifiPermission()'
+    'private void addNearbyBluetoothPermissionsIfNeeded'
   );
   for (const permission of ['BLUETOOTH_SCAN', 'BLUETOOTH_CONNECT', 'BLUETOOTH_ADVERTISE']) {
     assert.match(bluetoothGroup, new RegExp(`Manifest\\.permission\\.${permission}`));
   }
-  assert.match(bluetoothGroup, /addNearbyBluetoothPermissionsIfNeeded/);
 
   const attendancePermissions = methodBody(
     mainActivity,
@@ -62,8 +48,7 @@ test('Nearby conserva Wi-Fi state en API 32 y pide Nearby Wi-Fi solo desde API 3
   );
   assert.match(attendancePermissions, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
   assert.match(attendancePermissions, /addNearbyBluetoothPermissionsIfNeeded\(missing\)/);
-  assert.match(attendancePermissions, /requiresNearbyWifiPermission\(\)/);
-  assert.match(attendancePermissions, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
+  assert.doesNotMatch(attendancePermissions, /NEARBY_WIFI_DEVICES|requiresNearbyWifiPermission/);
 
   const grantedCheck = methodBody(
     mainActivity,
@@ -72,6 +57,7 @@ test('Nearby conserva Wi-Fi state en API 32 y pide Nearby Wi-Fi solo desde API 3
   );
   assert.match(grantedCheck, /hasPreciseLocationPermission\(\)/);
   assert.match(grantedCheck, /hasNearbyBluetoothPermissions\(\)/);
-  assert.match(grantedCheck, /requiresNearbyWifiPermission\(\)/);
-  assert.match(grantedCheck, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
+  assert.doesNotMatch(grantedCheck, /NEARBY_WIFI_DEVICES|requiresNearbyWifiPermission/);
+
+  assert.doesNotMatch(gradle, /play-services-nearby/);
 });
