@@ -24,19 +24,30 @@ test('APK usa la autoridad nativa de cuadrilla y no inicia el Web Bluetooth here
   assert.match(nativePresence, /\[data-crew-bluetooth-status\]/);
 });
 
-test('auxiliar anuncia señal local y el encargado descubre múltiples auxiliares sin cambiar WiFi o Bluetooth', async () => {
-  const nearby = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
+test('auxiliar anuncia BLE y el encargado descubre por UUID y obtiene proof por GATT sin Google Nearby ni Wi-Fi', async () => {
+  const [ble, gradle] = await Promise.all([
+    read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
+    read('mobile/android/app/build.gradle')
+  ]);
 
-  assert.match(nearby, /Strategy STRATEGY = Strategy\.P2P_CLUSTER/);
-  assert.match(nearby, /startReady\([\s\S]{0,260}startReadyAdvertising\(normalizedService, 0\)/);
-  assert.match(nearby, /startReadyAdvertising[\s\S]{0,500}client\.startAdvertising/);
-  assert.match(nearby, /startLeaderScan[\s\S]{0,700}startLeaderDiscovery\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
-  assert.match(nearby, /startLeaderDiscovery[\s\S]{0,500}client\.startDiscovery/);
-  assert.match(nearby, /DiscoveryOptions\.Builder\(\)[\s\S]{0,180}setLowPower\(true\)/);
-  assert.match(nearby, /AdvertisingOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(true\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
-  assert.match(nearby, /ConnectionOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(true\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
-  assert.match(nearby, /private static final String ENDPOINT_NAME = "LORREN"/);
-  assert.doesNotMatch(nearby, /WifiManager|setWifiEnabled|ACTION_WIFI_STATE_CHANGED|startLocalOnlyHotspot/);
+  assert.match(ble, /BluetoothLeAdvertiser/);
+  assert.match(ble, /BluetoothLeScanner/);
+  assert.match(ble, /BluetoothGattServer/);
+  assert.match(ble, /BluetoothGattCallback/);
+  assert.match(ble, /openGattServer\(appContext, gattServerCallback\)/);
+  assert.match(ble, /AdvertiseData\.Builder\(\)[\s\S]{0,160}addServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
+  assert.match(ble, /ScanFilter\.Builder\(\)[\s\S]{0,120}setServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
+  assert.match(ble, /setScanMode\(ScanSettings\.SCAN_MODE_LOW_LATENCY\)/);
+  assert.match(ble, /connectGatt\([\s\S]{0,180}BluetoothDevice\.TRANSPORT_LE/);
+  assert.match(ble, /FRAME_TYPE_CHALLENGE/);
+  assert.match(ble, /FRAME_TYPE_PROOF/);
+  assert.match(ble, /requestMtu\(REQUESTED_MTU\)/);
+  assert.match(ble, /DeviceKeyStore\.signBase64\(canonical\)/);
+  assert.match(ble, /DeviceKeyStore\.verifyBase64\(publicKey, canonical, signature\)/);
+  assert.match(ble, /expectedProofCount > 0 && proofsByKey\.size\(\) >= expectedProofCount/);
+  assert.doesNotMatch(ble, /com\.google\.android\.gms\.nearby|ConnectionsClient|Strategy\.P2P_/);
+  assert.doesNotMatch(ble, /WifiManager|setWifiEnabled|ACTION_WIFI_STATE_CHANGED|startLocalOnlyHotspot/);
+  assert.doesNotMatch(gradle, /play-services-nearby/);
 });
 
 test('auxiliar solo queda READY cuando Android confirma que el anuncio local inició', async () => {
