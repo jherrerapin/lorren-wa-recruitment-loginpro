@@ -1,39 +1,54 @@
 package com.loginpro.lorren.portal;
 
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattServer;
+import android.bluetooth.BluetoothGattServerCallback;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.AdvertiseCallback;
+import android.bluetooth.le.AdvertiseData;
+import android.bluetooth.le.AdvertiseSettings;
+import android.bluetooth.le.BluetoothLeAdvertiser;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.ParcelUuid;
 import android.util.Base64;
-
-import com.google.android.gms.common.api.ApiException;
-import com.google.android.gms.common.api.Status;
-import com.google.android.gms.nearby.Nearby;
-import com.google.android.gms.nearby.connection.AdvertisingOptions;
-import com.google.android.gms.nearby.connection.ConnectionInfo;
-import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback;
-import com.google.android.gms.nearby.connection.ConnectionOptions;
-import com.google.android.gms.nearby.connection.ConnectionResolution;
-import com.google.android.gms.nearby.connection.ConnectionType;
-import com.google.android.gms.nearby.connection.ConnectionsClient;
-import com.google.android.gms.nearby.connection.ConnectionsStatusCodes;
-import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo;
-import com.google.android.gms.nearby.connection.DiscoveryOptions;
-import com.google.android.gms.nearby.connection.EndpointDiscoveryCallback;
-import com.google.android.gms.nearby.connection.Payload;
-import com.google.android.gms.nearby.connection.PayloadCallback;
-import com.google.android.gms.nearby.connection.PayloadTransferUpdate;
-import com.google.android.gms.nearby.connection.Strategy;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
+/**
+ * Autoridad nativa única de presencia local de cuadrilla.
+ *
+ * El nombre histórico de la clase se conserva para no crear un segundo manager/bridge,
+ * pero el transporte es BLE Android nativo: advertiser + scanner + GATT. No usa Google
+ * Nearby Connections ni Wi-Fi.
+ */
 final class NearbyPresenceManager {
     interface EventSink {
         void emit(JSONObject event);
@@ -43,23 +58,41 @@ final class NearbyPresenceManager {
         String credential();
     }
 
-    private static final String SERVICE_ID = "com.loginpro.lorren.portal.crew.presence.v1";
-    private static final String ENDPOINT_NAME = "LORREN";
-    private static final Strategy STRATEGY = Strategy.P2P_CLUSTER;
+    private static final UUID SERVICE_UUID = UUID.fromString("6f727265-6e2d-4352-4557-505245530001");
+    private static final UUID CHALLENGE_UUID = UUID.fromString("6f727265-6e2d-4352-4557-505245530002");
+    private static final UUID PROOF_UUID = UUID.fromString("6f727265-6e2d-4352-4557-505245530003");
+    private static final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+
     private static final long MIN_SCAN_MS = 4_000L;
     private static final long MAX_SCAN_MS = 30_000L;
-    private static final long CONNECTION_GRACE_MS = 1_000L;
-    private static final long NEARBY_RESTART_DELAY_MS = 350L;
-    private static final int MAX_START_RETRIES = 1;
+    private static final long CONNECTION_GRACE_MS = 1_500L;
+    private static final long SERVICE_DISCOVERY_FALLBACK_MS = 700L;
+    private static final int REQUESTED_MTU = 517;
+    private static final int DEFAULT_MTU = 23;
+    private static final int MAX_FRAME_BYTES = 16_384;
+    private static final int FRAME_HEADER_BYTES = 6;
+    private static final int FRAME_MAGIC = 0x4c;
+    private static final int FRAME_VERSION = 1;
+    private static final int FRAME_TYPE_CHALLENGE = 1;
+    private static final int FRAME_TYPE_PROOF = 2;
+    private static final int FRAME_FLAG_FINAL = 1;
 
     private enum Role { IDLE, READY, LEADER }
 
-    private final ConnectionsClient client;
+    private final Context appContext;
+    private final BluetoothManager bluetoothManager;
+    private final BluetoothAdapter bluetoothAdapter;
     private final EventSink eventSink;
     private final CredentialProvider credentialProvider;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Set<String> requestedEndpoints = new LinkedHashSet<>();
+
     private final Map<String, JSONObject> proofsByKey = new LinkedHashMap<>();
+    private final Map<String, LeaderPeer> leaderPeers = new LinkedHashMap<>();
+    private final Set<String> attemptedAddresses = new LinkedHashSet<>();
+    private final Map<String, FrameAccumulator> incomingChallenges = new LinkedHashMap<>();
+    private final Map<String, Integer> serverMtuByAddress = new LinkedHashMap<>();
+    private final Set<String> notificationSubscribers = new LinkedHashSet<>();
+    private final Map<String, OutgoingProof> outgoingProofs = new LinkedHashMap<>();
 
     private Role role = Role.IDLE;
     private String readyServiceRequestId = "";
@@ -71,8 +104,16 @@ final class NearbyPresenceManager {
     private Runnable scanTimeout;
     private Runnable scanCompleteTimeout;
 
+    private BluetoothLeAdvertiser advertiser;
+    private BluetoothLeScanner scanner;
+    private BluetoothGattServer gattServer;
+    private BluetoothGattCharacteristic challengeCharacteristic;
+    private BluetoothGattCharacteristic proofCharacteristic;
+
     NearbyPresenceManager(Context context, EventSink eventSink, CredentialProvider credentialProvider) {
-        this.client = Nearby.getConnectionsClient(context.getApplicationContext());
+        this.appContext = context.getApplicationContext();
+        this.bluetoothManager = (BluetoothManager) appContext.getSystemService(Context.BLUETOOTH_SERVICE);
+        this.bluetoothAdapter = bluetoothManager == null ? null : bluetoothManager.getAdapter();
         this.eventSink = eventSink;
         this.credentialProvider = credentialProvider;
     }
@@ -82,47 +123,79 @@ final class NearbyPresenceManager {
         stopAllInternal(false);
         role = Role.READY;
         readyServiceRequestId = normalizedService;
-        startReadyAdvertising(normalizedService, 0);
+        startReadyGattServer();
     }
 
-    private void startReadyAdvertising(String normalizedService, int retryCount) {
-        AdvertisingOptions options = new AdvertisingOptions.Builder()
-            .setStrategy(STRATEGY)
-            .setLowPower(true)
-            .setConnectionType(ConnectionType.NON_DISRUPTIVE)
-            .build();
-        try {
-            client.startAdvertising(ENDPOINT_NAME, SERVICE_ID, connectionLifecycleCallback, options)
-                .addOnSuccessListener(unused -> {
-                    synchronized (NearbyPresenceManager.this) {
-                        if (role != Role.READY || !readyServiceRequestId.equals(normalizedService)) {
-                            client.stopAdvertising();
-                            return;
-                        }
-                    }
-                    emit("ready", event -> event.put("serviceRequestId", normalizedService));
-                })
-                .addOnFailureListener(error -> handleReadyAdvertisingFailure(normalizedService, retryCount, error));
-        } catch (RuntimeException error) {
-            handleReadyAdvertisingFailure(normalizedService, retryCount, error);
-        }
-    }
-
-    private void handleReadyAdvertisingFailure(String normalizedService, int retryCount, Exception error) {
-        if (retryCount < MAX_START_RETRIES && isRecoverableStartFailure(error)) {
-            resetNearbyClientForRetry();
-            handler.postDelayed(() -> {
-                synchronized (NearbyPresenceManager.this) {
-                    if (role != Role.READY || !readyServiceRequestId.equals(normalizedService)) return;
-                }
-                startReadyAdvertising(normalizedService, retryCount + 1);
-            }, NEARBY_RESTART_DELAY_MS);
+    private synchronized void startReadyGattServer() {
+        if (role != Role.READY || bluetoothManager == null || bluetoothAdapter == null) {
+            failReady("advertising_failed");
             return;
         }
-        synchronized (this) {
-            if (role == Role.READY && readyServiceRequestId.equals(normalizedService)) role = Role.IDLE;
+        try {
+            advertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
+            if (advertiser == null) {
+                failReady("advertising_failed");
+                return;
+            }
+            gattServer = bluetoothManager.openGattServer(appContext, gattServerCallback);
+            if (gattServer == null) {
+                failReady("advertising_failed");
+                return;
+            }
+
+            BluetoothGattService service = new BluetoothGattService(
+                SERVICE_UUID,
+                BluetoothGattService.SERVICE_TYPE_PRIMARY
+            );
+            challengeCharacteristic = new BluetoothGattCharacteristic(
+                CHALLENGE_UUID,
+                BluetoothGattCharacteristic.PROPERTY_WRITE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE
+            );
+            proofCharacteristic = new BluetoothGattCharacteristic(
+                PROOF_UUID,
+                BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+                BluetoothGattCharacteristic.PERMISSION_READ
+            );
+            BluetoothGattDescriptor cccd = new BluetoothGattDescriptor(
+                CCCD_UUID,
+                BluetoothGattDescriptor.PERMISSION_READ | BluetoothGattDescriptor.PERMISSION_WRITE
+            );
+            proofCharacteristic.addDescriptor(cccd);
+            service.addCharacteristic(challengeCharacteristic);
+            service.addCharacteristic(proofCharacteristic);
+            if (!gattServer.addService(service)) {
+                failReady("advertising_failed");
+            }
+        } catch (SecurityException | RuntimeException error) {
+            failReady("advertising_failed");
         }
-        emitError(nearbyStartErrorCode(error, "advertising_failed"));
+    }
+
+    private synchronized void startReadyAdvertising() {
+        if (role != Role.READY || advertiser == null || gattServer == null) return;
+        AdvertiseSettings settings = new AdvertiseSettings.Builder()
+            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
+            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+            .setConnectable(true)
+            .setTimeout(0)
+            .build();
+        AdvertiseData data = new AdvertiseData.Builder()
+            .addServiceUuid(new ParcelUuid(SERVICE_UUID))
+            .setIncludeDeviceName(false)
+            .setIncludeTxPowerLevel(false)
+            .build();
+        try {
+            advertiser.startAdvertising(settings, data, advertiseCallback);
+        } catch (SecurityException | RuntimeException error) {
+            failReady("advertising_failed");
+        }
+    }
+
+    private synchronized void failReady(String code) {
+        stopReadyResources();
+        role = Role.IDLE;
+        emitError(code);
     }
 
     synchronized void startLeaderScan(JSONObject input) {
@@ -140,81 +213,44 @@ final class NearbyPresenceManager {
         challengeSentAt = System.currentTimeMillis();
         expectedProofCount = nextExpectedProofCount;
         proofsByKey.clear();
-        requestedEndpoints.clear();
-        startLeaderDiscovery(nextAttemptId, serviceRequestId, timeoutMs, 0);
-    }
+        leaderPeers.clear();
+        attemptedAddresses.clear();
 
-    private void startLeaderDiscovery(
-        String nextAttemptId,
-        String serviceRequestId,
-        long timeoutMs,
-        int retryCount
-    ) {
-        DiscoveryOptions options = new DiscoveryOptions.Builder()
-            .setStrategy(STRATEGY)
-            .setLowPower(true)
-            .build();
-        try {
-            client.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
-                .addOnSuccessListener(unused -> {
-                    synchronized (NearbyPresenceManager.this) {
-                        if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) {
-                            client.stopDiscovery();
-                            return;
-                        }
-                    }
-                    emit("scan_started", event -> {
-                        event.put("attemptId", nextAttemptId);
-                        event.put("serviceRequestId", serviceRequestId);
-                        event.put("timeoutMs", timeoutMs);
-                        event.put("expectedProofCount", expectedProofCount);
-                    });
-                    if (expectedProofCount == 0) {
-                        completeLeaderScan(nextAttemptId);
-                        return;
-                    }
-                    scheduleLeaderScanTimeout(nextAttemptId, timeoutMs);
-                })
-                .addOnFailureListener(error -> handleLeaderDiscoveryFailure(
-                    nextAttemptId,
-                    serviceRequestId,
-                    timeoutMs,
-                    retryCount,
-                    error
-                ));
-        } catch (RuntimeException error) {
-            handleLeaderDiscoveryFailure(
-                nextAttemptId,
-                serviceRequestId,
-                timeoutMs,
-                retryCount,
-                error
-            );
-        }
-    }
-
-    private void handleLeaderDiscoveryFailure(
-        String nextAttemptId,
-        String serviceRequestId,
-        long timeoutMs,
-        int retryCount,
-        Exception error
-    ) {
-        if (retryCount < MAX_START_RETRIES && isRecoverableStartFailure(error)) {
-            resetNearbyClientForRetry();
-            handler.postDelayed(() -> {
-                synchronized (NearbyPresenceManager.this) {
-                    if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) return;
-                }
-                startLeaderDiscovery(nextAttemptId, serviceRequestId, timeoutMs, retryCount + 1);
-            }, NEARBY_RESTART_DELAY_MS);
+        if (bluetoothAdapter == null) {
+            role = Role.IDLE;
+            emitError("discovery_failed");
             return;
         }
-        synchronized (this) {
-            if (role == Role.LEADER && attemptId.equals(nextAttemptId)) role = Role.IDLE;
-            cancelLeaderTimers();
+        try {
+            scanner = bluetoothAdapter.getBluetoothLeScanner();
+            if (scanner == null) {
+                role = Role.IDLE;
+                emitError("discovery_failed");
+                return;
+            }
+            ScanFilter filter = new ScanFilter.Builder()
+                .setServiceUuid(new ParcelUuid(SERVICE_UUID))
+                .build();
+            ScanSettings settings = new ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .setReportDelay(0L)
+                .build();
+            scanner.startScan(Collections.singletonList(filter), settings, scanCallback);
+            emit("scan_started", event -> {
+                event.put("attemptId", nextAttemptId);
+                event.put("serviceRequestId", serviceRequestId);
+                event.put("timeoutMs", timeoutMs);
+                event.put("expectedProofCount", expectedProofCount);
+            });
+            if (expectedProofCount == 0) {
+                completeLeaderScan(nextAttemptId);
+                return;
+            }
+            scheduleLeaderScanTimeout(nextAttemptId, timeoutMs);
+        } catch (SecurityException | RuntimeException error) {
+            role = Role.IDLE;
+            emitError("discovery_failed");
         }
-        emitError(nearbyStartErrorCode(error, "discovery_failed"));
     }
 
     private synchronized void scheduleLeaderScanTimeout(String nextAttemptId, long timeoutMs) {
@@ -223,7 +259,7 @@ final class NearbyPresenceManager {
         scanTimeout = () -> {
             synchronized (NearbyPresenceManager.this) {
                 if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) return;
-                client.stopDiscovery();
+                stopLeaderScanner();
                 scanCompleteTimeout = () -> completeLeaderScan(nextAttemptId);
                 handler.postDelayed(scanCompleteTimeout, CONNECTION_GRACE_MS);
             }
@@ -251,7 +287,7 @@ final class NearbyPresenceManager {
             for (JSONObject proof : proofsByKey.values()) proofs.put(new JSONObject(proof.toString()));
             result.put("proofs", proofs);
         } catch (Exception ignored) {
-            // JSONObject fields above use non-null primitives/strings and should not fail.
+            // Campos no nulos y primitivos; el bundle debe conservarse aun si la UI falla.
         }
         return result;
     }
@@ -260,130 +296,411 @@ final class NearbyPresenceManager {
         stopAllInternal(false);
     }
 
-    private final EndpointDiscoveryCallback endpointDiscoveryCallback = new EndpointDiscoveryCallback() {
+    private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
         @Override
-        public void onEndpointFound(String endpointId, DiscoveredEndpointInfo info) {
+        public void onStartSuccess(AdvertiseSettings settingsInEffect) {
             synchronized (NearbyPresenceManager.this) {
-                if (role != Role.LEADER || !SERVICE_ID.equals(info.getServiceId())) return;
-                if (!requestedEndpoints.add(endpointId)) return;
-                emit("endpoint_found", event -> event.put("pendingCount", requestedEndpoints.size()));
-                ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
-                    .setLowPower(true)
-                    .setConnectionType(ConnectionType.NON_DISRUPTIVE)
-                    .build();
-                client.requestConnection(ENDPOINT_NAME, endpointId, connectionLifecycleCallback, connectionOptions)
-                    .addOnFailureListener(error -> {
-                        synchronized (NearbyPresenceManager.this) {
-                            requestedEndpoints.remove(endpointId);
-                        }
-                        emitError("connection_request_failed");
-                    });
+                if (role != Role.READY) {
+                    stopReadyAdvertising();
+                    return;
+                }
+                emit("ready", event -> event.put("serviceRequestId", readyServiceRequestId));
             }
         }
 
         @Override
-        public void onEndpointLost(String endpointId) {
-            // Un anuncio puede desaparecer mientras la conexión ya está negociándose.
-            // El resultado de conexión o el timeout del intento deciden el estado final.
-        }
-    };
-
-    private final ConnectionLifecycleCallback connectionLifecycleCallback = new ConnectionLifecycleCallback() {
-        @Override
-        public void onConnectionInitiated(String endpointId, ConnectionInfo info) {
+        public void onStartFailure(int errorCode) {
             synchronized (NearbyPresenceManager.this) {
-                if (role == Role.IDLE) {
-                    client.rejectConnection(endpointId);
-                    return;
-                }
-                if (role == Role.LEADER && !requestedEndpoints.contains(endpointId)) {
-                    client.rejectConnection(endpointId);
-                    return;
-                }
-                client.acceptConnection(endpointId, payloadCallback)
-                    .addOnFailureListener(error -> emitError("connection_accept_failed"));
-            }
-        }
-
-        @Override
-        public void onConnectionResult(String endpointId, ConnectionResolution resolution) {
-            synchronized (NearbyPresenceManager.this) {
-                Status status = resolution.getStatus();
-                if (!status.isSuccess()) {
-                    if (role == Role.LEADER) requestedEndpoints.remove(endpointId);
-                    emitError("connection_failed");
-                    return;
-                }
-                if (role == Role.LEADER) sendChallenge(endpointId);
-            }
-        }
-
-        @Override
-        public void onDisconnected(String endpointId) {
-            synchronized (NearbyPresenceManager.this) {
-                if (role == Role.LEADER) requestedEndpoints.remove(endpointId);
+                if (role == Role.READY) failReady("advertising_failed");
             }
         }
     };
 
-    private final PayloadCallback payloadCallback = new PayloadCallback() {
+    private final ScanCallback scanCallback = new ScanCallback() {
         @Override
-        public void onPayloadReceived(String endpointId, Payload payload) {
-            byte[] bytes = payload.asBytes();
-            if (bytes == null || bytes.length == 0 || bytes.length > 64 * 1024) return;
-            try {
-                JSONObject message = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-                String type = message.optString("type");
-                synchronized (NearbyPresenceManager.this) {
-                    if (role == Role.READY && "challenge".equals(type)) {
-                        respondToChallenge(endpointId, message);
-                    } else if (role == Role.LEADER && "proof".equals(type)) {
-                        acceptProof(endpointId, message);
-                    }
-                }
-            } catch (Exception ignored) {
-                emitError("payload_invalid");
-            }
+        public void onScanResult(int callbackType, ScanResult result) {
+            BluetoothDevice device = result == null ? null : result.getDevice();
+            if (device == null) return;
+            connectDiscoveredDevice(device);
         }
 
         @Override
-        public void onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
-            if (
-                update.getStatus() == PayloadTransferUpdate.Status.FAILURE
-                || update.getStatus() == PayloadTransferUpdate.Status.CANCELED
-            ) {
-                emitError("payload_transfer_failed");
+        public void onBatchScanResults(List<ScanResult> results) {
+            if (results == null) return;
+            for (ScanResult result : results) onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, result);
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            synchronized (NearbyPresenceManager.this) {
+                if (role != Role.LEADER) return;
+                cancelLeaderTimers();
+                closeAllLeaderPeers();
+                role = Role.IDLE;
+                emitError("discovery_failed");
             }
         }
     };
 
-    private void sendChallenge(String endpointId) {
+    private synchronized void connectDiscoveredDevice(BluetoothDevice device) {
+        if (role != Role.LEADER) return;
+        String address = safeAddress(device);
+        if (address.isEmpty() || !attemptedAddresses.add(address)) return;
+        LeaderPeer peer = new LeaderPeer(device, address);
+        leaderPeers.put(address, peer);
+        emit("endpoint_found", event -> event.put("pendingCount", leaderPeers.size()));
         try {
-            JSONObject payload = new JSONObject();
-            payload.put("type", "challenge");
-            payload.put("version", 1);
-            payload.put("attemptId", attemptId);
-            payload.put("serviceRequestId", scanServiceRequestId);
-            payload.put("challenge", challenge);
-            payload.put("sentAt", challengeSentAt);
-            sendBytes(endpointId, payload);
-        } catch (Exception ignored) {
-            emitError("challenge_build_failed");
+            BluetoothGatt gatt = device.connectGatt(
+                appContext,
+                false,
+                gattClientCallback,
+                BluetoothDevice.TRANSPORT_LE
+            );
+            if (gatt == null) {
+                failLeaderPeer(peer, "connection_request_failed");
+                return;
+            }
+            peer.gatt = gatt;
+        } catch (SecurityException | RuntimeException error) {
+            failLeaderPeer(peer, "connection_request_failed");
         }
     }
 
-    private void respondToChallenge(String endpointId, JSONObject message) {
+    private final BluetoothGattCallback gattClientCallback = new BluetoothGattCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            synchronized (NearbyPresenceManager.this) {
+                LeaderPeer peer = leaderPeer(gatt);
+                if (peer == null || role != Role.LEADER) {
+                    closeGatt(gatt);
+                    return;
+                }
+                if (status != BluetoothGatt.GATT_SUCCESS || newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    failLeaderPeer(peer, "connection_failed");
+                    return;
+                }
+                if (newState != BluetoothProfile.STATE_CONNECTED) return;
+                try {
+                    gatt.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH);
+                    boolean mtuRequested = gatt.requestMtu(REQUESTED_MTU);
+                    peer.serviceFallback = () -> {
+                        synchronized (NearbyPresenceManager.this) {
+                            requestServices(peer);
+                        }
+                    };
+                    handler.postDelayed(peer.serviceFallback, SERVICE_DISCOVERY_FALLBACK_MS);
+                    if (!mtuRequested) requestServices(peer);
+                } catch (SecurityException | RuntimeException error) {
+                    failLeaderPeer(peer, "connection_failed");
+                }
+            }
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+            synchronized (NearbyPresenceManager.this) {
+                LeaderPeer peer = leaderPeer(gatt);
+                if (peer == null || role != Role.LEADER) return;
+                if (status == BluetoothGatt.GATT_SUCCESS && mtu >= DEFAULT_MTU) peer.mtu = mtu;
+                requestServices(peer);
+            }
+        }
+
+        @Override
+        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            synchronized (NearbyPresenceManager.this) {
+                LeaderPeer peer = leaderPeer(gatt);
+                if (peer == null || role != Role.LEADER) return;
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    failLeaderPeer(peer, "connection_failed");
+                    return;
+                }
+                BluetoothGattService service = gatt.getService(SERVICE_UUID);
+                if (service == null) {
+                    failLeaderPeer(peer, "connection_failed");
+                    return;
+                }
+                peer.challengeCharacteristic = service.getCharacteristic(CHALLENGE_UUID);
+                peer.proofCharacteristic = service.getCharacteristic(PROOF_UUID);
+                if (peer.challengeCharacteristic == null || peer.proofCharacteristic == null) {
+                    failLeaderPeer(peer, "connection_failed");
+                    return;
+                }
+                BluetoothGattDescriptor cccd = peer.proofCharacteristic.getDescriptor(CCCD_UUID);
+                if (cccd == null || !gatt.setCharacteristicNotification(peer.proofCharacteristic, true)) {
+                    failLeaderPeer(peer, "connection_failed");
+                    return;
+                }
+                cccd.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                try {
+                    if (!gatt.writeDescriptor(cccd)) failLeaderPeer(peer, "connection_failed");
+                } catch (SecurityException | RuntimeException error) {
+                    failLeaderPeer(peer, "connection_failed");
+                }
+            }
+        }
+
+        @Override
+        public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, int status) {
+            synchronized (NearbyPresenceManager.this) {
+                LeaderPeer peer = leaderPeer(gatt);
+                if (peer == null || role != Role.LEADER || !CCCD_UUID.equals(descriptor.getUuid())) return;
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    failLeaderPeer(peer, "connection_failed");
+                    return;
+                }
+                try {
+                    JSONObject payload = new JSONObject();
+                    payload.put("type", "challenge");
+                    payload.put("version", 1);
+                    payload.put("attemptId", attemptId);
+                    payload.put("serviceRequestId", scanServiceRequestId);
+                    payload.put("challenge", challenge);
+                    payload.put("sentAt", challengeSentAt);
+                    peer.challengeFrames = buildFrames(
+                        payload.toString().getBytes(StandardCharsets.UTF_8),
+                        FRAME_TYPE_CHALLENGE,
+                        peer.mtu
+                    );
+                    peer.challengeIndex = 0;
+                    sendNextChallengeFrame(peer);
+                } catch (Exception error) {
+                    failLeaderPeer(peer, "payload_send_failed");
+                }
+            }
+        }
+
+        @Override
+        public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            synchronized (NearbyPresenceManager.this) {
+                LeaderPeer peer = leaderPeer(gatt);
+                if (peer == null || role != Role.LEADER || !CHALLENGE_UUID.equals(characteristic.getUuid())) return;
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    failLeaderPeer(peer, "payload_send_failed");
+                    return;
+                }
+                peer.challengeIndex += 1;
+                sendNextChallengeFrame(peer);
+            }
+        }
+
+        @Override
+        public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+            handleProofNotification(gatt, characteristic, characteristic.getValue());
+        }
+
+        @Override
+        public void onCharacteristicChanged(
+            BluetoothGatt gatt,
+            BluetoothGattCharacteristic characteristic,
+            byte[] value
+        ) {
+            handleProofNotification(gatt, characteristic, value);
+        }
+    };
+
+    private synchronized void requestServices(LeaderPeer peer) {
+        if (peer == null || role != Role.LEADER || peer.servicesRequested || peer.gatt == null) return;
+        peer.servicesRequested = true;
+        if (peer.serviceFallback != null) handler.removeCallbacks(peer.serviceFallback);
+        peer.serviceFallback = null;
         try {
+            if (!peer.gatt.discoverServices()) failLeaderPeer(peer, "connection_failed");
+        } catch (SecurityException | RuntimeException error) {
+            failLeaderPeer(peer, "connection_failed");
+        }
+    }
+
+    private synchronized void sendNextChallengeFrame(LeaderPeer peer) {
+        if (peer == null || role != Role.LEADER || peer.gatt == null || peer.challengeCharacteristic == null) return;
+        if (peer.challengeIndex >= peer.challengeFrames.size()) return;
+        byte[] frame = peer.challengeFrames.get(peer.challengeIndex);
+        peer.challengeCharacteristic.setWriteType(BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT);
+        peer.challengeCharacteristic.setValue(frame);
+        try {
+            if (!peer.gatt.writeCharacteristic(peer.challengeCharacteristic)) {
+                failLeaderPeer(peer, "payload_send_failed");
+            }
+        } catch (SecurityException | RuntimeException error) {
+            failLeaderPeer(peer, "payload_send_failed");
+        }
+    }
+
+    private void handleProofNotification(
+        BluetoothGatt gatt,
+        BluetoothGattCharacteristic characteristic,
+        byte[] value
+    ) {
+        synchronized (this) {
+            LeaderPeer peer = leaderPeer(gatt);
+            if (
+                peer == null
+                || role != Role.LEADER
+                || characteristic == null
+                || !PROOF_UUID.equals(characteristic.getUuid())
+                || value == null
+            ) return;
+            try {
+                byte[] complete = peer.proofFrames.accept(value, FRAME_TYPE_PROOF);
+                if (complete == null) return;
+                acceptProof(peer, new JSONObject(new String(complete, StandardCharsets.UTF_8)));
+            } catch (Exception error) {
+                failLeaderPeer(peer, "proof_invalid");
+            }
+        }
+    }
+
+    private final BluetoothGattServerCallback gattServerCallback = new BluetoothGattServerCallback() {
+        @Override
+        public void onServiceAdded(int status, BluetoothGattService service) {
+            synchronized (NearbyPresenceManager.this) {
+                if (role != Role.READY || service == null || !SERVICE_UUID.equals(service.getUuid())) return;
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    failReady("advertising_failed");
+                    return;
+                }
+                startReadyAdvertising();
+            }
+        }
+
+        @Override
+        public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+            synchronized (NearbyPresenceManager.this) {
+                String address = safeAddress(device);
+                if (newState == BluetoothProfile.STATE_DISCONNECTED || status != BluetoothGatt.GATT_SUCCESS) {
+                    cleanupServerPeer(address);
+                    return;
+                }
+                if (role != Role.READY && gattServer != null) {
+                    try {
+                        gattServer.cancelConnection(device);
+                    } catch (SecurityException ignored) {
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void onMtuChanged(BluetoothDevice device, int mtu) {
+            synchronized (NearbyPresenceManager.this) {
+                String address = safeAddress(device);
+                if (!address.isEmpty() && mtu >= DEFAULT_MTU) serverMtuByAddress.put(address, mtu);
+            }
+        }
+
+        @Override
+        public void onDescriptorWriteRequest(
+            BluetoothDevice device,
+            int requestId,
+            BluetoothGattDescriptor descriptor,
+            boolean preparedWrite,
+            boolean responseNeeded,
+            int offset,
+            byte[] value
+        ) {
+            synchronized (NearbyPresenceManager.this) {
+                int status = BluetoothGatt.GATT_FAILURE;
+                String address = safeAddress(device);
+                if (
+                    role == Role.READY
+                    && descriptor != null
+                    && CCCD_UUID.equals(descriptor.getUuid())
+                    && !preparedWrite
+                    && offset == 0
+                    && Arrays.equals(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE, value)
+                    && !address.isEmpty()
+                ) {
+                    notificationSubscribers.add(address);
+                    status = BluetoothGatt.GATT_SUCCESS;
+                }
+                sendServerResponse(device, requestId, responseNeeded, status);
+            }
+        }
+
+        @Override
+        public void onCharacteristicWriteRequest(
+            BluetoothDevice device,
+            int requestId,
+            BluetoothGattCharacteristic characteristic,
+            boolean preparedWrite,
+            boolean responseNeeded,
+            int offset,
+            byte[] value
+        ) {
+            synchronized (NearbyPresenceManager.this) {
+                String address = safeAddress(device);
+                if (
+                    role != Role.READY
+                    || characteristic == null
+                    || !CHALLENGE_UUID.equals(characteristic.getUuid())
+                    || preparedWrite
+                    || offset != 0
+                    || value == null
+                    || address.isEmpty()
+                ) {
+                    sendServerResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_FAILURE);
+                    return;
+                }
+                try {
+                    FrameAccumulator accumulator = incomingChallenges.computeIfAbsent(
+                        address,
+                        ignored -> new FrameAccumulator()
+                    );
+                    byte[] complete = accumulator.accept(value, FRAME_TYPE_CHALLENGE);
+                    sendServerResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_SUCCESS);
+                    if (complete != null) {
+                        incomingChallenges.remove(address);
+                        respondToChallenge(device, complete);
+                    }
+                } catch (Exception error) {
+                    incomingChallenges.remove(address);
+                    sendServerResponse(device, requestId, responseNeeded, BluetoothGatt.GATT_FAILURE);
+                    emitError("payload_invalid");
+                }
+            }
+        }
+
+        @Override
+        public void onNotificationSent(BluetoothDevice device, int status) {
+            synchronized (NearbyPresenceManager.this) {
+                String address = safeAddress(device);
+                OutgoingProof outgoing = outgoingProofs.get(address);
+                if (outgoing == null) return;
+                if (status != BluetoothGatt.GATT_SUCCESS) {
+                    outgoingProofs.remove(address);
+                    emitError("payload_transfer_failed");
+                    return;
+                }
+                outgoing.index += 1;
+                if (outgoing.index >= outgoing.frames.size()) {
+                    outgoingProofs.remove(address);
+                    emit("proof_sent", event -> event.put("serviceRequestId", outgoing.serviceRequestId));
+                    if (gattServer != null) {
+                        try {
+                            gattServer.cancelConnection(device);
+                        } catch (SecurityException ignored) {
+                        }
+                    }
+                    return;
+                }
+                sendNextProofFrame(device, outgoing);
+            }
+        }
+    };
+
+    private synchronized void respondToChallenge(BluetoothDevice device, byte[] payloadBytes) {
+        try {
+            JSONObject message = new JSONObject(new String(payloadBytes, StandardCharsets.UTF_8));
             String incomingAttemptId = requiredToken(message.optString("attemptId"), "attemptId");
             String incomingServiceRequestId = requiredToken(message.optString("serviceRequestId"), "serviceRequestId");
             String incomingChallenge = requiredToken(message.optString("challenge"), "challenge");
             if (!readyServiceRequestId.equals(incomingServiceRequestId)) {
-                client.disconnectFromEndpoint(endpointId);
+                cancelServerConnection(device);
                 return;
             }
             long sentAt = message.optLong("sentAt", 0L);
             if (sentAt <= 0L || Math.abs(sentAt - System.currentTimeMillis()) > 2 * 60 * 1000L) {
-                client.disconnectFromEndpoint(endpointId);
+                cancelServerConnection(device);
                 return;
             }
 
@@ -409,14 +726,46 @@ final class NearbyPresenceManager {
             response.put("signature", signature);
             response.put("credential", credential);
             response.put("credentialState", credential.isEmpty() ? "UNPROVISIONED" : "PROVISIONED");
-            sendBytes(endpointId, response);
-            emit("proof_sent", event -> event.put("serviceRequestId", incomingServiceRequestId));
-        } catch (Exception ignored) {
+
+            String address = safeAddress(device);
+            if (address.isEmpty() || !notificationSubscribers.contains(address)) {
+                emitError("payload_send_failed");
+                return;
+            }
+            int mtu = serverMtuByAddress.getOrDefault(address, DEFAULT_MTU);
+            OutgoingProof outgoing = new OutgoingProof(
+                incomingServiceRequestId,
+                buildFrames(response.toString().getBytes(StandardCharsets.UTF_8), FRAME_TYPE_PROOF, mtu)
+            );
+            outgoingProofs.put(address, outgoing);
+            sendNextProofFrame(device, outgoing);
+        } catch (Exception error) {
             emitError("proof_sign_failed");
         }
     }
 
-    private void acceptProof(String endpointId, JSONObject proof) {
+    private synchronized void sendNextProofFrame(BluetoothDevice device, OutgoingProof outgoing) {
+        if (
+            role != Role.READY
+            || gattServer == null
+            || proofCharacteristic == null
+            || outgoing == null
+            || outgoing.index >= outgoing.frames.size()
+        ) return;
+        byte[] frame = outgoing.frames.get(outgoing.index);
+        proofCharacteristic.setValue(frame);
+        try {
+            if (!gattServer.notifyCharacteristicChanged(device, proofCharacteristic, false)) {
+                outgoingProofs.remove(safeAddress(device));
+                emitError("payload_send_failed");
+            }
+        } catch (SecurityException | RuntimeException error) {
+            outgoingProofs.remove(safeAddress(device));
+            emitError("payload_send_failed");
+        }
+    }
+
+    private synchronized void acceptProof(LeaderPeer peer, JSONObject proof) {
         try {
             if (!attemptId.equals(proof.optString("attemptId"))) return;
             if (!scanServiceRequestId.equals(proof.optString("serviceRequestId"))) return;
@@ -428,6 +777,7 @@ final class NearbyPresenceManager {
             String canonical = canonicalProof(attemptId, scanServiceRequestId, challenge, respondedAt);
             if (!DeviceKeyStore.verifyBase64(publicKey, canonical, signature)) {
                 emitError("proof_signature_invalid");
+                failLeaderPeer(peer, null);
                 return;
             }
             String keyId = keyId(publicKey);
@@ -443,40 +793,32 @@ final class NearbyPresenceManager {
             stored.put("credentialState", proof.optString("credentialState", "UNPROVISIONED"));
             stored.put("deviceKeyId", keyId);
             proofsByKey.put(keyId, stored);
-            requestedEndpoints.remove(endpointId);
+            removeLeaderPeer(peer);
             emit("proof_received", event -> {
                 event.put("deviceKeyId", keyId);
                 event.put("verifiedCount", proofsByKey.size());
-                event.put("pendingCount", requestedEndpoints.size());
+                event.put("pendingCount", leaderPeers.size());
                 event.put("credentialProvisioned", !stored.optString("credential").isEmpty());
             });
             if (expectedProofCount > 0 && proofsByKey.size() >= expectedProofCount) {
                 completeLeaderScan(attemptId);
-            } else {
-                client.disconnectFromEndpoint(endpointId);
             }
         } catch (Exception ignored) {
-            emitError("proof_invalid");
+            failLeaderPeer(peer, "proof_invalid");
         }
-    }
-
-    private void sendBytes(String endpointId, JSONObject payload) {
-        client.sendPayload(endpointId, Payload.fromBytes(payload.toString().getBytes(StandardCharsets.UTF_8)))
-            .addOnFailureListener(error -> emitError("payload_send_failed"));
     }
 
     private synchronized void completeLeaderScan(String completedAttemptId) {
         if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
         cancelLeaderTimers();
-        client.stopDiscovery();
+        stopLeaderScanner();
         emit("scan_complete", event -> {
             event.put("attemptId", completedAttemptId);
             event.put("verifiedCount", proofsByKey.size());
-            event.put("pendingCount", requestedEndpoints.size());
+            event.put("pendingCount", leaderPeers.size());
             event.put("expectedProofCount", expectedProofCount);
         });
-        client.stopAllEndpoints();
-        requestedEndpoints.clear();
+        closeAllLeaderPeers();
         role = Role.IDLE;
     }
 
@@ -487,58 +829,132 @@ final class NearbyPresenceManager {
         scanCompleteTimeout = null;
     }
 
-    private synchronized void resetNearbyClientForRetry() {
-        cancelLeaderTimers();
-        client.stopAdvertising();
-        client.stopDiscovery();
-        client.stopAllEndpoints();
-        requestedEndpoints.clear();
-    }
-
     private synchronized void stopAllInternal(boolean notify) {
         cancelLeaderTimers();
-        client.stopAdvertising();
-        client.stopDiscovery();
-        client.stopAllEndpoints();
-        requestedEndpoints.clear();
+        stopReadyResources();
+        stopLeaderScanner();
+        closeAllLeaderPeers();
+        attemptedAddresses.clear();
+        incomingChallenges.clear();
+        serverMtuByAddress.clear();
+        notificationSubscribers.clear();
+        outgoingProofs.clear();
         readyServiceRequestId = "";
         expectedProofCount = 0;
         role = Role.IDLE;
         if (notify) emit("stopped", event -> {});
     }
 
-    private static boolean isRecoverableStartFailure(Exception error) {
-        int statusCode = nearbyStatusCode(error);
-        return statusCode == ConnectionsStatusCodes.STATUS_ALREADY_ADVERTISING
-            || statusCode == ConnectionsStatusCodes.STATUS_ALREADY_DISCOVERING
-            || statusCode == ConnectionsStatusCodes.STATUS_ALREADY_HAVE_ACTIVE_STRATEGY
-            || statusCode == ConnectionsStatusCodes.STATUS_OUT_OF_ORDER_API_CALL;
+    private synchronized void stopReadyResources() {
+        stopReadyAdvertising();
+        if (gattServer != null) {
+            try {
+                gattServer.clearServices();
+                gattServer.close();
+            } catch (SecurityException ignored) {
+            }
+        }
+        gattServer = null;
+        challengeCharacteristic = null;
+        proofCharacteristic = null;
+        incomingChallenges.clear();
+        serverMtuByAddress.clear();
+        notificationSubscribers.clear();
+        outgoingProofs.clear();
     }
 
-    private static String nearbyStartErrorCode(Exception error, String fallback) {
-        int statusCode = nearbyStatusCode(error);
-        if (isMissingPermissionStatus(statusCode)) return "permissions_required";
-        if (statusCode == ConnectionsStatusCodes.STATUS_RADIO_ERROR) return "nearby_radio_error";
-        if (statusCode == ConnectionsStatusCodes.API_CONNECTION_FAILED_ALREADY_IN_USE) return "nearby_in_use";
-        if (isRecoverableStartFailure(error)) return "nearby_state_conflict";
-        return fallback;
+    private synchronized void stopReadyAdvertising() {
+        if (advertiser != null) {
+            try {
+                advertiser.stopAdvertising(advertiseCallback);
+            } catch (SecurityException | RuntimeException ignored) {
+            }
+        }
+        advertiser = null;
     }
 
-    private static int nearbyStatusCode(Exception error) {
-        return error instanceof ApiException ? ((ApiException) error).getStatusCode() : Integer.MIN_VALUE;
+    private synchronized void stopLeaderScanner() {
+        if (scanner != null) {
+            try {
+                scanner.stopScan(scanCallback);
+            } catch (SecurityException | RuntimeException ignored) {
+            }
+        }
+        scanner = null;
     }
 
-    private static boolean isMissingPermissionStatus(int statusCode) {
-        return statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_COARSE_LOCATION
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_FINE_LOCATION
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_ACCESS_WIFI_STATE
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_CHANGE_WIFI_STATE
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_ADMIN
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_ADVERTISE
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_CONNECT
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_BLUETOOTH_SCAN
-            || statusCode == ConnectionsStatusCodes.MISSING_PERMISSION_NEARBY_WIFI_DEVICES;
+    private synchronized void closeAllLeaderPeers() {
+        List<LeaderPeer> peers = new ArrayList<>(leaderPeers.values());
+        leaderPeers.clear();
+        for (LeaderPeer peer : peers) closeLeaderPeer(peer);
+    }
+
+    private synchronized void failLeaderPeer(LeaderPeer peer, String code) {
+        if (peer == null) return;
+        removeLeaderPeer(peer);
+        if (code != null && !code.isEmpty()) emitError(code);
+    }
+
+    private synchronized void removeLeaderPeer(LeaderPeer peer) {
+        if (peer == null) return;
+        leaderPeers.remove(peer.address);
+        closeLeaderPeer(peer);
+    }
+
+    private void closeLeaderPeer(LeaderPeer peer) {
+        if (peer == null) return;
+        if (peer.serviceFallback != null) handler.removeCallbacks(peer.serviceFallback);
+        peer.serviceFallback = null;
+        if (peer.gatt != null) {
+            try {
+                peer.gatt.disconnect();
+            } catch (SecurityException | RuntimeException ignored) {
+            }
+            closeGatt(peer.gatt);
+            peer.gatt = null;
+        }
+    }
+
+    private static void closeGatt(BluetoothGatt gatt) {
+        if (gatt == null) return;
+        try {
+            gatt.close();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private synchronized LeaderPeer leaderPeer(BluetoothGatt gatt) {
+        if (gatt == null || gatt.getDevice() == null) return null;
+        return leaderPeers.get(safeAddress(gatt.getDevice()));
+    }
+
+    private synchronized void cleanupServerPeer(String address) {
+        if (address == null || address.isEmpty()) return;
+        incomingChallenges.remove(address);
+        serverMtuByAddress.remove(address);
+        notificationSubscribers.remove(address);
+        outgoingProofs.remove(address);
+    }
+
+    private synchronized void cancelServerConnection(BluetoothDevice device) {
+        if (gattServer == null || device == null) return;
+        try {
+            gattServer.cancelConnection(device);
+        } catch (SecurityException ignored) {
+        }
+    }
+
+    private synchronized void sendServerResponse(
+        BluetoothDevice device,
+        int requestId,
+        boolean responseNeeded,
+        int status
+    ) {
+        if (!responseNeeded || gattServer == null || device == null) return;
+        try {
+            gattServer.sendResponse(device, requestId, status, 0, null);
+        } catch (SecurityException | RuntimeException ignored) {
+        }
     }
 
     private String safeCredential() {
@@ -546,6 +962,33 @@ final class NearbyPresenceManager {
         if (credential == null) return "";
         String normalized = credential.trim();
         return normalized.length() > 16_384 ? "" : normalized;
+    }
+
+    private static List<byte[]> buildFrames(byte[] payload, int type, int mtu) {
+        if (payload == null || payload.length > MAX_FRAME_BYTES) {
+            throw new IllegalArgumentException("ble_frame_payload_invalid");
+        }
+        int attPayload = Math.max(20, Math.max(DEFAULT_MTU, mtu) - 3);
+        int chunkSize = Math.max(1, attPayload - FRAME_HEADER_BYTES);
+        List<byte[]> frames = new ArrayList<>();
+        int sequence = 0;
+        for (int offset = 0; offset < Math.max(1, payload.length); offset += chunkSize) {
+            int remaining = payload.length - offset;
+            int length = Math.min(chunkSize, Math.max(0, remaining));
+            boolean last = offset + length >= payload.length;
+            byte[] frame = new byte[FRAME_HEADER_BYTES + length];
+            frame[0] = (byte) FRAME_MAGIC;
+            frame[1] = (byte) FRAME_VERSION;
+            frame[2] = (byte) type;
+            frame[3] = (byte) (last ? FRAME_FLAG_FINAL : 0);
+            frame[4] = (byte) ((sequence >>> 8) & 0xff);
+            frame[5] = (byte) (sequence & 0xff);
+            if (length > 0) System.arraycopy(payload, offset, frame, FRAME_HEADER_BYTES, length);
+            frames.add(frame);
+            sequence += 1;
+            if (payload.length == 0) break;
+        }
+        return frames;
     }
 
     private static String canonicalProof(
@@ -579,6 +1022,16 @@ final class NearbyPresenceManager {
         return normalized;
     }
 
+    private static String safeAddress(BluetoothDevice device) {
+        if (device == null) return "";
+        try {
+            String address = device.getAddress();
+            return address == null ? "" : address;
+        } catch (SecurityException error) {
+            return "";
+        }
+    }
+
     private interface EventWriter {
         void write(JSONObject event) throws Exception;
     }
@@ -590,11 +1043,82 @@ final class NearbyPresenceManager {
             writer.write(event);
             eventSink.emit(event);
         } catch (Exception ignored) {
-            // Los eventos de UI nunca cambian la autoridad de presencia.
+            // Eventos de UI no cambian la autoridad de presencia.
         }
     }
 
     private void emitError(String code) {
         emit("error", event -> event.put("code", code));
+    }
+
+    private static final class FrameAccumulator {
+        private final ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        private int nextSequence = 0;
+
+        byte[] accept(byte[] frame, int expectedType) {
+            if (frame == null || frame.length < FRAME_HEADER_BYTES) {
+                throw new IllegalArgumentException("ble_frame_invalid");
+            }
+            int magic = frame[0] & 0xff;
+            int version = frame[1] & 0xff;
+            int type = frame[2] & 0xff;
+            int flags = frame[3] & 0xff;
+            int sequence = ((frame[4] & 0xff) << 8) | (frame[5] & 0xff);
+            if (
+                magic != FRAME_MAGIC
+                || version != FRAME_VERSION
+                || type != expectedType
+                || sequence != nextSequence
+            ) {
+                reset();
+                throw new IllegalArgumentException("ble_frame_sequence_invalid");
+            }
+            int bodyLength = frame.length - FRAME_HEADER_BYTES;
+            if (bytes.size() + bodyLength > MAX_FRAME_BYTES) {
+                reset();
+                throw new IllegalArgumentException("ble_frame_too_large");
+            }
+            if (bodyLength > 0) bytes.write(frame, FRAME_HEADER_BYTES, bodyLength);
+            nextSequence += 1;
+            if ((flags & FRAME_FLAG_FINAL) == 0) return null;
+            byte[] completed = bytes.toByteArray();
+            reset();
+            return completed;
+        }
+
+        private void reset() {
+            bytes.reset();
+            nextSequence = 0;
+        }
+    }
+
+    private static final class LeaderPeer {
+        final BluetoothDevice device;
+        final String address;
+        final FrameAccumulator proofFrames = new FrameAccumulator();
+        BluetoothGatt gatt;
+        BluetoothGattCharacteristic challengeCharacteristic;
+        BluetoothGattCharacteristic proofCharacteristic;
+        List<byte[]> challengeFrames = Collections.emptyList();
+        int challengeIndex = 0;
+        int mtu = DEFAULT_MTU;
+        boolean servicesRequested = false;
+        Runnable serviceFallback;
+
+        LeaderPeer(BluetoothDevice device, String address) {
+            this.device = device;
+            this.address = address;
+        }
+    }
+
+    private static final class OutgoingProof {
+        final String serviceRequestId;
+        final List<byte[]> frames;
+        int index = 0;
+
+        OutgoingProof(String serviceRequestId, List<byte[]> frames) {
+            this.serviceRequestId = serviceRequestId;
+            this.frames = frames;
+        }
     }
 }
