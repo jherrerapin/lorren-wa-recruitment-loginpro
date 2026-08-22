@@ -620,8 +620,10 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
   }
 
   const hasAuxiliaryMembers = members.some((member) => member.workerId !== leaderWorkerId);
+  const isAttendanceMarkChallenge = /^lorren-mark-v1:(?:ARRIVAL|BREAK_START|BREAK_END|DEPARTURE):/.test(bundle.challenge);
   if (
-    hasAuxiliaryMembers
+    isAttendanceMarkChallenge
+    && hasAuxiliaryMembers
     && validatedWorkerIds.length === 1
     && phoneExceptionWorkerIds.length === 0
   ) {
