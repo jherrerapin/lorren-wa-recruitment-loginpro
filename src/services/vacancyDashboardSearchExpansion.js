@@ -20,6 +20,11 @@ const RECRUITER_VISIBLE_STATUSES = [
   'CONTACTADO',
   'CONTRATADO'
 ];
+const VACANCY_CYCLE_AUDIT_ACTIONS = [
+  'VACANCY_CREATED',
+  'VACANCY_UPDATED',
+  'VACANCY_FLOW_TOGGLED'
+];
 
 function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
@@ -42,6 +47,39 @@ function timeValue(value) {
   if (!value) return 0;
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function vacancyIsOpen(value = {}) {
+  return Boolean(value?.isActive && value?.acceptingApplications);
+}
+
+export function normalizeVacancyHistoryScopes(query = {}) {
+  const vacancyIds = new Set();
+  for (const [key, rawValue] of Object.entries(query || {})) {
+    const match = /^vh_(.+)$/.exec(String(key));
+    if (!match) continue;
+    const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+    if (String(value || '').trim().toLowerCase() === 'all') vacancyIds.add(match[1]);
+  }
+  return vacancyIds;
+}
+
+export function resolveVacancyApplicationCycleStartedAt(events = [], vacancyId = '') {
+  const normalizedVacancyId = String(vacancyId || '');
+  const orderedEvents = [...(events || [])]
+    .filter((event) => String(event?.entityId || '') === normalizedVacancyId)
+    .sort((a, b) => timeValue(b?.createdAt) - timeValue(a?.createdAt));
+
+  for (const event of orderedEvents) {
+    if (!vacancyIsOpen(event?.toValue)) continue;
+    if (event?.action === 'VACANCY_CREATED' || !vacancyIsOpen(event?.fromValue)) {
+      const startedAt = event?.createdAt instanceof Date
+        ? event.createdAt
+        : new Date(event?.createdAt);
+      if (!Number.isNaN(startedAt.getTime())) return startedAt;
+    }
+  }
+  return null;
 }
 
 function candidateHasCv(candidate = {}) {
@@ -164,6 +202,16 @@ function displayedCandidateIds(vacancy = {}) {
   return ids;
 }
 
+function vacancyListCandidateIds(vacancy = {}) {
+  const ids = new Set();
+  for (const field of VACANCY_LIST_FIELDS) {
+    for (const candidate of vacancy[field] || []) {
+      if (candidate?.id) ids.add(candidate.id);
+    }
+  }
+  return ids;
+}
+
 function resolveSearchResultTarget(vacancy = {}, candidate = {}) {
   if (!candidateHasCv(candidate)) return 'completeWithoutCv';
   if (candidate.status === 'CONTRATADO') return 'contractedCandidates';
@@ -263,6 +311,75 @@ export function mergeVacancySearchResults(viewModel = {}, searches = {}, candida
   return viewModel;
 }
 
+export function scopeVacancyToApplicationCycle(vacancy = {}, cycleStartedAt = null, options = {}) {
+  const historicalCandidateCount = vacancyListCandidateIds(vacancy).size;
+  const cycleStartTime = timeValue(cycleStartedAt);
+  const showHistory = Boolean(options.showHistory);
+
+  if (cycleStartTime && !showHistory) {
+    for (const field of VACANCY_LIST_FIELDS) {
+      vacancy[field] = (vacancy[field] || []).filter((candidate) => (
+        timeValue(candidate?.createdAt) >= cycleStartTime
+      ));
+    }
+  }
+
+  return {
+    cycleStartedAt: cycleStartTime ? new Date(cycleStartTime).toISOString() : null,
+    showHistory,
+    historicalCandidateCount,
+    visibleCandidateCount: vacancyListCandidateIds(vacancy).size
+  };
+}
+
+async function loadVacancyCycleEvents(vacancyIds = []) {
+  if (!vacancyIds.length || typeof prisma?.devAuditEvent?.findMany !== 'function') return [];
+  return prisma.devAuditEvent.findMany({
+    where: {
+      entityType: 'VACANCY',
+      entityId: { in: vacancyIds },
+      action: { in: VACANCY_CYCLE_AUDIT_ACTIONS }
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      entityId: true,
+      action: true,
+      fromValue: true,
+      toValue: true,
+      createdAt: true
+    }
+  });
+}
+
+export async function applyVacancyApplicationCycleScope(viewModel = {}, query = {}) {
+  const vacancies = [];
+  for (const city of viewModel.cities || []) {
+    for (const vacancy of city.vacancies || []) {
+      vacancies.push({ vacancy, cityName: city.name || vacancy.city || '' });
+    }
+  }
+
+  const vacancyIds = vacancies.map(({ vacancy }) => String(vacancy.id || '')).filter(Boolean);
+  const cycleEvents = await loadVacancyCycleEvents(vacancyIds);
+  const historyScopes = normalizeVacancyHistoryScopes(query);
+  const cycleMetadata = {};
+
+  for (const { vacancy, cityName } of vacancies) {
+    const vacancyId = String(vacancy.id || '');
+    const cycleStartedAt = resolveVacancyApplicationCycleStartedAt(cycleEvents, vacancyId);
+    const showHistory = historyScopes.has(vacancyId);
+    const scoped = scopeVacancyToApplicationCycle(vacancy, cycleStartedAt, { showHistory });
+    cycleMetadata[vacancyId] = {
+      vacancyId,
+      cityName,
+      ...scoped
+    };
+  }
+
+  viewModel.vacancyApplicationCycles = cycleMetadata;
+  return viewModel;
+}
+
 async function loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds) {
   const activeVacancyIds = Object.entries(searches)
     .filter(([vacancyId, search]) => search?.text && visibleVacancyIds.has(String(vacancyId)))
@@ -329,10 +446,13 @@ export async function expandVacancySearchCandidates(viewModel = {}, query = {}, 
 
   const accessContext = getRequestAccessContext(req);
   sanitizeVacancyDashboardVisibility(viewModel, { isDev: accessContext.isDev });
-  if (!Object.values(searches).some((search) => search?.text)) return viewModel;
 
-  const candidates = await loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds);
-  return mergeVacancySearchResults(viewModel, searches, candidates, { isDev: accessContext.isDev });
+  if (Object.values(searches).some((search) => search?.text)) {
+    const candidates = await loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds);
+    mergeVacancySearchResults(viewModel, searches, candidates, { isDev: accessContext.isDev });
+  }
+
+  return applyVacancyApplicationCycleScope(viewModel, query);
 }
 
 function isValidDateString(value) {
@@ -439,7 +559,7 @@ function escapeHtml(value) {
 }
 
 function isPreservableQueryKey(key) {
-  return [
+  return /^vh_.+/.test(key) || [
     'status',
     'vacancyId',
     'searchField',
@@ -586,6 +706,132 @@ function buildApplicantLinkScript(dateRange) {
 </script>`;
 }
 
+export function buildVacancyApplicationCycleScript(cycleMetadata = {}) {
+  const serializedCycles = JSON.stringify(cycleMetadata || {}).replaceAll('<', '\\u003c');
+
+  return `
+<script>
+  (function () {
+    const cycles = ${serializedCycles};
+    const entries = Object.values(cycles || {});
+    if (!entries.length) return;
+
+    function relativeHref(url) {
+      const query = url.searchParams.toString();
+      return url.pathname + (query ? '?' + query : '') + (url.hash || '');
+    }
+
+    function ensureHiddenInput(form, name, value) {
+      let input = form.querySelector('input[name="' + name + '"]');
+      if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        form.appendChild(input);
+      }
+      input.value = value;
+    }
+
+    function formattedCycleDate(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      return new Intl.DateTimeFormat('es-CO', {
+        timeZone: 'America/Bogota',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      }).format(date);
+    }
+
+    function updateCount(container, value) {
+      if (!container) return;
+      let count = container.querySelector('.count');
+      if (!count) {
+        count = document.createElement('span');
+        count.className = 'count';
+        container.appendChild(count);
+      }
+      count.textContent = String(value);
+      count.hidden = false;
+    }
+
+    const pageUrl = new URL(window.location.href);
+    const activeHistory = entries.filter((meta) => meta.showHistory && meta.cycleStartedAt);
+
+    entries.forEach((meta) => {
+      if (!meta || !meta.vacancyId) return;
+      const panel = document.getElementById('vacancy-' + meta.vacancyId);
+      if (panel && meta.cycleStartedAt) {
+        const existing = panel.querySelector('[data-vacancy-cycle-scope]');
+        if (!existing) {
+          const bar = document.createElement('div');
+          bar.setAttribute('data-vacancy-cycle-scope', meta.vacancyId);
+          bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid var(--border-soft);background:var(--surface);';
+
+          const note = document.createElement('span');
+          note.className = 'filter-note';
+          note.textContent = meta.showHistory
+            ? 'Histórico visible: ' + meta.visibleCandidateCount + ' registro(s).'
+            : 'Ciclo actual: ' + meta.visibleCandidateCount + ' postulación(es) desde ' + formattedCycleDate(meta.cycleStartedAt) + '.';
+
+          const link = document.createElement('a');
+          link.className = 'export-btn';
+          link.setAttribute('data-vacancy-cycle-toggle', meta.vacancyId);
+          const target = new URL(window.location.href);
+          if (meta.showHistory) target.searchParams.delete('vh_' + meta.vacancyId);
+          else target.searchParams.set('vh_' + meta.vacancyId, 'all');
+          target.hash = 'vacancy-' + meta.vacancyId;
+          link.href = relativeHref(target);
+          link.textContent = meta.showHistory ? 'Ver ciclo actual' : 'Ver todos los registros';
+
+          bar.append(note, link);
+          const header = panel.querySelector('.vacancy-header');
+          if (header) header.insertAdjacentElement('afterend', bar);
+          else panel.prepend(bar);
+        }
+      }
+
+      const tab = Array.from(document.querySelectorAll('[data-vacancy-tab]'))
+        .find((candidate) => candidate.dataset.vacancyTab === meta.vacancyId);
+      updateCount(tab, meta.visibleCandidateCount);
+    });
+
+    document.querySelectorAll('.city-tab[href]').forEach((anchor) => {
+      const url = new URL(anchor.getAttribute('href'), window.location.origin);
+      const cityName = url.searchParams.get('city');
+      if (!cityName) return;
+      const total = entries
+        .filter((meta) => meta.cityName === cityName)
+        .reduce((sum, meta) => sum + Number(meta.visibleCandidateCount || 0), 0);
+      updateCount(anchor, total);
+    });
+
+    if (!activeHistory.length) return;
+
+    document.querySelectorAll('form[method="get"], form[method="GET"]').forEach((form) => {
+      const action = new URL(form.getAttribute('action') || window.location.href, window.location.origin);
+      if (action.pathname !== '/admin') return;
+      activeHistory.forEach((meta) => ensureHiddenInput(form, 'vh_' + meta.vacancyId, 'all'));
+    });
+
+    document.querySelectorAll('a[href]').forEach((anchor) => {
+      if (anchor.hasAttribute('data-vacancy-cycle-toggle')) return;
+      const url = new URL(anchor.getAttribute('href'), window.location.origin);
+      if (url.pathname !== '/admin') return;
+      activeHistory.forEach((meta) => {
+        if (!url.searchParams.has('vh_' + meta.vacancyId)) {
+          url.searchParams.set('vh_' + meta.vacancyId, 'all');
+        }
+      });
+      anchor.setAttribute('href', relativeHref(url));
+    });
+  })();
+</script>`;
+}
+
 export function injectAdminApplicantControls(html, req, viewModel = {}) {
   if (typeof html !== 'string') return html;
   const dateRange = viewModel.applicantDateRange || normalizeApplicantDateRange(req?.query || {});
@@ -601,10 +847,12 @@ export function injectAdminApplicantControls(html, req, viewModel = {}) {
     }
   }
 
-  const script = buildApplicantLinkScript(dateRange);
+  const applicantScript = buildApplicantLinkScript(dateRange);
+  const cycleScript = buildVacancyApplicationCycleScript(viewModel.vacancyApplicationCycles || {});
+  const scripts = `${applicantScript}\n${cycleScript}`;
   return output.includes('</body>')
-    ? output.replace('</body>', `${script}\n</body>`)
-    : `${output}${script}`;
+    ? output.replace('</body>', `${scripts}\n</body>`)
+    : `${output}${scripts}`;
 }
 
 async function enhanceAdminListView(viewModel = {}, query = {}, req = {}) {
