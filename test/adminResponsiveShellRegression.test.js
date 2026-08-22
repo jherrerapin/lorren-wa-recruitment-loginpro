@@ -61,6 +61,7 @@ test('el shell comparte gutters, compacta controles y permite wrap antes de sola
 
   assert.match(css, /@media \(min-width:\s*901px\) and \(max-width:\s*1180px\)[\s\S]*\.spacer[\s\S]*display:\s*none/);
   assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*admin-module-standalone-link[\s\S]*flex:\s*1 1 130px/);
+  assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*admin-module-standalone-link[\s\S]*justify-content:\s*flex-start/);
   assert.match(css, /@media \(max-width:\s*430px\)[\s\S]*flex-basis:\s*100%/);
 });
 
