@@ -18,6 +18,7 @@ import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
@@ -62,9 +63,11 @@ final class NearbyPresenceManager {
     private static final UUID CHALLENGE_UUID = UUID.fromString("6f727265-6e2d-4352-4557-505245530002");
     private static final UUID PROOF_UUID = UUID.fromString("6f727265-6e2d-4352-4557-505245530003");
     private static final UUID CCCD_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+    private static final ParcelUuid SERVICE_PARCEL_UUID = new ParcelUuid(SERVICE_UUID);
 
     private static final long MIN_SCAN_MS = 4_000L;
     private static final long MAX_SCAN_MS = 30_000L;
+    private static final long FILTERED_SCAN_FALLBACK_MS = 2_000L;
     private static final long CONNECTION_GRACE_MS = 1_500L;
     private static final long SERVICE_DISCOVERY_FALLBACK_MS = 700L;
     private static final int REQUESTED_MTU = 517;
@@ -101,8 +104,10 @@ final class NearbyPresenceManager {
     private String challenge = "";
     private long challengeSentAt = 0L;
     private int expectedProofCount = 0;
+    private Runnable scanFilterFallback;
     private Runnable scanTimeout;
     private Runnable scanCompleteTimeout;
+    private boolean softwareFilteredScan = false;
 
     private BluetoothLeAdvertiser advertiser;
     private BluetoothLeScanner scanner;
@@ -181,7 +186,7 @@ final class NearbyPresenceManager {
             .setTimeout(0)
             .build();
         AdvertiseData data = new AdvertiseData.Builder()
-            .addServiceUuid(new ParcelUuid(SERVICE_UUID))
+            .addServiceUuid(SERVICE_PARCEL_UUID)
             .setIncludeDeviceName(false)
             .setIncludeTxPowerLevel(false)
             .build();
@@ -215,6 +220,7 @@ final class NearbyPresenceManager {
         proofsByKey.clear();
         leaderPeers.clear();
         attemptedAddresses.clear();
+        softwareFilteredScan = false;
 
         if (bluetoothAdapter == null) {
             role = Role.IDLE;
@@ -228,14 +234,11 @@ final class NearbyPresenceManager {
                 emitError("discovery_failed");
                 return;
             }
-            ScanFilter filter = new ScanFilter.Builder()
-                .setServiceUuid(new ParcelUuid(SERVICE_UUID))
-                .build();
-            ScanSettings settings = new ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                .setReportDelay(0L)
-                .build();
-            scanner.startScan(Collections.singletonList(filter), settings, scanCallback);
+            scanner.startScan(
+                Collections.singletonList(lorrenScanFilter()),
+                leaderScanSettings(),
+                scanCallback
+            );
             emit("scan_started", event -> {
                 event.put("attemptId", nextAttemptId);
                 event.put("serviceRequestId", serviceRequestId);
@@ -246,6 +249,7 @@ final class NearbyPresenceManager {
                 completeLeaderScan(nextAttemptId);
                 return;
             }
+            scheduleSoftwareFilterFallback(nextAttemptId, timeoutMs);
             scheduleLeaderScanTimeout(nextAttemptId, timeoutMs);
         } catch (RuntimeException error) {
             stopLeaderScanner();
@@ -254,13 +258,61 @@ final class NearbyPresenceManager {
         }
     }
 
+    private static ScanFilter lorrenScanFilter() {
+        return new ScanFilter.Builder()
+            .setServiceUuid(SERVICE_PARCEL_UUID)
+            .build();
+    }
+
+    private static ScanSettings leaderScanSettings() {
+        return new ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setReportDelay(0L)
+            .build();
+    }
+
+    private synchronized void scheduleSoftwareFilterFallback(String nextAttemptId, long timeoutMs) {
+        cancelScanFilterFallback();
+        long fallbackDelayMs = Math.min(
+            FILTERED_SCAN_FALLBACK_MS,
+            Math.max(500L, timeoutMs / 2L)
+        );
+        scanFilterFallback = () -> {
+            synchronized (NearbyPresenceManager.this) {
+                if (
+                    role != Role.LEADER
+                    || !attemptId.equals(nextAttemptId)
+                    || scanner == null
+                    || !attemptedAddresses.isEmpty()
+                ) return;
+                try {
+                    scanner.stopScan(scanCallback);
+                    softwareFilteredScan = true;
+                    scanner.startScan(Collections.emptyList(), leaderScanSettings(), scanCallback);
+                } catch (RuntimeException error) {
+                    cancelLeaderTimers();
+                    stopLeaderScanner();
+                    closeAllLeaderPeers();
+                    role = Role.IDLE;
+                    emitError("discovery_failed");
+                }
+            }
+        };
+        handler.postDelayed(scanFilterFallback, fallbackDelayMs);
+    }
+
     private synchronized void scheduleLeaderScanTimeout(String nextAttemptId, long timeoutMs) {
         if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) return;
         if (scanTimeout != null) handler.removeCallbacks(scanTimeout);
         scanTimeout = () -> {
             synchronized (NearbyPresenceManager.this) {
                 if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) return;
+                cancelScanFilterFallback();
                 stopLeaderScanner();
+                if (leaderPeers.isEmpty()) {
+                    completeLeaderScan(nextAttemptId);
+                    return;
+                }
                 scanCompleteTimeout = () -> completeLeaderScan(nextAttemptId);
                 handler.postDelayed(scanCompleteTimeout, CONNECTION_GRACE_MS);
             }
@@ -319,7 +371,9 @@ final class NearbyPresenceManager {
     private final ScanCallback scanCallback = new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
-            BluetoothDevice device = result == null ? null : result.getDevice();
+            if (result == null) return;
+            if (softwareFilteredScan && !isLorrenAdvertisement(result)) return;
+            BluetoothDevice device = result.getDevice();
             if (device == null) return;
             connectDiscoveredDevice(device);
         }
@@ -342,10 +396,18 @@ final class NearbyPresenceManager {
         }
     };
 
+    private static boolean isLorrenAdvertisement(ScanResult result) {
+        if (result == null) return false;
+        ScanRecord record = result.getScanRecord();
+        List<ParcelUuid> serviceUuids = record == null ? null : record.getServiceUuids();
+        return serviceUuids != null && serviceUuids.contains(SERVICE_PARCEL_UUID);
+    }
+
     private synchronized void connectDiscoveredDevice(BluetoothDevice device) {
         if (role != Role.LEADER) return;
         String address = safeAddress(device);
         if (address.isEmpty() || !attemptedAddresses.add(address)) return;
+        cancelScanFilterFallback();
         LeaderPeer peer = new LeaderPeer(device, address);
         leaderPeers.put(address, peer);
         emit("endpoint_found", event -> event.put("pendingCount", leaderPeers.size()));
@@ -822,7 +884,13 @@ final class NearbyPresenceManager {
         role = Role.IDLE;
     }
 
+    private synchronized void cancelScanFilterFallback() {
+        if (scanFilterFallback != null) handler.removeCallbacks(scanFilterFallback);
+        scanFilterFallback = null;
+    }
+
     private synchronized void cancelLeaderTimers() {
+        cancelScanFilterFallback();
         if (scanTimeout != null) handler.removeCallbacks(scanTimeout);
         if (scanCompleteTimeout != null) handler.removeCallbacks(scanCompleteTimeout);
         scanTimeout = null;
@@ -841,6 +909,7 @@ final class NearbyPresenceManager {
         outgoingProofs.clear();
         readyServiceRequestId = "";
         expectedProofCount = 0;
+        softwareFilteredScan = false;
         role = Role.IDLE;
         if (notify) emit("stopped", event -> {});
     }
@@ -881,6 +950,7 @@ final class NearbyPresenceManager {
             }
         }
         scanner = null;
+        softwareFilteredScan = false;
     }
 
     private synchronized void closeAllLeaderPeers() {

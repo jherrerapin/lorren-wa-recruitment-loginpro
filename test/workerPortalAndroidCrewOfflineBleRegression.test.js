@@ -35,8 +35,8 @@ test('auxiliar anuncia BLE y el encargado descubre por UUID y obtiene proof por 
   assert.match(ble, /BluetoothGattServer/);
   assert.match(ble, /BluetoothGattCallback/);
   assert.match(ble, /openGattServer\(appContext, gattServerCallback\)/);
-  assert.match(ble, /AdvertiseData\.Builder\(\)[\s\S]{0,160}addServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
-  assert.match(ble, /ScanFilter\.Builder\(\)[\s\S]{0,120}setServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
+  assert.match(ble, /AdvertiseData\.Builder\(\)[\s\S]{0,160}addServiceUuid\(SERVICE_PARCEL_UUID\)/);
+  assert.match(ble, /ScanFilter\.Builder\(\)[\s\S]{0,120}setServiceUuid\(SERVICE_PARCEL_UUID\)/);
   assert.match(ble, /setScanMode\(ScanSettings\.SCAN_MODE_LOW_LATENCY\)/);
   assert.match(ble, /connectGatt\([\s\S]{0,180}BluetoothDevice\.TRANSPORT_LE/);
   assert.match(ble, /FRAME_TYPE_CHALLENGE/);
@@ -48,6 +48,40 @@ test('auxiliar anuncia BLE y el encargado descubre por UUID y obtiene proof por 
   assert.doesNotMatch(ble, /com\.google\.android\.gms\.nearby|ConnectionsClient|Strategy\.P2P_/);
   assert.doesNotMatch(ble, /WifiManager|setWifiEnabled|ACTION_WIFI_STATE_CHANGED|startLocalOnlyHotspot/);
   assert.doesNotMatch(gradle, /play-services-nearby/);
+});
+
+test('encargado cae a scan foreground con filtro software cuando el filtro BLE no entrega endpoints', async () => {
+  const nearby = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
+
+  assert.match(nearby, /FILTERED_SCAN_FALLBACK_MS = 2_000L/);
+  assert.match(
+    nearby,
+    /startLeaderScan\(JSONObject input\)[\s\S]{0,2400}Collections\.singletonList\(lorrenScanFilter\(\)\)[\s\S]{0,500}scheduleSoftwareFilterFallback\(nextAttemptId, timeoutMs\)[\s\S]{0,160}scheduleLeaderScanTimeout\(nextAttemptId, timeoutMs\)/
+  );
+  const fallback = nearby.match(
+    /private synchronized void scheduleSoftwareFilterFallback\(String nextAttemptId, long timeoutMs\) \{([\s\S]*?)\n    \}\n\n    private synchronized void scheduleLeaderScanTimeout/
+  );
+  assert.ok(fallback, 'falta el fallback del filtro BLE');
+  assert.match(fallback[1], /attemptedAddresses\.isEmpty\(\)/);
+  assert.match(fallback[1], /scanner\.stopScan\(scanCallback\)/);
+  assert.match(fallback[1], /scanner\.startScan\(Collections\.emptyList\(\), leaderScanSettings\(\), scanCallback\)/);
+  assert.doesNotMatch(fallback[1], /scheduleLeaderScanTimeout/);
+
+  assert.match(nearby, /ScanRecord record = result\.getScanRecord\(\)/);
+  assert.match(nearby, /record\.getServiceUuids\(\)/);
+  assert.match(nearby, /serviceUuids\.contains\(SERVICE_PARCEL_UUID\)/);
+  assert.match(
+    nearby,
+    /onScanResult\(int callbackType, ScanResult result\)[\s\S]{0,180}!isLorrenAdvertisement\(result\)[\s\S]{0,180}connectDiscoveredDevice\(device\)/
+  );
+
+  const timeout = nearby.match(
+    /private synchronized void scheduleLeaderScanTimeout\(String nextAttemptId, long timeoutMs\) \{([\s\S]*?)\n    \}\n\n    synchronized void stopReady/
+  );
+  assert.ok(timeout, 'falta el deadline del scan');
+  assert.match(timeout[1], /leaderPeers\.isEmpty\(\)[\s\S]{0,100}completeLeaderScan\(nextAttemptId\)/);
+  assert.match(timeout[1], /handler\.postDelayed\(scanCompleteTimeout, CONNECTION_GRACE_MS\)/);
+  assert.match(nearby, /cancelLeaderTimers\(\)[\s\S]{0,120}cancelScanFilterFallback\(\)/);
 });
 
 test('auxiliar solo queda READY cuando Android confirma que el anuncio local inició', async () => {
