@@ -657,8 +657,8 @@
       permissions_required: 'Autoriza los permisos solicitados por Android para continuar.',
       bluetooth_disabled: 'Bluetooth está apagado. Actívalo para continuar.',
       bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible para verificar la cuadrilla.',
-      advertising_failed: 'No fue posible dejar este teléfono disponible para la cuadrilla. Intenta nuevamente.',
-      discovery_failed: 'No fue posible iniciar la búsqueda de la cuadrilla. Intenta nuevamente.',
+      advertising_failed: 'Este teléfono no puede iniciar la señal Bluetooth del encargado para esta marcación.',
+      discovery_failed: 'No fue posible iniciar la escucha Bluetooth para la marcación. Intenta nuevamente.',
       connection_failed: 'Una conexión cercana falló. La comprobación continuará con los demás teléfonos.',
       connection_request_failed: 'No fue posible conectar con uno de los teléfonos cercanos.',
       connection_accept_failed: 'No fue posible aceptar una conexión cercana.',
@@ -796,7 +796,7 @@
             ? `Listo para ${markInfo(presentationMarkType).noun}.`
             : 'No hay una marcación de cuadrilla disponible en este momento.'
       : credentialPrepared()
-        ? 'Preparando señal local para el encargado…'
+        ? 'Preparando Bluetooth para la marcación…'
         : 'Conéctate una vez para preparar este teléfono.');
     status.dataset.nativePresenceStatus = 'true';
     panel.appendChild(status);
@@ -844,7 +844,7 @@
   async function ensureAuxiliaryReady(forceRestart = false) {
     const context = currentContext();
     if (!context || context.isCrewLeader) return;
-    if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
+    if (document.visibilityState === 'hidden') return;
     if (forceRestart && ['PREPARING', 'READY'].includes(activeMode)) {
       bridgeCall('stopReady');
       activeMode = 'IDLE';
@@ -857,7 +857,7 @@
     const context = currentContext();
     if (!context || context.isCrewLeader || ['PREPARING', 'READY'].includes(activeMode)) return;
     activeMode = 'PREPARING';
-    setStatus('Preparando señal Bluetooth…', 'warning');
+    setStatus('Preparando Bluetooth para la marcación…', 'warning');
     if (!credentialPrepared()) {
       if (!navigator.onLine || !(await provisionCredential())) {
         activeMode = 'IDLE';
@@ -871,7 +871,7 @@
       setStatus(publicNativeError(result?.error), 'warning');
       return;
     }
-    setStatus('Activando señal Bluetooth para el encargado…', 'warning');
+    setStatus('Activando escucha Bluetooth…', 'warning');
   }
 
   async function startLeaderScan(markType, automaticRetry = false) {
@@ -1087,7 +1087,7 @@
     if (type === 'permissions') {
       const context = currentContext();
       if (detail.granted && context && !context.isCrewLeader) {
-        setStatus('Permisos listos. Preparando señal local…', 'warning');
+        setStatus('Permisos listos. Preparando Bluetooth…', 'warning');
         scheduleAuxiliaryRearm();
       } else {
         setStatus(detail.granted
@@ -1099,7 +1099,7 @@
     if (type === 'bluetooth') {
       const context = currentContext();
       if (detail.enabled && context && !context.isCrewLeader) {
-        setStatus('Bluetooth listo. Preparando señal local…', 'warning');
+        setStatus('Bluetooth listo. Preparando escucha local…', 'warning');
         scheduleAuxiliaryRearm();
       } else {
         setStatus(detail.enabled
@@ -1112,7 +1112,7 @@
       const context = currentContext();
       if (!context || context.isCrewLeader) return;
       activeMode = 'READY';
-      setStatus('Señal Bluetooth activa. Listo para que el encargado te detecte.', '');
+      setStatus('Bluetooth listo. Esperando la marcación del encargado.', '');
       showStop();
       return;
     }
