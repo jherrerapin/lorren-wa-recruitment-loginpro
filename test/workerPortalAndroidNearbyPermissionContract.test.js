@@ -16,7 +16,7 @@ function methodBody(source, signature, nextSignature) {
   return source.slice(start, end);
 }
 
-test('Nearby de cuadrilla declara permisos requeridos y desugaring sin encender Wi-Fi desde Lórren', async () => {
+test('Nearby de cuadrilla separa permisos de transporte y geocerca, con desugaring habilitado', async () => {
   const [manifest, mainActivity, gradle] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
     read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
@@ -50,25 +50,41 @@ test('Nearby de cuadrilla declara permisos requeridos y desugaring sin encender 
   );
   assert.match(wifiGroup, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
 
+  const transportPermissions = methodBody(
+    mainActivity,
+    'private List<String> nearbyTransportPermissions()',
+    'private boolean nearbyTransportPermissionsGranted()'
+  );
+  assert.match(transportPermissions, /addNearbyBluetoothPermissionsIfNeeded\(missing\)/);
+  assert.match(transportPermissions, /addNearbyWifiPermissionIfNeeded\(missing\)/);
+  assert.doesNotMatch(transportPermissions, /addPreciseLocationPermissionsIfNeeded|ACCESS_FINE_LOCATION/);
+
+  const transportGranted = methodBody(
+    mainActivity,
+    'private boolean nearbyTransportPermissionsGranted()',
+    'private List<String> attendancePermissions(boolean includeCamera)'
+  );
+  assert.match(transportGranted, /hasNearbyBluetoothPermissions\(\)/);
+  assert.match(transportGranted, /hasNearbyWifiPermission\(\)/);
+  assert.doesNotMatch(transportGranted, /hasPreciseLocationPermission/);
+
+  const ensureNearby = methodBody(
+    mainActivity,
+    'boolean ensureNearbyPermissions()',
+    'String ensureNearbyRadioReady()'
+  );
+  assert.match(ensureNearby, /nearbyTransportPermissions\(\)/);
+  assert.doesNotMatch(ensureNearby, /attendancePermissions|hasPreciseLocationPermission/);
+
   const attendancePermissions = methodBody(
     mainActivity,
     'private List<String> attendancePermissions(boolean includeCamera)',
     'private BluetoothAdapter bluetoothAdapter()'
   );
   assert.match(attendancePermissions, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
-  assert.match(attendancePermissions, /addNearbyBluetoothPermissionsIfNeeded\(missing\)/);
-  assert.match(attendancePermissions, /addNearbyWifiPermissionIfNeeded\(missing\)/);
+  assert.match(attendancePermissions, /missing\.addAll\(nearbyTransportPermissions\(\)\)/);
 
-  const grantedCheck = methodBody(
-    mainActivity,
-    'private boolean nearbyPermissionsGranted()',
-    'void emitPresenceEvent(JSONObject event)'
-  );
-  assert.match(grantedCheck, /hasPreciseLocationPermission\(\)/);
-  assert.match(grantedCheck, /hasNearbyBluetoothPermissions\(\)/);
-  assert.match(grantedCheck, /hasNearbyWifiPermission\(\)/);
   assert.doesNotMatch(mainActivity, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
-
   assert.match(gradle, /play-services-nearby:19\.4\.0/);
   assert.match(gradle, /coreLibraryDesugaringEnabled true/);
   assert.match(gradle, /coreLibraryDesugaring 'com\.android\.tools:desugar_jdk_libs:2\.1\.5'/);
