@@ -16,14 +16,16 @@ function methodBody(source, signature, nextSignature) {
   return source.slice(start, end);
 }
 
-test('BLE de cuadrilla no solicita Wi-Fi y conserva ubicación precisa porque usa proximidad física', async () => {
+test('Nearby de cuadrilla declara permisos requeridos y desugaring sin encender Wi-Fi desde Lórren', async () => {
   const [manifest, mainActivity, gradle] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
     read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
     read('app/build.gradle')
   ]);
 
-  assert.doesNotMatch(manifest, /android\.permission\.(?:ACCESS_WIFI_STATE|CHANGE_WIFI_STATE|NEARBY_WIFI_DEVICES)/);
+  assert.match(manifest, /android\.permission\.ACCESS_WIFI_STATE/);
+  assert.match(manifest, /android\.permission\.CHANGE_WIFI_STATE/);
+  assert.match(manifest, /android\.permission\.NEARBY_WIFI_DEVICES/);
   assert.doesNotMatch(manifest, /BLUETOOTH_SCAN[^>]*neverForLocation/);
   assert.match(manifest, /android\.permission\.ACCESS_COARSE_LOCATION/);
   assert.match(manifest, /android\.permission\.ACCESS_FINE_LOCATION/);
@@ -41,6 +43,13 @@ test('BLE de cuadrilla no solicita Wi-Fi y conserva ubicación precisa porque us
     assert.match(bluetoothGroup, new RegExp(`Manifest\\.permission\\.${permission}`));
   }
 
+  const wifiGroup = methodBody(
+    mainActivity,
+    'private boolean hasNearbyWifiPermission()',
+    'private void addNearbyWifiPermissionIfNeeded'
+  );
+  assert.match(wifiGroup, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
+
   const attendancePermissions = methodBody(
     mainActivity,
     'private List<String> attendancePermissions(boolean includeCamera)',
@@ -48,7 +57,7 @@ test('BLE de cuadrilla no solicita Wi-Fi y conserva ubicación precisa porque us
   );
   assert.match(attendancePermissions, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
   assert.match(attendancePermissions, /addNearbyBluetoothPermissionsIfNeeded\(missing\)/);
-  assert.doesNotMatch(attendancePermissions, /NEARBY_WIFI_DEVICES|requiresNearbyWifiPermission/);
+  assert.match(attendancePermissions, /addNearbyWifiPermissionIfNeeded\(missing\)/);
 
   const grantedCheck = methodBody(
     mainActivity,
@@ -57,7 +66,10 @@ test('BLE de cuadrilla no solicita Wi-Fi y conserva ubicación precisa porque us
   );
   assert.match(grantedCheck, /hasPreciseLocationPermission\(\)/);
   assert.match(grantedCheck, /hasNearbyBluetoothPermissions\(\)/);
-  assert.doesNotMatch(grantedCheck, /NEARBY_WIFI_DEVICES|requiresNearbyWifiPermission/);
+  assert.match(grantedCheck, /hasNearbyWifiPermission\(\)/);
+  assert.doesNotMatch(mainActivity, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
 
-  assert.doesNotMatch(gradle, /play-services-nearby/);
+  assert.match(gradle, /play-services-nearby:19\.4\.0/);
+  assert.match(gradle, /coreLibraryDesugaringEnabled true/);
+  assert.match(gradle, /coreLibraryDesugaring 'com\.android\.tools:desugar_jdk_libs:2\.1\.5'/);
 });
