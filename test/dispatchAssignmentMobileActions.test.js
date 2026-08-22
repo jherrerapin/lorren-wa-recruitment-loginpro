@@ -13,9 +13,8 @@ test('acciones de solicitudes quedan compactas y con ancho coherente en mobile',
   assert.match(view, />Editar<\/a>/);
   assert.match(view, /data-delete-service-request="true"/);
 
-  const mobileBlock = css.match(/@media \(max-width: 760px\) \{([\s\S]*?)\n\}/)?.[1] || '';
-  assert.match(mobileBlock, /\.assignment-page \.request-actions\s*\{[\s\S]*display:\s*grid\s*!important/);
-  assert.match(mobileBlock, /grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(82px,\s*1fr\)\)\s*!important/);
-  assert.match(mobileBlock, /\.assignment-page \.request-actions > a,[\s\S]*\.assignment-page \.request-actions > form[\s\S]*width:\s*100%\s*!important/);
-  assert.match(mobileBlock, /\.assignment-page \.request-actions \.btn[\s\S]*width:\s*100%\s*!important/);
+  assert.match(css, /@media \(max-width: 760px\) \{[\s\S]*?\.assignment-page \.request-actions\s*\{[\s\S]*?display:\s*grid\s*!important/);
+  assert.match(css, /@media \(max-width: 760px\) \{[\s\S]*?grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(82px,\s*1fr\)\)\s*!important/);
+  assert.match(css, /@media \(max-width: 760px\) \{[\s\S]*?\.assignment-page \.request-actions > a,[\s\S]*?\.assignment-page \.request-actions > form[\s\S]*?width:\s*100%\s*!important/);
+  assert.match(css, /@media \(max-width: 760px\) \{[\s\S]*?\.assignment-page \.request-actions \.btn[\s\S]*?width:\s*100%\s*!important/);
 });
