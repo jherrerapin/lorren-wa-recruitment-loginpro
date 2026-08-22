@@ -150,7 +150,7 @@
   .admin-module-navbar a.admin-module-standalone-link {
     flex: 1 1 130px;
     min-width: 0;
-    justify-content: center;
+    justify-content: flex-start;
   }
 
   .admin-session-user-name {
