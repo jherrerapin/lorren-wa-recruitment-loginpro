@@ -150,11 +150,23 @@
   .admin-module-navbar a.admin-module-standalone-link {
     flex: 1 1 130px;
     min-width: 0;
-    justify-content: flex-start;
+    justify-content: center;
   }
 
   .admin-session-user-name {
     white-space: normal;
+  }
+}
+
+@media (max-width: 540px) {
+  .admin-module-navbar .admin-module-menu-trigger {
+    position: relative;
+    justify-content: center;
+  }
+
+  .admin-module-navbar .admin-module-menu-chevron {
+    position: absolute;
+    right: 11px;
   }
 }
 
