@@ -619,6 +619,15 @@ export async function verifyCrewPresenceBundle(prisma, input = {}, options = {})
     phoneExceptionWorkerIds.push(exception.workerId);
   }
 
+  const hasAuxiliaryMembers = members.some((member) => member.workerId !== leaderWorkerId);
+  if (
+    hasAuxiliaryMembers
+    && validatedWorkerIds.length === 1
+    && phoneExceptionWorkerIds.length === 0
+  ) {
+    throw new Error('crew_presence_auxiliary_not_detected');
+  }
+
   const notDetectedCount = members.filter((member) => (
     !validatedSet.has(member.workerId)
     && !phoneExceptionSet.has(member.workerId)
