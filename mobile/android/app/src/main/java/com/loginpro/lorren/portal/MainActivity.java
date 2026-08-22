@@ -259,14 +259,14 @@ public final class MainActivity extends Activity {
     }
 
     boolean ensureNearbyPermissions() {
-        List<String> missing = attendancePermissions(false);
+        List<String> missing = nearbyTransportPermissions();
         if (missing.isEmpty()) return true;
         runOnUiThread(() -> requestRuntimePermissions(missing.toArray(new String[0]), REQUEST_NEARBY));
         return false;
     }
 
     String ensureNearbyRadioReady() {
-        if (!nearbyPermissionsGranted()) {
+        if (!nearbyTransportPermissionsGranted()) {
             ensureNearbyPermissions();
             return "permissions_required";
         }
@@ -323,12 +323,22 @@ public final class MainActivity extends Activity {
         permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES);
     }
 
+    private List<String> nearbyTransportPermissions() {
+        List<String> missing = new ArrayList<>();
+        addNearbyBluetoothPermissionsIfNeeded(missing);
+        addNearbyWifiPermissionIfNeeded(missing);
+        return missing;
+    }
+
+    private boolean nearbyTransportPermissionsGranted() {
+        return hasNearbyBluetoothPermissions() && hasNearbyWifiPermission();
+    }
+
     private List<String> attendancePermissions(boolean includeCamera) {
         List<String> missing = new ArrayList<>();
         if (includeCamera) addIfMissing(missing, Manifest.permission.CAMERA);
         addPreciseLocationPermissionsIfNeeded(missing);
-        addNearbyBluetoothPermissionsIfNeeded(missing);
-        addNearbyWifiPermissionIfNeeded(missing);
+        missing.addAll(nearbyTransportPermissions());
         return missing;
     }
 
@@ -399,11 +409,11 @@ public final class MainActivity extends Activity {
             return;
         }
         if (requestCode == REQUEST_APP_PREPARE) {
-            if (nearbyPermissionsGranted()) ensureNearbyRadioReady();
+            if (nearbyTransportPermissionsGranted()) ensureNearbyRadioReady();
             return;
         }
         if (requestCode == REQUEST_NEARBY) {
-            boolean granted = nearbyPermissionsGranted();
+            boolean granted = nearbyTransportPermissionsGranted();
             emitPresenceEvent(event("permissions", "granted", granted));
             if (granted) ensureNearbyRadioReady();
         }
@@ -422,12 +432,6 @@ public final class MainActivity extends Activity {
         } catch (SecurityException ignored) {
         }
         emitPresenceEvent(event("bluetooth", "enabled", enabled));
-    }
-
-    private boolean nearbyPermissionsGranted() {
-        return hasPreciseLocationPermission()
-            && hasNearbyBluetoothPermissions()
-            && hasNearbyWifiPermission();
     }
 
     void emitPresenceEvent(JSONObject event) {
