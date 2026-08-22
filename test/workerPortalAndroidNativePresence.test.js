@@ -87,13 +87,19 @@ test('Android privado reutiliza el Portal y BLE nativo sin introducir un escrito
   assert.match(presenceManager, /BluetoothGattServer/);
   assert.match(presenceManager, /openGattServer\(appContext, gattServerCallback\)/);
   assert.match(presenceManager, /AdvertiseCallback[\s\S]{0,800}onStartSuccess/);
-  assert.match(presenceManager, /ScanFilter\.Builder\(\)[\s\S]{0,140}setServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
+  assert.match(presenceManager, /readyScanner\.startScan\([\s\S]{0,140}Collections\.emptyList\(\)[\s\S]{0,120}readyScanSettings\(\)[\s\S]{0,120}auxiliaryScanCallback/);
+  assert.match(presenceManager, /ScanRecord record = result\.getScanRecord\(\)/);
+  assert.match(presenceManager, /record\.getServiceUuids\(\)/);
+  assert.match(presenceManager, /serviceUuids\.contains\(SERVICE_PARCEL_UUID\)/);
+  assert.doesNotMatch(presenceManager, /ScanFilter/);
   assert.match(presenceManager, /setScanMode\(ScanSettings\.SCAN_MODE_LOW_LATENCY\)/);
   assert.match(presenceManager, /connectGatt\([\s\S]{0,200}BluetoothDevice\.TRANSPORT_LE/);
   assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,260}startReadyScanner\(true\)/);
-  assert.match(presenceManager, /startReadyScanner\(boolean emitReady\)[\s\S]{0,500}getBluetoothLeScanner\(\)/);
-  assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,2200}getBluetoothLeAdvertiser\(\)/);
-  assert.match(presenceManager, /isMultipleAdvertisementSupported\(\)/);
+  assert.match(presenceManager, /startReadyScanner\(boolean emitReady\)[\s\S]{0,700}getBluetoothLeScanner\(\)/);
+  assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,2600}getBluetoothLeAdvertiser\(\)/);
+  assert.doesNotMatch(presenceManager, /isMultipleAdvertisementSupported\(\)/);
+  assert.match(presenceManager, /advertising_unsupported/);
+  assert.match(presenceManager, /BluetoothStatusCodes\.SUCCESS/);
   assert.match(presenceManager, /"attemptId"/);
   assert.match(presenceManager, /"serviceRequestId"/);
   assert.match(presenceManager, /"challenge"/);
@@ -126,8 +132,11 @@ test('Android privado reutiliza el Portal y BLE nativo sin introducir un escrito
   }
 });
 
-test('auxiliar queda listo por visibilidad y confirmación nativa, sin depender del foco del WebView', async () => {
-  const nativePresence = await read('app/src/main/assets/native-presence.js');
+test('auxiliar queda listo por visibilidad y escucha nativa, sin depender del foco del WebView ni de advertising propio', async () => {
+  const [nativePresence, presenceManager] = await Promise.all([
+    read('app/src/main/assets/native-presence.js'),
+    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
+  ]);
   const memberStatus = nativePresence.match(
     /function memberStatus\(context, member, markType\) \{([\s\S]*?)\n  \}\n\n  function expectedAuxiliaryProofCount/
   );
@@ -151,6 +160,9 @@ test('auxiliar queda listo por visibilidad y confirmación nativa, sin depender 
   assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
   assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,220}activeMode = 'READY'/);
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
+  assert.match(presenceManager, /startReadyScanner\(true\)/);
+  assert.match(presenceManager, /Collections\.emptyList\(\)/);
+  assert.match(presenceManager, /onScanFailed\(int errorCode\)[\s\S]{0,180}failReady\("discovery_failed"\)/);
   assert.match(nativePresence, /window\.addEventListener\('focus', scheduleAuxiliaryRearm\)/);
   assert.match(nativePresence, /visibilityState === 'visible'[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
 });
@@ -168,7 +180,7 @@ test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal
 test('advertisement BLE no publica PII ni usa la dirección Bluetooth como identidad de trabajador', async () => {
   const presenceManager = await read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
-  assert.match(presenceManager, /AdvertiseData\.Builder\(\)[\s\S]{0,180}addServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
+  assert.match(presenceManager, /AdvertiseData\.Builder\(\)[\s\S]{0,180}addServiceUuid\(SERVICE_PARCEL_UUID\)/);
   assert.match(presenceManager, /setIncludeDeviceName\(false\)/);
   assert.match(presenceManager, /setIncludeTxPowerLevel\(false\)/);
   assert.doesNotMatch(presenceManager, /fullName|workerName|documentNumber|phoneNumber/i);
