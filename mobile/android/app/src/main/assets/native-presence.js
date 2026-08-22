@@ -25,6 +25,7 @@
   ]);
   const NATIVE_START_ERRORS = new Set([
     'advertising_failed',
+    'advertising_unsupported',
     'discovery_failed',
     'permissions_required',
     'bluetooth_disabled',
@@ -657,7 +658,8 @@
       permissions_required: 'Autoriza los permisos solicitados por Android para continuar.',
       bluetooth_disabled: 'Bluetooth está apagado. Actívalo para continuar.',
       bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible para verificar la cuadrilla.',
-      advertising_failed: 'Este teléfono no puede iniciar la señal Bluetooth del encargado para esta marcación.',
+      advertising_failed: 'No fue posible iniciar la señal Bluetooth del encargado. Intenta nuevamente.',
+      advertising_unsupported: 'Este teléfono no soporta la función Bluetooth requerida para actuar como encargado de cuadrilla.',
       discovery_failed: 'No fue posible iniciar la escucha Bluetooth para la marcación. Intenta nuevamente.',
       connection_failed: 'Una conexión cercana falló. La comprobación continuará con los demás teléfonos.',
       connection_request_failed: 'No fue posible conectar con uno de los teléfonos cercanos.',
