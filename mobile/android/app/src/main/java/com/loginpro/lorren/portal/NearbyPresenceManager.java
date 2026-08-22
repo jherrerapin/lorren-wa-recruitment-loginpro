@@ -290,7 +290,10 @@ final class NearbyPresenceManager {
                     softwareFilteredScan = true;
                     scanner.startScan(Collections.emptyList(), leaderScanSettings(), scanCallback);
                 } catch (RuntimeException error) {
-                    softwareFilteredScan = false;
+                    cancelLeaderTimers();
+                    stopLeaderScanner();
+                    closeAllLeaderPeers();
+                    role = Role.IDLE;
                     emitError("discovery_failed");
                 }
             }
@@ -368,7 +371,8 @@ final class NearbyPresenceManager {
     private final ScanCallback scanCallback = new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
-            if (!isLorrenAdvertisement(result)) return;
+            if (result == null) return;
+            if (softwareFilteredScan && !isLorrenAdvertisement(result)) return;
             BluetoothDevice device = result.getDevice();
             if (device == null) return;
             connectDiscoveredDevice(device);
