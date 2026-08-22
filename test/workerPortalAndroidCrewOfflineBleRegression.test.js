@@ -24,13 +24,31 @@ test('APK usa la autoridad nativa de cuadrilla y no inicia el Web Bluetooth here
   assert.match(nativePresence, /\[data-crew-bluetooth-status\]/);
 });
 
-test('Nearby prioriza descubrimiento disponible sin cambiar WiFi o Bluetooth por su cuenta', async () => {
+test('auxiliar anuncia señal local y el encargado descubre múltiples auxiliares sin cambiar WiFi o Bluetooth', async () => {
   const nearby = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
-  assert.match(nearby, /DiscoveryOptions\.Builder\(\)[\s\S]{0,180}setLowPower\(false\)/);
-  assert.match(nearby, /AdvertisingOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(false\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
-  assert.match(nearby, /ConnectionOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(false\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
+  assert.match(nearby, /Strategy STRATEGY = Strategy\.P2P_CLUSTER/);
+  assert.match(nearby, /startReady\([\s\S]{0,260}startReadyAdvertising\(normalizedService, 0\)/);
+  assert.match(nearby, /startReadyAdvertising[\s\S]{0,500}client\.startAdvertising/);
+  assert.match(nearby, /startLeaderScan[\s\S]{0,700}startLeaderDiscovery\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
+  assert.match(nearby, /startLeaderDiscovery[\s\S]{0,500}client\.startDiscovery/);
+  assert.match(nearby, /DiscoveryOptions\.Builder\(\)[\s\S]{0,180}setLowPower\(true\)/);
+  assert.match(nearby, /AdvertisingOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(true\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
+  assert.match(nearby, /ConnectionOptions\.Builder\(\)[\s\S]{0,220}setLowPower\(true\)[\s\S]{0,120}setConnectionType\(ConnectionType\.NON_DISRUPTIVE\)/);
+  assert.match(nearby, /private static final String ENDPOINT_NAME = "LORREN"/);
   assert.doesNotMatch(nearby, /WifiManager|setWifiEnabled|ACTION_WIFI_STATE_CHANGED|startLocalOnlyHotspot/);
+});
+
+test('auxiliar solo queda READY cuando Android confirma que el anuncio local inició', async () => {
+  const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
+  const startReady = nativePresence.match(/async function startReady\(\) \{([\s\S]*?)\n  \}\n\n  async function startLeaderScan/);
+
+  assert.ok(startReady, 'falta startReady');
+  assert.match(startReady[1], /activeMode = 'PREPARING'/);
+  assert.match(startReady[1], /bridgeCall\('setReady'/);
+  assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
+  assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,220}activeMode = 'READY'/);
+  assert.match(nativePresence, /NATIVE_START_ERRORS[\s\S]{0,260}activeMode = 'IDLE'/);
 });
 
 test('cada marcación CREW genera una comprobación local nueva ligada al tipo de marca', async () => {
@@ -39,7 +57,7 @@ test('cada marcación CREW genera una comprobación local nueva ligada al tipo d
   assert.match(nativePresence, /const MARK_TYPES = new Set\(\['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE'\]\)/);
   assert.match(nativePresence, /async function startLeaderScan\(markType, automaticRetry = false\)/);
   assert.match(nativePresence, /challenge: `lorren-mark-v1:\$\{normalizedMark\}:\$\{randomToken\(32\)\}`/);
-  assert.match(nativePresence, /proofBundle\.markType = attempt\.markType/);
+  assert.match(nativePresence, /bundle\.markType = attempt\.markType/);
   assert.match(nativePresence, /expectedAuxiliaryProofCount\(context, normalizedMark\)/);
   assert.match(nativePresence, /memberHasPersistedMark\(member, normalizedMark\)/);
   assert.match(nativePresence, /Iniciar almuerzo de la cuadrilla/);
@@ -67,25 +85,41 @@ test('sin teléfono no se presenta como diagnóstico antes de completar una entr
   assert.doesNotMatch(nativePresence, /native-presence-member-action', 'Sin teléfono'/);
 });
 
-test('auxiliar reinicia realmente discovery cuando vuelve a primer plano', async () => {
+test('auxiliar rearma una sola señal local al volver a primer plano', async () => {
   const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
 
-  assert.match(nativePresence, /async function ensureAuxiliaryReady\(forceRestart = false\)/);
-  assert.match(nativePresence, /forceRestart && activeMode === 'READY'[\s\S]{0,120}bridgeCall\('stopReady'\)[\s\S]{0,80}activeMode = 'IDLE'/);
-  assert.match(nativePresence, /window\.addEventListener\('focus',[\s\S]{0,100}ensureAuxiliaryReady\(true\)/);
-  assert.match(nativePresence, /visibilitychange[\s\S]{0,160}visibilityState === 'visible'[\s\S]{0,100}ensureAuxiliaryReady\(true\)/);
+  assert.match(nativePresence, /function scheduleAuxiliaryRearm\(\)/);
+  assert.match(nativePresence, /clearAuxiliaryRearm\(\)[\s\S]{0,220}ensureAuxiliaryReady\(true\)/);
+  assert.match(nativePresence, /forceRestart && \['PREPARING', 'READY'\]\.includes\(activeMode\)[\s\S]{0,120}bridgeCall\('stopReady'\)[\s\S]{0,80}activeMode = 'IDLE'/);
+  assert.match(nativePresence, /window\.addEventListener\('focus', scheduleAuxiliaryRearm\)/);
+  assert.match(nativePresence, /visibilitychange[\s\S]{0,120}visibilityState === 'visible'[\s\S]{0,80}scheduleAuxiliaryRearm\(\)/);
 });
 
-test('scan conserva un único reintento automático y vuelve a comprobar solamente la misma marca', async () => {
-  const [nearby, nativePresence] = await Promise.all([
+test('scan con cero auxiliares reintenta antes de persistir y después falla cerrado', async () => {
+  const [nearby, nativePresence, verifier] = await Promise.all([
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
-    read('mobile/android/app/src/main/assets/native-presence.js')
+    read('mobile/android/app/src/main/assets/native-presence.js'),
+    read('src/modules/dispatch-attendance/application/crewPresenceCredential.js')
   ]);
 
+  assert.match(nativePresence, /const DEFAULT_SCAN_MS = 6_000/);
   assert.match(nearby, /input\.optInt\("expectedProofCount", 0\)/);
   assert.match(nearby, /expectedProofCount > 0 && proofsByKey\.size\(\) >= expectedProofCount[\s\S]{0,120}completeLeaderScan\(attemptId\)/);
   assert.match(nativePresence, /let autoRetryRemaining = 1;/);
-  assert.match(nativePresence, /autoRetryRemaining -= 1;/);
+  const zeroProofBranch = nativePresence.match(/if \(noAuxiliaryDetected\) \{([\s\S]*?)\n    \}\n\n    queueCompletedAttempt\(proofBundle\)/);
+  assert.ok(zeroProofBranch, 'la rama cero-proof debe ocurrir antes de encolar');
+  assert.match(zeroProofBranch[1], /startLeaderScan\(completionMarkType, true\)/);
+  assert.match(zeroProofBranch[1], /no se guardó/);
+  assert.doesNotMatch(zeroProofBranch[1], /queueCompletedAttempt/);
+  assert.match(verifier, /hasAuxiliaryMembers[\s\S]{0,180}validatedWorkerIds\.length === 1[\s\S]{0,120}crew_presence_auxiliary_not_detected/);
+});
+
+test('scan parcial conserva subconjunto detectado y un único reintento de la misma marca', async () => {
+  const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
+
+  assert.match(nativePresence, /retryNotDetectedCount = Math\.max\(0, completion\.expectedProofCount - queuedProofCount\)/);
+  assert.match(nativePresence, /if \(incomplete && autoRetryRemaining > 0\)/);
+  assert.match(nativePresence, /autoRetryRemaining -= 1/);
   assert.match(nativePresence, /startLeaderScan\(completionMarkType, true\)/);
   assert.match(nativePresence, /retryMarkType = incomplete \? completionMarkType : ''/);
 });
@@ -122,7 +156,7 @@ test('sin Internet una marcación CREW se encola y solo sincroniza cuando vuelve
   const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
 
   const startLeaderScan = nativePresence.match(/async function startLeaderScan\(markType, automaticRetry = false\) \{([\s\S]*?)\n  \}\n\n  function stopNativeModes/);
-  const queueCompletedAttempt = nativePresence.match(/async function queueCompletedAttempt\(\) \{([\s\S]*?)\n  \}\n\n  function finishCompletedScan/);
+  const queueCompletedAttempt = nativePresence.match(/async function queueCompletedAttempt\(proofBundle\) \{([\s\S]*?)\n  \}\n\n  function finishCompletedScan/);
 
   assert.ok(startLeaderScan, 'falta startLeaderScan');
   assert.ok(queueCompletedAttempt, 'falta queueCompletedAttempt');
@@ -154,6 +188,17 @@ test('panel de cuadrilla diferencia la próxima detección del historial confirm
   assert.match(nativePresence, /function appendMemberHistory\(copy, member\)/);
   assert.match(nativePresence, /\$\{markInfo\(markType\)\.title\} · \$\{time\}/);
   assert.match(nativePresence, /Por detectar · \$\{markInfo\(markType\)\.noun\}/);
+});
+
+test('interfaz retira textos internos solicitados sin desactivar anti-spoof', async () => {
+  const [nativePresence, biometricMobile] = await Promise.all([
+    read('mobile/android/app/src/main/assets/native-presence.js'),
+    read('src/public/worker-biometric-mobile.js')
+  ]);
+
+  assert.doesNotMatch(nativePresence, /Cada marcación comprueba localmente a los auxiliares presentes/);
+  assert.doesNotMatch(biometricMobile, /Validando que sea un rostro real/);
+  assert.match(biometricMobile, /scores\.realScore < MIN_REAL_SCORE/);
 });
 
 test('contexto de cuadrilla proyecta las cuatro horas persistidas por integrante', async () => {

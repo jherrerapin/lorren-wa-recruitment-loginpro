@@ -504,7 +504,6 @@
       consecutiveFront += 1;
       const scores = biometricScores(detected.face);
       if (enforcePresenceScores && scores.realScore < MIN_REAL_SCORE) {
-        onStatus?.('Validando que sea un rostro real…');
         await sleep(DETECTION_INTERVAL_MS);
         continue;
       }
