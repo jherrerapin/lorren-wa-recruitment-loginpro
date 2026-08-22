@@ -582,6 +582,28 @@ textarea:focus {
   .assignment-page .worker-list {
     max-height: 330px !important;
   }
+
+  .assignment-page .request-actions {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(82px, 1fr)) !important;
+    gap: 6px !important;
+    width: 100% !important;
+    align-items: stretch !important;
+  }
+
+  .assignment-page .request-actions > a,
+  .assignment-page .request-actions > form {
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+  }
+
+  .assignment-page .request-actions .btn {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 7px 8px !important;
+    font-size: 11px !important;
+  }
 }
 
 /* Prevent duplicated delete controls in assignment request cards. */
