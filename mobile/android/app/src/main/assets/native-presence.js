@@ -10,8 +10,9 @@
   const CACHE_KEY = 'lorren-native-presence-context-v1';
   const CREDENTIAL_META_KEY = 'lorren-native-presence-credential-meta-v1';
   const PANEL_ID = 'lorren-native-presence-panel';
-  const DEFAULT_SCAN_MS = 12_000;
+  const DEFAULT_SCAN_MS = 6_000;
   const AUTO_RETRY_DELAY_MS = 1_500;
+  const AUXILIARY_REARM_DELAY_MS = 250;
   const CREDENTIAL_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
   const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
   const MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
@@ -21,6 +22,16 @@
     'connection_accept_failed',
     'payload_transfer_failed',
     'payload_send_failed'
+  ]);
+  const NATIVE_START_ERRORS = new Set([
+    'advertising_failed',
+    'discovery_failed',
+    'permissions_required',
+    'bluetooth_disabled',
+    'bluetooth_unavailable',
+    'nearby_radio_error',
+    'nearby_in_use',
+    'nearby_state_conflict'
   ]);
 
   let contexts = [];
@@ -35,6 +46,7 @@
   let scanTransientFailureCount = 0;
   let autoRetryRemaining = 1;
   let autoRetryTimer = null;
+  let auxiliaryRearmTimer = null;
   let provisioningPromise = null;
   let pendingPhoneExceptionWorkerId = '';
   let pendingCompletedScan = null;
@@ -645,10 +657,10 @@
       permissions_required: 'Autoriza los permisos solicitados por Android para continuar.',
       bluetooth_disabled: 'Bluetooth está apagado. Actívalo para continuar.',
       bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible para verificar la cuadrilla.',
-      advertising_failed: 'No fue posible iniciar la comprobación. Intenta nuevamente.',
-      discovery_failed: 'No fue posible dejar este teléfono listo para asistencia. Intenta nuevamente.',
+      advertising_failed: 'No fue posible dejar este teléfono disponible para la cuadrilla. Intenta nuevamente.',
+      discovery_failed: 'No fue posible iniciar la búsqueda de la cuadrilla. Intenta nuevamente.',
       connection_failed: 'Una conexión cercana falló. La comprobación continuará con los demás teléfonos.',
-      connection_request_failed: 'No fue posible conectar este teléfono con el encargado.',
+      connection_request_failed: 'No fue posible conectar con uno de los teléfonos cercanos.',
       connection_accept_failed: 'No fue posible aceptar una conexión cercana.',
       payload_invalid: 'Se recibió una respuesta local inválida y fue ignorada.',
       payload_transfer_failed: 'Una respuesta local se perdió. Puedes volver a buscar a quienes falten.',
@@ -693,6 +705,19 @@
     autoRetryTimer = null;
   }
 
+  function clearAuxiliaryRearm() {
+    if (auxiliaryRearmTimer !== null) window.clearTimeout(auxiliaryRearmTimer);
+    auxiliaryRearmTimer = null;
+  }
+
+  function scheduleAuxiliaryRearm() {
+    clearAuxiliaryRearm();
+    auxiliaryRearmTimer = window.setTimeout(() => {
+      auxiliaryRearmTimer = null;
+      ensureAuxiliaryReady(true).catch(() => {});
+    }, AUXILIARY_REARM_DELAY_MS);
+  }
+
   function resetLeaderAttemptState() {
     pendingPhoneExceptionWorkerId = '';
     retryNotDetectedCount = 0;
@@ -712,10 +737,7 @@
     panel = element('section');
     panel.id = PANEL_ID;
     panel.setAttribute('aria-label', 'Marcación de cuadrilla');
-    panel.append(
-      element('h3', '', 'Marcación de cuadrilla'),
-      element('p', '', 'Cada marcación comprueba localmente a los auxiliares presentes y registra únicamente a quienes fueron detectados con el encargado.')
-    );
+    panel.appendChild(element('h3', '', 'Marcación de cuadrilla'));
 
     if (!selectedServiceRequestId || !contexts.some((item) => item.serviceRequestId === selectedServiceRequestId)) {
       selectedServiceRequestId = contexts[0].serviceRequestId;
@@ -738,7 +760,7 @@
       selectedServiceRequestId = select.value;
       resetLeaderAttemptState();
       renderPanel();
-      ensureAuxiliaryReady(true).catch(() => {});
+      scheduleAuxiliaryRearm();
     });
     field.append(label, select);
     row.appendChild(field);
@@ -771,10 +793,10 @@
         : offlineQueued
           ? 'Hay marcaciones guardadas sin conexión y pendientes de sincronizar. Puedes continuar localmente; se confirmarán cuando vuelva Internet.'
           : markActions.length
-            ? `Listo para ${markInfo(presentationMarkType).noun}. La app comprobará la cuadrilla antes de guardar la marca.`
+            ? `Listo para ${markInfo(presentationMarkType).noun}.`
             : 'No hay una marcación de cuadrilla disponible en este momento.'
       : credentialPrepared()
-        ? 'Listo para asistencia. Mantén la app abierta durante la comprobación del encargado.'
+        ? 'Preparando señal local para el encargado…'
         : 'Conéctate una vez para preparar este teléfono.');
     status.dataset.nativePresenceStatus = 'true';
     panel.appendChild(status);
@@ -821,13 +843,13 @@
 
   async function ensureAuxiliaryReady(forceRestart = false) {
     const context = currentContext();
-    if (!context || context.isCrewLeader || activeMode === 'PREPARING') return;
+    if (!context || context.isCrewLeader) return;
     if (typeof document.hasFocus === 'function' && !document.hasFocus()) return;
-    if (forceRestart && activeMode === 'READY') {
+    if (forceRestart && ['PREPARING', 'READY'].includes(activeMode)) {
       bridgeCall('stopReady');
       activeMode = 'IDLE';
     }
-    if (activeMode === 'READY') return;
+    if (['PREPARING', 'READY'].includes(activeMode)) return;
     await startReady();
   }
 
@@ -835,7 +857,7 @@
     const context = currentContext();
     if (!context || context.isCrewLeader || ['PREPARING', 'READY'].includes(activeMode)) return;
     activeMode = 'PREPARING';
-    setStatus('Preparando asistencia…', 'warning');
+    setStatus('Preparando señal Bluetooth…', 'warning');
     if (!credentialPrepared()) {
       if (!navigator.onLine || !(await provisionCredential())) {
         activeMode = 'IDLE';
@@ -849,8 +871,7 @@
       setStatus(publicNativeError(result?.error), 'warning');
       return;
     }
-    activeMode = 'READY';
-    setStatus('Listo para asistencia. Mantén la app abierta durante la comprobación del encargado.', '');
+    setStatus('Activando señal Bluetooth para el encargado…', 'warning');
   }
 
   async function startLeaderScan(markType, automaticRetry = false) {
@@ -901,13 +922,14 @@
     setStatus(
       automaticRetry
         ? `Reintentando automáticamente la ${markInfo(normalizedMark).noun} para quienes faltan…`
-        : `Comprobando la cuadrilla para ${markInfo(normalizedMark).noun}…`,
+        : `Buscando señales de la cuadrilla para ${markInfo(normalizedMark).noun}…`,
       'warning'
     );
   }
 
   function stopNativeModes() {
     clearAutoRetry();
+    clearAuxiliaryRearm();
     bridgeCall('stopReady');
     bridgeCall('stopCrewScan');
     activeMode = 'IDLE';
@@ -939,52 +961,95 @@
     };
   }
 
-  async function queueCompletedAttempt() {
-    const attempt = activeAttempt;
-    if (!attempt) throw new Error('crew_attempt_missing');
+  function readProofBundle(attempt) {
     const proofBundle = bridgeCall('getProofBundle');
     if (
-      !proofBundle
+      !attempt
+      || !proofBundle
       || proofBundle.attemptId !== attempt.idempotencyKey
       || proofBundle.serviceRequestId !== attempt.serviceRequestId
       || !Array.isArray(proofBundle.proofs)
     ) {
       throw new Error('crew_proof_bundle_invalid');
     }
-    proofBundle.markType = attempt.markType;
-    proofBundle.phoneExceptions = attempt.markType === 'ARRIVAL'
+    return proofBundle;
+  }
+
+  async function queueCompletedAttempt(proofBundle) {
+    const attempt = activeAttempt;
+    if (!attempt) throw new Error('crew_attempt_missing');
+    const bundle = proofBundle || readProofBundle(attempt);
+    bundle.markType = attempt.markType;
+    bundle.phoneExceptions = attempt.markType === 'ARRIVAL'
       ? [...phoneExceptionSet(attempt.serviceRequestId)].map((workerId) => ({
           workerId,
           reason: PHONE_EXCEPTION_REASON
         }))
       : [];
-    const nativeLocation = nativeLocationFromBundle(proofBundle);
+    const nativeLocation = nativeLocationFromBundle(bundle);
     const offline = window.LorrenWorkerPortalOffline;
     if (typeof offline?.queueCrewPresence !== 'function') throw new Error('offline_queue_unavailable');
-    const queued = await offline.queueCrewPresence({ ...attempt, ...nativeLocation, proofBundle });
+    const queued = await offline.queueCrewPresence({ ...attempt, ...nativeLocation, proofBundle: bundle });
     rememberQueuedMark(attempt.serviceRequestId, attempt.markType);
     if (navigator.onLine && typeof offline.syncNow === 'function') offline.syncNow().catch(() => {});
-    return { queued, proofCount: proofBundle.proofs.length, markType: attempt.markType };
+    return { queued, proofCount: bundle.proofs.length, markType: attempt.markType };
   }
 
   function finishCompletedScan(completion) {
     if (!completion || !activeAttempt) return;
     const completionMarkType = normalizeMarkType(completion.markType || activeAttempt.markType) || 'ARRIVAL';
-    queueCompletedAttempt()
-      .then(({ proofCount }) => {
+    let proofBundle;
+    try {
+      proofBundle = readProofBundle(activeAttempt);
+    } catch (error) {
+      pendingCompletedScan = null;
+      activeAttempt = null;
+      setStatus(publicNativeError(error?.message), 'error');
+      return;
+    }
+    const proofCount = proofBundle.proofs.length;
+    const noAuxiliaryDetected = completion.expectedProofCount > 0 && proofCount === 0;
+    if (noAuxiliaryDetected) {
+      const pendingCount = completion.expectedProofCount;
+      activeAttempt = null;
+      pendingCompletedScan = null;
+      retryNotDetectedCount = pendingCount;
+      retryMarkType = completionMarkType;
+      hasCompletedLeaderScan = true;
+      renderPanel();
+      if (autoRetryRemaining > 0) {
+        autoRetryRemaining -= 1;
+        setStatus(
+          `No se detectó ningún auxiliar para la ${markInfo(completionMarkType).noun}. Reintentando automáticamente una vez…`,
+          'warning'
+        );
+        autoRetryTimer = window.setTimeout(() => {
+          autoRetryTimer = null;
+          startLeaderScan(completionMarkType, true);
+        }, AUTO_RETRY_DELAY_MS);
+        return;
+      }
+      setStatus(
+        `No se detectó ningún auxiliar. La ${markInfo(completionMarkType).noun} no se guardó; vuelve a intentarlo cuando sus teléfonos estén disponibles.`,
+        'error'
+      );
+      markRetryAvailable(completionMarkType);
+      return;
+    }
+
+    queueCompletedAttempt(proofBundle)
+      .then(({ proofCount: queuedProofCount }) => {
         activeAttempt = null;
         pendingCompletedScan = null;
-        retryNotDetectedCount = Math.max(0, completion.expectedProofCount - proofCount);
+        retryNotDetectedCount = Math.max(0, completion.expectedProofCount - queuedProofCount);
         const incomplete = retryNotDetectedCount > 0;
         hasCompletedLeaderScan = incomplete;
         retryMarkType = incomplete ? completionMarkType : '';
         renderPanel();
-        if ((completion.transientFailures > 0 || incomplete) && autoRetryRemaining > 0) {
+        if (incomplete && autoRetryRemaining > 0) {
           autoRetryRemaining -= 1;
           setStatus(
-            incomplete
-              ? `Faltan respuestas para la ${markInfo(completionMarkType).noun}. Lórren reintentará automáticamente una vez.`
-              : 'Marcación guardada. Hubo un problema de conexión local; Lórren reintentará automáticamente.',
+            `Faltan respuestas para la ${markInfo(completionMarkType).noun}. Lórren reintentará automáticamente una vez.`,
             'warning'
           );
           autoRetryTimer = window.setTimeout(() => {
@@ -1022,8 +1087,8 @@
     if (type === 'permissions') {
       const context = currentContext();
       if (detail.granted && context && !context.isCrewLeader) {
-        setStatus('Permisos listos. Preparando asistencia…', 'warning');
-        ensureAuxiliaryReady(true).catch(() => {});
+        setStatus('Permisos listos. Preparando señal local…', 'warning');
+        scheduleAuxiliaryRearm();
       } else {
         setStatus(detail.granted
           ? 'Permisos listos. Pulsa nuevamente para continuar.'
@@ -1034,8 +1099,8 @@
     if (type === 'bluetooth') {
       const context = currentContext();
       if (detail.enabled && context && !context.isCrewLeader) {
-        setStatus('Bluetooth listo. Preparando asistencia…', 'warning');
-        ensureAuxiliaryReady(true).catch(() => {});
+        setStatus('Bluetooth listo. Preparando señal local…', 'warning');
+        scheduleAuxiliaryRearm();
       } else {
         setStatus(detail.enabled
           ? 'Bluetooth listo. Pulsa nuevamente para continuar.'
@@ -1044,15 +1109,17 @@
       return;
     }
     if (type === 'ready') {
+      const context = currentContext();
+      if (!context || context.isCrewLeader) return;
       activeMode = 'READY';
-      setStatus('Listo para asistencia. Mantén la app abierta durante la comprobación del encargado.', '');
+      setStatus('Señal Bluetooth activa. Listo para que el encargado te detecte.', '');
       showStop();
       return;
     }
     if (type === 'scan_started') {
       activeMode = 'LEADER';
       const markType = normalizeMarkType(activeAttempt?.markType) || 'ARRIVAL';
-      setStatus(`Comprobando la cuadrilla para ${markInfo(markType).noun}…`, 'warning');
+      setStatus(`Buscando señales de la cuadrilla para ${markInfo(markType).noun}…`, 'warning');
       showStop();
       return;
     }
@@ -1100,14 +1167,19 @@
       return;
     }
     if (type === 'stopped') {
-      activeMode = 'IDLE';
-      pendingCompletedScan = null;
+      if (activeMode !== 'PREPARING') activeMode = 'IDLE';
+      if (activeMode === 'IDLE') pendingCompletedScan = null;
       return;
     }
     if (type === 'error') {
       const code = String(detail.code || 'native_error');
       if (activeMode === 'LEADER' && TRANSIENT_SCAN_ERRORS.has(code)) scanTransientFailureCount += 1;
-      if (pendingCompletedScan && ['native_location_unavailable', 'native_location_proof_failed'].includes(code)) {
+      if (NATIVE_START_ERRORS.has(code)) {
+        activeMode = 'IDLE';
+        activeAttempt = null;
+        pendingCompletedScan = null;
+        renderPanel();
+      } else if (pendingCompletedScan && ['native_location_unavailable', 'native_location_proof_failed'].includes(code)) {
         pendingCompletedScan = null;
       }
       setStatus(publicNativeError(code), TRANSIENT_SCAN_ERRORS.has(code) ? 'warning' : 'error');
@@ -1175,14 +1247,12 @@
     await provisionCredential();
     await hydrateLocalQueuedMarks();
     renderPanel();
-    await ensureAuxiliaryReady(true);
+    scheduleAuxiliaryRearm();
     window.LorrenWorkerPortalOffline?.syncNow?.().catch(() => {});
   });
-  window.addEventListener('focus', () => {
-    ensureAuxiliaryReady(true).catch(() => {});
-  });
+  window.addEventListener('focus', scheduleAuxiliaryRearm);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') ensureAuxiliaryReady(true).catch(() => {});
+    if (document.visibilityState === 'visible') scheduleAuxiliaryRearm();
   });
   window.addEventListener('beforeunload', stopNativeModes, { once: true });
 
