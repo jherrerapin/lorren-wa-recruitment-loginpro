@@ -90,6 +90,10 @@ test('Android privado reutiliza el Portal y BLE nativo sin introducir un escrito
   assert.match(presenceManager, /ScanFilter\.Builder\(\)[\s\S]{0,140}setServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
   assert.match(presenceManager, /setScanMode\(ScanSettings\.SCAN_MODE_LOW_LATENCY\)/);
   assert.match(presenceManager, /connectGatt\([\s\S]{0,200}BluetoothDevice\.TRANSPORT_LE/);
+  assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,260}startReadyScanner\(true\)/);
+  assert.match(presenceManager, /startReadyScanner\(boolean emitReady\)[\s\S]{0,500}getBluetoothLeScanner\(\)/);
+  assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,2200}getBluetoothLeAdvertiser\(\)/);
+  assert.match(presenceManager, /isMultipleAdvertisementSupported\(\)/);
   assert.match(presenceManager, /"attemptId"/);
   assert.match(presenceManager, /"serviceRequestId"/);
   assert.match(presenceManager, /"challenge"/);
@@ -122,25 +126,31 @@ test('Android privado reutiliza el Portal y BLE nativo sin introducir un escrito
   }
 });
 
-test('auxiliar queda listo solo después de confirmación nativa y el encargado no aparece pendiente de sí mismo', async () => {
+test('auxiliar queda listo por visibilidad y confirmación nativa, sin depender del foco del WebView', async () => {
   const nativePresence = await read('app/src/main/assets/native-presence.js');
   const memberStatus = nativePresence.match(
     /function memberStatus\(context, member, markType\) \{([\s\S]*?)\n  \}\n\n  function expectedAuxiliaryProofCount/
+  );
+  const ensureReady = nativePresence.match(
+    /async function ensureAuxiliaryReady\(forceRestart = false\) \{([\s\S]*?)\n  \}\n\n  async function startReady/
   );
   const startReady = nativePresence.match(
     /async function startReady\(\) \{([\s\S]*?)\n  \}\n\n  async function startLeaderScan/
   );
 
   assert.ok(memberStatus, 'no se encontró la autoridad memberStatus');
+  assert.ok(ensureReady, 'no se encontró ensureAuxiliaryReady');
   assert.ok(startReady, 'no se encontró startReady');
   assert.match(memberStatus[1], /if \(member\.isLeader\) return 'LEADER_DEVICE';/);
   assert.match(nativePresence, /status === 'LEADER_DEVICE'[\s\S]{0,120}label: 'Este teléfono'/);
-  assert.match(nativePresence, /async function ensureAuxiliaryReady\(forceRestart = false\)/);
-  assert.match(nativePresence, /forceRestart && \['PREPARING', 'READY'\]\.includes\(activeMode\)[\s\S]{0,120}bridgeCall\('stopReady'\)/);
+  assert.match(ensureReady[1], /document\.visibilityState === 'hidden'/);
+  assert.doesNotMatch(ensureReady[1], /document\.hasFocus/);
+  assert.match(ensureReady[1], /forceRestart && \['PREPARING', 'READY'\]\.includes\(activeMode\)[\s\S]{0,120}bridgeCall\('stopReady'\)/);
   assert.match(startReady[1], /activeMode = 'PREPARING'/);
   assert.match(startReady[1], /bridgeCall\('setReady'/);
   assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
   assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,220}activeMode = 'READY'/);
+  assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
   assert.match(nativePresence, /window\.addEventListener\('focus', scheduleAuxiliaryRearm\)/);
   assert.match(nativePresence, /visibilityState === 'visible'[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
 });
