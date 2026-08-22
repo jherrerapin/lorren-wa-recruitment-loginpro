@@ -45,10 +45,10 @@ final class NearbyPresenceManager {
 
     private static final String SERVICE_ID = "com.loginpro.lorren.portal.crew.presence.v1";
     private static final String ENDPOINT_NAME = "LORREN";
-    private static final Strategy STRATEGY = Strategy.P2P_STAR;
-    private static final long MIN_SCAN_MS = 5_000L;
+    private static final Strategy STRATEGY = Strategy.P2P_CLUSTER;
+    private static final long MIN_SCAN_MS = 4_000L;
     private static final long MAX_SCAN_MS = 30_000L;
-    private static final long CONNECTION_GRACE_MS = 1_200L;
+    private static final long CONNECTION_GRACE_MS = 1_000L;
     private static final long NEARBY_RESTART_DELAY_MS = 350L;
     private static final int MAX_START_RETRIES = 1;
 
@@ -82,53 +82,54 @@ final class NearbyPresenceManager {
         stopAllInternal(false);
         role = Role.READY;
         readyServiceRequestId = normalizedService;
-        startReadyDiscovery(normalizedService, 0);
+        startReadyAdvertising(normalizedService, 0);
     }
 
-    private void startReadyDiscovery(String normalizedService, int retryCount) {
-        DiscoveryOptions options = new DiscoveryOptions.Builder()
+    private void startReadyAdvertising(String normalizedService, int retryCount) {
+        AdvertisingOptions options = new AdvertisingOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false)
+            .setLowPower(true)
+            .setConnectionType(ConnectionType.NON_DISRUPTIVE)
             .build();
         try {
-            client.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
+            client.startAdvertising(ENDPOINT_NAME, SERVICE_ID, connectionLifecycleCallback, options)
                 .addOnSuccessListener(unused -> {
                     synchronized (NearbyPresenceManager.this) {
                         if (role != Role.READY || !readyServiceRequestId.equals(normalizedService)) {
-                            client.stopDiscovery();
+                            client.stopAdvertising();
                             return;
                         }
                     }
                     emit("ready", event -> event.put("serviceRequestId", normalizedService));
                 })
-                .addOnFailureListener(error -> handleDiscoveryStartFailure(normalizedService, retryCount, error));
+                .addOnFailureListener(error -> handleReadyAdvertisingFailure(normalizedService, retryCount, error));
         } catch (RuntimeException error) {
-            handleDiscoveryStartFailure(normalizedService, retryCount, error);
+            handleReadyAdvertisingFailure(normalizedService, retryCount, error);
         }
     }
 
-    private void handleDiscoveryStartFailure(String normalizedService, int retryCount, Exception error) {
+    private void handleReadyAdvertisingFailure(String normalizedService, int retryCount, Exception error) {
         if (retryCount < MAX_START_RETRIES && isRecoverableStartFailure(error)) {
             resetNearbyClientForRetry();
             handler.postDelayed(() -> {
                 synchronized (NearbyPresenceManager.this) {
                     if (role != Role.READY || !readyServiceRequestId.equals(normalizedService)) return;
                 }
-                startReadyDiscovery(normalizedService, retryCount + 1);
+                startReadyAdvertising(normalizedService, retryCount + 1);
             }, NEARBY_RESTART_DELAY_MS);
             return;
         }
         synchronized (this) {
             if (role == Role.READY && readyServiceRequestId.equals(normalizedService)) role = Role.IDLE;
         }
-        emitError(nearbyStartErrorCode(error, "discovery_failed"));
+        emitError(nearbyStartErrorCode(error, "advertising_failed"));
     }
 
     synchronized void startLeaderScan(JSONObject input) {
         String nextAttemptId = requiredToken(input.optString("attemptId"), "attemptId");
         String serviceRequestId = requiredToken(input.optString("serviceRequestId"), "serviceRequestId");
         String nextChallenge = requiredToken(input.optString("challenge"), "challenge");
-        long timeoutMs = Math.max(MIN_SCAN_MS, Math.min(MAX_SCAN_MS, input.optLong("timeoutMs", 12_000L)));
+        long timeoutMs = Math.max(MIN_SCAN_MS, Math.min(MAX_SCAN_MS, input.optLong("timeoutMs", 6_000L)));
         int nextExpectedProofCount = Math.max(0, input.optInt("expectedProofCount", 0));
 
         stopAllInternal(false);
@@ -140,26 +141,25 @@ final class NearbyPresenceManager {
         expectedProofCount = nextExpectedProofCount;
         proofsByKey.clear();
         requestedEndpoints.clear();
-        startLeaderAdvertising(nextAttemptId, serviceRequestId, timeoutMs, 0);
+        startLeaderDiscovery(nextAttemptId, serviceRequestId, timeoutMs, 0);
     }
 
-    private void startLeaderAdvertising(
+    private void startLeaderDiscovery(
         String nextAttemptId,
         String serviceRequestId,
         long timeoutMs,
         int retryCount
     ) {
-        AdvertisingOptions options = new AdvertisingOptions.Builder()
+        DiscoveryOptions options = new DiscoveryOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false)
-            .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+            .setLowPower(true)
             .build();
         try {
-            client.startAdvertising(ENDPOINT_NAME, SERVICE_ID, connectionLifecycleCallback, options)
+            client.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
                 .addOnSuccessListener(unused -> {
                     synchronized (NearbyPresenceManager.this) {
                         if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) {
-                            client.stopAdvertising();
+                            client.stopDiscovery();
                             return;
                         }
                     }
@@ -175,7 +175,7 @@ final class NearbyPresenceManager {
                     }
                     scheduleLeaderScanTimeout(nextAttemptId, timeoutMs);
                 })
-                .addOnFailureListener(error -> handleAdvertisingStartFailure(
+                .addOnFailureListener(error -> handleLeaderDiscoveryFailure(
                     nextAttemptId,
                     serviceRequestId,
                     timeoutMs,
@@ -183,7 +183,7 @@ final class NearbyPresenceManager {
                     error
                 ));
         } catch (RuntimeException error) {
-            handleAdvertisingStartFailure(
+            handleLeaderDiscoveryFailure(
                 nextAttemptId,
                 serviceRequestId,
                 timeoutMs,
@@ -193,7 +193,7 @@ final class NearbyPresenceManager {
         }
     }
 
-    private void handleAdvertisingStartFailure(
+    private void handleLeaderDiscoveryFailure(
         String nextAttemptId,
         String serviceRequestId,
         long timeoutMs,
@@ -206,7 +206,7 @@ final class NearbyPresenceManager {
                 synchronized (NearbyPresenceManager.this) {
                     if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) return;
                 }
-                startLeaderAdvertising(nextAttemptId, serviceRequestId, timeoutMs, retryCount + 1);
+                startLeaderDiscovery(nextAttemptId, serviceRequestId, timeoutMs, retryCount + 1);
             }, NEARBY_RESTART_DELAY_MS);
             return;
         }
@@ -214,7 +214,7 @@ final class NearbyPresenceManager {
             if (role == Role.LEADER && attemptId.equals(nextAttemptId)) role = Role.IDLE;
             cancelLeaderTimers();
         }
-        emitError(nearbyStartErrorCode(error, "advertising_failed"));
+        emitError(nearbyStartErrorCode(error, "discovery_failed"));
     }
 
     private synchronized void scheduleLeaderScanTimeout(String nextAttemptId, long timeoutMs) {
@@ -223,7 +223,7 @@ final class NearbyPresenceManager {
         scanTimeout = () -> {
             synchronized (NearbyPresenceManager.this) {
                 if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) return;
-                client.stopAdvertising();
+                client.stopDiscovery();
                 scanCompleteTimeout = () -> completeLeaderScan(nextAttemptId);
                 handler.postDelayed(scanCompleteTimeout, CONNECTION_GRACE_MS);
             }
@@ -264,11 +264,11 @@ final class NearbyPresenceManager {
         @Override
         public void onEndpointFound(String endpointId, DiscoveredEndpointInfo info) {
             synchronized (NearbyPresenceManager.this) {
-                if (role != Role.READY || !SERVICE_ID.equals(info.getServiceId())) return;
+                if (role != Role.LEADER || !SERVICE_ID.equals(info.getServiceId())) return;
                 if (!requestedEndpoints.add(endpointId)) return;
-                emit("leader_found", event -> event.put("candidateCount", requestedEndpoints.size()));
+                emit("endpoint_found", event -> event.put("pendingCount", requestedEndpoints.size()));
                 ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
-                    .setLowPower(false)
+                    .setLowPower(true)
                     .setConnectionType(ConnectionType.NON_DISRUPTIVE)
                     .build();
                 client.requestConnection(ENDPOINT_NAME, endpointId, connectionLifecycleCallback, connectionOptions)
@@ -283,9 +283,8 @@ final class NearbyPresenceManager {
 
         @Override
         public void onEndpointLost(String endpointId) {
-            synchronized (NearbyPresenceManager.this) {
-                if (role == Role.READY) requestedEndpoints.remove(endpointId);
-            }
+            // Un anuncio puede desaparecer mientras la conexión ya está negociándose.
+            // El resultado de conexión o el timeout del intento deciden el estado final.
         }
     };
 
@@ -297,12 +296,9 @@ final class NearbyPresenceManager {
                     client.rejectConnection(endpointId);
                     return;
                 }
-                if (role == Role.READY && !requestedEndpoints.contains(endpointId)) {
+                if (role == Role.LEADER && !requestedEndpoints.contains(endpointId)) {
                     client.rejectConnection(endpointId);
                     return;
-                }
-                if (role == Role.LEADER && requestedEndpoints.add(endpointId)) {
-                    emit("endpoint_found", event -> event.put("pendingCount", requestedEndpoints.size()));
                 }
                 client.acceptConnection(endpointId, payloadCallback)
                     .addOnFailureListener(error -> emitError("connection_accept_failed"));
@@ -314,7 +310,7 @@ final class NearbyPresenceManager {
             synchronized (NearbyPresenceManager.this) {
                 Status status = resolution.getStatus();
                 if (!status.isSuccess()) {
-                    requestedEndpoints.remove(endpointId);
+                    if (role == Role.LEADER) requestedEndpoints.remove(endpointId);
                     emitError("connection_failed");
                     return;
                 }
@@ -325,7 +321,7 @@ final class NearbyPresenceManager {
         @Override
         public void onDisconnected(String endpointId) {
             synchronized (NearbyPresenceManager.this) {
-                requestedEndpoints.remove(endpointId);
+                if (role == Role.LEADER) requestedEndpoints.remove(endpointId);
             }
         }
     };
@@ -472,7 +468,7 @@ final class NearbyPresenceManager {
     private synchronized void completeLeaderScan(String completedAttemptId) {
         if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
         cancelLeaderTimers();
-        client.stopAdvertising();
+        client.stopDiscovery();
         emit("scan_complete", event -> {
             event.put("attemptId", completedAttemptId);
             event.put("verifiedCount", proofsByKey.size());
