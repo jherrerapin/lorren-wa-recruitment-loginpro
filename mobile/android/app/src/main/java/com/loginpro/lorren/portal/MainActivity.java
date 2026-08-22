@@ -313,18 +313,11 @@ public final class MainActivity extends Activity {
         permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE);
     }
 
-    private boolean requiresNearbyWifiPermission() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU;
-    }
-
     private List<String> attendancePermissions(boolean includeCamera) {
         List<String> missing = new ArrayList<>();
         if (includeCamera) addIfMissing(missing, Manifest.permission.CAMERA);
         addPreciseLocationPermissionsIfNeeded(missing);
         addNearbyBluetoothPermissionsIfNeeded(missing);
-        if (requiresNearbyWifiPermission()) {
-            addIfMissing(missing, Manifest.permission.NEARBY_WIFI_DEVICES);
-        }
         return missing;
     }
 
@@ -421,10 +414,7 @@ public final class MainActivity extends Activity {
     }
 
     private boolean nearbyPermissionsGranted() {
-        if (!hasPreciseLocationPermission()) return false;
-        if (!hasNearbyBluetoothPermissions()) return false;
-        return !requiresNearbyWifiPermission()
-            || hasPermission(Manifest.permission.NEARBY_WIFI_DEVICES);
+        return hasPreciseLocationPermission() && hasNearbyBluetoothPermissions();
     }
 
     void emitPresenceEvent(JSONObject event) {

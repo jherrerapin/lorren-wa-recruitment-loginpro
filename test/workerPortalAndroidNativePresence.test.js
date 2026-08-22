@@ -8,14 +8,14 @@ function read(relativePath) {
   return readFile(new URL(relativePath, ROOT), 'utf8');
 }
 
-test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de asistencia', async () => {
+test('Android privado reutiliza el Portal y BLE nativo sin introducir un escritor de asistencia', async () => {
   const [
     rootBuild,
     appBuild,
     manifest,
     mainActivity,
     bridge,
-    nearby,
+    presenceManager,
     keyStore,
     nativePresence,
     ignore
@@ -32,24 +32,25 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   ]);
 
   assert.match(rootBuild, /com\.android\.application[^\n]*version '9\.3\.0'/);
-  assert.match(appBuild, /play-services-nearby:19\.3\.0/);
   assert.match(appBuild, /compileSdk 37/);
   assert.match(appBuild, /targetSdk 36/);
   assert.match(appBuild, /minSdk 26/);
   assert.match(appBuild, /lorrenPortalBaseUrl/);
   assert.match(appBuild, /https:\/\/example\.invalid/);
-  assert.doesNotMatch(appBuild, /loginpro\.(com|co)|railway\.app|railway\.com/i);
+  assert.doesNotMatch(appBuild, /play-services-nearby|loginpro\.(com|co)|railway\.app|railway\.com/i);
 
   for (const permission of [
     'ACCESS_COARSE_LOCATION',
     'ACCESS_FINE_LOCATION',
     'BLUETOOTH_ADVERTISE',
     'BLUETOOTH_CONNECT',
-    'BLUETOOTH_SCAN',
-    'NEARBY_WIFI_DEVICES'
+    'BLUETOOTH_SCAN'
   ]) {
     assert.match(manifest, new RegExp(`android\\.permission\\.${permission}`));
   }
+  assert.doesNotMatch(manifest, /android\.permission\.(?:ACCESS_WIFI_STATE|CHANGE_WIFI_STATE|NEARBY_WIFI_DEVICES)/);
+  assert.doesNotMatch(manifest, /BLUETOOTH_SCAN[^>]*neverForLocation/);
+  assert.match(manifest, /android\.hardware\.bluetooth_le/);
   assert.match(manifest, /android:usesCleartextTraffic="false"/);
   assert.match(manifest, /android:scheme="lorren"/);
   assert.match(manifest, /android:host="portal"/);
@@ -58,62 +59,22 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(mainActivity, /PresenceBridge\.JS_NAME/);
   assert.match(mainActivity, /\/operaciones\/portal\/sesion-transferencia\/continuar/);
   assert.match(mainActivity, /Uri\.encode\(token\.trim\(\)\)/);
-  assert.match(mainActivity, /path\.equals\(PORTAL_PATH\) \|\| path\.startsWith\(PORTAL_PATH \+ "\/"\)/);
-  assert.match(mainActivity, /isPortalOriginUri/);
   assert.match(mainActivity, /setMixedContentMode\(WebSettings\.MIXED_CONTENT_NEVER_ALLOW\)/);
   assert.match(mainActivity, /setAllowFileAccess\(false\)/);
   assert.match(mainActivity, /setAcceptThirdPartyCookies\(webView, false\)/);
   assert.match(mainActivity, /NATIVE_USER_AGENT_TOKEN = "LorrenNative\/1"/);
-  assert.match(mainActivity, /setUserAgentString\(userAgent \+ " " \+ NATIVE_USER_AGENT_TOKEN\)/);
   assert.doesNotMatch(mainActivity, /Log\.[vdiew]|System\.out|System\.err/);
 
-  assert.match(mainActivity, /REQUEST_APP_PREPARE/);
-  assert.match(mainActivity, /prepareAttendanceDeviceOnce\(\)/);
   assert.match(mainActivity, /attendancePermissions\(true\)/);
-  assert.match(mainActivity, /addIfMissing\(missing, Manifest\.permission\.CAMERA\)/);
   assert.match(mainActivity, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
-  assert.match(mainActivity, /private String\[\] locationRuntimePermissions\(\)/);
-  assert.match(
-    mainActivity,
-    /locationRuntimePermissions\(\)[\s\S]{0,260}ACCESS_COARSE_LOCATION[\s\S]{0,120}ACCESS_FINE_LOCATION/
-  );
-  const preciseLocationCheck = mainActivity.match(
-    /private boolean hasPreciseLocationPermission\(\) \{([\s\S]*?)\n    \}/
-  );
-  assert.ok(preciseLocationCheck, 'falta la autoridad de ubicación precisa');
-  assert.match(preciseLocationCheck[1], /ACCESS_FINE_LOCATION/);
-  assert.doesNotMatch(preciseLocationCheck[1], /ACCESS_COARSE_LOCATION/);
-  assert.match(
-    mainActivity,
-    /addPreciseLocationPermissionsIfNeeded\(List<String> permissions\)[\s\S]{0,380}hasPreciseLocationPermission\(\)[\s\S]{0,180}permissions\.add\(Manifest\.permission\.ACCESS_COARSE_LOCATION\)[\s\S]{0,180}permissions\.add\(Manifest\.permission\.ACCESS_FINE_LOCATION\)/
-  );
-  assert.match(
-    mainActivity,
-    /onGeolocationPermissionsShowPrompt[\s\S]{0,700}requestRuntimePermissions\(locationRuntimePermissions\(\), REQUEST_GEOLOCATION\)/
-  );
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
-  assert.match(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
-  assert.match(mainActivity, /BluetoothManager/);
-  assert.match(mainActivity, /adapter\.isEnabled\(\)/);
+  assert.doesNotMatch(mainActivity, /NEARBY_WIFI_DEVICES|requiresNearbyWifiPermission/);
   assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_ENABLE/);
-  assert.match(mainActivity, /REQUEST_ENABLE_BLUETOOTH/);
   assert.match(mainActivity, /"bluetooth_unavailable"/);
   assert.match(mainActivity, /"bluetooth_disabled"/);
-  assert.match(
-    mainActivity,
-    /nearbyPermissionsGranted\(\)[\s\S]{0,320}hasPreciseLocationPermission\(\)/
-  );
-
-  const stopLifecycle = mainActivity.match(/protected void onStop\(\) \{([\s\S]*?)\n    \}/);
-  assert.ok(stopLifecycle, 'falta detectar una salida real de la app');
-  assert.match(stopLifecycle[1], /stoppedForBackground = true/);
-  assert.match(mainActivity, /private void refreshPortalSilently\(\)/);
-  assert.match(mainActivity, /navigator\.onLine/);
-  assert.match(mainActivity, /#mark-dialog\[open\],#enrollment-dialog\[open\]/);
-  assert.match(mainActivity, /window\.location\.reload\(\)/);
-  assert.match(mainActivity, /stoppedForSystemPrompt/);
+  assert.match(mainActivity, /nearbyPermissionsGranted\(\)[\s\S]{0,220}hasPreciseLocationPermission\(\)[\s\S]{0,120}hasNearbyBluetoothPermissions\(\)/);
 
   assert.match(keyStore, /AndroidKeyStore/);
   assert.match(keyStore, /secp256r1/);
@@ -121,68 +82,38 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   assert.match(keyStore, /setUserAuthenticationRequired\(false\)/);
   assert.doesNotMatch(keyStore, /encodeToString\([^\n]*getPrivate|privateKey\.getEncoded|getPrivate\(\)\.getEncoded/);
 
-  assert.match(nearby, /Strategy\.P2P_STAR/);
-  assert.match(nearby, /ENDPOINT_NAME = "LORREN"/);
-  assert.match(nearby, /synchronized void startReady[\s\S]{0,1200}startReadyDiscovery/);
-  assert.match(nearby, /private void startReadyDiscovery[\s\S]{0,1800}startDiscovery/);
-  assert.match(nearby, /synchronized void startLeaderScan[\s\S]{0,2200}startLeaderAdvertising/);
-  assert.match(nearby, /private void startLeaderAdvertising[\s\S]{0,2200}startAdvertising/);
-  assert.match(nearby, /role != Role\.READY/);
-  assert.match(nearby, /role == Role\.LEADER && requestedEndpoints\.add/);
-  assert.match(nearby, /"attemptId"/);
-  assert.match(nearby, /"serviceRequestId"/);
-  assert.match(nearby, /"challenge"/);
-  assert.match(nearby, /"signature"/);
-  assert.match(nearby, /DeviceKeyStore\.verifyBase64/);
-  assert.match(nearby, /proofsByKey/);
-  assert.doesNotMatch(nearby, /fullName|phone|document|documentNumber|workerName/i);
-
-  assert.match(nearby, /com\.google\.android\.gms\.common\.api\.ApiException/);
-  assert.match(nearby, /ConnectionsStatusCodes/);
-  assert.match(nearby, /MAX_START_RETRIES = 1/);
-  assert.match(nearby, /NEARBY_RESTART_DELAY_MS = 350L/);
-  for (const status of [
-    'STATUS_ALREADY_ADVERTISING',
-    'STATUS_ALREADY_DISCOVERING',
-    'STATUS_ALREADY_HAVE_ACTIVE_STRATEGY',
-    'STATUS_OUT_OF_ORDER_API_CALL'
-  ]) {
-    assert.match(nearby, new RegExp(`ConnectionsStatusCodes\\.${status}`));
-  }
-  assert.match(nearby, /STATUS_RADIO_ERROR[\s\S]{0,120}"nearby_radio_error"/);
-  assert.match(nearby, /MISSING_PERMISSION_BLUETOOTH_ADVERTISE/);
-  assert.match(nearby, /MISSING_PERMISSION_BLUETOOTH_SCAN/);
-  assert.match(nearby, /MISSING_PERMISSION_NEARBY_WIFI_DEVICES/);
-  assert.match(nearby, /isRecoverableStartFailure\(error\)[\s\S]{0,260}resetNearbyClientForRetry\(\)[\s\S]{0,420}retryCount \+ 1/);
-  assert.match(nearby, /resetNearbyClientForRetry\(\)[\s\S]{0,500}stopAdvertising\(\)[\s\S]{0,220}stopDiscovery\(\)[\s\S]{0,220}stopAllEndpoints\(\)/);
-  assert.match(nearby, /emit\("scan_started"[\s\S]{0,500}scheduleLeaderScanTimeout\(nextAttemptId, timeoutMs\)/);
-  const leaderStart = nearby.match(/synchronized void startLeaderScan\(JSONObject input\) \{([\s\S]*?)\n    \}\n\n    private void startLeaderAdvertising/);
-  assert.ok(leaderStart, 'falta autoridad startLeaderScan');
-  assert.doesNotMatch(leaderStart[1], /handler\.postDelayed\(scanTimeout/);
+  assert.match(presenceManager, /BluetoothLeAdvertiser/);
+  assert.match(presenceManager, /BluetoothLeScanner/);
+  assert.match(presenceManager, /BluetoothGattServer/);
+  assert.match(presenceManager, /openGattServer\(appContext, gattServerCallback\)/);
+  assert.match(presenceManager, /AdvertiseCallback[\s\S]{0,800}onStartSuccess/);
+  assert.match(presenceManager, /ScanFilter\.Builder\(\)[\s\S]{0,140}setServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
+  assert.match(presenceManager, /setScanMode\(ScanSettings\.SCAN_MODE_LOW_LATENCY\)/);
+  assert.match(presenceManager, /connectGatt\([\s\S]{0,200}BluetoothDevice\.TRANSPORT_LE/);
+  assert.match(presenceManager, /"attemptId"/);
+  assert.match(presenceManager, /"serviceRequestId"/);
+  assert.match(presenceManager, /"challenge"/);
+  assert.match(presenceManager, /"signature"/);
+  assert.match(presenceManager, /DeviceKeyStore\.signBase64/);
+  assert.match(presenceManager, /DeviceKeyStore\.verifyBase64/);
+  assert.match(presenceManager, /proofsByKey/);
+  assert.doesNotMatch(presenceManager, /com\.google\.android\.gms\.nearby|ConnectionsClient|Strategy\.P2P_/);
+  assert.doesNotMatch(presenceManager, /WifiManager|setWifiEnabled|NEARBY_WIFI_DEVICES/);
 
   assert.match(bridge, /JS_NAME = "LorrenAndroidPresence"/);
   assert.match(bridge, /"attendanceWriter", false/);
   assert.match(bridge, /setReady\(/);
   assert.match(bridge, /startCrewScan\(/);
   assert.match(bridge, /getProofBundle\(/);
-  assert.match(bridge, /setReady[\s\S]{0,500}ensureNearbyRadioReady\(\)[\s\S]{0,500}manager\.startReady/);
-  assert.match(bridge, /startCrewScan[\s\S]{0,500}ensureNearbyRadioReady\(\)[\s\S]{0,800}manager\.startLeaderScan/);
+  assert.match(bridge, /manager\.startReady/);
+  assert.match(bridge, /manager\.startLeaderScan/);
 
-  assert.match(nativePresence, /Entrada de cuadrilla/);
-  assert.match(nativePresence, /Detecta a los auxiliares presentes y registra su entrada con la del encargado\./);
+  assert.match(nativePresence, /Marcación de cuadrilla/);
   assert.match(nativePresence, /Marcar entrada de la cuadrilla/);
-  assert.doesNotMatch(nativePresence, /Quedar listo para asistencia/);
-  assert.match(nativePresence, /Reintentar no detectados/);
-  assert.match(nativePresence, /cuadrillas\/proximidad\/contexto/);
-  assert.match(nativePresence, /attendanceWriter !== false/);
-  assert.match(nativePresence, /bluetooth_disabled: 'Bluetooth está apagado\. Actívalo para continuar\.'/);
-  assert.match(nativePresence, /bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible/);
-  assert.match(nativePresence, /type === 'bluetooth'/);
-  assert.match(nativePresence, /Bluetooth listo\. Pulsa nuevamente para continuar\./);
-  assert.doesNotMatch(nativePresence, /Los teléfonos Lórren se comprueban entre sí/);
-  assert.doesNotMatch(nativePresence, /La app no escribe asistencia por sí sola/);
-  assert.doesNotMatch(nativePresence, /Pulsa una vez\. Lórren comprobará los teléfonos cercanos/);
-  assert.doesNotMatch(nativePresence, /Prueba local: todavía no registra asistencia/);
+  assert.match(nativePresence, /Iniciar almuerzo de la cuadrilla/);
+  assert.match(nativePresence, /Finalizar almuerzo de la cuadrilla/);
+  assert.match(nativePresence, /Registrar salida de la cuadrilla/);
+  assert.match(nativePresence, /queueCrewPresence/);
   assert.doesNotMatch(nativePresence, /\/llegada|\/salida|inicio-almuerzo|fin-almuerzo|registerDispatchArrival|registerCrewArrivalForLeader/);
   assert.doesNotMatch(nativePresence, /alert\s*\(|confirm\s*\(|prompt\s*\(/);
 
@@ -191,37 +122,27 @@ test('Android privado reutiliza el Portal y Nearby sin introducir un escritor de
   }
 });
 
-test('auxiliares quedan listos automáticamente y el encargado no aparece pendiente de sí mismo', async () => {
+test('auxiliar queda listo solo después de confirmación nativa y el encargado no aparece pendiente de sí mismo', async () => {
   const nativePresence = await read('app/src/main/assets/native-presence.js');
-  const renderPanel = nativePresence.match(/function renderPanel\(\) \{([\s\S]*?)\n  \}\n\n  function insertPanel/);
-  const memberStatus = nativePresence.match(/function memberStatus\(context, member\) \{([\s\S]*?)\n  \}\n\n  function memberStatusPresentation/);
+  const memberStatus = nativePresence.match(
+    /function memberStatus\(context, member, markType\) \{([\s\S]*?)\n  \}\n\n  function expectedAuxiliaryProofCount/
+  );
+  const startReady = nativePresence.match(
+    /async function startReady\(\) \{([\s\S]*?)\n  \}\n\n  async function startLeaderScan/
+  );
 
-  assert.ok(renderPanel, 'no se encontró la autoridad renderPanel');
   assert.ok(memberStatus, 'no se encontró la autoridad memberStatus');
-  assert.doesNotMatch(renderPanel[1], /nativePresenceReady|Quedar listo para asistencia/);
-  assert.match(renderPanel[1], /if \(context\?\.isCrewLeader\)[\s\S]{0,500}Marcar entrada de la cuadrilla/);
-  assert.match(
-    nativePresence,
-    /async function ensureAuxiliaryReady\(\)[\s\S]{0,500}!context \|\| context\.isCrewLeader[\s\S]{0,500}await startReady\(\)/
-  );
-  assert.match(
-    nativePresence,
-    /async function initialize\(\)[\s\S]{0,700}renderPanel\(\);\s*await ensureAuxiliaryReady\(\);/
-  );
-  assert.match(
-    nativePresence,
-    /type === 'permissions'[\s\S]{0,500}!context\.isCrewLeader[\s\S]{0,300}ensureAuxiliaryReady\(\)/
-  );
-  assert.match(
-    nativePresence,
-    /type === 'bluetooth'[\s\S]{0,500}!context\.isCrewLeader[\s\S]{0,300}ensureAuxiliaryReady\(\)/
-  );
-  assert.match(
-    nativePresence,
-    /window\.addEventListener\('focus',[\s\S]{0,180}ensureAuxiliaryReady\(\)/
-  );
+  assert.ok(startReady, 'no se encontró startReady');
   assert.match(memberStatus[1], /if \(member\.isLeader\) return 'LEADER_DEVICE';/);
   assert.match(nativePresence, /status === 'LEADER_DEVICE'[\s\S]{0,120}label: 'Este teléfono'/);
+  assert.match(nativePresence, /async function ensureAuxiliaryReady\(forceRestart = false\)/);
+  assert.match(nativePresence, /forceRestart && \['PREPARING', 'READY'\]\.includes\(activeMode\)[\s\S]{0,120}bridgeCall\('stopReady'\)/);
+  assert.match(startReady[1], /activeMode = 'PREPARING'/);
+  assert.match(startReady[1], /bridgeCall\('setReady'/);
+  assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
+  assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,220}activeMode = 'READY'/);
+  assert.match(nativePresence, /window\.addEventListener\('focus', scheduleAuxiliaryRearm\)/);
+  assert.match(nativePresence, /visibilityState === 'visible'[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
 });
 
 test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal individual', async () => {
@@ -229,42 +150,36 @@ test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal
   const renderPanel = nativePresence.match(/function renderPanel\(\) \{([\s\S]*?)\n  \}\n\n  function insertPanel/);
 
   assert.ok(renderPanel, 'no se encontró la autoridad renderPanel');
-  assert.match(
-    renderPanel[1],
-    /document\.getElementById\(PANEL_ID\)[\s\S]{0,160}if \(!contexts\.length\) return;[\s\S]{0,80}installStyles\(\);/
-  );
-  assert.doesNotMatch(nativePresence, /No hay una cuadrilla disponible para este teléfono en este momento\./);
-  assert.match(nativePresence, /Entrada de cuadrilla/);
-  assert.match(nativePresence, /if \(!selectedServiceRequestId \|\| !contexts\.some/);
+  assert.match(renderPanel[1], /if \(!contexts\.length\) return;/);
+  assert.match(nativePresence, /function hideIndividualCrewMarks\(\)/);
+  assert.match(nativePresence, /if \(!context\?\.isCrewLeader\) return;/);
 });
 
-test('la prueba Android no contiene PII ni una identidad Bluetooth humana', async () => {
-  const [nearby, nativePresence, readme] = await Promise.all([
-    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
-    read('app/src/main/assets/native-presence.js'),
-    read('README.md')
-  ]);
-  const combined = `${nearby}\n${nativePresence}`;
+test('advertisement BLE no publica PII ni usa la dirección Bluetooth como identidad de trabajador', async () => {
+  const presenceManager = await read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
-  assert.doesNotMatch(combined, /\b3\d{9}\b/);
-  assert.doesNotMatch(combined, /\b\d{7,10}\b.*(?:cedula|c[eé]dula|documento)/i);
-  assert.doesNotMatch(combined, /@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
-  assert.match(nearby, /private static final String ENDPOINT_NAME = "LORREN"/);
-  assert.match(readme, /no anuncia nombre, documento o teléfono/i);
+  assert.match(presenceManager, /AdvertiseData\.Builder\(\)[\s\S]{0,180}addServiceUuid\(new ParcelUuid\(SERVICE_UUID\)\)/);
+  assert.match(presenceManager, /setIncludeDeviceName\(false\)/);
+  assert.match(presenceManager, /setIncludeTxPowerLevel\(false\)/);
+  assert.doesNotMatch(presenceManager, /fullName|workerName|documentNumber|phoneNumber/i);
+  assert.match(presenceManager, /keyId\(publicKey\)/);
+  assert.match(presenceManager, /proofsByKey\.put\(keyId, stored\)/);
+  assert.doesNotMatch(presenceManager, /proofsByKey\.put\([^\n]*(?:address|getAddress)/);
 });
 
-test('la fase Android no reemplaza las autoridades server-side de asistencia', async () => {
-  const [nativePresence, bridge, nearby, readme] = await Promise.all([
+test('BLE solo transporta la prueba; servidor y cola siguen siendo autoridades de asistencia', async () => {
+  const [nativePresence, bridge, presenceManager] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java'),
-    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
-    read('README.md')
+    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
   ]);
-  const nativeCode = `${nativePresence}\n${bridge}\n${nearby}`;
+  const nativeCode = `${bridge}\n${presenceManager}`;
 
   assert.doesNotMatch(nativeCode, /prisma|DispatchAttendanceMark|DispatchAttendanceSession/);
-  assert.doesNotMatch(nativeCode, /fetch\([^\n]*(?:llegada|salida|almuerzo)/i);
-  assert.match(readme, /Esta fase no registra asistencia/i);
-  assert.match(readme, /no crea un segundo backend de asistencia/i);
-  assert.match(readme, /credencial firmada por el servidor/i);
+  assert.match(bridge, /"attendanceWriter", false/);
+  assert.match(presenceManager, /"lorren-presence-v1\\n"/);
+  assert.match(presenceManager, /DeviceKeyStore\.signBase64\(canonical\)/);
+  assert.match(presenceManager, /DeviceKeyStore\.verifyBase64\(publicKey, canonical, signature\)/);
+  assert.match(nativePresence, /offline\.queueCrewPresence/);
+  assert.doesNotMatch(nativePresence, /fetch\([^\n]*(?:llegada|salida|almuerzo)/i);
 });
