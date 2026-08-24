@@ -220,15 +220,20 @@ test('ubicación Android conserva la mejor muestra y el backend mantiene precisi
   assert.match(geofence, /maxLocationAccuracyMeters/);
 });
 
-test('sin Internet una marcación CREW se encola y solo sincroniza cuando vuelve conectividad', async () => {
+test('sin Internet encargado y auxiliares pueden completar la prueba local; la marca se encola y sincroniza después', async () => {
   const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
 
+  const startReady = nativePresence.match(/async function startReady\(\) \{([\s\S]*?)\n  \}\n\n  async function startLeaderScan/);
   const startLeaderScan = nativePresence.match(/async function startLeaderScan\(markType, automaticRetry = false\) \{([\s\S]*?)\n  \}\n\n  function stopNativeModes/);
   const queueCompletedAttempt = nativePresence.match(/async function queueCompletedAttempt\(proofBundle\) \{([\s\S]*?)\n  \}\n\n  function finishCompletedScan/);
 
-  assert.ok(startLeaderScan, 'falta startLeaderScan');
+  assert.ok(startReady, 'falta startReady del auxiliar');
+  assert.ok(startLeaderScan, 'falta startLeaderScan del encargado');
   assert.ok(queueCompletedAttempt, 'falta queueCompletedAttempt');
-  assert.doesNotMatch(startLeaderScan[1], /navigator\.onLine/);
+  assert.match(startReady[1], /navigator\.onLine && !credentialPrepared\(\)[\s\S]{0,80}provisionCredential\(\)/);
+  assert.doesNotMatch(startReady[1], /if \(!navigator\.onLine\)[\s\S]{0,120}return/);
+  assert.match(startLeaderScan[1], /navigator\.onLine && !credentialPrepared\(\)[\s\S]{0,80}provisionCredential\(\)/);
+  assert.doesNotMatch(startLeaderScan[1], /if \(!navigator\.onLine\)[\s\S]{0,120}return/);
   assert.match(queueCompletedAttempt[1], /offline\.queueCrewPresence/);
   assert.match(queueCompletedAttempt[1], /if \(navigator\.onLine && typeof offline\.syncNow === 'function'\) offline\.syncNow\(\)/);
   assert.match(nativePresence, /if \(!navigator\.onLine\) return readCachedContexts\(\);/);
@@ -361,7 +366,7 @@ test('tarjeta de cada trabajador muestra las cuatro marcaciones persistidas con 
   assert.match(view, /Marcaciones registradas/);
   assert.match(view, /data-assignment-history-mark="ARRIVAL"[\s\S]{0,180}assignment\.arrivalReportedLabel/);
   assert.match(view, /data-assignment-history-mark="BREAK_START"[\s\S]{0,180}assignment\.breakStartLabel/);
-  assert.match(view, /data-assignment-history-mark="BREAK_END"[\s\S]{0,180}assignment\.breakEndLabel/);
+  assert.match(view, /data-assignment-history-mark="BREAK_END"[\s\S]{0,180}assignment\.breakEndReportedLabel/);
   assert.match(view, /data-assignment-history-mark="DEPARTURE"[\s\S]{0,180}assignment\.departureReportedLabel/);
   assert.match(view, /Sin registrar/);
 });
