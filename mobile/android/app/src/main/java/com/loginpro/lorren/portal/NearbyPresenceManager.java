@@ -97,7 +97,7 @@ final class NearbyPresenceManager {
         AdvertisingOptions options = new AdvertisingOptions.Builder()
             .setStrategy(STRATEGY)
             .setLowPower(false)
-            .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+            .setConnectionType(ConnectionType.BALANCED)
             .build();
         try {
             client.startAdvertising(
@@ -316,7 +316,7 @@ final class NearbyPresenceManager {
                 emit("endpoint_found", event -> event.put("pendingCount", pendingCount));
                 ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
                     .setLowPower(false)
-                    .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+                    .setConnectionType(ConnectionType.BALANCED)
                     .build();
                 client.requestConnection(
                     ENDPOINT_NAME,

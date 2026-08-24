@@ -40,7 +40,8 @@ test('Nearby Connections es el único transporte local de cuadrilla y puede usar
   assert.match(nearby, /startLeaderDiscovery/);
   assert.match(nearby, /client\.startDiscovery/);
   assert.match(nearby, /setLowPower\(false\)/);
-  assert.match(nearby, /ConnectionType\.NON_DISRUPTIVE/);
+  assert.equal((nearby.match(/ConnectionType\.BALANCED/g) || []).length, 2);
+  assert.doesNotMatch(nearby, /ConnectionType\.(?:NON_DISRUPTIVE|DISRUPTIVE)/);
   assert.match(nearby, /Payload\.fromBytes/);
   assert.match(nearby, /DeviceKeyStore\.signBase64\(canonical\)/);
   assert.match(nearby, /DeviceKeyStore\.verifyBase64\(publicKey, canonical, signature\)/);
@@ -72,7 +73,7 @@ test('replay físico: auxiliar anuncia por Nearby y encargado descubre sin exigi
   assert.match(readyAdvertising[1], /client\.startAdvertising/);
   assert.match(readyAdvertising[1], /setStrategy\(STRATEGY\)/);
   assert.match(readyAdvertising[1], /setLowPower\(false\)/);
-  assert.match(readyAdvertising[1], /ConnectionType\.NON_DISRUPTIVE/);
+  assert.match(readyAdvertising[1], /ConnectionType\.BALANCED/);
   assert.match(readyAdvertising[1], /emit\("ready"/);
 
   const leaderPath = nearby.match(
