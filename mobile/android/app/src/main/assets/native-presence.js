@@ -757,6 +757,19 @@
         actions.appendChild(action);
       });
       row.appendChild(actions);
+    } else {
+      const actions = element('div', 'native-presence-actions');
+      const prepare = element('button', 'native-presence-btn secondary', 'Preparar para marcación');
+      prepare.type = 'button';
+      prepare.dataset.nativePresenceAuxReady = 'true';
+      prepare.addEventListener('click', () => {
+        setStatus('Preparando Bluetooth para la marcación…', 'warning');
+        ensureAuxiliaryReady(true).catch(() => {
+          setStatus('No fue posible preparar Bluetooth. Intenta nuevamente.', 'error');
+        });
+      });
+      actions.appendChild(prepare);
+      row.appendChild(actions);
     }
     panel.appendChild(row);
 
@@ -771,7 +784,9 @@
             ? `Listo para ${markInfo(presentationMarkType).noun}.`
             : 'No hay una marcación de cuadrilla disponible en este momento.'
       : credentialPrepared()
-        ? 'Preparando Bluetooth para la marcación…'
+        ? activeMode === 'READY'
+          ? 'Bluetooth listo. Esperando la marcación del encargado.'
+          : 'Preparando Bluetooth para la marcación…'
         : 'Conéctate una vez para preparar este teléfono.');
     status.dataset.nativePresenceStatus = 'true';
     panel.appendChild(status);
