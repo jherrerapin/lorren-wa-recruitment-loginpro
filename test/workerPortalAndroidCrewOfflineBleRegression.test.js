@@ -91,6 +91,13 @@ test('replay físico: auxiliar descubre al encargado Nearby y el enlace no usa B
   assert.doesNotMatch(leaderAdvertising[1], /ConnectionType\.BALANCED/);
   assert.match(leaderAdvertising[1], /emitLeaderScanStarted/);
 
+  const leaderTimeout = nearby.match(
+    /private synchronized void scheduleLeaderScanTimeout\(String nextAttemptId, long timeoutMs\) \{([\s\S]*?)\n    \}\n\n    synchronized void stopReady/
+  );
+  assert.ok(leaderTimeout, 'falta cierre temporizado del advertising del encargado');
+  assert.match(leaderTimeout[1], /client\.stopAdvertising\(\)[\s\S]{0,220}handler\.postDelayed\(scanCompleteTimeout, CONNECTION_GRACE_MS\)/);
+  assert.doesNotMatch(leaderTimeout[1], /requestedEndpoints\.isEmpty\(\)[\s\S]{0,180}completeLeaderScan\(nextAttemptId\)/);
+
   assert.match(nearby, /onEndpointFound[\s\S]{0,1400}role != Role\.READY[\s\S]{0,1400}requestConnection/);
   assert.match(nearby, /onConnectionInitiated[\s\S]{0,1200}role == Role\.LEADER && requestedEndpoints\.add\(endpointId\)[\s\S]{0,300}endpoint_found/);
   assert.match(nearby, /role == Role\.LEADER[\s\S]{0,220}sendChallenge\(endpointId\)/);
