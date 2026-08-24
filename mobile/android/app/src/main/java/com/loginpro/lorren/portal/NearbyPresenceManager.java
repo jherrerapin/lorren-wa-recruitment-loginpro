@@ -97,7 +97,7 @@ final class NearbyPresenceManager {
     private void startReadyDiscovery(String normalizedService, int retryCount) {
         DiscoveryOptions options = new DiscoveryOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false)
+            .setLowPower(true)
             .build();
         try {
             client.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
@@ -323,7 +323,7 @@ final class NearbyPresenceManager {
                 ) return;
 
                 ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
-                    .setLowPower(false)
+                    .setLowPower(true)
                     .setConnectionType(ConnectionType.NON_DISRUPTIVE)
                     .build();
                 client.requestConnection(
