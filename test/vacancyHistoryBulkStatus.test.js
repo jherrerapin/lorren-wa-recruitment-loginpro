@@ -16,6 +16,12 @@ const cycleMetadata = {
   }
 };
 
+function clientScriptBody(script = '') {
+  return String(script)
+    .replace(/^\s*<script>\s*/, '')
+    .replace(/\s*<\/script>\s*$/, '');
+}
+
 test('cambio masivo histórico conserva los estados de reclutamiento permitidos por rol', () => {
   assert.deepEqual(
     historicalBulkCandidateStatuses('admin'),
@@ -39,6 +45,7 @@ test('el histórico por vacante añade selección múltiple y reutiliza la trans
   assert.match(script, /\/status/);
   assert.match(script, /bulkStatuses = \["REGISTRADO","APROBADO","CONTACTADO","RECHAZADO"\]/);
   assert.doesNotMatch(script, /\/bulk-status/);
+  assert.doesNotThrow(() => new Function(clientScriptBody(script)));
 });
 
 test('los controles masivos solo se activan en histórico y excluyen contratados', () => {
@@ -49,4 +56,5 @@ test('los controles masivos solo se activan en histórico y excluyen contratados
   assert.match(script, /Contratados se gestionan individualmente/);
   assert.match(script, /bulkStatuses = \["NUEVO","REGISTRADO","APROBADO","CONTACTADO","RECHAZADO"\]/);
   assert.doesNotMatch(script, /\b(?:alert|confirm|prompt)\s*\(/);
+  assert.doesNotThrow(() => new Function(clientScriptBody(script)));
 });
