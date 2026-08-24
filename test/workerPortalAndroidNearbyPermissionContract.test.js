@@ -25,7 +25,18 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatib
 
   assert.match(manifest, /android\.permission\.ACCESS_WIFI_STATE/);
   assert.match(manifest, /android\.permission\.CHANGE_WIFI_STATE/);
-  assert.match(manifest, /android\.permission\.NEARBY_WIFI_DEVICES/);
+  assert.doesNotMatch(
+    manifest,
+    /android:maxSdkVersion="31"\s+android:name="android\.permission\.(?:ACCESS_WIFI_STATE|CHANGE_WIFI_STATE)"/
+  );
+  assert.match(
+    manifest,
+    /android:minSdkVersion="33"\s+android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
+  );
+  assert.doesNotMatch(
+    manifest,
+    /android:minSdkVersion="32"\s+android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
+  );
   assert.doesNotMatch(manifest, /BLUETOOTH_SCAN[^>]*neverForLocation/);
   assert.match(manifest, /android\.permission\.ACCESS_COARSE_LOCATION/);
   assert.match(manifest, /android\.permission\.ACCESS_FINE_LOCATION/);
@@ -67,6 +78,7 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatib
     'private boolean hasNearbyWifiPermission()',
     'private void addNearbyWifiPermissionIfNeeded'
   );
+  assert.match(wifiGroup, /Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.TIRAMISU/);
   assert.match(wifiGroup, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
 
   const transportPermissions = methodBody(
