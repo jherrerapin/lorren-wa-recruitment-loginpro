@@ -96,6 +96,7 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(presenceManager, /AdvertisingOptions\.Builder/);
   assert.match(presenceManager, /DiscoveryOptions\.Builder/);
   assert.match(presenceManager, /ConnectionOptions\.Builder/);
+  assert.match(presenceManager, /setLowPower\(true\)/);
   assert.match(presenceManager, /setLowPower\(false\)/);
   assert.equal((presenceManager.match(/ConnectionType\.NON_DISRUPTIVE/g) || []).length, 2);
   assert.doesNotMatch(presenceManager, /ConnectionType\.(?:BALANCED|DISRUPTIVE)/);
@@ -103,7 +104,9 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,1400}startLeaderAdvertising\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
   assert.match(presenceManager, /client\.startAdvertising/);
   assert.match(presenceManager, /client\.startDiscovery/);
-  assert.match(presenceManager, /role != Role\.READY[\s\S]{0,800}requestConnection/);
+  assert.match(presenceManager, /role != Role\.READY[\s\S]{0,800}requestAuxiliaryConnection\(endpointId, 0\)/);
+  assert.match(presenceManager, /MAX_CONNECTION_REQUEST_RETRIES = 1/);
+  assert.match(presenceManager, /isRecoverableConnectionRequestFailure[\s\S]{0,260}STATUS_RADIO_ERROR[\s\S]{0,160}STATUS_ERROR/);
   assert.match(presenceManager, /role == Role\.LEADER && requestedEndpoints\.add\(endpointId\)[\s\S]{0,180}endpoint_found/);
   assert.match(presenceManager, /Payload\.fromBytes/);
   assert.match(presenceManager, /"attemptId"/);
@@ -132,6 +135,7 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(nativePresence, /Iniciar almuerzo de la cuadrilla/);
   assert.match(nativePresence, /Finalizar almuerzo de la cuadrilla/);
   assert.match(nativePresence, /Registrar salida de la cuadrilla/);
+  assert.match(nativePresence, /const DEFAULT_SCAN_MS = 15_000/);
   assert.match(nativePresence, /queueCrewPresence/);
   assert.doesNotMatch(nativePresence, /\/llegada|\/salida|inicio-almuerzo|fin-almuerzo|registerDispatchArrival|registerCrewArrivalForLeader/);
   assert.doesNotMatch(nativePresence, /alert\s*\(|confirm\s*\(|prompt\s*\(/);

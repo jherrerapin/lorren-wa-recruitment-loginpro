@@ -9,7 +9,7 @@
   const CREDENTIAL_PATH = '/operaciones/portal/cuadrillas/presencia/credencial';
   const CACHE_KEY = 'lorren-native-presence-context-v1';
   const PANEL_ID = 'lorren-native-presence-panel';
-  const DEFAULT_SCAN_MS = 6_000;
+  const DEFAULT_SCAN_MS = 15_000;
   const AUTO_RETRY_DELAY_MS = 1_500;
   const AUXILIARY_REARM_DELAY_MS = 250;
   const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
@@ -1002,18 +1002,6 @@
       retryMarkType = completionMarkType;
       hasCompletedLeaderScan = true;
       renderPanel();
-      if (autoRetryRemaining > 0) {
-        autoRetryRemaining -= 1;
-        setStatus(
-          `No se detectó ningún auxiliar para la ${markInfo(completionMarkType).noun}. Reintentando automáticamente una vez…`,
-          'warning'
-        );
-        autoRetryTimer = window.setTimeout(() => {
-          autoRetryTimer = null;
-          startLeaderScan(completionMarkType, true);
-        }, AUTO_RETRY_DELAY_MS);
-        return;
-      }
       setStatus(
         `No se detectó ningún auxiliar. La ${markInfo(completionMarkType).noun} no se guardó; vuelve a intentarlo cuando sus teléfonos estén disponibles.`,
         'error'

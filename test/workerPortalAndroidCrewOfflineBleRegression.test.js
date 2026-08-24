@@ -58,7 +58,7 @@ test('Nearby Connections conserva una sola autoridad: encargado hub y auxiliares
   assert.match(mainActivity, /addNearbyWifiPermissionIfNeeded\(missing\)/);
 });
 
-test('replay físico: auxiliar descubre por medio de bajo consumo y encargado anuncia sin cambiar radios', async () => {
+test('replay físico: auxiliar descubre por medio de bajo consumo y reintenta una solicitud de radio transitoria', async () => {
   const nearby = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
   const readyPath = nearby.match(
@@ -80,9 +80,21 @@ test('replay físico: auxiliar descubre por medio de bajo consumo y encargado an
     /onEndpointFound\(String endpointId, DiscoveredEndpointInfo info\) \{([\s\S]*?)\n        \}\n\n        @Override\n        public void onEndpointLost/
   );
   assert.ok(auxiliaryConnection, 'falta conexión iniciada por el auxiliar');
-  assert.match(auxiliaryConnection[1], /new ConnectionOptions\.Builder\(\)[\s\S]{0,180}setLowPower\(true\)/);
-  assert.match(auxiliaryConnection[1], /ConnectionType\.NON_DISRUPTIVE/);
-  assert.match(auxiliaryConnection[1], /client\.requestConnection/);
+  assert.match(auxiliaryConnection[1], /requestAuxiliaryConnection\(endpointId, 0\)/);
+
+  const requestConnection = nearby.match(
+    /private void requestAuxiliaryConnection\(String endpointId, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private final ConnectionLifecycleCallback/
+  );
+  assert.ok(requestConnection, 'falta autoridad acotada para requestConnection');
+  assert.match(requestConnection[1], /new ConnectionOptions\.Builder\(\)[\s\S]{0,180}setLowPower\(true\)/);
+  assert.match(requestConnection[1], /ConnectionType\.NON_DISRUPTIVE/);
+  assert.match(requestConnection[1], /client\.requestConnection/);
+  assert.match(requestConnection[1], /retryCount < MAX_CONNECTION_REQUEST_RETRIES/);
+  assert.match(requestConnection[1], /isRecoverableConnectionRequestFailure\(error\)/);
+  assert.match(requestConnection[1], /role != Role\.READY \|\| !requestedEndpoints\.contains\(endpointId\)/);
+  assert.match(requestConnection[1], /handler\.postDelayed[\s\S]{0,500}requestAuxiliaryConnection\(endpointId, retryCount \+ 1\)/);
+  assert.match(nearby, /MAX_CONNECTION_REQUEST_RETRIES = 1/);
+  assert.match(nearby, /isRecoverableConnectionRequestFailure[\s\S]{0,260}STATUS_RADIO_ERROR[\s\S]{0,160}STATUS_ERROR/);
 
   const leaderPath = nearby.match(
     /synchronized void startLeaderScan\(JSONObject input\) \{([\s\S]*?)\n    \}\n\n    private void startLeaderAdvertising/
@@ -107,7 +119,7 @@ test('replay físico: auxiliar descubre por medio de bajo consumo y encargado an
   assert.match(leaderTimeout[1], /client\.stopAdvertising\(\)[\s\S]{0,220}handler\.postDelayed\(scanCompleteTimeout, CONNECTION_GRACE_MS\)/);
   assert.doesNotMatch(leaderTimeout[1], /requestedEndpoints\.isEmpty\(\)[\s\S]{0,180}completeLeaderScan\(nextAttemptId\)/);
 
-  assert.match(nearby, /onEndpointFound[\s\S]{0,1400}role != Role\.READY[\s\S]{0,1400}requestConnection/);
+  assert.match(nearby, /onEndpointFound[\s\S]{0,1400}role != Role\.READY[\s\S]{0,1400}requestAuxiliaryConnection/);
   assert.match(nearby, /onConnectionInitiated[\s\S]{0,1200}role == Role\.LEADER && requestedEndpoints\.add\(endpointId\)[\s\S]{0,300}endpoint_found/);
   assert.match(nearby, /role == Role\.LEADER[\s\S]{0,220}sendChallenge\(endpointId\)/);
   assert.match(nearby, /role == Role\.READY && "challenge"\.equals\(type\)[\s\S]{0,180}respondToChallenge/);
@@ -188,21 +200,23 @@ test('auxiliar rearma una sola señal local al volver a primer plano', async () 
   assert.match(nativePresence, /visibilitychange[\s\S]{0,120}visibilityState === 'visible'[\s\S]{0,80}scheduleAuxiliaryRearm\(\)/);
 });
 
-test('scan con cero auxiliares reintenta antes de persistir y después falla cerrado', async () => {
+test('scan con cero auxiliares usa una ventana continua y falla cerrado sin reiniciar advertising', async () => {
   const [nearby, nativePresence, verifier] = await Promise.all([
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
     read('mobile/android/app/src/main/assets/native-presence.js'),
     read('src/modules/dispatch-attendance/application/crewPresenceCredential.js')
   ]);
 
-  assert.match(nativePresence, /const DEFAULT_SCAN_MS = 6_000/);
+  assert.match(nativePresence, /const DEFAULT_SCAN_MS = 15_000/);
   assert.match(nearby, /input\.optInt\("expectedProofCount", 0\)/);
   assert.match(nearby, /expectedProofCount > 0 && verifiedCount >= expectedProofCount[\s\S]{0,120}completeLeaderScan\(attemptId\)/);
   assert.match(nativePresence, /let autoRetryRemaining = 1;/);
   const zeroProofBranch = nativePresence.match(/if \(noAuxiliaryDetected\) \{([\s\S]*?)\n    \}\n\n    queueCompletedAttempt\(proofBundle\)/);
   assert.ok(zeroProofBranch, 'la rama cero-proof debe ocurrir antes de encolar');
-  assert.match(zeroProofBranch[1], /startLeaderScan\(completionMarkType, true\)/);
+  assert.doesNotMatch(zeroProofBranch[1], /startLeaderScan\(completionMarkType, true\)/);
+  assert.doesNotMatch(zeroProofBranch[1], /autoRetryRemaining|autoRetryTimer/);
   assert.match(zeroProofBranch[1], /no se guardó/);
+  assert.match(zeroProofBranch[1], /markRetryAvailable\(completionMarkType\)/);
   assert.doesNotMatch(zeroProofBranch[1], /queueCompletedAttempt/);
   assert.match(verifier, /hasAuxiliaryMembers[\s\S]{0,180}validatedWorkerIds\.length === 1[\s\S]{0,120}crew_presence_auxiliary_not_detected/);
 });

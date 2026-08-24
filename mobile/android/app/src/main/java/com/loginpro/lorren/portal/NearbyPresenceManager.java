@@ -60,6 +60,7 @@ final class NearbyPresenceManager {
     private static final long CONNECTION_GRACE_MS = 1_500L;
     private static final long NEARBY_RESTART_DELAY_MS = 350L;
     private static final int MAX_START_RETRIES = 1;
+    private static final int MAX_CONNECTION_REQUEST_RETRIES = 1;
 
     private enum Role { IDLE, READY, LEADER }
 
@@ -321,23 +322,8 @@ final class NearbyPresenceManager {
                     || !SERVICE_ID.equals(info.getServiceId())
                     || !requestedEndpoints.add(endpointId)
                 ) return;
-
-                ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
-                    .setLowPower(true)
-                    .setConnectionType(ConnectionType.NON_DISRUPTIVE)
-                    .build();
-                client.requestConnection(
-                    ENDPOINT_NAME,
-                    endpointId,
-                    connectionLifecycleCallback,
-                    connectionOptions
-                ).addOnFailureListener(error -> {
-                    synchronized (NearbyPresenceManager.this) {
-                        requestedEndpoints.remove(endpointId);
-                    }
-                    emitError("connection_request_failed");
-                });
             }
+            requestAuxiliaryConnection(endpointId, 0);
         }
 
         @Override
@@ -347,6 +333,37 @@ final class NearbyPresenceManager {
             }
         }
     };
+
+    private void requestAuxiliaryConnection(String endpointId, int retryCount) {
+        ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
+            .setLowPower(true)
+            .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+            .build();
+        client.requestConnection(
+            ENDPOINT_NAME,
+            endpointId,
+            connectionLifecycleCallback,
+            connectionOptions
+        ).addOnFailureListener(error -> {
+            synchronized (NearbyPresenceManager.this) {
+                if (role != Role.READY || !requestedEndpoints.contains(endpointId)) return;
+                if (
+                    retryCount < MAX_CONNECTION_REQUEST_RETRIES
+                    && isRecoverableConnectionRequestFailure(error)
+                ) {
+                    handler.postDelayed(() -> {
+                        synchronized (NearbyPresenceManager.this) {
+                            if (role != Role.READY || !requestedEndpoints.contains(endpointId)) return;
+                        }
+                        requestAuxiliaryConnection(endpointId, retryCount + 1);
+                    }, NEARBY_RESTART_DELAY_MS);
+                    return;
+                }
+                requestedEndpoints.remove(endpointId);
+            }
+            emitError("connection_request_failed");
+        });
+    }
 
     private final ConnectionLifecycleCallback connectionLifecycleCallback = new ConnectionLifecycleCallback() {
         @Override
@@ -614,6 +631,12 @@ final class NearbyPresenceManager {
             || statusCode == ConnectionsStatusCodes.STATUS_ALREADY_DISCOVERING
             || statusCode == ConnectionsStatusCodes.STATUS_ALREADY_HAVE_ACTIVE_STRATEGY
             || statusCode == ConnectionsStatusCodes.STATUS_OUT_OF_ORDER_API_CALL;
+    }
+
+    private static boolean isRecoverableConnectionRequestFailure(Exception error) {
+        int statusCode = nearbyStatusCode(error);
+        return statusCode == ConnectionsStatusCodes.STATUS_RADIO_ERROR
+            || statusCode == ConnectionsStatusCodes.STATUS_ERROR;
     }
 
     private static String nearbyStartErrorCode(Exception error, String fallback) {
