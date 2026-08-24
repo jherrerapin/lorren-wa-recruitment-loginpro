@@ -16,7 +16,7 @@ function methodBody(source, signature, nextSignature) {
   return source.slice(start, end);
 }
 
-test('Nearby de cuadrilla declara permisos requeridos y desugaring sin encender Wi-Fi desde Lórren', async () => {
+test('Nearby conserva el contrato API 32/33 y desugaring sin encender Wi-Fi desde Lórren', async () => {
   const [manifest, mainActivity, gradle] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
     read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
@@ -25,7 +25,18 @@ test('Nearby de cuadrilla declara permisos requeridos y desugaring sin encender 
 
   assert.match(manifest, /android\.permission\.ACCESS_WIFI_STATE/);
   assert.match(manifest, /android\.permission\.CHANGE_WIFI_STATE/);
-  assert.match(manifest, /android\.permission\.NEARBY_WIFI_DEVICES/);
+  assert.doesNotMatch(
+    manifest,
+    /android:maxSdkVersion="31"\s+android:name="android\.permission\.(?:ACCESS_WIFI_STATE|CHANGE_WIFI_STATE)"/
+  );
+  assert.match(
+    manifest,
+    /android:minSdkVersion="33"\s+android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
+  );
+  assert.doesNotMatch(
+    manifest,
+    /android:minSdkVersion="32"\s+android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
+  );
   assert.doesNotMatch(manifest, /BLUETOOTH_SCAN[^>]*neverForLocation/);
   assert.match(manifest, /android\.permission\.ACCESS_COARSE_LOCATION/);
   assert.match(manifest, /android\.permission\.ACCESS_FINE_LOCATION/);
@@ -48,6 +59,7 @@ test('Nearby de cuadrilla declara permisos requeridos y desugaring sin encender 
     'private boolean hasNearbyWifiPermission()',
     'private void addNearbyWifiPermissionIfNeeded'
   );
+  assert.match(wifiGroup, /Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.TIRAMISU/);
   assert.match(wifiGroup, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
 
   const attendancePermissions = methodBody(
