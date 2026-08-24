@@ -2,7 +2,8 @@ import {
   alignCandidateLocationFields,
   isHighConfidenceLocalField,
   normalizeCandidateFields,
-  parseNaturalData
+  parseNaturalData,
+  shouldPreserveStructuredLocalField
 } from './candidateData.js';
 import { detectRoleHintFromText } from './vacancyResolver.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
@@ -43,11 +44,6 @@ function hasValue(value) {
   return value !== null && value !== undefined && value !== '';
 }
 
-function hasHighConfidenceLocalValue(field, localParsedData = {}) {
-  const value = localParsedData?.[field];
-  return hasValue(value) && isHighConfidenceLocalField(field, value);
-}
-
 function compactFields(fields = {}) {
   return Object.fromEntries(
     Object.entries(fields || {}).filter(([, value]) => hasValue(value))
@@ -80,6 +76,16 @@ function buildLocalEvidence(fields = {}, text = '') {
   );
 }
 
+function buildEngineEvidence(fields = {}, text = '') {
+  const snippet = String(text || '').slice(0, 180);
+  return Object.fromEntries(
+    Object.keys(fields || {}).map((field) => [
+      field,
+      { snippet, confidence: 0.8, source: 'engine' }
+    ])
+  );
+}
+
 function mergeFieldSource(sourceByField, field, source) {
   if (!field || !source) return;
   sourceByField[field] = sourceByField[field] ? 'merged' : source;
@@ -97,6 +103,35 @@ function hasFieldsFromOriginalUnderstanding(turnInterpretation = {}) {
   return Object.entries(turnInterpretation.sourceByField || {}).some(([field, source]) => (
     source !== 'engine' && hasValue(turnInterpretation.fields?.[field])
   ));
+}
+
+function normalizeEntityComparable(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function conflictsWithIndependentIdentityEvidence(field, value, localFields = {}) {
+  const comparable = normalizeEntityComparable(value);
+  if (!comparable) return false;
+
+  if (field === 'fullName') {
+    return ['neighborhood', 'locality'].some((residenceField) => (
+      hasValue(localFields[residenceField])
+      && normalizeEntityComparable(localFields[residenceField]) === comparable
+    ));
+  }
+
+  if (field === 'neighborhood' || field === 'locality') {
+    return hasValue(localFields.fullName)
+      && normalizeEntityComparable(localFields.fullName) === comparable;
+  }
+
+  return false;
 }
 
 function normalizeContextualConfirmationText(value = '') {
@@ -199,41 +234,72 @@ function buildContextualExperienceCandidate(input = '', context = {}) {
 
 function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context = {}) {
   const localParsedData = runtime.localParsedData || parseNaturalData(input);
-  const aiFields = aiResult?.parsedFields || {};
+  const rawAiFields = aiResult?.parsedFields || {};
+  const aiFields = normalizeAiFields(rawAiFields);
   const extractionEvidence = aiResult?.extraction?.fieldEvidence || {};
   const engineFields = runtime.engineFields && typeof runtime.engineFields === 'object'
     ? normalizeAiFields(runtime.engineFields)
     : {};
   const contextualExperience = buildContextualExperienceCandidate(input, context);
+  const turnType = aiResult?.extraction?.turnType || null;
+
+  const localCandidates = compactFields(normalizeCandidateFields(Object.fromEntries(
+    Object.entries(localParsedData).filter(([field, value]) => (
+      hasValue(value) && isHighConfidenceLocalField(field, value)
+    ))
+  )));
+  const localEvidence = buildLocalEvidence(localCandidates, input);
+  const localGate = sanitizeCandidateFieldsForConversation({
+    fields: localCandidates,
+    evidence: localEvidence,
+    text: input,
+    context,
+    turnType: null
+  });
+  const aiGate = sanitizeCandidateFieldsForConversation({
+    fields: aiFields,
+    evidence: extractionEvidence,
+    text: input,
+    context,
+    turnType
+  });
+  const engineEvidence = buildEngineEvidence(engineFields, input);
+  const engineGate = sanitizeCandidateFieldsForConversation({
+    fields: engineFields,
+    evidence: engineEvidence,
+    text: input,
+    context,
+    turnType
+  });
+
   const sourceByField = {};
   const evidenceByField = {};
   const mergedData = {};
 
-  for (const [field, value] of Object.entries(localParsedData)) {
-    if (!hasValue(value) || !isHighConfidenceLocalField(field, value)) continue;
+  // Cada fuente se valida antes de competir por un campo. Así una propuesta
+  // posterior rechazada no borra el fallback ya aceptado. La IA conserva la
+  // precedencia semántica cuando su propuesta es válida; el parser local solo
+  // actúa como evidencia independiente/fallback y no como segunda autoridad.
+  for (const [field, value] of Object.entries(localGate.fields)) {
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'local');
-    evidenceByField[field] = { snippet: input.slice(0, 120), confidence: 0.9, source: 'local' };
+    evidenceByField[field] = localGate.evidence[field];
   }
 
-  // El parser local solo entra a mergedData cuando la propia autoridad lo
-  // clasifica como alta confianza. Una fuente probabilística posterior puede
-  // completar campos ausentes, pero no debe borrar ni reinterpretar esa misma
-  // entidad del turno. Si una corrección es explícita, parseNaturalData recibe
-  // el texto de la corrección y el valor local ya corresponde al turno actual.
-  for (const [field, value] of Object.entries(aiFields)) {
-    if (!hasValue(value) || hasHighConfidenceLocalValue(field, localParsedData)) continue;
+  for (const [field, value] of Object.entries(aiGate.fields)) {
+    if (shouldPreserveStructuredLocalField(field, localGate.fields[field], value)) continue;
+    if (conflictsWithIndependentIdentityEvidence(field, value, localGate.fields)) continue;
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'openai');
-    if (extractionEvidence[field]) evidenceByField[field] = extractionEvidence[field];
+    if (aiGate.evidence[field]) evidenceByField[field] = aiGate.evidence[field];
   }
 
-  for (const [field, value] of Object.entries(engineFields)) {
-    if (!hasValue(value) || hasHighConfidenceLocalValue(field, localParsedData)) continue;
+  for (const [field, value] of Object.entries(engineGate.fields)) {
+    if (shouldPreserveStructuredLocalField(field, localGate.fields[field], value)) continue;
+    if (conflictsWithIndependentIdentityEvidence(field, value, localGate.fields)) continue;
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'engine');
-    evidenceByField[field] = evidenceByField[field]
-      || { snippet: input.slice(0, 120), confidence: 0.8, source: 'engine' };
+    if (engineGate.evidence[field]) evidenceByField[field] = engineGate.evidence[field];
   }
 
   for (const [field, value] of Object.entries(contextualExperience.fields)) {
@@ -256,7 +322,7 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
     evidence: evidenceByField,
     text: input,
     context,
-    turnType: aiResult?.extraction?.turnType || null
+    turnType
   });
   fields = semanticGate.fields;
 
@@ -274,7 +340,7 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
     cityHint: null,
     roleHint: null,
     detectedFields: [...new Set([
-      ...Object.keys(aiFields).filter((field) => fields[field] !== undefined),
+      ...Object.keys(rawAiFields).filter((field) => fields[field] !== undefined),
       ...Object.keys(engineFields).filter((field) => fields[field] !== undefined)
     ])],
     engineFieldCount: Object.keys(engineFields).length,
