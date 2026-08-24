@@ -1217,12 +1217,12 @@
     if (!credentialPrepared()) await provisionCredential();
     await hydrateLocalQueuedMarks();
     renderPanel();
-    scheduleAuxiliaryRearm();
+    await ensureAuxiliaryReady();
     window.LorrenWorkerPortalOffline?.syncNow?.().catch(() => {});
   });
   window.addEventListener('offline', () => {
     renderPanel();
-    scheduleAuxiliaryRearm();
+    ensureAuxiliaryReady().catch(() => {});
   });
   window.addEventListener('focus', scheduleAuxiliaryRearm);
   document.addEventListener('visibilitychange', () => {
