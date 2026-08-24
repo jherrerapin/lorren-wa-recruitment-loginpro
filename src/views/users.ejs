@@ -284,7 +284,7 @@
                 <td><span class="badge <%= user.isActive ? 'badge-active' : 'badge-inactive' %>"><%= user.isActive ? 'Activo' : 'Inactivo' %></span><small>Último cambio de contraseña: <%= user.lastPasswordResetAt ? user.lastPasswordResetAt.toLocaleString('es-CO', { hour12: false }) : 'Sin registro' %></small></td>
                 <td><% if (user.username === environmentAdminUsername && !user.identityMigratedAt) { %><small>La cuenta debe completar primero la actualización de identidad.</small><% } else { %><small>Tel: <%= user.recoveryPhone || '—' %></small><small>Correo: <%= user.email || 'Pendiente' %></small><small>Recuperación disponible desde /recover.</small><% } %></td>
                 <td>
-                  <% if (canImpersonateUsers && user.identityMigratedAt && user.isActive && user.username !== environmentAdminUsername) { %>
+                  <% if (canImpersonateUsers && user.identityMigratedAt && user.isActive) { %>
                     <form method="post" action="/admin/users/<%= user.id %>/impersonate" class="inline-form"><button type="submit" class="btn btn-primary btn-sm">Entrar como usuario</button></form>
                   <% } %>
 
