@@ -7,6 +7,7 @@ import {
   resolveVacancyFirstGate
 } from '../src/services/vacancyFirstGate.js';
 
+// Replay seudonimizado de #1414: la oferta persistida debe bastar aunque el outbound ya no esté en la ventana reciente.
 function futureProfileCandidate(overrides = {}) {
   return {
     id: 'cand-future-profile-replay',
