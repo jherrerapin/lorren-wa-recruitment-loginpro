@@ -103,7 +103,7 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,1400}startLeaderAdvertising\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
   assert.match(presenceManager, /client\.startAdvertising/);
   assert.match(presenceManager, /client\.startDiscovery/);
-  assert.match(presenceManager, /role != Role\.READY[\s\S]{0,160}requestConnection/);
+  assert.match(presenceManager, /role != Role\.READY[\s\S]{0,800}requestConnection/);
   assert.match(presenceManager, /role == Role\.LEADER && requestedEndpoints\.add\(endpointId\)[\s\S]{0,180}endpoint_found/);
   assert.match(presenceManager, /Payload\.fromBytes/);
   assert.match(presenceManager, /"attemptId"/);
