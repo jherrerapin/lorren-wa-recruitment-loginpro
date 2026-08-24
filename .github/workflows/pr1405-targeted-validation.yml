@@ -28,15 +28,37 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
-      - name: Syntax
-        run: node --check src/services/conversationUnderstanding.js
+      - name: Run targeted validation and capture output
+        id: targeted
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '== syntax =='
+            node --check src/services/conversationUnderstanding.js
+            syntax_status=$?
+            echo "syntax_status=$syntax_status"
+            echo '== tests =='
+            node --test \
+              test/conversationUnderstanding.test.js \
+              test/fieldSanitizer.test.js \
+              test/candidateData.test.js \
+              test/structuredAgeEvidence.test.js \
+              test/candidateAgeEvidence.test.js \
+              test/aiFirstRecruitmentGuards.test.js
+            test_status=$?
+            echo "test_status=$test_status"
+            final_status=$(( syntax_status || test_status ))
+            echo "final_status=$final_status"
+            exit $final_status
+          } 2>&1 | tee targeted-validation.log
+          exit ${PIPESTATUS[0]}
 
-      - name: Entity consolidation tests
-        run: >-
-          node --test
-          test/conversationUnderstanding.test.js
-          test/fieldSanitizer.test.js
-          test/candidateData.test.js
-          test/structuredAgeEvidence.test.js
-          test/candidateAgeEvidence.test.js
-          test/aiFirstRecruitmentGuards.test.js
+      - name: Upload targeted validation log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr1405-targeted-validation-log
+          path: targeted-validation.log
+          if-no-files-found: error
+          retention-days: 1
