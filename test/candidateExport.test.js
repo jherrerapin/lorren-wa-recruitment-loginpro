@@ -75,6 +75,24 @@ test('scope registered incluye estados legacy cuando cumplen criterio operativo'
   assert.deepEqual(filterCandidatesByScope(candidates, 'rejected').map((c) => c.id), ['rejected']);
 });
 
+test('scope all excluye rechazados y el apartado rejected conserva esos registros', () => {
+  const candidates = [
+    { ...baseCandidate, id: 'active-registered', status: 'REGISTRADO' },
+    { ...baseCandidate, id: 'active-approved', status: 'APROBADO' },
+    { ...baseCandidate, id: 'rejected-history', status: 'RECHAZADO' }
+  ];
+
+  assert.deepEqual(
+    filterCandidatesByScope(candidates, 'all').map((candidate) => candidate.id),
+    ['active-registered', 'active-approved']
+  );
+  assert.deepEqual(
+    filterCandidatesByScope(candidates, 'rejected').map((candidate) => candidate.id),
+    ['rejected-history']
+  );
+  assert.equal(candidates.length, 3, 'el filtrado no elimina ni muta el registro rechazado');
+});
+
 test('nombre de archivo de exportación usa scopes operativos', () => {
   assert.match(exportFilenameByScope('contacted'), /^candidatos_contactados_\d{4}-\d{2}-\d{2}\.xlsx$/);
   assert.match(exportFilenameByScope('contracted'), /^candidatos_contratados_\d{4}-\d{2}-\d{2}\.xlsx$/);
