@@ -17,10 +17,11 @@ function methodBody(source, signature, nextSignature) {
 }
 
 test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatibilidad por versión', async () => {
-  const [manifest, mainActivity, gradle] = await Promise.all([
+  const [manifest, mainActivity, gradle, presenceManager] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
     read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
-    read('app/build.gradle')
+    read('app/build.gradle'),
+    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
   ]);
 
   assert.match(manifest, /android\.permission\.ACCESS_WIFI_STATE/);
@@ -124,6 +125,14 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatib
   );
   assert.match(attendancePermissions, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
   assert.match(attendancePermissions, /missing\.addAll\(nearbyTransportPermissions\(\)\)/);
+
+  const balancedPolicies = presenceManager.match(/ConnectionType\.BALANCED/g) || [];
+  assert.equal(balancedPolicies.length, 2, 'advertising y conexión deben permitir que Nearby gestione el medio local necesario');
+  assert.match(presenceManager, /AdvertisingOptions\.Builder\(\)[\s\S]{0,220}setConnectionType\(ConnectionType\.BALANCED\)/);
+  assert.match(presenceManager, /ConnectionOptions\.Builder\(\)[\s\S]{0,180}setConnectionType\(ConnectionType\.BALANCED\)/);
+  assert.doesNotMatch(presenceManager, /ConnectionType\.(?:NON_DISRUPTIVE|DISRUPTIVE)/);
+  assert.match(presenceManager, /Strategy\.P2P_CLUSTER/);
+  assert.match(presenceManager, /setLowPower\(false\)/);
 
   assert.doesNotMatch(mainActivity, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
   assert.match(gradle, /play-services-nearby:19\.4\.0/);
