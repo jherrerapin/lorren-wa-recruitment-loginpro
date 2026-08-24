@@ -67,7 +67,7 @@ test('conversationUnderstanding permite género femenino contextual sin crear no
   assert.equal(result.candidateFields.neighborhood, undefined);
 });
 
-test('conversationUnderstanding conserva entidades locales de alta confianza ante propuestas IA conflictivas', async () => {
+test('conversationUnderstanding no cruza nombre y barrio cuando existe evidencia independiente del turno', async () => {
   const input = 'Ana Sofia Perez, CC 10203040, 31 años, barrio San Javier, transporte público';
   const result = await conversationUnderstanding(input, {
     context: {
@@ -80,10 +80,10 @@ test('conversationUnderstanding conserva entidades locales de alta confianza ant
       intent: 'provide_data',
       parsedFields: {
         fullName: 'San Javier',
-        documentNumber: '99999999',
-        age: 44,
+        documentNumber: '10203040',
+        age: 31,
         neighborhood: 'Ana Sofia Perez',
-        transportMode: 'Moto'
+        transportMode: 'Publico'
       },
       extraction: {
         turnType: 'PROVIDE_DATA',
@@ -116,9 +116,35 @@ test('conversationUnderstanding conserva entidades locales de alta confianza ant
   assert.equal(result.candidateFields.neighborhood, 'San Javier');
   assert.equal(result.candidateFields.transportMode, 'Publico');
   assert.equal(result.turnInterpretation.sourceByField.fullName, 'local');
-  assert.equal(result.turnInterpretation.sourceByField.documentNumber, 'local');
   assert.equal(result.turnInterpretation.sourceByField.neighborhood, 'local');
-  assert.equal(result.turnInterpretation.sourceByField.transportMode, 'local');
+});
+
+test('conversationUnderstanding conserva fallback aceptado si una propuesta IA posterior es rechazada', async () => {
+  const input = 'Buenas tardes. Mi nombre es Ana Sofia Perez, CC 10203040';
+  const result = await conversationUnderstanding(input, {
+    context: { currentStep: 'COLLECTING_DATA', pendingFields: ['fullName', 'documentNumber'] },
+    aiResult: {
+      status: 'ok',
+      used: true,
+      intent: 'provide_data',
+      parsedFields: { fullName: 'Buenas Tardes' },
+      extraction: {
+        turnType: 'PROVIDE_DATA',
+        fieldEvidence: {
+          fullName: { snippet: 'Buenas tardes', confidence: 0.94, source: 'ai_extraction' }
+        }
+      }
+    },
+    runtime: {
+      localParsedData: { fullName: 'Ana Sofia Perez', documentType: 'CC', documentNumber: '10203040' },
+      engineFields: {},
+      enrichFields: (fields) => fields
+    }
+  });
+
+  assert.equal(result.candidateFields.fullName, 'Ana Sofia Perez');
+  assert.equal(result.candidateFields.documentNumber, '10203040');
+  assert.equal(result.turnInterpretation.sourceByField.fullName, 'local');
 });
 
 test('conversationUnderstanding concentra la interpretación runtime en un solo snapshot', async () => {
@@ -146,11 +172,11 @@ test('conversationUnderstanding concentra la interpretación runtime en un solo 
   assert.ok(snapshot);
   assert.equal(snapshot.intent, 'provide_data');
   assert.equal(snapshot.fields.documentType, 'CC');
-  assert.equal(snapshot.fields.documentNumber, '10203040');
+  assert.equal(snapshot.fields.documentNumber, '99999999');
   assert.equal(snapshot.fields.age, 21);
   assert.equal(snapshot.fields.transportMode, 'Moto');
   assert.equal(snapshot.fields.medicalRestrictions, 'Sin restricciones médicas');
-  assert.equal(snapshot.sourceByField.documentNumber, 'local');
+  assert.equal(snapshot.sourceByField.documentNumber, 'merged');
   assert.equal(snapshot.sourceByField.medicalRestrictions, 'engine');
   assert.deepEqual(snapshot.evidenceByField.transportMode, transportEvidence);
   assert.equal(snapshot.cityHint, 'Bogota');
