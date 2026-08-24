@@ -1,0 +1,39 @@
+name: PR1405 Targeted Validation
+
+on:
+  push:
+    branches:
+      - fix/1403-entity-precedence-audit
+
+jobs:
+  targeted-conversation-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Syntax
+        run: node --check src/services/conversationUnderstanding.js
+
+      - name: Entity consolidation tests
+        run: >-
+          node --test
+          test/conversationUnderstanding.test.js
+          test/fieldSanitizer.test.js
+          test/candidateData.test.js
+          test/structuredAgeEvidence.test.js
+          test/candidateAgeEvidence.test.js
+          test/aiFirstRecruitmentGuards.test.js
