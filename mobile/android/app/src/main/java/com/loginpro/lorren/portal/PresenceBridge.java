@@ -118,6 +118,7 @@ final class PresenceBridge {
     @JavascriptInterface
     public String startCrewScan(String inputJson) {
         if (!hasUsablePresenceCredential()) return jsonError("native_presence_credential_required");
+        if (!activity.ensureAttendanceLocationPermission()) return jsonError("permissions_required");
         if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) return jsonError(readinessError);
@@ -165,6 +166,7 @@ final class PresenceBridge {
     public String requestAttendanceLocation(String inputJson) {
         String credential = presenceCredential();
         if (!hasUsablePresenceCredential()) return jsonError("native_location_credential_required");
+        if (!activity.ensureAttendanceLocationPermission()) return jsonError("permissions_required");
         try {
             JSONObject input = new JSONObject(inputJson == null ? "{}" : inputJson);
             String assignmentId = requiredToken(input.optString("assignmentId"), "assignmentId");
