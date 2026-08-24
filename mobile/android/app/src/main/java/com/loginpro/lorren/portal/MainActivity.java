@@ -32,6 +32,7 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_CAMERA = 4103;
     private static final int REQUEST_APP_PREPARE = 4104;
     private static final int REQUEST_ENABLE_BLUETOOTH = 4105;
+    private static final int REQUEST_ATTENDANCE_LOCATION = 4106;
     private static final String PORTAL_PATH = "/operaciones/portal";
     private static final String HANDOFF_PATH = "/operaciones/portal/sesion-transferencia/continuar";
     private static final String NATIVE_USER_AGENT_TOKEN = "LorrenNative/1";
@@ -259,14 +260,23 @@ public final class MainActivity extends Activity {
     }
 
     boolean ensureNearbyPermissions() {
-        List<String> missing = attendancePermissions(false);
+        List<String> missing = nearbyTransportPermissions();
         if (missing.isEmpty()) return true;
         runOnUiThread(() -> requestRuntimePermissions(missing.toArray(new String[0]), REQUEST_NEARBY));
         return false;
     }
 
+    boolean ensureAttendanceLocationPermission() {
+        if (hasPreciseLocationPermission()) return true;
+        runOnUiThread(() -> requestRuntimePermissions(
+            locationRuntimePermissions(),
+            REQUEST_ATTENDANCE_LOCATION
+        ));
+        return false;
+    }
+
     String ensureNearbyRadioReady() {
-        if (!nearbyPermissionsGranted()) {
+        if (!nearbyTransportPermissionsGranted()) {
             ensureNearbyPermissions();
             return "permissions_required";
         }
@@ -294,9 +304,23 @@ public final class MainActivity extends Activity {
     }
 
     private void addPreciseLocationPermissionsIfNeeded(List<String> permissions) {
-        if (hasPreciseLocationPermission()) return;
-        permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION);
-        permissions.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        addIfMissing(permissions, Manifest.permission.ACCESS_COARSE_LOCATION);
+        addIfMissing(permissions, Manifest.permission.ACCESS_FINE_LOCATION);
+    }
+
+    private boolean hasNearbyLegacyLocationPermission() {
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.S) return true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) return hasPreciseLocationPermission();
+        return hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION);
+    }
+
+    private void addNearbyLegacyLocationPermissionIfNeeded(List<String> permissions) {
+        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.S || hasNearbyLegacyLocationPermission()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            addPreciseLocationPermissionsIfNeeded(permissions);
+            return;
+        }
+        addIfMissing(permissions, Manifest.permission.ACCESS_COARSE_LOCATION);
     }
 
     private boolean hasNearbyBluetoothPermissions() {
@@ -323,12 +347,25 @@ public final class MainActivity extends Activity {
         permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES);
     }
 
+    private List<String> nearbyTransportPermissions() {
+        List<String> missing = new ArrayList<>();
+        addNearbyLegacyLocationPermissionIfNeeded(missing);
+        addNearbyBluetoothPermissionsIfNeeded(missing);
+        addNearbyWifiPermissionIfNeeded(missing);
+        return missing;
+    }
+
+    private boolean nearbyTransportPermissionsGranted() {
+        return hasNearbyLegacyLocationPermission()
+            && hasNearbyBluetoothPermissions()
+            && hasNearbyWifiPermission();
+    }
+
     private List<String> attendancePermissions(boolean includeCamera) {
         List<String> missing = new ArrayList<>();
         if (includeCamera) addIfMissing(missing, Manifest.permission.CAMERA);
         addPreciseLocationPermissionsIfNeeded(missing);
-        addNearbyBluetoothPermissionsIfNeeded(missing);
-        addNearbyWifiPermissionIfNeeded(missing);
+        missing.addAll(nearbyTransportPermissions());
         return missing;
     }
 
@@ -371,7 +408,7 @@ public final class MainActivity extends Activity {
     }
 
     private void addIfMissing(List<String> missing, String permission) {
-        if (!hasPermission(permission)) missing.add(permission);
+        if (!hasPermission(permission) && !missing.contains(permission)) missing.add(permission);
     }
 
     private boolean hasPermission(String permission) {
@@ -399,13 +436,21 @@ public final class MainActivity extends Activity {
             return;
         }
         if (requestCode == REQUEST_APP_PREPARE) {
-            if (nearbyPermissionsGranted()) ensureNearbyRadioReady();
+            if (nearbyTransportPermissionsGranted()) ensureNearbyRadioReady();
             return;
         }
         if (requestCode == REQUEST_NEARBY) {
-            boolean granted = nearbyPermissionsGranted();
+            boolean granted = nearbyTransportPermissionsGranted();
             emitPresenceEvent(event("permissions", "granted", granted));
             if (granted) ensureNearbyRadioReady();
+            return;
+        }
+        if (requestCode == REQUEST_ATTENDANCE_LOCATION) {
+            emitPresenceEvent(event(
+                "attendance_location_permission",
+                "granted",
+                hasPreciseLocationPermission()
+            ));
         }
     }
 
@@ -422,12 +467,6 @@ public final class MainActivity extends Activity {
         } catch (SecurityException ignored) {
         }
         emitPresenceEvent(event("bluetooth", "enabled", enabled));
-    }
-
-    private boolean nearbyPermissionsGranted() {
-        return hasPreciseLocationPermission()
-            && hasNearbyBluetoothPermissions()
-            && hasNearbyWifiPermission();
     }
 
     void emitPresenceEvent(JSONObject event) {

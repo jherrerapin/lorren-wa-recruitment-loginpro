@@ -8,12 +8,10 @@
   const CONTEXT_PATH = '/operaciones/portal/cuadrillas/proximidad/contexto';
   const CREDENTIAL_PATH = '/operaciones/portal/cuadrillas/presencia/credencial';
   const CACHE_KEY = 'lorren-native-presence-context-v1';
-  const CREDENTIAL_META_KEY = 'lorren-native-presence-credential-meta-v1';
   const PANEL_ID = 'lorren-native-presence-panel';
   const DEFAULT_SCAN_MS = 6_000;
   const AUTO_RETRY_DELAY_MS = 1_500;
   const AUXILIARY_REARM_DELAY_MS = 250;
-  const CREDENTIAL_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
   const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
   const MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
   const TRANSIENT_SCAN_ERRORS = new Set([
@@ -32,7 +30,8 @@
     'bluetooth_unavailable',
     'nearby_radio_error',
     'nearby_in_use',
-    'nearby_state_conflict'
+    'nearby_state_conflict',
+    'native_presence_credential_required'
   ]);
 
   let contexts = [];
@@ -73,6 +72,10 @@
 
   function capabilities() {
     return bridgeCall('getCapabilities');
+  }
+
+  function credentialPrepared() {
+    return capabilities()?.presenceCredentialReady === true;
   }
 
   function normalizeMarkType(value) {
@@ -220,35 +223,6 @@
     }
   }
 
-  function readCredentialMeta() {
-    try {
-      const parsed = JSON.parse(window.localStorage.getItem(CREDENTIAL_META_KEY) || '{}');
-      const expiresAt = new Date(parsed?.expiresAt || 0).getTime();
-      return parsed?.version === 1 && Number.isFinite(expiresAt)
-        ? { ...parsed, expiresAtMs: expiresAt }
-        : null;
-    } catch (_error) {
-      return null;
-    }
-  }
-
-  function credentialPrepared() {
-    const meta = readCredentialMeta();
-    return Boolean(meta && meta.expiresAtMs > Date.now() + CREDENTIAL_EXPIRY_MARGIN_MS);
-  }
-
-  function rememberCredential(payload) {
-    try {
-      window.localStorage.setItem(CREDENTIAL_META_KEY, JSON.stringify({
-        version: 1,
-        expiresAt: payload.expiresAt,
-        keyHash: String(payload.keyHash || '').slice(0, 100)
-      }));
-    } catch (_error) {
-      // La credencial real permanece en almacenamiento privado Android.
-    }
-  }
-
   async function provisionCredential() {
     if (!navigator.onLine) return credentialPrepared();
     if (provisioningPromise) return provisioningPromise;
@@ -269,9 +243,7 @@
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok !== true || typeof payload.credential !== 'string') return false;
       const stored = bridgeCall('setPresenceCredential', payload.credential);
-      if (!stored?.ok) return false;
-      rememberCredential(payload);
-      return true;
+      return stored?.ok === true && credentialPrepared();
     })().catch(() => false).finally(() => {
       provisioningPromise = null;
     });
@@ -656,6 +628,7 @@
   function publicNativeError(code) {
     const messages = {
       permissions_required: 'Autoriza los permisos solicitados por Android para continuar.',
+      native_presence_credential_required: 'Este teléfono necesita conectarse una vez para preparar o renovar su credencial de asistencia.',
       bluetooth_disabled: 'Bluetooth está apagado. Actívalo para continuar.',
       bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible para verificar la cuadrilla.',
       advertising_failed: 'No fue posible iniciar la señal Bluetooth del encargado. Intenta nuevamente.',
@@ -860,13 +833,7 @@
     if (!context || context.isCrewLeader || ['PREPARING', 'READY'].includes(activeMode)) return;
     activeMode = 'PREPARING';
     setStatus('Preparando Bluetooth para la marcación…', 'warning');
-    if (!credentialPrepared()) {
-      if (!navigator.onLine || !(await provisionCredential())) {
-        activeMode = 'IDLE';
-        setStatus('Conecta este teléfono a Internet una vez antes de usar la asistencia de cuadrilla.', 'warning');
-        return;
-      }
-    }
+    if (navigator.onLine && !credentialPrepared()) await provisionCredential();
     const result = bridgeCall('setReady', context.serviceRequestId);
     if (!result?.ok) {
       activeMode = 'IDLE';
@@ -912,6 +879,7 @@
       markType: normalizedMark,
       expectedProofCount
     };
+    if (navigator.onLine && !credentialPrepared()) await provisionCredential();
     const result = bridgeCall('startCrewScan', JSON.stringify(payload));
     if (!result?.ok) {
       activeAttempt = null;
@@ -1235,7 +1203,7 @@
     observeLegacyControls();
     contexts = await loadContexts();
     await hydrateLocalQueuedMarks();
-    if (navigator.onLine) await provisionCredential();
+    if (navigator.onLine && !credentialPrepared()) await provisionCredential();
     renderPanel();
     await ensureAuxiliaryReady();
   }
@@ -1246,11 +1214,15 @@
   });
   window.addEventListener('online', async () => {
     contexts = await loadContexts();
-    await provisionCredential();
+    if (!credentialPrepared()) await provisionCredential();
     await hydrateLocalQueuedMarks();
     renderPanel();
     scheduleAuxiliaryRearm();
     window.LorrenWorkerPortalOffline?.syncNow?.().catch(() => {});
+  });
+  window.addEventListener('offline', () => {
+    renderPanel();
+    scheduleAuxiliaryRearm();
   });
   window.addEventListener('focus', scheduleAuxiliaryRearm);
   document.addEventListener('visibilitychange', () => {

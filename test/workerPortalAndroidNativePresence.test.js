@@ -70,6 +70,8 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
 
   assert.match(mainActivity, /attendancePermissions\(true\)/);
   assert.match(mainActivity, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
+  assert.match(mainActivity, /hasNearbyLegacyLocationPermission\(\)/);
+  assert.match(mainActivity, /addNearbyLegacyLocationPermissionIfNeeded\(missing\)/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
@@ -78,7 +80,9 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_ENABLE/);
   assert.match(mainActivity, /"bluetooth_unavailable"/);
   assert.match(mainActivity, /"bluetooth_disabled"/);
-  assert.match(mainActivity, /nearbyPermissionsGranted\(\)[\s\S]{0,260}hasPreciseLocationPermission\(\)[\s\S]{0,180}hasNearbyBluetoothPermissions\(\)[\s\S]{0,120}hasNearbyWifiPermission\(\)/);
+  assert.match(mainActivity, /nearbyTransportPermissionsGranted\(\)[\s\S]{0,220}hasNearbyLegacyLocationPermission\(\)[\s\S]{0,100}hasNearbyBluetoothPermissions\(\)[\s\S]{0,100}hasNearbyWifiPermission\(\)/);
+  assert.match(mainActivity, /ensureAttendanceLocationPermission\(\)[\s\S]{0,180}hasPreciseLocationPermission\(\)[\s\S]{0,180}REQUEST_ATTENDANCE_LOCATION/);
+  assert.doesNotMatch(mainActivity, /nearbyPermissionsGranted\(\)/);
 
   assert.match(keyStore, /AndroidKeyStore/);
   assert.match(keyStore, /secp256r1/);
@@ -111,11 +115,14 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
 
   assert.match(bridge, /JS_NAME = "LorrenAndroidPresence"/);
   assert.match(bridge, /"attendanceWriter", false/);
+  assert.match(bridge, /"presenceCredentialReady", hasUsablePresenceCredential\(\)/);
   assert.match(bridge, /setReady\(/);
   assert.match(bridge, /startCrewScan\(/);
   assert.match(bridge, /getProofBundle\(/);
   assert.match(bridge, /manager\.startReady/);
   assert.match(bridge, /manager\.startLeaderScan/);
+  assert.match(bridge, /startCrewScan\(String inputJson\)[\s\S]{0,260}activity\.ensureAttendanceLocationPermission\(\)/);
+  assert.match(bridge, /requestAttendanceLocation\(String inputJson\)[\s\S]{0,260}activity\.ensureAttendanceLocationPermission\(\)/);
 
   assert.match(nativePresence, /Marcación de cuadrilla/);
   assert.match(nativePresence, /Marcar entrada de la cuadrilla/);
@@ -155,7 +162,9 @@ test('auxiliar queda listo por visibilidad y confirmación de Nearby, sin depend
   assert.doesNotMatch(ensureReady[1], /document\.hasFocus/);
   assert.match(ensureReady[1], /forceRestart && \['PREPARING', 'READY'\]\.includes\(activeMode\)[\s\S]{0,120}bridgeCall\('stopReady'\)/);
   assert.match(startReady[1], /activeMode = 'PREPARING'/);
+  assert.match(startReady[1], /navigator\.onLine && !credentialPrepared\(\)[\s\S]{0,80}provisionCredential\(\)/);
   assert.match(startReady[1], /bridgeCall\('setReady'/);
+  assert.doesNotMatch(startReady[1], /!navigator\.onLine[\s\S]{0,180}return/);
   assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
   assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,220}activeMode = 'READY'/);
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
@@ -163,6 +172,24 @@ test('auxiliar queda listo por visibilidad y confirmación de Nearby, sin depend
   assert.match(presenceManager, /client\.startAdvertising[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
   assert.match(nativePresence, /window\.addEventListener\('focus', scheduleAuxiliaryRearm\)/);
   assert.match(nativePresence, /visibilityState === 'visible'[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
+  assert.match(nativePresence, /window\.addEventListener\('offline',[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
+});
+
+test('credencial persistida en Android es la autoridad para responder sin Internet', async () => {
+  const [bridge, nativePresence] = await Promise.all([
+    read('app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java'),
+    read('app/src/main/assets/native-presence.js')
+  ]);
+
+  assert.match(bridge, /CREDENTIAL_VERSION = "cp1"/);
+  assert.match(bridge, /CREDENTIAL_AUDIENCE = "lorren-crew-presence"/);
+  assert.match(bridge, /credentialExpirationMs\(presenceCredential\(\)\)/);
+  assert.match(bridge, /payload\.optLong\("exp", 0L\)/);
+  assert.match(bridge, /setReady\(String serviceRequestId\)[\s\S]{0,180}!hasUsablePresenceCredential\(\)[\s\S]{0,80}native_presence_credential_required/);
+  assert.match(bridge, /startCrewScan\(String inputJson\)[\s\S]{0,180}!hasUsablePresenceCredential\(\)/);
+  assert.match(nativePresence, /function credentialPrepared\(\)[\s\S]{0,100}presenceCredentialReady === true/);
+  assert.doesNotMatch(nativePresence, /lorren-native-presence-credential-meta-v1|CREDENTIAL_META_KEY|readCredentialMeta|rememberCredential/);
+  assert.match(nativePresence, /if \(!navigator\.onLine\) return credentialPrepared\(\);/);
 });
 
 test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal individual', async () => {

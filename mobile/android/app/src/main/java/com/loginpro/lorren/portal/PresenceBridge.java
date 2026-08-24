@@ -10,16 +10,21 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.util.Base64;
 import android.webkit.JavascriptInterface;
 
 import org.json.JSONObject;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 
 final class PresenceBridge {
     static final String JS_NAME = "LorrenAndroidPresence";
     private static final String PREFS = "lorren_presence_native_v1";
     private static final String CREDENTIAL_KEY = "presence_credential";
+    private static final String CREDENTIAL_VERSION = "cp1";
+    private static final String CREDENTIAL_AUDIENCE = "lorren-crew-presence";
+    private static final long CREDENTIAL_EXPIRY_MARGIN_MS = 5 * 60 * 1000L;
     private static final String NATIVE_ATTENDANCE_LOCATION_CONTEXT = "lorren-native-attendance-location-v1";
     private static final long MAX_LAST_LOCATION_AGE_MS = 30_000L;
     private static final long LOCATION_TIMEOUT_MS = 15_000L;
@@ -61,6 +66,7 @@ final class PresenceBridge {
             result.put("offlineNearby", true);
             result.put("nativeAttendanceLocation", true);
             result.put("mockLocationSignal", true);
+            result.put("presenceCredentialReady", hasUsablePresenceCredential());
             result.put("protocolVersion", 1);
             result.put("attendanceWriter", false);
         } catch (Exception ignored) {
@@ -84,12 +90,14 @@ final class PresenceBridge {
     public String setPresenceCredential(String credential) {
         String normalized = credential == null ? "" : credential.trim();
         if (normalized.length() > 16_384) return jsonError("credential_too_large");
+        if (credentialExpirationMs(normalized) <= 0L) return jsonError("credential_invalid");
         preferences.edit().putString(CREDENTIAL_KEY, normalized).apply();
         return jsonOk();
     }
 
     @JavascriptInterface
     public String setReady(String serviceRequestId) {
+        if (!hasUsablePresenceCredential()) return jsonError("native_presence_credential_required");
         if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) return jsonError(readinessError);
@@ -109,6 +117,8 @@ final class PresenceBridge {
 
     @JavascriptInterface
     public String startCrewScan(String inputJson) {
+        if (!hasUsablePresenceCredential()) return jsonError("native_presence_credential_required");
+        if (!activity.ensureAttendanceLocationPermission()) return jsonError("permissions_required");
         if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) return jsonError(readinessError);
@@ -154,9 +164,9 @@ final class PresenceBridge {
 
     @JavascriptInterface
     public String requestAttendanceLocation(String inputJson) {
-        if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
         String credential = presenceCredential();
-        if (credential.isEmpty()) return jsonError("native_location_credential_required");
+        if (!hasUsablePresenceCredential()) return jsonError("native_location_credential_required");
+        if (!activity.ensureAttendanceLocationPermission()) return jsonError("permissions_required");
         try {
             JSONObject input = new JSONObject(inputJson == null ? "{}" : inputJson);
             String assignmentId = requiredToken(input.optString("assignmentId"), "assignmentId");
@@ -497,6 +507,29 @@ final class PresenceBridge {
     private String presenceCredential() {
         String credential = preferences.getString(CREDENTIAL_KEY, "");
         return credential == null ? "" : credential.trim();
+    }
+
+    private boolean hasUsablePresenceCredential() {
+        long expiresAt = credentialExpirationMs(presenceCredential());
+        return expiresAt > System.currentTimeMillis() + CREDENTIAL_EXPIRY_MARGIN_MS;
+    }
+
+    private static long credentialExpirationMs(String credential) {
+        try {
+            String normalized = credential == null ? "" : credential.trim();
+            String[] parts = normalized.split("\\.", -1);
+            if (parts.length != 3 || !CREDENTIAL_VERSION.equals(parts[0])) return 0L;
+            byte[] decoded = Base64.decode(
+                parts[1],
+                Base64.URL_SAFE | Base64.NO_WRAP | Base64.NO_PADDING
+            );
+            JSONObject payload = new JSONObject(new String(decoded, StandardCharsets.UTF_8));
+            if (payload.optInt("v", 0) != 1) return 0L;
+            if (!CREDENTIAL_AUDIENCE.equals(payload.optString("aud"))) return 0L;
+            return payload.optLong("exp", 0L);
+        } catch (Exception ignored) {
+            return 0L;
+        }
     }
 
     private static boolean isMockLocation(Location location) {
