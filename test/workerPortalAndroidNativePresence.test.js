@@ -152,10 +152,18 @@ test('auxiliar queda listo por visibilidad y confirmación de Nearby, sin depend
   const startReady = nativePresence.match(
     /async function startReady\(\) \{([\s\S]*?)\n  \}\n\n  async function startLeaderScan/
   );
+  const onlineHandler = nativePresence.match(
+    /window\.addEventListener\('online', async \(\) => \{([\s\S]*?)\n  \}\);\n  window\.addEventListener\('offline'/
+  );
+  const offlineHandler = nativePresence.match(
+    /window\.addEventListener\('offline', \(\) => \{([\s\S]*?)\n  \}\);\n  window\.addEventListener\('focus'/
+  );
 
   assert.ok(memberStatus, 'no se encontró la autoridad memberStatus');
   assert.ok(ensureReady, 'no se encontró ensureAuxiliaryReady');
   assert.ok(startReady, 'no se encontró startReady');
+  assert.ok(onlineHandler, 'no se encontró el manejador online');
+  assert.ok(offlineHandler, 'no se encontró el manejador offline');
   assert.match(memberStatus[1], /if \(member\.isLeader\) return 'LEADER_DEVICE';/);
   assert.match(nativePresence, /status === 'LEADER_DEVICE'[\s\S]{0,120}label: 'Este teléfono'/);
   assert.match(ensureReady[1], /document\.visibilityState === 'hidden'/);
@@ -170,9 +178,12 @@ test('auxiliar queda listo por visibilidad y confirmación de Nearby, sin depend
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
   assert.match(presenceManager, /startReadyAdvertising\(normalizedService, 0\)/);
   assert.match(presenceManager, /client\.startAdvertising[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
+  assert.match(onlineHandler[1], /ensureAuxiliaryReady\(\)/);
+  assert.match(offlineHandler[1], /ensureAuxiliaryReady\(\)/);
+  assert.doesNotMatch(onlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
+  assert.doesNotMatch(offlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
   assert.match(nativePresence, /window\.addEventListener\('focus', scheduleAuxiliaryRearm\)/);
   assert.match(nativePresence, /visibilityState === 'visible'[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
-  assert.match(nativePresence, /window\.addEventListener\('offline',[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
 });
 
 test('credencial persistida en Android es la autoridad para responder sin Internet', async () => {
