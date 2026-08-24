@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import ejs from 'ejs';
 import { buildAdminModuleNavbar } from '../src/services/adminNavigation.js';
 
 function readSource(path) {
@@ -44,6 +45,55 @@ test('un reclutador ordinario ve Usuarios como módulo de creación', () => {
   });
 
   assert.match(primaryGroup(html), /data-standalone-link="users"/);
+});
+
+test('DEV puede entrar como la cuenta administrativa heredada sin habilitar sus acciones protegidas', () => {
+  const template = readSource('src/views/users.ejs');
+  const legacyAdmin = {
+    id: 'legacy-admin-1',
+    username: 'legacy-env-admin',
+    displayName: 'Administración Heredada',
+    email: 'legacy.admin@example.test',
+    identityMigratedAt: new Date('2026-08-20T12:00:00.000Z'),
+    createdByUsername: 'system',
+    accessScope: 'ALL',
+    scopeCity: null,
+    scopeVacancyId: null,
+    canAccessDispatch: false,
+    canAccessAttendance: false,
+    canAccessMetaAds: false,
+    canAccessCvAnalysis: false,
+    isActive: true,
+    lastPasswordResetAt: null,
+    recoveryPhone: null,
+    recoveryEmail: 'legacy.admin@example.test'
+  };
+  const html = ejs.render(template, {
+    role: 'dev',
+    canAccessDispatch: true,
+    canCreateUsers: false,
+    canManageUsers: true,
+    canManageModulePermissions: true,
+    canImpersonateUsers: true,
+    users: [legacyAdmin],
+    vacancies: [],
+    manageableScopeOptions: { allowedCities: [], allowedVacancies: [], canCreateAll: true },
+    describeUserScope: () => 'Todas las vacantes',
+    successMsg: null,
+    errorMsg: null,
+    revealedRecoveryCode: null,
+    highlightedUserId: null,
+    highlightedUser: null,
+    currentUsername: 'dev-env',
+    currentUserId: 'dev-1',
+    environmentAdminUsername: 'legacy-env-admin'
+  });
+
+  assert.match(html, /action="\/admin\/users\/legacy-admin-1\/impersonate"/);
+  assert.match(html, />Entrar como usuario<\/button>/);
+  assert.match(html, /Perfil principal configurado por entorno/);
+  assert.doesNotMatch(html, /\/admin\/users\/legacy-admin-1\/toggle/);
+  assert.doesNotMatch(html, /\/admin\/users\/legacy-admin-1\/reset-password/);
 });
 
 test('la vista impersonada muestra retorno explícito a DEV sin correo', () => {
