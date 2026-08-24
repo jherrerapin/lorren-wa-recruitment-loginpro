@@ -34,7 +34,6 @@ export const VACANCY_CHANGE_OFFER_MODE = 'vacancy_change_offer';
 
 const START_OR_INTAKE_STEPS = new Set([MENU, GREETING_SENT, COLLECTING_DATA, CONFIRMING_DATA, ASK_CV]);
 const CLOSED_OR_REGISTERED_STATUSES = new Set(['REGISTRADO', 'VALIDANDO', 'APROBADO', 'CONTACTADO', 'CONTRATADO']);
-const FUTURE_PROFILE_OFFER_REPLY_KINDS = new Set(['INACTIVE_VACANCY_FUTURE_PROFILE_OFFER', 'NO_ACTIVE_VACANCIES_FOR_CITY']);
 
 function isOpenVacancy(vacancy = null) {
   return Boolean(vacancy?.isActive && vacancy?.acceptingApplications);
@@ -337,7 +336,6 @@ function buildVacancyChangeTargetPrompt(resolution = {}) {
 function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMessages = [] } = {}) {
   const lastOutbound = getLastOutboundBotDecision(recentMessages);
   const lastReplyKind = lastOutbound?.rawPayload?.replyKind || null;
-  const lastWasFutureOffer = FUTURE_PROFILE_OFFER_REPLY_KINDS.has(lastReplyKind);
   const inOfferMode = isFutureProfileOfferMode(botResumeMode);
   const intent = detectAffirmationIntent(text);
   const turn = analyzeConversationTurn(text);
@@ -352,10 +350,10 @@ function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMes
   }
 
   const explicitContextualAcceptance = turn.confirmation || explicitProfileIntent;
-  if (inOfferMode && lastWasFutureOffer && explicitContextualAcceptance && intent.affirmative) {
+  if (inOfferMode && explicitContextualAcceptance && intent.affirmative) {
     return { accepted: true, passiveAck: false, reason: 'contextual_affirmation_after_future_profile_offer', lastReplyKind };
   }
-  if (inOfferMode && lastWasFutureOffer && intent.passiveAck) {
+  if (inOfferMode && intent.passiveAck) {
     return { accepted: false, passiveAck: true, reason: 'passive_ack_after_future_profile_offer', lastReplyKind };
   }
   if (intent.affirmative && explicitProfileIntent) {
