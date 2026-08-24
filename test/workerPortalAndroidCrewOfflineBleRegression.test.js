@@ -24,7 +24,7 @@ test('APK usa la autoridad nativa de cuadrilla y no inicia el Web Bluetooth here
   assert.match(nativePresence, /\[data-crew-bluetooth-status\]/);
 });
 
-test('Nearby Connections es el único transporte local de cuadrilla y puede usar más que BLE', async () => {
+test('Nearby Connections conserva una sola autoridad: encargado hub y auxiliares discoverers sin cambiar radios', async () => {
   const [nearby, gradle, manifest, mainActivity] = await Promise.all([
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
     read('mobile/android/app/build.gradle'),
@@ -34,14 +34,14 @@ test('Nearby Connections es el único transporte local de cuadrilla y puede usar
 
   assert.match(gradle, /play-services-nearby:19\.4\.0/);
   assert.match(nearby, /Nearby\.getConnectionsClient/);
-  assert.match(nearby, /Strategy\.P2P_CLUSTER/);
-  assert.match(nearby, /startReadyAdvertising/);
-  assert.match(nearby, /client\.startAdvertising/);
-  assert.match(nearby, /startLeaderDiscovery/);
+  assert.match(nearby, /Strategy\.P2P_STAR/);
+  assert.match(nearby, /startReadyDiscovery/);
   assert.match(nearby, /client\.startDiscovery/);
+  assert.match(nearby, /startLeaderAdvertising/);
+  assert.match(nearby, /client\.startAdvertising/);
   assert.match(nearby, /setLowPower\(false\)/);
-  assert.equal((nearby.match(/ConnectionType\.BALANCED/g) || []).length, 2);
-  assert.doesNotMatch(nearby, /ConnectionType\.(?:NON_DISRUPTIVE|DISRUPTIVE)/);
+  assert.equal((nearby.match(/ConnectionType\.NON_DISRUPTIVE/g) || []).length, 2);
+  assert.doesNotMatch(nearby, /ConnectionType\.(?:BALANCED|DISRUPTIVE)/);
   assert.match(nearby, /Payload\.fromBytes/);
   assert.match(nearby, /DeviceKeyStore\.signBase64\(canonical\)/);
   assert.match(nearby, /DeviceKeyStore\.verifyBase64\(publicKey, canonical, signature\)/);
@@ -57,46 +57,48 @@ test('Nearby Connections es el único transporte local de cuadrilla y puede usar
   assert.match(mainActivity, /addNearbyWifiPermissionIfNeeded\(missing\)/);
 });
 
-test('replay físico: auxiliar anuncia por Nearby y encargado descubre sin exigir BLE peripheral nativo', async () => {
+test('replay físico: auxiliar descubre al encargado Nearby y el enlace no usa BALANCED', async () => {
   const nearby = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
   const readyPath = nearby.match(
-    /synchronized void startReady\(String serviceRequestId\) \{([\s\S]*?)\n    \}\n\n    private void startReadyAdvertising/
+    /synchronized void startReady\(String serviceRequestId\) \{([\s\S]*?)\n    \}\n\n    private void startReadyDiscovery/
   );
   assert.ok(readyPath, 'falta startReady del auxiliar');
-  assert.match(readyPath[1], /startReadyAdvertising\(normalizedService, 0\)/);
+  assert.match(readyPath[1], /startReadyDiscovery\(normalizedService, 0\)/);
 
-  const readyAdvertising = nearby.match(
-    /private void startReadyAdvertising\(String normalizedService, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private void handleReadyAdvertisingFailure/
+  const readyDiscovery = nearby.match(
+    /private void startReadyDiscovery\(String normalizedService, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private void handleReadyDiscoveryFailure/
   );
-  assert.ok(readyAdvertising, 'falta advertising Nearby del auxiliar');
-  assert.match(readyAdvertising[1], /client\.startAdvertising/);
-  assert.match(readyAdvertising[1], /setStrategy\(STRATEGY\)/);
-  assert.match(readyAdvertising[1], /setLowPower\(false\)/);
-  assert.match(readyAdvertising[1], /ConnectionType\.BALANCED/);
-  assert.match(readyAdvertising[1], /emit\("ready"/);
+  assert.ok(readyDiscovery, 'falta discovery Nearby del auxiliar');
+  assert.match(readyDiscovery[1], /client\.startDiscovery/);
+  assert.match(readyDiscovery[1], /setStrategy\(STRATEGY\)/);
+  assert.match(readyDiscovery[1], /setLowPower\(false\)/);
+  assert.match(readyDiscovery[1], /emit\("ready"/);
 
   const leaderPath = nearby.match(
-    /synchronized void startLeaderScan\(JSONObject input\) \{([\s\S]*?)\n    \}\n\n    private void startLeaderDiscovery/
+    /synchronized void startLeaderScan\(JSONObject input\) \{([\s\S]*?)\n    \}\n\n    private void startLeaderAdvertising/
   );
   assert.ok(leaderPath, 'falta startLeaderScan del encargado');
-  assert.match(leaderPath[1], /startLeaderDiscovery\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
+  assert.match(leaderPath[1], /startLeaderAdvertising\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
 
-  const leaderDiscovery = nearby.match(
-    /private void startLeaderDiscovery\([\s\S]*?\) \{([\s\S]*?)\n    \}\n\n    private void handleLeaderDiscoveryFailure/
+  const leaderAdvertising = nearby.match(
+    /private void startLeaderAdvertising\([\s\S]*?\) \{([\s\S]*?)\n    \}\n\n    private void handleLeaderAdvertisingFailure/
   );
-  assert.ok(leaderDiscovery, 'falta discovery Nearby del encargado');
-  assert.match(leaderDiscovery[1], /client\.startDiscovery/);
-  assert.match(leaderDiscovery[1], /setLowPower\(false\)/);
-  assert.match(leaderDiscovery[1], /scan_started/);
+  assert.ok(leaderAdvertising, 'falta advertising Nearby del encargado');
+  assert.match(leaderAdvertising[1], /client\.startAdvertising/);
+  assert.match(leaderAdvertising[1], /setLowPower\(false\)/);
+  assert.match(leaderAdvertising[1], /ConnectionType\.NON_DISRUPTIVE/);
+  assert.doesNotMatch(leaderAdvertising[1], /ConnectionType\.BALANCED/);
+  assert.match(leaderAdvertising[1], /emitLeaderScanStarted/);
 
-  assert.match(nearby, /onEndpointFound[\s\S]{0,900}endpoint_found[\s\S]{0,900}requestConnection/);
-  assert.match(nearby, /role == Role\.LEADER[\s\S]{0,180}sendChallenge\(endpointId\)/);
-  assert.match(nearby, /role == Role\.READY && "challenge"\.equals\(type\)[\s\S]{0,160}respondToChallenge/);
+  assert.match(nearby, /onEndpointFound[\s\S]{0,1400}role != Role\.READY[\s\S]{0,1400}requestConnection/);
+  assert.match(nearby, /onConnectionInitiated[\s\S]{0,1200}role == Role\.LEADER && requestedEndpoints\.add\(endpointId\)[\s\S]{0,300}endpoint_found/);
+  assert.match(nearby, /role == Role\.LEADER[\s\S]{0,220}sendChallenge\(endpointId\)/);
+  assert.match(nearby, /role == Role\.READY && "challenge"\.equals\(type\)[\s\S]{0,180}respondToChallenge/);
   assert.doesNotMatch(nearby, /android\.bluetooth\.le|BluetoothGatt|BluetoothLeAdvertiser|BluetoothLeScanner/);
 });
 
-test('auxiliar entra READY tras confirmación de Nearby y no por foco del WebView', async () => {
+test('auxiliar entra READY tras confirmación de discovery Nearby y no por foco del WebView', async () => {
   const [nativePresence, nearby] = await Promise.all([
     read('mobile/android/app/src/main/assets/native-presence.js'),
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -113,8 +115,8 @@ test('auxiliar entra READY tras confirmación de Nearby y no por foco del WebVie
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
   assert.match(ensureReady[1], /document\.visibilityState === 'hidden'/);
   assert.doesNotMatch(ensureReady[1], /document\.hasFocus/);
-  assert.match(nearby, /client\.startAdvertising[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
-  assert.match(nearby, /handleReadyAdvertisingFailure/);
+  assert.match(nearby, /client\.startDiscovery[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
+  assert.match(nearby, /handleReadyDiscoveryFailure/);
 });
 
 test('cada marcación CREW genera una comprobación local nueva ligada al tipo de marca', async () => {
@@ -218,15 +220,20 @@ test('ubicación Android conserva la mejor muestra y el backend mantiene precisi
   assert.match(geofence, /maxLocationAccuracyMeters/);
 });
 
-test('sin Internet una marcación CREW se encola y solo sincroniza cuando vuelve conectividad', async () => {
+test('sin Internet encargado y auxiliares pueden completar la prueba local; la marca se encola y sincroniza después', async () => {
   const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
 
+  const startReady = nativePresence.match(/async function startReady\(\) \{([\s\S]*?)\n  \}\n\n  async function startLeaderScan/);
   const startLeaderScan = nativePresence.match(/async function startLeaderScan\(markType, automaticRetry = false\) \{([\s\S]*?)\n  \}\n\n  function stopNativeModes/);
   const queueCompletedAttempt = nativePresence.match(/async function queueCompletedAttempt\(proofBundle\) \{([\s\S]*?)\n  \}\n\n  function finishCompletedScan/);
 
-  assert.ok(startLeaderScan, 'falta startLeaderScan');
+  assert.ok(startReady, 'falta startReady del auxiliar');
+  assert.ok(startLeaderScan, 'falta startLeaderScan del encargado');
   assert.ok(queueCompletedAttempt, 'falta queueCompletedAttempt');
-  assert.doesNotMatch(startLeaderScan[1], /navigator\.onLine/);
+  assert.match(startReady[1], /navigator\.onLine && !credentialPrepared\(\)[\s\S]{0,80}provisionCredential\(\)/);
+  assert.doesNotMatch(startReady[1], /if \(!navigator\.onLine\)[\s\S]{0,120}return/);
+  assert.match(startLeaderScan[1], /navigator\.onLine && !credentialPrepared\(\)[\s\S]{0,80}provisionCredential\(\)/);
+  assert.doesNotMatch(startLeaderScan[1], /if \(!navigator\.onLine\)[\s\S]{0,120}return/);
   assert.match(queueCompletedAttempt[1], /offline\.queueCrewPresence/);
   assert.match(queueCompletedAttempt[1], /if \(navigator\.onLine && typeof offline\.syncNow === 'function'\) offline\.syncNow\(\)/);
   assert.match(nativePresence, /if \(!navigator\.onLine\) return readCachedContexts\(\);/);
