@@ -2,8 +2,7 @@ import {
   alignCandidateLocationFields,
   isHighConfidenceLocalField,
   normalizeCandidateFields,
-  parseNaturalData,
-  shouldPreserveStructuredLocalField
+  parseNaturalData
 } from './candidateData.js';
 import { detectRoleHintFromText } from './vacancyResolver.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
@@ -42,6 +41,11 @@ function baseUnderstanding() {
 
 function hasValue(value) {
   return value !== null && value !== undefined && value !== '';
+}
+
+function hasHighConfidenceLocalValue(field, localParsedData = {}) {
+  const value = localParsedData?.[field];
+  return hasValue(value) && isHighConfidenceLocalField(field, value);
 }
 
 function compactFields(fields = {}) {
@@ -212,15 +216,20 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
     evidenceByField[field] = { snippet: input.slice(0, 120), confidence: 0.9, source: 'local' };
   }
 
+  // El parser local solo entra a mergedData cuando la propia autoridad lo
+  // clasifica como alta confianza. Una fuente probabilística posterior puede
+  // completar campos ausentes, pero no debe borrar ni reinterpretar esa misma
+  // entidad del turno. Si una corrección es explícita, parseNaturalData recibe
+  // el texto de la corrección y el valor local ya corresponde al turno actual.
   for (const [field, value] of Object.entries(aiFields)) {
-    if (!hasValue(value) || shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;
+    if (!hasValue(value) || hasHighConfidenceLocalValue(field, localParsedData)) continue;
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'openai');
     if (extractionEvidence[field]) evidenceByField[field] = extractionEvidence[field];
   }
 
   for (const [field, value] of Object.entries(engineFields)) {
-    if (!hasValue(value) || shouldPreserveStructuredLocalField(field, localParsedData[field], value)) continue;
+    if (!hasValue(value) || hasHighConfidenceLocalValue(field, localParsedData)) continue;
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'engine');
     evidenceByField[field] = evidenceByField[field]
