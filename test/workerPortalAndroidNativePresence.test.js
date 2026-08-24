@@ -70,6 +70,8 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
 
   assert.match(mainActivity, /attendancePermissions\(true\)/);
   assert.match(mainActivity, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
+  assert.match(mainActivity, /hasNearbyLegacyLocationPermission\(\)/);
+  assert.match(mainActivity, /addNearbyLegacyLocationPermissionIfNeeded\(missing\)/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
@@ -78,7 +80,8 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_ENABLE/);
   assert.match(mainActivity, /"bluetooth_unavailable"/);
   assert.match(mainActivity, /"bluetooth_disabled"/);
-  assert.match(mainActivity, /nearbyTransportPermissionsGranted\(\)[\s\S]{0,180}hasNearbyBluetoothPermissions\(\)[\s\S]{0,120}hasNearbyWifiPermission\(\)/);
+  assert.match(mainActivity, /nearbyTransportPermissionsGranted\(\)[\s\S]{0,220}hasNearbyLegacyLocationPermission\(\)[\s\S]{0,100}hasNearbyBluetoothPermissions\(\)[\s\S]{0,100}hasNearbyWifiPermission\(\)/);
+  assert.match(mainActivity, /ensureAttendanceLocationPermission\(\)[\s\S]{0,180}hasPreciseLocationPermission\(\)[\s\S]{0,180}REQUEST_ATTENDANCE_LOCATION/);
   assert.doesNotMatch(mainActivity, /nearbyPermissionsGranted\(\)/);
 
   assert.match(keyStore, /AndroidKeyStore/);
@@ -118,6 +121,8 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(bridge, /getProofBundle\(/);
   assert.match(bridge, /manager\.startReady/);
   assert.match(bridge, /manager\.startLeaderScan/);
+  assert.match(bridge, /startCrewScan\(String inputJson\)[\s\S]{0,260}activity\.ensureAttendanceLocationPermission\(\)/);
+  assert.match(bridge, /requestAttendanceLocation\(String inputJson\)[\s\S]{0,260}activity\.ensureAttendanceLocationPermission\(\)/);
 
   assert.match(nativePresence, /Marcación de cuadrilla/);
   assert.match(nativePresence, /Marcar entrada de la cuadrilla/);
