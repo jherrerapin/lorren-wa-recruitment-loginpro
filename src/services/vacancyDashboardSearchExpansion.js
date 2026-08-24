@@ -783,8 +783,11 @@ export function buildVacancyApplicationCycleScript(cycleMetadata = {}, role = ''
     function candidateIdFromDetailLink(anchor) {
       if (!anchor) return '';
       const url = new URL(anchor.getAttribute('href') || '', window.location.origin);
-      const match = /^\/admin\/candidates\/([^/]+)$/.exec(url.pathname);
-      return match ? decodeURIComponent(match[1]) : '';
+      const prefix = '/admin/candidates/';
+      if (!url.pathname.startsWith(prefix)) return '';
+      const encodedCandidateId = url.pathname.slice(prefix.length);
+      if (!encodedCandidateId || encodedCandidateId.includes('/')) return '';
+      return decodeURIComponent(encodedCandidateId);
     }
 
     function buildCandidateCheckbox(candidateId) {
@@ -918,7 +921,11 @@ export function buildVacancyApplicationCycleScript(cycleMetadata = {}, role = ''
               body: body.toString()
             });
             const finalUrl = new URL(response.url || window.location.href, window.location.origin);
-            if (!response.ok || !/^\/admin\/candidates\/[^/]+$/.test(finalUrl.pathname)) {
+            const detailPrefix = '/admin/candidates/';
+            const finalCandidateId = finalUrl.pathname.startsWith(detailPrefix)
+              ? finalUrl.pathname.slice(detailPrefix.length)
+              : '';
+            if (!response.ok || !finalCandidateId || finalCandidateId.includes('/')) {
               throw new Error('bulk_status_request_failed');
             }
             completed += 1;
