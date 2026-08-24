@@ -121,6 +121,7 @@ export function filterCandidatesByScope(candidates, scope = 'all') {
   if (scope === 'contacted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTACTADO');
   if (scope === 'contracted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTRATADO');
   if (scope === 'rejected') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'RECHAZADO');
+  if (scope === 'all') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) !== 'RECHAZADO');
   return candidates;
 }
 
