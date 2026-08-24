@@ -366,7 +366,7 @@ test('tarjeta de cada trabajador muestra las cuatro marcaciones persistidas con 
   assert.match(view, /Marcaciones registradas/);
   assert.match(view, /data-assignment-history-mark="ARRIVAL"[\s\S]{0,180}assignment\.arrivalReportedLabel/);
   assert.match(view, /data-assignment-history-mark="BREAK_START"[\s\S]{0,180}assignment\.breakStartLabel/);
-  assert.match(view, /data-assignment-history-mark="BREAK_END"[\s\S]{0,180}assignment\.breakEndReportedLabel/);
+  assert.match(view, /data-assignment-history-mark="BREAK_END"[\s\S]{0,180}assignment\.breakEndLabel/);
   assert.match(view, /data-assignment-history-mark="DEPARTURE"[\s\S]{0,180}assignment\.departureReportedLabel/);
   assert.match(view, /Sin registrar/);
 });
