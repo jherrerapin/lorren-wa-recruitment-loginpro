@@ -2,6 +2,7 @@ import {
   alignCandidateLocationFields,
   isHighConfidenceLocalField,
   normalizeCandidateFields,
+  normalizeTransportMode,
   parseNaturalData,
   shouldPreserveStructuredLocalField
 } from './candidateData.js';
@@ -9,6 +10,7 @@ import { detectRoleHintFromText } from './vacancyResolver.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
 
 const EMPTY_USAGE = Object.freeze({ input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+const EVIDENCE_SENSITIVE_FIELDS = new Set(['fullName', 'documentNumber', 'neighborhood', 'locality', 'transportMode']);
 
 const EMPTY_UNDERSTANDING = Object.freeze({
   intent: 'unknown',
@@ -113,6 +115,44 @@ function normalizeEntityComparable(value = '') {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeDigits(value = '') {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function evidenceSupportsValue(field, value, evidence = {}) {
+  const snippet = String(evidence?.snippet || '').trim();
+  if (!snippet) return false;
+
+  if (field === 'documentNumber') {
+    const expected = normalizeDigits(value);
+    const observed = normalizeDigits(snippet);
+    return Boolean(expected && observed && observed.includes(expected));
+  }
+
+  if (field === 'transportMode') {
+    const expected = normalizeTransportMode(value);
+    const observed = normalizeTransportMode(snippet);
+    return Boolean(expected && observed && expected === observed);
+  }
+
+  const expected = normalizeEntityComparable(value);
+  const observed = normalizeEntityComparable(snippet);
+  return Boolean(expected && observed && observed.includes(expected));
+}
+
+function shouldPreserveAcceptedLocalField(field, localValue, proposedValue, evidence = {}) {
+  if (!hasValue(localValue) || !hasValue(proposedValue)) return false;
+  if (normalizeEntityComparable(localValue) === normalizeEntityComparable(proposedValue)) return false;
+  if (shouldPreserveStructuredLocalField(field, localValue, proposedValue)) return true;
+  if (!EVIDENCE_SENSITIVE_FIELDS.has(field)) return false;
+
+  // Para identidad, residencia, documento y transporte una fuente posterior
+  // solo desplaza un valor ya aceptado cuando trae evidencia específica que
+  // respalda su propio valor. La ausencia o contradicción de evidencia no
+  // puede borrar una entidad ya comprendida del mismo turno.
+  return !evidenceSupportsValue(field, proposedValue, evidence);
 }
 
 function conflictsWithIndependentIdentityEvidence(field, value, localFields = {}) {
@@ -278,7 +318,7 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
 
   // Cada fuente se valida antes de competir por un campo. Así una propuesta
   // posterior rechazada no borra el fallback ya aceptado. La IA conserva la
-  // precedencia semántica cuando su propuesta es válida; el parser local solo
+  // precedencia semántica cuando su propuesta está respaldada; el parser local
   // actúa como evidencia independiente/fallback y no como segunda autoridad.
   for (const [field, value] of Object.entries(localGate.fields)) {
     mergedData[field] = value;
@@ -287,7 +327,7 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
   }
 
   for (const [field, value] of Object.entries(aiGate.fields)) {
-    if (shouldPreserveStructuredLocalField(field, localGate.fields[field], value)) continue;
+    if (shouldPreserveAcceptedLocalField(field, localGate.fields[field], value, aiGate.evidence[field])) continue;
     if (conflictsWithIndependentIdentityEvidence(field, value, localGate.fields)) continue;
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'openai');
@@ -295,7 +335,7 @@ function buildRuntimeTurnInterpretation(input, aiResult, runtime = {}, context =
   }
 
   for (const [field, value] of Object.entries(engineGate.fields)) {
-    if (shouldPreserveStructuredLocalField(field, localGate.fields[field], value)) continue;
+    if (shouldPreserveAcceptedLocalField(field, localGate.fields[field], value, engineGate.evidence[field])) continue;
     if (conflictsWithIndependentIdentityEvidence(field, value, localGate.fields)) continue;
     mergedData[field] = value;
     mergeFieldSource(sourceByField, field, 'engine');
