@@ -25,6 +25,18 @@ const VACANCY_CYCLE_AUDIT_ACTIONS = [
   'VACANCY_UPDATED',
   'VACANCY_FLOW_TOGGLED'
 ];
+const RECRUITMENT_BULK_STATUSES = [
+  'REGISTRADO',
+  'APROBADO',
+  'CONTACTADO',
+  'RECHAZADO'
+];
+
+export function historicalBulkCandidateStatuses(role = '') {
+  return role === 'dev'
+    ? ['NUEVO', ...RECRUITMENT_BULK_STATUSES]
+    : [...RECRUITMENT_BULK_STATUSES];
+}
 
 function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
@@ -706,15 +718,25 @@ function buildApplicantLinkScript(dateRange) {
 </script>`;
 }
 
-export function buildVacancyApplicationCycleScript(cycleMetadata = {}) {
+export function buildVacancyApplicationCycleScript(cycleMetadata = {}, role = '') {
   const serializedCycles = JSON.stringify(cycleMetadata || {}).replaceAll('<', '\\u003c');
+  const serializedBulkStatuses = JSON.stringify(historicalBulkCandidateStatuses(role)).replaceAll('<', '\\u003c');
 
   return `
 <script>
   (function () {
     const cycles = ${serializedCycles};
+    const bulkStatuses = ${serializedBulkStatuses};
     const entries = Object.values(cycles || {});
     if (!entries.length) return;
+
+    const bulkStatusLabels = {
+      NUEVO: 'Nuevo',
+      REGISTRADO: 'Registrado',
+      APROBADO: 'Aprobado',
+      CONTACTADO: 'Contactado',
+      RECHAZADO: 'Rechazado'
+    };
 
     function relativeHref(url) {
       const query = url.searchParams.toString();
@@ -758,15 +780,178 @@ export function buildVacancyApplicationCycleScript(cycleMetadata = {}) {
       count.hidden = false;
     }
 
+    function candidateIdFromDetailLink(anchor) {
+      if (!anchor) return '';
+      const url = new URL(anchor.getAttribute('href') || '', window.location.origin);
+      const match = /^\/admin\/candidates\/([^/]+)$/.exec(url.pathname);
+      return match ? decodeURIComponent(match[1]) : '';
+    }
+
+    function buildCandidateCheckbox(candidateId) {
+      const label = document.createElement('label');
+      label.setAttribute('data-history-bulk-checkbox', candidateId);
+      label.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin:0 8px 5px 0;font-size:11px;font-weight:700;color:var(--text-muted);cursor:pointer;';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.value = candidateId;
+      checkbox.setAttribute('data-history-candidate-id', candidateId);
+      checkbox.setAttribute('aria-label', 'Seleccionar candidato para cambio de estado');
+
+      const text = document.createElement('span');
+      text.textContent = 'Seleccionar';
+      label.append(checkbox, text);
+      return label;
+    }
+
+    function attachHistoricalBulkControls(meta, panel, cycleBar) {
+      if (!meta.showHistory || !meta.cycleStartedAt || !panel || !cycleBar || !bulkStatuses.length) return;
+      if (panel.querySelector('[data-vacancy-bulk-status="' + meta.vacancyId + '"]')) return;
+
+      const candidateIds = new Set();
+      panel.querySelectorAll('a.link-detail[href]').forEach((anchor) => {
+        const candidateId = candidateIdFromDetailLink(anchor);
+        if (!candidateId || candidateIds.has(candidateId)) return;
+        const row = anchor.closest('.candidate-row, tr');
+        if (!row || row.querySelector('.badge-contratado')) return;
+
+        const mount = row.classList.contains('candidate-row')
+          ? row.firstElementChild
+          : (row.querySelector('td:nth-child(2)') || row.querySelector('td'));
+        if (!mount) return;
+
+        candidateIds.add(candidateId);
+        mount.prepend(buildCandidateCheckbox(candidateId));
+      });
+
+      if (!candidateIds.size) return;
+
+      const toolbar = document.createElement('form');
+      toolbar.setAttribute('data-vacancy-bulk-status', meta.vacancyId);
+      toolbar.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid var(--border-soft);background:#f8fafc;';
+
+      const selectAllLabel = document.createElement('label');
+      selectAllLabel.style.cssText = 'display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--navy);cursor:pointer;';
+      const selectAll = document.createElement('input');
+      selectAll.type = 'checkbox';
+      selectAll.setAttribute('data-history-select-all', meta.vacancyId);
+      const selectAllText = document.createElement('span');
+      selectAllText.textContent = 'Seleccionar visibles';
+      selectAllLabel.append(selectAll, selectAllText);
+
+      const selectedCount = document.createElement('span');
+      selectedCount.className = 'filter-note';
+      selectedCount.setAttribute('data-history-selected-count', meta.vacancyId);
+      selectedCount.textContent = '0 seleccionados';
+
+      const statusSelect = document.createElement('select');
+      statusSelect.setAttribute('aria-label', 'Nuevo estado para seleccionados');
+      statusSelect.style.cssText = 'min-height:34px;border:1px solid var(--border);border-radius:6px;padding:5px 9px;background:var(--surface);color:var(--navy);';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = 'Cambiar estado a...';
+      statusSelect.appendChild(placeholder);
+      bulkStatuses.forEach((status) => {
+        const option = document.createElement('option');
+        option.value = status;
+        option.textContent = bulkStatusLabels[status] || status;
+        statusSelect.appendChild(option);
+      });
+
+      const submit = document.createElement('button');
+      submit.type = 'submit';
+      submit.className = 'export-btn';
+      submit.style.cursor = 'pointer';
+      submit.disabled = true;
+      submit.textContent = 'Aplicar a seleccionados';
+
+      const feedback = document.createElement('span');
+      feedback.className = 'filter-note';
+      feedback.setAttribute('data-history-bulk-feedback', meta.vacancyId);
+      feedback.textContent = 'Contratados se gestionan individualmente.';
+
+      toolbar.append(selectAllLabel, selectedCount, statusSelect, submit, feedback);
+      cycleBar.insertAdjacentElement('afterend', toolbar);
+
+      const candidateCheckboxes = () => Array.from(panel.querySelectorAll('input[data-history-candidate-id]'));
+      const syncControls = () => {
+        const checkboxes = candidateCheckboxes();
+        const selected = checkboxes.filter((checkbox) => checkbox.checked);
+        selectedCount.textContent = selected.length + ' seleccionado' + (selected.length === 1 ? '' : 's');
+        selectAll.checked = checkboxes.length > 0 && selected.length === checkboxes.length;
+        selectAll.indeterminate = selected.length > 0 && selected.length < checkboxes.length;
+        submit.disabled = selected.length === 0 || !statusSelect.value;
+      };
+
+      candidateCheckboxes().forEach((checkbox) => checkbox.addEventListener('change', syncControls));
+      statusSelect.addEventListener('change', syncControls);
+      selectAll.addEventListener('change', () => {
+        candidateCheckboxes().forEach((checkbox) => { checkbox.checked = selectAll.checked; });
+        syncControls();
+      });
+
+      toolbar.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const selectedIds = candidateCheckboxes()
+          .filter((checkbox) => checkbox.checked)
+          .map((checkbox) => checkbox.value);
+        const status = statusSelect.value;
+        if (!selectedIds.length || !bulkStatuses.includes(status)) return;
+
+        submit.disabled = true;
+        selectAll.disabled = true;
+        statusSelect.disabled = true;
+        candidateCheckboxes().forEach((checkbox) => { checkbox.disabled = true; });
+        let completed = 0;
+        const returnTo = pageUrl.pathname + pageUrl.search;
+
+        try {
+          for (const candidateId of selectedIds) {
+            feedback.textContent = 'Actualizando ' + (completed + 1) + ' de ' + selectedIds.length + '...';
+            const body = new URLSearchParams();
+            body.set('status', status);
+            body.set('returnTo', returnTo);
+            const response = await fetch('/admin/candidates/' + encodeURIComponent(candidateId) + '/status', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+              body: body.toString()
+            });
+            const finalUrl = new URL(response.url || window.location.href, window.location.origin);
+            if (!response.ok || !/^\/admin\/candidates\/[^/]+$/.test(finalUrl.pathname)) {
+              throw new Error('bulk_status_request_failed');
+            }
+            completed += 1;
+          }
+
+          const target = new URL(window.location.href);
+          target.searchParams.delete('error');
+          target.searchParams.set('success', completed + ' registro' + (completed === 1 ? '' : 's') + ' actualizado' + (completed === 1 ? '' : 's') + ' a ' + (bulkStatusLabels[status] || status) + '.');
+          target.hash = 'vacancy-' + meta.vacancyId;
+          window.location.assign(relativeHref(target));
+        } catch (_error) {
+          const target = new URL(window.location.href);
+          target.searchParams.delete('success');
+          target.searchParams.set('error', completed
+            ? 'Se actualizaron ' + completed + ' de ' + selectedIds.length + ' registros. Revisa el listado antes de reintentar.'
+            : 'No fue posible aplicar el cambio masivo. Ningún registro fue confirmado como actualizado.');
+          target.hash = 'vacancy-' + meta.vacancyId;
+          window.location.assign(relativeHref(target));
+        }
+      });
+
+      syncControls();
+    }
+
     const pageUrl = new URL(window.location.href);
     const activeHistory = entries.filter((meta) => meta.showHistory && meta.cycleStartedAt);
 
     entries.forEach((meta) => {
       if (!meta || !meta.vacancyId) return;
       const panel = document.getElementById('vacancy-' + meta.vacancyId);
+      let cycleBar = panel?.querySelector('[data-vacancy-cycle-scope]') || null;
       if (panel && meta.cycleStartedAt) {
-        const existing = panel.querySelector('[data-vacancy-cycle-scope]');
-        if (!existing) {
+        if (!cycleBar) {
           const bar = document.createElement('div');
           bar.setAttribute('data-vacancy-cycle-scope', meta.vacancyId);
           bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid var(--border-soft);background:var(--surface);';
@@ -791,7 +976,9 @@ export function buildVacancyApplicationCycleScript(cycleMetadata = {}) {
           const header = panel.querySelector('.vacancy-header');
           if (header) header.insertAdjacentElement('afterend', bar);
           else panel.prepend(bar);
+          cycleBar = bar;
         }
+        attachHistoricalBulkControls(meta, panel, cycleBar);
       }
 
       const tab = Array.from(document.querySelectorAll('[data-vacancy-tab]'))
@@ -848,7 +1035,7 @@ export function injectAdminApplicantControls(html, req, viewModel = {}) {
   }
 
   const applicantScript = buildApplicantLinkScript(dateRange);
-  const cycleScript = buildVacancyApplicationCycleScript(viewModel.vacancyApplicationCycles || {});
+  const cycleScript = buildVacancyApplicationCycleScript(viewModel.vacancyApplicationCycles || {}, viewModel.role || '');
   const scripts = `${applicantScript}\n${cycleScript}`;
   return output.includes('</body>')
     ? output.replace('</body>', `${scripts}\n</body>`)
