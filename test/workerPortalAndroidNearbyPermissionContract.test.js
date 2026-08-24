@@ -16,7 +16,7 @@ function methodBody(source, signature, nextSignature) {
   return source.slice(start, end);
 }
 
-test('Nearby de cuadrilla separa permisos de transporte y geocerca, con desugaring habilitado', async () => {
+test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatibilidad por versión', async () => {
   const [manifest, mainActivity, gradle] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
     read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
@@ -33,6 +33,25 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con desugari
   assert.match(manifest, /android\.permission\.BLUETOOTH_CONNECT/);
   assert.match(manifest, /android\.permission\.BLUETOOTH_ADVERTISE/);
   assert.match(manifest, /android\.hardware\.bluetooth_le/);
+
+  const legacyLocationGranted = methodBody(
+    mainActivity,
+    'private boolean hasNearbyLegacyLocationPermission()',
+    'private void addNearbyLegacyLocationPermissionIfNeeded'
+  );
+  assert.match(legacyLocationGranted, /Build\.VERSION\.SDK_INT > Build\.VERSION_CODES\.S/);
+  assert.match(legacyLocationGranted, /Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.Q[\s\S]{0,80}hasPreciseLocationPermission\(\)/);
+  assert.match(legacyLocationGranted, /Manifest\.permission\.ACCESS_COARSE_LOCATION/);
+
+  const legacyLocationRequest = methodBody(
+    mainActivity,
+    'private void addNearbyLegacyLocationPermissionIfNeeded',
+    'private boolean hasNearbyBluetoothPermissions()'
+  );
+  assert.match(legacyLocationRequest, /Build\.VERSION\.SDK_INT > Build\.VERSION_CODES\.S/);
+  assert.match(legacyLocationRequest, /Build\.VERSION\.SDK_INT >= Build\.VERSION_CODES\.Q/);
+  assert.match(legacyLocationRequest, /addPreciseLocationPermissionsIfNeeded\(permissions\)/);
+  assert.match(legacyLocationRequest, /Manifest\.permission\.ACCESS_COARSE_LOCATION/);
 
   const bluetoothGroup = methodBody(
     mainActivity,
@@ -55,26 +74,36 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con desugari
     'private List<String> nearbyTransportPermissions()',
     'private boolean nearbyTransportPermissionsGranted()'
   );
+  assert.match(transportPermissions, /addNearbyLegacyLocationPermissionIfNeeded\(missing\)/);
   assert.match(transportPermissions, /addNearbyBluetoothPermissionsIfNeeded\(missing\)/);
   assert.match(transportPermissions, /addNearbyWifiPermissionIfNeeded\(missing\)/);
-  assert.doesNotMatch(transportPermissions, /addPreciseLocationPermissionsIfNeeded|ACCESS_FINE_LOCATION/);
+  assert.doesNotMatch(transportPermissions, /attendancePermissions/);
 
   const transportGranted = methodBody(
     mainActivity,
     'private boolean nearbyTransportPermissionsGranted()',
     'private List<String> attendancePermissions(boolean includeCamera)'
   );
+  assert.match(transportGranted, /hasNearbyLegacyLocationPermission\(\)/);
   assert.match(transportGranted, /hasNearbyBluetoothPermissions\(\)/);
   assert.match(transportGranted, /hasNearbyWifiPermission\(\)/);
-  assert.doesNotMatch(transportGranted, /hasPreciseLocationPermission/);
 
   const ensureNearby = methodBody(
     mainActivity,
     'boolean ensureNearbyPermissions()',
-    'String ensureNearbyRadioReady()'
+    'boolean ensureAttendanceLocationPermission()'
   );
   assert.match(ensureNearby, /nearbyTransportPermissions\(\)/);
-  assert.doesNotMatch(ensureNearby, /attendancePermissions|hasPreciseLocationPermission/);
+  assert.doesNotMatch(ensureNearby, /attendancePermissions/);
+
+  const ensureAttendanceLocation = methodBody(
+    mainActivity,
+    'boolean ensureAttendanceLocationPermission()',
+    'String ensureNearbyRadioReady()'
+  );
+  assert.match(ensureAttendanceLocation, /hasPreciseLocationPermission\(\)/);
+  assert.match(ensureAttendanceLocation, /locationRuntimePermissions\(\)/);
+  assert.match(ensureAttendanceLocation, /REQUEST_ATTENDANCE_LOCATION/);
 
   const attendancePermissions = methodBody(
     mainActivity,
