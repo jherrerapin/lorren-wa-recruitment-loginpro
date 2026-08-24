@@ -92,17 +92,19 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
 
   assert.match(presenceManager, /Nearby\.getConnectionsClient/);
   assert.match(presenceManager, /ConnectionsClient/);
-  assert.match(presenceManager, /Strategy\.P2P_CLUSTER/);
+  assert.match(presenceManager, /Strategy\.P2P_STAR/);
   assert.match(presenceManager, /AdvertisingOptions\.Builder/);
   assert.match(presenceManager, /DiscoveryOptions\.Builder/);
   assert.match(presenceManager, /ConnectionOptions\.Builder/);
   assert.match(presenceManager, /setLowPower\(false\)/);
-  assert.equal((presenceManager.match(/ConnectionType\.BALANCED/g) || []).length, 2);
-  assert.doesNotMatch(presenceManager, /ConnectionType\.(?:NON_DISRUPTIVE|DISRUPTIVE)/);
-  assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,260}startReadyAdvertising\(normalizedService, 0\)/);
-  assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,1200}startLeaderDiscovery\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
+  assert.equal((presenceManager.match(/ConnectionType\.NON_DISRUPTIVE/g) || []).length, 2);
+  assert.doesNotMatch(presenceManager, /ConnectionType\.(?:BALANCED|DISRUPTIVE)/);
+  assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,260}startReadyDiscovery\(normalizedService, 0\)/);
+  assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,1400}startLeaderAdvertising\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
   assert.match(presenceManager, /client\.startAdvertising/);
   assert.match(presenceManager, /client\.startDiscovery/);
+  assert.match(presenceManager, /role != Role\.READY[\s\S]{0,160}requestConnection/);
+  assert.match(presenceManager, /role == Role\.LEADER && requestedEndpoints\.add\(endpointId\)[\s\S]{0,180}endpoint_found/);
   assert.match(presenceManager, /Payload\.fromBytes/);
   assert.match(presenceManager, /"attemptId"/);
   assert.match(presenceManager, /"serviceRequestId"/);
@@ -139,7 +141,7 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   }
 });
 
-test('auxiliar queda listo por visibilidad y confirmación de Nearby, sin depender del foco del WebView', async () => {
+test('auxiliar queda listo por visibilidad y discovery confirmado de Nearby, sin depender del foco del WebView', async () => {
   const [nativePresence, presenceManager] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -177,8 +179,8 @@ test('auxiliar queda listo por visibilidad y confirmación de Nearby, sin depend
   assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
   assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,220}activeMode = 'READY'/);
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
-  assert.match(presenceManager, /startReadyAdvertising\(normalizedService, 0\)/);
-  assert.match(presenceManager, /client\.startAdvertising[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
+  assert.match(presenceManager, /startReadyDiscovery\(normalizedService, 0\)/);
+  assert.match(presenceManager, /client\.startDiscovery[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
   assert.match(onlineHandler[1], /ensureAuxiliaryReady\(\)/);
   assert.match(offlineHandler[1], /ensureAuxiliaryReady\(\)/);
   assert.doesNotMatch(onlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
@@ -214,11 +216,11 @@ test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal
   assert.match(nativePresence, /if \(!context\?\.isCrewLeader\) return;/);
 });
 
-test('advertisement Nearby no publica PII ni usa el identificador de servicio como identidad de trabajador', async () => {
+test('advertisement Nearby del encargado no publica PII ni usa el identificador de servicio como identidad de trabajador', async () => {
   const presenceManager = await read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
   assert.match(presenceManager, /ENDPOINT_NAME = "LORREN"/);
-  assert.match(presenceManager, /client\.startAdvertising\([\s\S]{0,180}ENDPOINT_NAME[\s\S]{0,100}SERVICE_ID/);
+  assert.match(presenceManager, /startLeaderAdvertising[\s\S]{0,700}client\.startAdvertising\([\s\S]{0,180}ENDPOINT_NAME[\s\S]{0,100}SERVICE_ID/);
   assert.doesNotMatch(presenceManager, /fullName|workerName|documentNumber|phoneNumber/i);
   assert.match(presenceManager, /keyId\(publicKey\)/);
   assert.match(presenceManager, /proofsByKey\.put\(keyId, stored\)/);
