@@ -273,10 +273,6 @@ final class NearbyPresenceManager {
             synchronized (NearbyPresenceManager.this) {
                 if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) return;
                 client.stopAdvertising();
-                if (requestedEndpoints.isEmpty()) {
-                    completeLeaderScan(nextAttemptId);
-                    return;
-                }
                 scanCompleteTimeout = () -> completeLeaderScan(nextAttemptId);
                 handler.postDelayed(scanCompleteTimeout, CONNECTION_GRACE_MS);
             }
