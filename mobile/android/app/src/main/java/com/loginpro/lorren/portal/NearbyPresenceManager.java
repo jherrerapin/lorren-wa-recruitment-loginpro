@@ -39,9 +39,9 @@ import java.util.Set;
  *
  * El encargado es el hub temporal: anuncia solo durante una marcación. Los
  * auxiliares preparados mantienen discovery y solicitan conexión al encontrarlo.
- * Nearby puede usar los radios locales ya disponibles, pero NON_DISRUPTIVE evita
- * que la comprobación cambie el estado de Wi-Fi/Bluetooth. Esta clase no escribe
- * asistencia.
+ * Para este flujo se restringe Nearby a medios de bajo consumo (BLE) y se usa
+ * NON_DISRUPTIVE para no cambiar el estado de Wi-Fi/Bluetooth. Esta clase no
+ * escribe asistencia.
  */
 final class NearbyPresenceManager {
     interface EventSink {
@@ -99,7 +99,7 @@ final class NearbyPresenceManager {
     private void startReadyDiscovery(String normalizedService, int retryCount) {
         DiscoveryOptions options = new DiscoveryOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false)
+            .setLowPower(true)
             .build();
         emitDiagnostic("AUX", "DISCOVERY_START", Integer.MIN_VALUE, retryCount);
         try {
@@ -191,7 +191,7 @@ final class NearbyPresenceManager {
     ) {
         AdvertisingOptions options = new AdvertisingOptions.Builder()
             .setStrategy(STRATEGY)
-            .setLowPower(false)
+            .setLowPower(true)
             .setConnectionType(ConnectionType.NON_DISRUPTIVE)
             .build();
         emitDiagnostic("ENC", "ADVERTISING_START", Integer.MIN_VALUE, retryCount);
@@ -352,7 +352,7 @@ final class NearbyPresenceManager {
 
     private void requestAuxiliaryConnection(String endpointId, int retryCount) {
         ConnectionOptions connectionOptions = new ConnectionOptions.Builder()
-            .setLowPower(false)
+            .setLowPower(true)
             .setConnectionType(ConnectionType.NON_DISRUPTIVE)
             .build();
         emitDiagnostic("AUX", "CONNECTION_REQUEST", Integer.MIN_VALUE, retryCount);
