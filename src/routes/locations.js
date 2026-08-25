@@ -1,6 +1,7 @@
 // routes/locations.js — CRUD de Sucursales, Operaciones y asignación territorial de usuarios
 import express from 'express';
 import {
+  canCreateRecruiterUsers,
   canManageUserModulePermissions,
   encodeUserAccessCities,
   encodeUserAccessSelection,
@@ -21,17 +22,11 @@ function sessionAuth(req, res, next) {
 }
 
 function canManageRecruiterUsers(req) {
-  if (req.userSource === 'env' && ['dev', 'admin'].includes(req.userRole)) return true;
-  return req.userSource === 'db'
-    && req.userRole === 'admin'
-    && req.username === 'reclutador-general'
-    && req.userAccessScope === 'ALL';
+  return canCreateRecruiterUsers(req);
 }
 
 function isProtectedRecruiterProfile(user = {}) {
-  const environmentAdminUsername = normalize(process.env.ADMIN_USER);
-  return user.username === 'reclutador-general'
-    || Boolean(environmentAdminUsername && user.username === environmentAdminUsername);
+  return user.username === 'reclutador-general';
 }
 
 function flash(res, type, msg) {
