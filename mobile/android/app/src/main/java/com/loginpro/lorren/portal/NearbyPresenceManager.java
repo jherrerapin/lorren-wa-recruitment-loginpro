@@ -231,7 +231,8 @@ final class NearbyPresenceManager {
                     return;
                 }
             }
-            // Corrección: Eliminado el Math.abs que bloqueaba a los auxiliares desfasados offline
+
+            // CORRECCIÓN RELOJ: Permitimos la conexión offline aunque haya desfase
             if (sentAt <= 0L) {
                 finishAuxiliaryExchange(socket);
                 return;
@@ -344,6 +345,17 @@ final class NearbyPresenceManager {
         try {
             registerLeaderReceiver();
             if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
+
+            // CORRECCIÓN: Evitar que Android ignore auxiliares si ya fueron emparejados en el pasado
+            try {
+                Set<BluetoothDevice> bonded = bluetoothAdapter.getBondedDevices();
+                if (bonded != null) {
+                    for (BluetoothDevice dev : bonded) {
+                        rememberDiscoveredDevice(dev);
+                    }
+                }
+            } catch (SecurityException ignored) {}
+
             emitDiagnostic("ENC", "CLASSIC_DISCOVERY_START");
             if (!bluetoothAdapter.startDiscovery()) {
                 failLeaderStart("advertising_failed");
@@ -519,7 +531,7 @@ final class NearbyPresenceManager {
                 return;
             }
             
-            // Corrección: Eliminado el Math.abs que bloqueaba a los auxiliares desfasados offline
+            // CORRECCIÓN RELOJ: Aceptamos respuesta sin importar desfase temporal
             long respondedAt = proof.optLong("respondedAt", 0L);
             if (respondedAt <= 0L) {
                 failLeaderPeer(address, "proof_invalid");
