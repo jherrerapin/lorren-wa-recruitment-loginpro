@@ -7,6 +7,21 @@ function requireTemplateString(value, label) {
   return normalized;
 }
 
+function buildTemplateQuickReplyComponents(rawPayloads = []) {
+  if (!Array.isArray(rawPayloads)) {
+    throw new TypeError('whatsapp_template_quick_reply_payloads_invalid');
+  }
+  return rawPayloads.map((value, index) => ({
+    type: 'button',
+    sub_type: 'quick_reply',
+    index: String(index),
+    parameters: [{
+      type: 'payload',
+      payload: requireTemplateString(value, 'whatsapp_template_quick_reply_payload')
+    }]
+  }));
+}
+
 export function buildWhatsAppTemplatePayload(to, options = {}) {
   const recipient = requireTemplateString(to, 'whatsapp_template_recipient');
   const name = requireTemplateString(options.name, 'whatsapp_template_name');
@@ -19,17 +34,21 @@ export function buildWhatsAppTemplatePayload(to, options = {}) {
     type: 'text',
     text: requireTemplateString(value, 'whatsapp_template_body_parameter')
   }));
+  const quickReplyComponents = buildTemplateQuickReplyComponents(options.quickReplyPayloads ?? []);
 
   const template = {
     name,
     language: { code: languageCode }
   };
+  const components = [];
   if (bodyParameters.length) {
-    template.components = [{
+    components.push({
       type: 'body',
       parameters: bodyParameters
-    }];
+    });
   }
+  components.push(...quickReplyComponents);
+  if (components.length) template.components = components;
 
   return {
     messaging_product: 'whatsapp',
