@@ -54,7 +54,7 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         portalBaseUri = Uri.parse(normalizeBaseUrl(BuildConfig.PORTAL_BASE_URL));
         if (!"https".equalsIgnoreCase(portalBaseUri.getScheme()) || portalBaseUri.getHost() == null) {
-            throw new IllegalStateException("lorrenPortalBaseUrl must be an https origin");
+            throw new IllegalStateException("lorrenPortalBaseUrl must use https://");
         }
 
         webView = new WebView(this);
@@ -337,28 +337,16 @@ public final class MainActivity extends Activity {
         permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE);
     }
 
-    private boolean hasNearbyWifiPermission() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true;
-        return hasPermission(Manifest.permission.NEARBY_WIFI_DEVICES);
-    }
-
-    private void addNearbyWifiPermissionIfNeeded(List<String> permissions) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNearbyWifiPermission()) return;
-        permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES);
-    }
-
     private List<String> nearbyTransportPermissions() {
         List<String> missing = new ArrayList<>();
         addNearbyLegacyLocationPermissionIfNeeded(missing);
         addNearbyBluetoothPermissionsIfNeeded(missing);
-        addNearbyWifiPermissionIfNeeded(missing);
         return missing;
     }
 
     private boolean nearbyTransportPermissionsGranted() {
         return hasNearbyLegacyLocationPermission()
-            && hasNearbyBluetoothPermissions()
-            && hasNearbyWifiPermission();
+            && hasNearbyBluetoothPermissions();
     }
 
     private List<String> attendancePermissions(boolean includeCamera) {

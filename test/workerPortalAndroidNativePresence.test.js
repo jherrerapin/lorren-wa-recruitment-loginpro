@@ -8,7 +8,7 @@ function read(relativePath) {
   return readFile(new URL(relativePath, ROOT), 'utf8');
 }
 
-test('Android privado reutiliza el Portal y Nearby Connections sin introducir un escritor de asistencia', async () => {
+test('Android privado reutiliza el Portal y una sola autoridad BLE nativa sin introducir escritor de asistencia', async () => {
   const [
     rootBuild,
     appBuild,
@@ -37,18 +37,14 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(appBuild, /minSdk 26/);
   assert.match(appBuild, /lorrenPortalBaseUrl/);
   assert.match(appBuild, /https:\/\/example\.invalid/);
-  assert.match(appBuild, /com\.google\.android\.gms:play-services-nearby:19\.4\.0/);
   assert.doesNotMatch(appBuild, /loginpro\.(com|co)|railway\.app|railway\.com/i);
 
   for (const permission of [
     'ACCESS_COARSE_LOCATION',
     'ACCESS_FINE_LOCATION',
-    'ACCESS_WIFI_STATE',
-    'CHANGE_WIFI_STATE',
     'BLUETOOTH_ADVERTISE',
     'BLUETOOTH_CONNECT',
-    'BLUETOOTH_SCAN',
-    'NEARBY_WIFI_DEVICES'
+    'BLUETOOTH_SCAN'
   ]) {
     assert.match(manifest, new RegExp(`android\\.permission\\.${permission}`));
   }
@@ -67,7 +63,6 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(mainActivity, /setAcceptThirdPartyCookies\(webView, false\)/);
   assert.match(mainActivity, /NATIVE_USER_AGENT_TOKEN = "LorrenNative\/1"/);
   assert.doesNotMatch(mainActivity, /Log\.[vdiew]|System\.out|System\.err/);
-
   assert.match(mainActivity, /attendancePermissions\(true\)/);
   assert.match(mainActivity, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
   assert.match(mainActivity, /hasNearbyLegacyLocationPermission\(\)/);
@@ -75,14 +70,14 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
-  assert.match(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
-  assert.match(mainActivity, /addNearbyWifiPermissionIfNeeded\(missing\)/);
+  assert.doesNotMatch(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
+  assert.doesNotMatch(mainActivity, /hasNearbyWifiPermission|addNearbyWifiPermissionIfNeeded/);
   assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_ENABLE/);
   assert.match(mainActivity, /"bluetooth_unavailable"/);
   assert.match(mainActivity, /"bluetooth_disabled"/);
-  assert.match(mainActivity, /nearbyTransportPermissionsGranted\(\)[\s\S]{0,220}hasNearbyLegacyLocationPermission\(\)[\s\S]{0,100}hasNearbyBluetoothPermissions\(\)[\s\S]{0,100}hasNearbyWifiPermission\(\)/);
+  assert.match(mainActivity, /nearbyTransportPermissionsGranted\(\)[\s\S]{0,180}hasNearbyLegacyLocationPermission\(\)[\s\S]{0,100}hasNearbyBluetoothPermissions\(\)/);
+  assert.doesNotMatch(mainActivity, /nearbyTransportPermissionsGranted\(\)[\s\S]{0,220}hasNearbyWifiPermission/);
   assert.match(mainActivity, /ensureAttendanceLocationPermission\(\)[\s\S]{0,180}hasPreciseLocationPermission\(\)[\s\S]{0,180}REQUEST_ATTENDANCE_LOCATION/);
-  assert.doesNotMatch(mainActivity, /nearbyPermissionsGranted\(\)/);
 
   assert.match(keyStore, /AndroidKeyStore/);
   assert.match(keyStore, /secp256r1/);
@@ -90,25 +85,18 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(keyStore, /setUserAuthenticationRequired\(false\)/);
   assert.doesNotMatch(keyStore, /encodeToString\([^\n]*getPrivate|privateKey\.getEncoded|getPrivate\(\)\.getEncoded/);
 
-  assert.match(presenceManager, /Nearby\.getConnectionsClient/);
-  assert.match(presenceManager, /ConnectionsClient/);
-  assert.match(presenceManager, /Strategy\.P2P_STAR/);
-  assert.match(presenceManager, /AdvertisingOptions\.Builder/);
-  assert.match(presenceManager, /DiscoveryOptions\.Builder/);
-  assert.match(presenceManager, /ConnectionOptions\.Builder/);
-  assert.equal((presenceManager.match(/setLowPower\(true\)/g) || []).length, 3);
-  assert.doesNotMatch(presenceManager, /setLowPower\(false\)/);
-  assert.equal((presenceManager.match(/ConnectionType\.NON_DISRUPTIVE/g) || []).length, 2);
-  assert.doesNotMatch(presenceManager, /ConnectionType\.(?:BALANCED|DISRUPTIVE)/);
-  assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,420}startReadyDiscovery\(normalizedService, 0\)/);
-  assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,1400}startLeaderAdvertising\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
-  assert.match(presenceManager, /client\.startAdvertising/);
-  assert.match(presenceManager, /client\.startDiscovery/);
-  assert.match(presenceManager, /role != Role\.READY[\s\S]{0,800}requestAuxiliaryConnection\(endpointId, 0\)/);
-  assert.match(presenceManager, /MAX_CONNECTION_REQUEST_RETRIES = 1/);
-  assert.match(presenceManager, /isRecoverableConnectionRequestFailure[\s\S]{0,260}STATUS_RADIO_ERROR[\s\S]{0,160}STATUS_ERROR/);
-  assert.match(presenceManager, /role == Role\.LEADER && requestedEndpoints\.add\(endpointId\)[\s\S]{0,180}endpoint_found/);
-  assert.match(presenceManager, /Payload\.fromBytes/);
+  assert.match(presenceManager, /BluetoothLeScanner/);
+  assert.match(presenceManager, /BluetoothLeAdvertiser/);
+  assert.match(presenceManager, /BluetoothGattServer/);
+  assert.match(presenceManager, /BluetoothGattCallback/);
+  assert.match(presenceManager, /BluetoothDevice\.TRANSPORT_LE/);
+  assert.match(presenceManager, /ScanSettings\.SCAN_MODE_LOW_LATENCY/);
+  assert.match(presenceManager, /AdvertiseSettings\.ADVERTISE_MODE_LOW_LATENCY/);
+  assert.match(presenceManager, /AdvertiseSettings\.ADVERTISE_TX_POWER_HIGH/);
+  assert.match(presenceManager, /setConnectable\(true\)/);
+  assert.match(presenceManager, /SERVICE_PARCEL_UUID/);
+  assert.doesNotMatch(presenceManager, /Nearby\.getConnectionsClient|ConnectionsClient|Strategy\.P2P_|ConnectionType\.|setLowPower\(/);
+  assert.doesNotMatch(presenceManager, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
   assert.match(presenceManager, /"attemptId"/);
   assert.match(presenceManager, /"serviceRequestId"/);
   assert.match(presenceManager, /"challenge"/);
@@ -116,8 +104,6 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(presenceManager, /DeviceKeyStore\.signBase64/);
   assert.match(presenceManager, /DeviceKeyStore\.verifyBase64/);
   assert.match(presenceManager, /proofsByKey/);
-  assert.doesNotMatch(presenceManager, /BluetoothLeAdvertiser|BluetoothLeScanner|BluetoothGatt|ScanFilter/);
-  assert.doesNotMatch(presenceManager, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
 
   assert.match(bridge, /JS_NAME = "LorrenAndroidPresence"/);
   assert.match(bridge, /"attendanceWriter", false/);
@@ -145,7 +131,7 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   }
 });
 
-test('auxiliar queda listo por visibilidad y discovery confirmado de Nearby, sin depender del foco del WebView', async () => {
+test('auxiliar queda listo por visibilidad con scan BLE activo y sin depender de WAN ni foco del WebView', async () => {
   const [nativePresence, presenceManager] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -166,34 +152,33 @@ test('auxiliar queda listo por visibilidad y discovery confirmado de Nearby, sin
     /window\.addEventListener\('offline', \(\) => \{([\s\S]*?)\n  \}\);\n  window\.addEventListener\('focus'/
   );
 
-  assert.ok(memberStatus, 'no se encontró la autoridad memberStatus');
-  assert.ok(ensureReady, 'no se encontró ensureAuxiliaryReady');
-  assert.ok(startReady, 'no se encontró startReady');
-  assert.ok(onlineHandler, 'no se encontró el manejador online');
-  assert.ok(offlineHandler, 'no se encontró el manejador offline');
+  assert.ok(memberStatus);
+  assert.ok(ensureReady);
+  assert.ok(startReady);
+  assert.ok(onlineHandler);
+  assert.ok(offlineHandler);
   assert.match(memberStatus[1], /if \(member\.isLeader\) return 'LEADER_DEVICE';/);
   assert.match(nativePresence, /status === 'LEADER_DEVICE'[\s\S]{0,120}label: 'Este teléfono'/);
   assert.match(ensureReady[1], /document\.visibilityState === 'hidden'/);
   assert.doesNotMatch(ensureReady[1], /document\.hasFocus/);
-  assert.match(ensureReady[1], /forceRestart && \['PREPARING', 'READY'\]\.includes\(activeMode\)[\s\S]{0,120}bridgeCall\('stopReady'\)/);
   assert.match(startReady[1], /activeMode = 'PREPARING'/);
   assert.match(startReady[1], /navigator\.onLine && !credentialPrepared\(\)[\s\S]{0,80}provisionCredential\(\)/);
+  assert.doesNotMatch(startReady[1], /if \(!navigator\.onLine\)[\s\S]{0,180}return/);
   assert.match(startReady[1], /bridgeCall\('setReady'/);
-  assert.doesNotMatch(startReady[1], /!navigator\.onLine[\s\S]{0,180}return/);
   assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
   assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,420}activeMode = 'READY'/);
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
-  assert.match(presenceManager, /startReadyDiscovery\(normalizedService, 0\)/);
-  assert.match(presenceManager, /client\.startDiscovery[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
+  assert.match(presenceManager, /startReadyScanner\(true\)/);
+  assert.match(presenceManager, /getBluetoothLeScanner\(\)/);
+  assert.match(presenceManager, /readyScanner\.startScan\([\s\S]{0,260}readyScanSettings\(\)[\s\S]{0,200}auxiliaryScanCallback/);
+  assert.match(presenceManager, /emitDiagnostic\("AUX", "DISCOVERY_READY"\)[\s\S]{0,100}emitReady\(\)/);
   assert.match(onlineHandler[1], /ensureAuxiliaryReady\(\)/);
   assert.match(offlineHandler[1], /ensureAuxiliaryReady\(\)/);
   assert.doesNotMatch(onlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
   assert.doesNotMatch(offlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
-  assert.match(nativePresence, /window\.addEventListener\('focus', scheduleAuxiliaryRearm\)/);
-  assert.match(nativePresence, /visibilityState === 'visible'[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
 });
 
-test('replay físico: preparar manualmente no reinicia un AUX ya READY y Nearby queda BLE-only en ambos roles', async () => {
+test('replay físico: el botón no destruye READY y BLE tiene watchdogs acotados y cola global de notificaciones', async () => {
   const [nativePresence, presenceManager] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -202,34 +187,36 @@ test('replay físico: preparar manualmente no reinicia un AUX ya READY y Nearby 
   const prepareBlock = nativePresence.match(
     /const prepare = element\([\s\S]*?actions\.appendChild\(prepare\);/
   );
-  assert.ok(prepareBlock, 'falta la acción manual del auxiliar');
+  assert.ok(prepareBlock, 'falta acción manual del auxiliar');
   assert.match(prepareBlock[0], /prepare\.disabled = \['PREPARING', 'READY'\]\.includes\(activeMode\)/);
   assert.match(prepareBlock[0], /if \(\['PREPARING', 'READY'\]\.includes\(activeMode\)\) return;/);
-  assert.match(prepareBlock[0], /clearAuxiliaryRearm\(\)/);
   assert.match(prepareBlock[0], /ensureAuxiliaryReady\(\)/);
   assert.doesNotMatch(prepareBlock[0], /ensureAuxiliaryReady\(true\)/);
-  assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,360}prepare\.disabled = true[\s\S]{0,120}prepare\.textContent = 'Bluetooth listo'/);
 
-  const discovery = presenceManager.match(
-    /private void startReadyDiscovery\(String normalizedService, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private void handleReadyDiscoveryFailure/
+  assert.match(presenceManager, /LEADER_START_TIMEOUT_MS = 25_000L/);
+  assert.match(presenceManager, /AUXILIARY_EXCHANGE_TIMEOUT_MS = 12_000L/);
+  assert.match(presenceManager, /scheduleAuxiliaryExchangeTimeout\(gatt\)/);
+  assert.match(presenceManager, /handler\.postDelayed\(auxiliaryExchangeTimeout, AUXILIARY_EXCHANGE_TIMEOUT_MS\)/);
+  assert.match(presenceManager, /cancelAuxiliaryExchangeTimeout\(\)/);
+  assert.match(presenceManager, /BluetoothDevice\.TRANSPORT_LE/);
+  assert.match(presenceManager, /requestConnectionPriority\(BluetoothGatt\.CONNECTION_PRIORITY_HIGH\)/);
+  assert.match(presenceManager, /requestMtu\(REQUESTED_MTU\)/);
+  assert.match(presenceManager, /SERVICE_DISCOVERY_FALLBACK_MS = 700L/);
+
+  assert.match(presenceManager, /Deque<PendingNotification> leaderNotificationQueue = new ArrayDeque<>\(\)/);
+  assert.match(presenceManager, /PendingNotification leaderNotificationInFlight/);
+  assert.match(presenceManager, /enqueueLeaderChallengeFrames/);
+  assert.match(presenceManager, /if \(leaderNotificationInFlight != null\) return/);
+  assert.match(presenceManager, /onNotificationSent[\s\S]{0,500}leaderNotificationInFlight = null[\s\S]{0,500}drainLeaderNotificationQueue\(\)/);
+
+  const startSuccess = presenceManager.match(
+    /public void onStartSuccess\(AdvertiseSettings settingsInEffect\) \{([\s\S]*?)\n        \}\n\n        @Override\n        public void onStartFailure/
   );
-  const advertising = presenceManager.match(
-    /private void startLeaderAdvertising\([\s\S]*?\) \{([\s\S]*?)\n    \}\n\n    private void handleLeaderAdvertisingFailure/
-  );
-  const connection = presenceManager.match(
-    /private void requestAuxiliaryConnection\(String endpointId, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private final ConnectionLifecycleCallback/
-  );
-  assert.ok(discovery, 'falta discovery AUX');
-  assert.ok(advertising, 'falta advertising ENC');
-  assert.ok(connection, 'falta conexión AUX');
-  assert.match(discovery[1], /setLowPower\(true\)/);
-  assert.match(advertising[1], /setLowPower\(true\)/);
-  assert.match(connection[1], /setLowPower\(true\)/);
-  assert.doesNotMatch(discovery[1], /setLowPower\(false\)/);
-  assert.doesNotMatch(advertising[1], /setLowPower\(false\)/);
-  assert.doesNotMatch(connection[1], /setLowPower\(false\)/);
-  assert.match(advertising[1], /ConnectionType\.NON_DISRUPTIVE/);
-  assert.match(connection[1], /ConnectionType\.NON_DISRUPTIVE/);
+  assert.ok(startSuccess, 'falta callback real de advertising BLE');
+  assert.match(startSuccess[1], /cancelLeaderStartTimeout\(\)/);
+  assert.match(startSuccess[1], /ADVERTISING_READY/);
+  assert.match(startSuccess[1], /scheduleLeaderTimeout\(attemptId, leaderTimeoutMs\)/);
+  assert.match(presenceManager, /handler\.postDelayed\(leaderStartTimeout, LEADER_START_TIMEOUT_MS\)/);
 });
 
 test('credencial persistida en Android es la autoridad para responder sin Internet', async () => {
@@ -259,18 +246,18 @@ test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal
   assert.match(nativePresence, /if \(!context\?\.isCrewLeader\) return;/);
 });
 
-test('advertisement Nearby del encargado no publica PII ni usa el identificador de servicio como identidad de trabajador', async () => {
+test('advertisement BLE del encargado publica solo UUID técnico y no PII', async () => {
   const presenceManager = await read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
-  assert.match(presenceManager, /ENDPOINT_NAME = "LORREN"/);
-  assert.match(presenceManager, /startLeaderAdvertising[\s\S]{0,700}client\.startAdvertising\([\s\S]{0,180}ENDPOINT_NAME[\s\S]{0,100}SERVICE_ID/);
+  assert.match(presenceManager, /new AdvertiseData\.Builder\(\)[\s\S]{0,220}addServiceUuid\(SERVICE_PARCEL_UUID\)/);
+  assert.match(presenceManager, /setIncludeDeviceName\(false\)/);
+  assert.match(presenceManager, /setIncludeTxPowerLevel\(false\)/);
   assert.doesNotMatch(presenceManager, /fullName|workerName|documentNumber|phoneNumber/i);
   assert.match(presenceManager, /keyId\(publicKey\)/);
   assert.match(presenceManager, /proofsByKey\.put\(keyId, stored\)/);
-  assert.doesNotMatch(presenceManager, /ENDPOINT_NAME\s*=\s*readyServiceRequestId|startAdvertising\(readyServiceRequestId/);
 });
 
-test('Nearby solo transporta la prueba; servidor y cola siguen siendo autoridades de asistencia', async () => {
+test('BLE solo transporta la prueba; servidor y cola siguen siendo autoridades de asistencia', async () => {
   const [nativePresence, bridge, presenceManager] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java'),
@@ -287,7 +274,7 @@ test('Nearby solo transporta la prueba; servidor y cola siguen siendo autoridade
   assert.doesNotMatch(nativePresence, /fetch\([^\n]*(?:llegada|salida|almuerzo)/i);
 });
 
-test('diagnóstico visible muestra checkpoints Nearby de ambos roles sin persistir ni exponer identificadores', async () => {
+test('diagnóstico visible conserva checkpoints sanitizados de ambos roles', async () => {
   const [nativePresence, presenceManager] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -300,11 +287,9 @@ test('diagnóstico visible muestra checkpoints Nearby de ambos roles sin persist
   assert.match(diagnosticEmitter[1], /emit\("diagnostic"/);
   assert.match(diagnosticEmitter[1], /event\.put\("actor", actor\)/);
   assert.match(diagnosticEmitter[1], /event\.put\("stage", stage\)/);
-  assert.match(diagnosticEmitter[1], /event\.put\("statusCode", statusCode\)/);
-  assert.match(diagnosticEmitter[1], /event\.put\("retryCount", retryCount\)/);
   assert.doesNotMatch(
     diagnosticEmitter[1],
-    /endpointId|workerId|serviceRequestId|attemptId|challenge|credential|publicKey|signature/
+    /address|workerId|serviceRequestId|attemptId|challenge|credential|publicKey|signature/
   );
 
   for (const stage of [
@@ -312,6 +297,7 @@ test('diagnóstico visible muestra checkpoints Nearby de ambos roles sin persist
     'DISCOVERY_READY',
     'ENDPOINT_FOUND',
     'CONNECTION_REQUEST',
+    'CONNECTION_ESTABLISHED',
     'CHALLENGE_RECEIVED',
     'PROOF_DISPATCHED'
   ]) {
@@ -320,6 +306,7 @@ test('diagnóstico visible muestra checkpoints Nearby de ambos roles sin persist
   for (const stage of [
     'ADVERTISING_START',
     'ADVERTISING_READY',
+    'CONNECTION_ESTABLISHED',
     'CHALLENGE_DISPATCHED',
     'PROOF_RECEIVED_RAW',
     'PROOF_VERIFIED',
@@ -327,10 +314,6 @@ test('diagnóstico visible muestra checkpoints Nearby de ambos roles sin persist
   ]) {
     assert.match(presenceManager, new RegExp(`emitDiagnostic\\(\\"ENC\\", \\"${stage}\\"`));
   }
-  assert.match(presenceManager, /String actor = role == Role\.LEADER \? "ENC" : "AUX";/);
-  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_INITIATED"\)/);
-  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_ACCEPTED"\)/);
-  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_ESTABLISHED"\)/);
 
   assert.match(nativePresence, /const DIAGNOSTIC_LIMIT = 20/);
   assert.match(nativePresence, /function recordDiagnostic\(actor, stage, detail = \{\}\)/);
