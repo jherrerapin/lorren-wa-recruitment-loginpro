@@ -12,7 +12,7 @@ function primaryGroup(html) {
   return html.match(/<div class="admin-module-nav-links" data-primary-nav-group="true">([\s\S]*?)<\/div>\s*<span class="spacer">/)?.[1] || '';
 }
 
-test('el nombre humano se muestra fuera del grupo de módulos y no expone el correo', () => {
+test('el nombre humano enlaza Mi perfil fuera de módulos y no expone el correo', () => {
   const html = buildAdminModuleNavbar({
     originalUrl: '/admin',
     session: {
@@ -26,10 +26,12 @@ test('el nombre humano se muestra fuera del grupo de módulos y no expone el cor
   });
 
   assert.match(html, /data-session-identity="true"/);
+  assert.match(html, /href="\/account\/profile"/);
+  assert.match(html, />Mi perfil<\/span>/);
   assert.match(html, />Persona de Prueba<\/span>/);
   assert.doesNotMatch(html, /persona@example\.test/);
-  assert.doesNotMatch(primaryGroup(html), /Persona de Prueba/);
-  assert.match(html, /<span class="spacer"><\/span>\s*<div class="admin-session-identity"/);
+  assert.doesNotMatch(primaryGroup(html), /Persona de Prueba|Mi perfil/);
+  assert.match(html, /<span class="spacer"><\/span>\s*<a class="admin-session-identity"/);
 });
 
 test('un reclutador ordinario ve Usuarios como módulo de creación', () => {
@@ -96,7 +98,7 @@ test('DEV puede entrar como la cuenta administrativa heredada sin habilitar sus 
   assert.doesNotMatch(html, /\/admin\/users\/legacy-admin-1\/reset-password/);
 });
 
-test('la vista impersonada muestra retorno explícito a DEV sin correo', () => {
+test('la vista impersonada muestra retorno explícito a DEV sin correo ni edición de perfil', () => {
   const html = buildAdminModuleNavbar({
     originalUrl: '/admin',
     session: {
@@ -118,6 +120,7 @@ test('la vista impersonada muestra retorno explícito a DEV sin correo', () => {
   assert.match(html, /action="\/admin\/users\/impersonation\/stop"/);
   assert.match(html, />Volver a DEV<\/button>/);
   assert.doesNotMatch(html, /objetivo@example\.test/);
+  assert.doesNotMatch(html, /\/account\/profile/);
 });
 
 test('el responsive coloca identidad en fila propia antes de módulos sin posicionamiento forzado', () => {
