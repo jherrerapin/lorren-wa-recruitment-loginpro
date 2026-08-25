@@ -96,8 +96,8 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(presenceManager, /AdvertisingOptions\.Builder/);
   assert.match(presenceManager, /DiscoveryOptions\.Builder/);
   assert.match(presenceManager, /ConnectionOptions\.Builder/);
-  assert.doesNotMatch(presenceManager, /setLowPower\(true\)/);
-  assert.equal((presenceManager.match(/setLowPower\(false\)/g) || []).length, 3);
+  assert.equal((presenceManager.match(/setLowPower\(true\)/g) || []).length, 3);
+  assert.doesNotMatch(presenceManager, /setLowPower\(false\)/);
   assert.equal((presenceManager.match(/ConnectionType\.NON_DISRUPTIVE/g) || []).length, 2);
   assert.doesNotMatch(presenceManager, /ConnectionType\.(?:BALANCED|DISRUPTIVE)/);
   assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,420}startReadyDiscovery\(normalizedService, 0\)/);
@@ -193,7 +193,7 @@ test('auxiliar queda listo por visibilidad y discovery confirmado de Nearby, sin
   assert.match(nativePresence, /visibilityState === 'visible'[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
 });
 
-test('replay físico: preparar manualmente no reinicia un AUX ya READY y Nearby usa potencia normal', async () => {
+test('replay físico: preparar manualmente no reinicia un AUX ya READY y Nearby queda BLE-only en ambos roles', async () => {
   const [nativePresence, presenceManager] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -213,15 +213,22 @@ test('replay físico: preparar manualmente no reinicia un AUX ya READY y Nearby 
   const discovery = presenceManager.match(
     /private void startReadyDiscovery\(String normalizedService, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private void handleReadyDiscoveryFailure/
   );
+  const advertising = presenceManager.match(
+    /private void startLeaderAdvertising\([\s\S]*?\) \{([\s\S]*?)\n    \}\n\n    private void handleLeaderAdvertisingFailure/
+  );
   const connection = presenceManager.match(
     /private void requestAuxiliaryConnection\(String endpointId, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private final ConnectionLifecycleCallback/
   );
   assert.ok(discovery, 'falta discovery AUX');
+  assert.ok(advertising, 'falta advertising ENC');
   assert.ok(connection, 'falta conexión AUX');
-  assert.match(discovery[1], /setLowPower\(false\)/);
-  assert.match(connection[1], /setLowPower\(false\)/);
-  assert.doesNotMatch(discovery[1], /setLowPower\(true\)/);
-  assert.doesNotMatch(connection[1], /setLowPower\(true\)/);
+  assert.match(discovery[1], /setLowPower\(true\)/);
+  assert.match(advertising[1], /setLowPower\(true\)/);
+  assert.match(connection[1], /setLowPower\(true\)/);
+  assert.doesNotMatch(discovery[1], /setLowPower\(false\)/);
+  assert.doesNotMatch(advertising[1], /setLowPower\(false\)/);
+  assert.doesNotMatch(connection[1], /setLowPower\(false\)/);
+  assert.match(advertising[1], /ConnectionType\.NON_DISRUPTIVE/);
   assert.match(connection[1], /ConnectionType\.NON_DISRUPTIVE/);
 });
 
