@@ -37,35 +37,44 @@ function identityParams(overrides = {}) {
   });
 }
 
+function generalSession(overrides = {}) {
+  return {
+    userRole: 'admin',
+    userId: 'general-1',
+    username: 'reclutador-general',
+    userSource: 'db',
+    userAccessScope: 'ALL',
+    displayName: 'Cuenta Administradora Prueba',
+    ...overrides
+  };
+}
+
 test('normalizador canónico de correo usa minúsculas y rechaza entradas inválidas', () => {
   assert.equal(normalizeAppUserEmail('  PERSONA@EXAMPLE.TEST '), 'persona@example.test');
   assert.equal(normalizeAppUserEmail('correo-sin-dominio'), null);
   assert.equal(normalizeAppUserEmail(''), null);
 });
 
-test('crear usuarios y conceder módulos son capacidades distintas', () => {
+test('el módulo Usuarios se limita a DEV y a la cuenta histórica reclutador-general', () => {
   assert.equal(canCreateRecruiterUsers({ userRole: 'dev', userSource: 'env' }), true);
-  assert.equal(canCreateRecruiterUsers({
-    userRole: 'admin',
-    userSource: 'db',
-    username: 'reclutador-general',
-    userAccessScope: 'ALL'
-  }), true);
+  assert.equal(canCreateRecruiterUsers(generalSession()), true);
+  assert.equal(canCreateRecruiterUsers(generalSession({ displayName: 'Nombre Visible Cambiado' })), true);
   assert.equal(canCreateRecruiterUsers({
     userRole: 'admin',
     userSource: 'db',
     username: 'reclutador-sucursal',
     userAccessScope: 'CITY'
-  }), true);
+  }), false);
+  assert.equal(canCreateRecruiterUsers({
+    userRole: 'admin',
+    userSource: 'env',
+    username: 'admin-entorno',
+    userAccessScope: 'ALL'
+  }), false);
   assert.equal(canCreateRecruiterUsers({ userRole: null }), false);
 
   assert.equal(canManageUserModulePermissions({ userRole: 'dev', userSource: 'env' }), true);
-  assert.equal(canManageUserModulePermissions({
-    userRole: 'admin',
-    userSource: 'db',
-    username: 'reclutador-general',
-    userAccessScope: 'ALL'
-  }), true);
+  assert.equal(canManageUserModulePermissions(generalSession()), true);
   assert.equal(canManageUserModulePermissions({
     userRole: 'admin',
     userSource: 'db',
@@ -111,13 +120,7 @@ test('reclutador-general puede activar y retirar módulos de un usuario administ
   const app = express();
   app.use(express.urlencoded({ extended: true }));
   app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'general-1',
-      username: 'reclutador-general',
-      userSource: 'db',
-      userAccessScope: 'ALL'
-    };
+    req.session = generalSession();
     next();
   });
   app.use('/admin/locations', locationsRouter(prisma));
@@ -203,13 +206,7 @@ test('API de sucursales usa City aunque una sucursal no tenga vacantes', async (
 
   const app = express();
   app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'general-1',
-      username: 'reclutador-general',
-      userSource: 'db',
-      userAccessScope: 'ALL'
-    };
+    req.session = generalSession();
     next();
   });
   app.use('/admin/locations', locationsRouter(prisma));
@@ -257,13 +254,7 @@ test('edición de usuario conserva alcance CITY con varias sucursales', async ()
   const app = express();
   app.use(express.urlencoded({ extended: true }));
   app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'general-1',
-      username: 'reclutador-general',
-      userSource: 'db',
-      userAccessScope: 'ALL'
-    };
+    req.session = generalSession();
     next();
   });
   app.use('/admin/locations', locationsRouter(prisma));
@@ -303,13 +294,7 @@ test('creación de usuario conserva alcance CITY con varias sucursales y crea id
   const app = express();
   app.use(express.urlencoded({ extended: true }));
   app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'env-admin',
-      username: 'admin-test',
-      userSource: 'env',
-      userAccessScope: 'ALL'
-    };
+    req.session = generalSession();
     next();
   });
   app.use('/admin', adminRouter(prisma));
@@ -371,13 +356,7 @@ test('creación de usuario persiste varias vacantes seleccionadas y conserva la 
   const app = express();
   app.use(express.urlencoded({ extended: true }));
   app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'env-admin',
-      username: 'admin-test',
-      userSource: 'env',
-      userAccessScope: 'ALL'
-    };
+    req.session = generalSession();
     next();
   });
   app.use('/admin', adminRouter(prisma));
@@ -425,13 +404,7 @@ test('creación de usuario rechaza alcance VACANCY sin vacantes seleccionadas', 
   const app = express();
   app.use(express.urlencoded({ extended: true }));
   app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'env-admin',
-      username: 'admin-test',
-      userSource: 'env',
-      userAccessScope: 'ALL'
-    };
+    req.session = generalSession();
     next();
   });
   app.use('/admin', adminRouter(prisma));
@@ -454,7 +427,7 @@ test('creación de usuario rechaza alcance VACANCY sin vacantes seleccionadas', 
   }
 });
 
-test('reclutador común crea dentro de su sucursal pero un POST manipulado no concede módulos', async () => {
+test('reclutador común no puede crear usuarios aunque fuerce el POST', async () => {
   const created = [];
   const prisma = {
     appUser: {
@@ -471,7 +444,7 @@ test('reclutador común crea dentro de su sucursal pero un POST manipulado no co
   app.use((req, _res, next) => {
     req.session = {
       userRole: 'admin',
-      userId: 'ordinary-creator',
+      userId: 'ordinary-user',
       username: 'legacy-ordinary',
       userSource: 'db',
       userAccessScope: 'CITY',
@@ -502,40 +475,33 @@ test('reclutador común crea dentro de su sucursal pero un POST manipulado no co
     });
 
     assert.equal(response.status, 302);
-    assert.equal(created.length, 1);
-    assert.equal(created[0].scopeCity, 'Bogotá');
-    assert.equal(created[0].canAccessDispatch, false);
-    assert.equal(created[0].canAccessAttendance, false);
-    assert.equal(created[0].canAccessStatistics, false);
-    assert.equal(created[0].canAccessMetaAds, false);
-    assert.equal(created[0].canAccessCvAnalysis, false);
+    assert.equal(created.length, 0);
+    assert.match(decodeURIComponent(response.headers.get('location') || ''), /No tienes acceso para crear usuarios/);
   } finally {
     await close(server);
   }
 });
 
-test('reclutador común no puede crear un usuario fuera de sus sucursales', async () => {
-  const created = [];
+test('reclutador común no puede listar usuarios aunque fuerce la URL', async () => {
+  let listQueries = 0;
   const prisma = {
     appUser: {
-      findUnique: async () => null,
-      create: async ({ data }) => {
-        created.push(data);
-        return { id: 'created-user', ...data };
+      findMany: async () => {
+        listQueries += 1;
+        return [];
       }
-    }
+    },
+    vacancy: { findMany: async () => [] }
   };
 
   const app = express();
-  app.use(express.urlencoded({ extended: true }));
   app.use((req, _res, next) => {
     req.session = {
       userRole: 'admin',
-      userId: 'ordinary-creator',
+      userId: 'ordinary-user',
       username: 'legacy-ordinary',
       userSource: 'db',
-      userAccessScope: 'CITY',
-      userAccessCity: JSON.stringify(['Bogotá'])
+      userAccessScope: 'ALL'
     };
     next();
   });
@@ -544,22 +510,11 @@ test('reclutador común no puede crear un usuario fuera de sus sucursales', asyn
   const server = await listen(app);
   try {
     const { port } = server.address();
-    const params = identityParams({
-      displayName: 'Persona Tres',
-      email: 'persona.tres@example.test',
-      accessScope: 'CITY',
-      scopeCity: JSON.stringify(['Neiva'])
-    });
-    const response = await fetch(`http://127.0.0.1:${port}/admin/users/create`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: params.toString(),
-      redirect: 'manual'
-    });
+    const response = await fetch(`http://127.0.0.1:${port}/admin/users`, { redirect: 'manual' });
 
     assert.equal(response.status, 302);
-    assert.equal(created.length, 0);
-    assert.match(response.headers.get('location') || '', /propio%20alcance/);
+    assert.equal(listQueries, 0);
+    assert.match(decodeURIComponent(response.headers.get('location') || ''), /No tienes acceso para crear usuarios/);
   } finally {
     await close(server);
   }
@@ -579,13 +534,7 @@ test('reclutador-general puede conceder módulos al crear', async () => {
   const app = express();
   app.use(express.urlencoded({ extended: true }));
   app.use((req, _res, next) => {
-    req.session = {
-      userRole: 'admin',
-      userId: 'general-1',
-      username: 'reclutador-general',
-      userSource: 'db',
-      userAccessScope: 'ALL'
-    };
+    req.session = generalSession();
     next();
   });
   app.use('/admin', adminRouter(prisma));
