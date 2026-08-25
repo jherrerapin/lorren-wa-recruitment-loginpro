@@ -17,6 +17,10 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function currentRole(req) {
+  return normalizeString(req.session?.userRole || req.userRole)?.toLowerCase() || null;
+}
+
 function isOpsUser(req) {
   const username = normalizeString(req.session?.username || req.username);
   return Boolean(username?.startsWith('operaciones-despacho'));
@@ -38,6 +42,53 @@ function requireOps(req, res, next) {
 function requireDev(req, res, next) {
   const role = req.session?.userRole || req.userRole;
   if (role !== 'dev') return res.status(403).send('Acceso restringido a DEV');
+  return next();
+}
+
+function isTestWorkerBearingValue(value) {
+  return value?.isTestProfile === true || value?.worker?.isTestProfile === true;
+}
+
+function hideTestWorkersFromArray(value) {
+  if (!Array.isArray(value)) return value;
+  return value.filter((item) => !isTestWorkerBearingValue(item));
+}
+
+function hideTestAssignmentsFromRequest(request) {
+  if (!request || typeof request !== 'object' || !Array.isArray(request.assignments)) return request;
+  return {
+    ...request,
+    assignments: hideTestWorkersFromArray(request.assignments)
+  };
+}
+
+function sanitizeNonDevRenderLocals(locals = {}) {
+  const sanitized = { ...locals };
+  for (const [key, value] of Object.entries(sanitized)) {
+    if (Array.isArray(value)) sanitized[key] = hideTestWorkersFromArray(value);
+  }
+  if (Array.isArray(sanitized.serviceRequests)) {
+    sanitized.serviceRequests = sanitized.serviceRequests.map(hideTestAssignmentsFromRequest);
+  }
+  if (sanitized.selectedServiceRequest) {
+    sanitized.selectedServiceRequest = hideTestAssignmentsFromRequest(sanitized.selectedServiceRequest);
+  }
+  return sanitized;
+}
+
+function installTestProfileVisibilityGate(req, res, next) {
+  if (currentRole(req) === 'dev') return next();
+  const originalRender = res.render.bind(res);
+  res.render = (view, locals, callback) => {
+    let renderLocals = locals || {};
+    let renderCallback = callback;
+    if (typeof locals === 'function') {
+      renderCallback = locals;
+      renderLocals = {};
+    }
+    const sanitizedLocals = sanitizeNonDevRenderLocals(renderLocals);
+    return originalRender(view, sanitizedLocals, renderCallback);
+  };
   return next();
 }
 
@@ -207,6 +258,7 @@ function installTestResetRenderGate(res, next) {
 export function dispatchWorkerStatsRouter(prisma) {
   const router = express.Router();
 
+  router.use(installTestProfileVisibilityGate);
   router.use('/asignaciones', requireOps, dispatchAssignmentDateGuard(prisma));
 
   router.get('/personal', requireOps, async (req, res, next) => {
@@ -297,7 +349,9 @@ export function dispatchWorkerStatsRouter(prisma) {
       }
     });
 
-    if (!worker) return res.status(404).send('Auxiliar no encontrado');
+    if (!worker || (worker.isTestProfile === true && currentRole(req) !== 'dev')) {
+      return res.status(404).send('Auxiliar no encontrado');
+    }
 
     const assignments = await prisma.dispatchAssignment.findMany({
       where: { workerId: worker.id },
