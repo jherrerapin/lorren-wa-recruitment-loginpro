@@ -376,6 +376,17 @@ export function sanitizeForRawPayload(message = {}) {
       filename: message.document.filename,
       mime_type: message.document.mime_type,
       sha256: message.document.sha256
+    } : undefined,
+    interactive: message.interactive ? {
+      type: message.interactive.type,
+      button_reply: message.interactive.button_reply ? {
+        id: message.interactive.button_reply.id,
+        title: message.interactive.button_reply.title
+      } : undefined,
+      list_reply: message.interactive.list_reply ? {
+        id: message.interactive.list_reply.id,
+        title: message.interactive.list_reply.title
+      } : undefined
     } : undefined
   };
 }

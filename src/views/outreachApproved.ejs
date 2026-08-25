@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Outreach aprobados</title>
+  <title>Citaciones a entrevista</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -15,19 +15,22 @@
     .container { max-width: 1200px; margin: 0 auto; padding: 24px 20px 40px; }
     .header { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
     .header h1 { color: #1e2d3d; font-size: 24px; }
-    .header p { color: #6b7280; margin-top: 4px; }
+    .header p { color: #6b7280; margin-top: 4px; max-width: 820px; line-height: 1.5; }
     .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); padding: 18px; margin-bottom: 18px; }
     .card h2 { color: #1e2d3d; font-size: 16px; margin-bottom: 12px; }
-    .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; }
+    .alert { padding: 12px 14px; border-radius: 8px; margin-bottom: 12px; font-size: 14px; line-height: 1.5; }
     .alert-success { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
     .alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
-    .filters { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+    .alert-warning { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+    .filters, .config-grid { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+    .config-grid .field { flex: 1 1 220px; }
     .field { display: flex; flex-direction: column; gap: 6px; min-width: 220px; }
     .field label { font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; }
     .field input, .field select, .field textarea {
-      border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: inherit;
+      border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: inherit; background: #fff;
     }
-    .field textarea { min-height: 110px; resize: vertical; }
+    .field input[readonly] { background: #f8fafc; color: #475569; }
+    .field textarea { min-height: 90px; resize: vertical; }
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px;
@@ -35,20 +38,24 @@
     }
     .btn-primary { background: #0d7a6b; border-color: #0d7a6b; color: #fff; }
     .btn-primary:hover { background: #0a5f53; }
-    .btn:hover { background: #f8fafc; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .btn:hover:not(:disabled) { background: #f8fafc; }
     .hint { font-size: 13px; color: #6b7280; line-height: 1.5; }
-    .candidate-table { width: 100%; border-collapse: collapse; }
+    .template-reference { white-space: pre-wrap; border: 1px solid #dbeafe; background: #f8fbff; padding: 14px; border-radius: 10px; font-size: 14px; line-height: 1.55; margin-top: 12px; }
+    .quick-replies { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .quick-reply { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 999px; padding: 7px 11px; font-size: 12px; font-weight: 700; }
+    .candidate-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
     .candidate-table th, .candidate-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
     .candidate-table th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; background: #f8fafc; }
     .candidate-table tr:last-child td { border-bottom: none; }
     .candidate-name { font-weight: 700; color: #1e2d3d; }
     .candidate-meta { font-size: 12px; color: #6b7280; margin-top: 4px; }
-    .prepared-list { display: grid; gap: 12px; }
-    .prepared-item { border: 1px solid #dbeafe; background: #f8fbff; border-radius: 10px; padding: 14px; }
-    .prepared-head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-    .prepared-body { white-space: pre-wrap; color: #334155; font-size: 14px; margin-bottom: 10px; }
+    .delivery-list { display: grid; gap: 12px; }
+    .delivery-item { border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 10px; padding: 14px; }
+    .delivery-body { white-space: pre-wrap; color: #334155; font-size: 14px; margin-top: 8px; }
     .empty { color: #6b7280; text-align: center; padding: 18px; }
-    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+    .separator { height: 1px; background: #e5e7eb; margin: 16px 0; }
     @media (max-width: 768px) {
       .container { padding: 18px 12px 32px; }
       .candidate-table { display: block; overflow-x: auto; }
@@ -62,7 +69,7 @@
     </a>
     <a href="/admin">Panel</a>
     <a href="/admin/vacancies">Vacantes</a>
-    <a href="/admin/outreach/approved">Outreach aprobados</a>
+    <a href="/admin/outreach/approved">Citaciones</a>
     <% if (role === 'dev' || canAccessDispatch) { %>
       <a href="/admin/operaciones">Operaciones / Despacho</a>
     <% } %>
@@ -77,8 +84,8 @@
   <div class="container">
     <div class="header">
       <div>
-        <h1>Outreach de candidatos aprobados</h1>
-        <p>Prepara mensajes asistidos por WhatsApp normal del reclutador, sin usar la línea Meta del bot.</p>
+        <h1>Citaciones a entrevista</h1>
+        <p>Envía a candidatos aprobados una plantilla oficial de Meta. Cuando Meta acepte el envío, el candidato pasa a Contactado y queda en coordinación humana. Su respuesta de asistencia alimenta el bloque “Confirmados a entrevista” de la vacante sin crear una agenda automática.</p>
       </div>
       <a href="/admin" class="btn">Volver al panel</a>
     </div>
@@ -88,6 +95,9 @@
     <% } %>
     <% if (preparedError) { %>
       <div class="alert alert-error"><%= preparedError %></div>
+    <% } %>
+    <% if (!coordinatorContact?.apiPhone) { %>
+      <div class="alert alert-warning">Tu usuario no tiene un número móvil colombiano válido configurado para coordinación. Configúralo antes de enviar citaciones.</div>
     <% } %>
 
     <div class="card">
@@ -107,7 +117,12 @@
           <select id="vacancyId" name="vacancyId">
             <option value="">Todas</option>
             <% for (const vacancy of vacancyOptions) { %>
-              <option value="<%= vacancy.id %>" <%= outreachFilters.vacancyId === vacancy.id ? 'selected' : '' %>><%= vacancy.label %></option>
+              <option
+                value="<%= vacancy.id %>"
+                data-city="<%= vacancy.city || '' %>"
+                data-address="<%= vacancy.address || '' %>"
+                <%= outreachFilters.vacancyId === vacancy.id ? 'selected' : '' %>
+              ><%= vacancy.label %></option>
             <% } %>
           </select>
         </div>
@@ -117,19 +132,60 @@
     </div>
 
     <div class="card">
-      <h2>Preparar ronda</h2>
-      <p class="hint">Placeholders disponibles: <code>{nombre}</code>, <code>{vacante}</code>, <code>{ciudad}</code>.</p>
-      <form method="post" action="/admin/outreach/approved/prepare">
+      <h2>Plantilla oficial de Meta</h2>
+      <p class="hint">El texto real lo gobierna la plantilla aprobada en Meta. Si corriges el texto en Meta creando otra versión aprobada, cambia aquí el nombre o idioma correspondiente. El orden de las seis variables debe mantenerse.</p>
+      <div class="template-reference"><%= templateReference %></div>
+      <div class="quick-replies" aria-label="Botones requeridos de la plantilla">
+        <span class="quick-reply">Confirmo asistencia</span>
+        <span class="quick-reply">No puedo asistir</span>
+      </div>
+      <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener esos dos botones <strong>Quick Reply</strong>, en ese orden. Lórren envía payloads estables para registrar la respuesta; cambiar este texto en el panel no modifica la plantilla aprobada en Meta.</p>
+    </div>
+
+    <div class="card">
+      <h2>Enviar citaciones</h2>
+      <form method="post" action="/admin/outreach/approved/prepare" id="approvedInterviewOutreachForm">
         <input type="hidden" name="city" value="<%= outreachFilters.city %>" />
         <input type="hidden" name="vacancyId" value="<%= outreachFilters.vacancyId %>" />
-        <div class="field" style="margin: 14px 0 16px;">
-          <label for="messageTemplate">Mensaje editable</label>
-          <textarea id="messageTemplate" name="messageTemplate"><%= outreachFilters.messageTemplate %></textarea>
+
+        <div class="config-grid">
+          <div class="field">
+            <label for="templateName">Nombre de plantilla</label>
+            <input id="templateName" name="templateName" value="<%= outreachConfig.templateName %>" required autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="templateLanguage">Idioma Meta</label>
+            <input id="templateLanguage" name="templateLanguage" value="<%= outreachConfig.templateLanguage %>" required autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="interviewDate">Fecha de entrevista</label>
+            <input type="date" id="interviewDate" name="interviewDate" value="<%= outreachConfig.interviewDate %>" required />
+          </div>
+          <div class="field">
+            <label for="interviewTime">Hora de entrevista</label>
+            <input type="time" id="interviewTime" name="interviewTime" value="<%= outreachConfig.interviewTime %>" required />
+          </div>
         </div>
 
+        <div class="config-grid" style="margin-top:12px;">
+          <div class="field" style="flex: 2 1 420px;">
+            <label for="interviewAddress">Dirección de citación — variable 5</label>
+            <textarea id="interviewAddress" name="interviewAddress" required><%= outreachConfig.interviewAddress %></textarea>
+            <span class="hint">Puedes corregirla para esta ronda sin alterar la dirección guardada de la vacante.</span>
+          </div>
+          <div class="field">
+            <label for="coordinatorPhone">WhatsApp de coordinación — variable 6</label>
+            <input id="coordinatorPhone" value="<%= coordinatorContact?.displayPhone || 'Sin número configurado' %>" readonly />
+            <span class="hint">Se toma del teléfono configurado para el usuario que está ejecutando la citación.</span>
+          </div>
+        </div>
+
+        <div class="separator"></div>
+
         <% if (candidates.length === 0) { %>
-          <div class="empty">No hay candidatos aprobados con los filtros actuales.</div>
+          <div class="empty">No hay candidatos aprobados disponibles con los filtros actuales.</div>
         <% } else { %>
+          <p class="hint">Cada envío es individual por la API oficial. Una sola ronda debe corresponder a una misma vacante para compartir fecha, hora y dirección. La confirmación del candidato es operativa y no crea un <code>InterviewBooking</code>.</p>
           <table class="candidate-table">
             <thead>
               <tr>
@@ -142,9 +198,8 @@
             </thead>
             <tbody>
               <% for (const candidate of candidates) { %>
-                <% const isPrepared = preparedRecipients.some((recipient) => recipient.id === candidate.id); %>
                 <tr>
-                  <td><input type="checkbox" name="candidateIds" value="<%= candidate.id %>" <%= isPrepared ? 'checked' : '' %> /></td>
+                  <td><input type="checkbox" name="candidateIds" value="<%= candidate.id %>" /></td>
                   <td>
                     <div class="candidate-name"><%= candidate.fullName || 'Sin nombre' %></div>
                     <div class="candidate-meta">Creado: <%= new Date(candidate.createdAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' }) %></div>
@@ -157,7 +212,8 @@
             </tbody>
           </table>
           <div class="toolbar">
-            <button type="submit" class="btn btn-primary">Preparar ronda</button>
+            <button type="submit" class="btn btn-primary" <%= coordinatorContact?.apiPhone ? '' : 'disabled' %>>Enviar citaciones por Meta</button>
+            <span class="hint">Solo los envíos aceptados por Meta pasarán a Contactados.</span>
           </div>
         <% } %>
       </form>
@@ -165,22 +221,13 @@
 
     <% if (preparedRecipients.length > 0) { %>
       <div class="card">
-        <h2>Destinatarios preparados</h2>
-        <div class="toolbar" style="margin-bottom:12px;">
-          <a href="<%= preparedRecipients[0].whatsappHref %>" target="_blank" rel="noopener" class="btn btn-primary">Abrir primero</a>
-          <button type="button" class="btn" onclick="openPreparedBatch()">Abrir lote</button>
-        </div>
-        <div class="prepared-list">
+        <h2>Citaciones confirmadas por Meta</h2>
+        <div class="delivery-list">
           <% for (const recipient of preparedRecipients) { %>
-            <div class="prepared-item">
-              <div class="prepared-head">
-                <div>
-                  <div class="candidate-name"><%= recipient.fullName || 'Sin nombre' %></div>
-                  <div class="candidate-meta"><%= recipient.vacancy?.title || recipient.vacancy?.role || 'Sin vacante' %> · <%= recipient.vacancy?.city || 'Sin ciudad' %></div>
-                </div>
-                <a href="<%= recipient.whatsappHref %>" target="_blank" rel="noopener" class="btn btn-primary prepared-wa-link">Abrir</a>
-              </div>
-              <div class="prepared-body"><%= recipient.personalizedMessage %></div>
+            <div class="delivery-item">
+              <div class="candidate-name"><%= recipient.fullName || 'Candidato' %></div>
+              <div class="candidate-meta"><%= recipient.vacancy?.title || recipient.vacancy?.role || 'Sin vacante' %> · <%= recipient.vacancy?.city || 'Sin ciudad' %></div>
+              <div class="delivery-body"><%= recipient.personalizedMessage %></div>
             </div>
           <% } %>
         </div>
@@ -202,10 +249,6 @@
     const vacancySelect = document.getElementById('vacancyId');
     if (citySelect && vacancySelect) {
       const vacancyOptions = Array.from(vacancySelect.options).slice(1);
-      vacancyOptions.forEach((option) => {
-        option.dataset.city = String(option.textContent || '').split('·')[0].trim();
-      });
-
       const syncVacanciesToCity = () => {
         const selectedCity = citySelect.value;
         const currentVacancy = vacancySelect.value;
@@ -225,13 +268,13 @@
       syncVacanciesToCity();
     }
 
-    function openPreparedBatch() {
-      const links = Array.from(document.querySelectorAll('.prepared-wa-link'));
-      if (!links.length) return;
-      if (!window.confirm('Se abrirán varias pestañas de WhatsApp Web o wa.me. ¿Deseas continuar?')) return;
-      links.forEach((link, index) => {
-        window.setTimeout(() => window.open(link.href, '_blank', 'noopener'), index * 450);
-      });
+    const interviewAddress = document.getElementById('interviewAddress');
+    const filteredVacancyId = '<%= outreachFilters.vacancyId %>';
+    if (interviewAddress && filteredVacancyId) {
+      const option = Array.from(document.querySelectorAll('#vacancyId option')).find((item) => item.value === filteredVacancyId);
+      if (!interviewAddress.value.trim() && option?.dataset?.address) {
+        interviewAddress.value = option.dataset.address;
+      }
     }
   </script>
 </body>

@@ -43,6 +43,19 @@ function requireSendText(sendText) {
   return sendText;
 }
 
+function normalizeAfterFinalize(afterFinalize) {
+  if (afterFinalize == null) return null;
+  if (typeof afterFinalize !== 'function') {
+    throw new TypeError('manual_outbound_after_finalize_invalid');
+  }
+  return afterFinalize;
+}
+
+function normalizeExpectedCandidateStatus(value) {
+  if (value == null) return null;
+  return requireNonEmptyString(value, 'manual_outbound_expected_candidate_status');
+}
+
 function requireNow(now) {
   if (typeof now !== 'function') throw new TypeError('manual_outbound_clock_required');
   return () => {
@@ -215,6 +228,7 @@ export function getManualOutboundUserMessage(error, fallback = 'No fue posible e
 export async function deliverManualOutboundText(prismaInput, input = {}, dependencies = {}) {
   const prisma = requirePrismaRoot(prismaInput);
   const sendText = requireSendText(dependencies.sendText);
+  const afterFinalize = normalizeAfterFinalize(dependencies.afterFinalize);
   const now = requireNow(dependencies.now || (() => new Date()));
   const candidateId = requireNonEmptyString(input.candidateId, 'manual_outbound_candidate_id');
   const phone = requireNonEmptyString(input.phone, 'manual_outbound_phone');
@@ -224,6 +238,7 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
     input.reason || 'Conversacion tomada manualmente desde dashboard',
     'manual_outbound_reason'
   );
+  const expectedCandidateStatus = normalizeExpectedCandidateStatus(input.expectedCandidateStatus);
   const rawPayload = normalizeRawPayload(input.rawPayload);
   const source = String(rawPayload.source || 'admin_outbound');
   const action = String(rawPayload.action || 'manual_text');
@@ -265,6 +280,19 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
           ? 'Ya existe una entrega manual en curso o pendiente de revisión para este candidato.'
           : 'El estado del candidato cambió antes del envío. Actualiza la página e intenta de nuevo.';
         throw manualOutboundError('manual_outbound_candidate_conflict', userMessage);
+      }
+
+      if (expectedCandidateStatus) {
+        const statusSnapshot = await tx.candidate.findUnique({
+          where: { id: candidateId },
+          select: { status: true }
+        });
+        if (!statusSnapshot || String(statusSnapshot.status) !== expectedCandidateStatus) {
+          throw manualOutboundError(
+            'manual_outbound_candidate_status_conflict',
+            'El estado del candidato cambió antes del envío. Actualiza la lista e intenta de nuevo.'
+          );
+        }
       }
 
       const duplicateAfterClaim = await findRecentOutboundConversationDelivery(tx, duplicateQuery);
@@ -356,6 +384,16 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
         expected: preparation.claimed,
         sentAt
       });
+
+      if (candidateResult.count === 1 && afterFinalize) {
+        await afterFinalize(tx, {
+          candidateId,
+          sentAt,
+          providerMessageId,
+          messageId: preparation.messageId,
+          candidateResult
+        });
+      }
 
       await updateOutboundConversationDelivery(tx, {
         messageId: preparation.messageId,

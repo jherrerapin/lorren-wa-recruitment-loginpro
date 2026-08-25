@@ -1,15 +1,75 @@
 import axios from 'axios';
 import { attachAdContextToMessage } from './adContext.js';
 
-export async function sendTextMessage(to, body) {
-  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
-  const payload = {
-    messaging_product: 'whatsapp',
-    to,
-    type: 'text',
-    text: { body }
-  };
+export const INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD = 'INTERVIEW_ATTEND_YES';
+export const INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD = 'INTERVIEW_ATTEND_NO';
+export const INTERVIEW_ATTENDANCE_QUICK_REPLY_PAYLOADS = [
+  INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
+  INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD
+];
 
+function requireTemplateString(value, label) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) throw new TypeError(`${label}_required`);
+  return normalized;
+}
+
+function buildTemplateQuickReplyComponents(rawPayloads = []) {
+  if (!Array.isArray(rawPayloads)) {
+    throw new TypeError('whatsapp_template_quick_reply_payloads_invalid');
+  }
+  return rawPayloads.map((value, index) => ({
+    type: 'button',
+    sub_type: 'quick_reply',
+    index: String(index),
+    parameters: [{
+      type: 'payload',
+      payload: requireTemplateString(value, 'whatsapp_template_quick_reply_payload')
+    }]
+  }));
+}
+
+export function buildWhatsAppTemplatePayload(to, options = {}) {
+  const recipient = requireTemplateString(to, 'whatsapp_template_recipient');
+  const name = requireTemplateString(options.name, 'whatsapp_template_name');
+  const languageCode = requireTemplateString(options.languageCode, 'whatsapp_template_language');
+  const rawParameters = options.bodyParameters ?? [];
+  if (!Array.isArray(rawParameters)) {
+    throw new TypeError('whatsapp_template_body_parameters_invalid');
+  }
+  const bodyParameters = rawParameters.map((value) => ({
+    type: 'text',
+    text: requireTemplateString(value, 'whatsapp_template_body_parameter')
+  }));
+  const quickReplyPayloads = options.quickReplyPayloads === undefined
+    ? INTERVIEW_ATTENDANCE_QUICK_REPLY_PAYLOADS
+    : options.quickReplyPayloads;
+  const quickReplyComponents = buildTemplateQuickReplyComponents(quickReplyPayloads);
+
+  const template = {
+    name,
+    language: { code: languageCode }
+  };
+  const components = [];
+  if (bodyParameters.length) {
+    components.push({
+      type: 'body',
+      parameters: bodyParameters
+    });
+  }
+  components.push(...quickReplyComponents);
+  if (components.length) template.components = components;
+
+  return {
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'template',
+    template
+  };
+}
+
+async function postWhatsAppPayload(payload) {
+  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const response = await axios.post(url, payload, {
     headers: {
       Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
@@ -21,8 +81,22 @@ export async function sendTextMessage(to, body) {
   return response.data;
 }
 
+export async function sendTemplateMessage(to, options = {}) {
+  return postWhatsAppPayload(buildWhatsAppTemplatePayload(to, options));
+}
+
+export async function sendTextMessage(to, body) {
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'text',
+    text: { body }
+  };
+
+  return postWhatsAppPayload(payload);
+}
+
 export async function sendImageMessage(to, image, caption = '') {
-  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const payload = {
     messaging_product: 'whatsapp',
     to,
@@ -36,19 +110,10 @@ export async function sendImageMessage(to, image, caption = '') {
     payload.image.caption = caption;
   }
 
-  const response = await axios.post(url, payload, {
-    headers: {
-      Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 15000
-  });
-
-  return response.data;
+  return postWhatsAppPayload(payload);
 }
 
 export async function sendDocumentMessage(to, document, caption = '') {
-  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const payload = {
     messaging_product: 'whatsapp',
     to,
@@ -66,19 +131,10 @@ export async function sendDocumentMessage(to, document, caption = '') {
     payload.document.caption = caption;
   }
 
-  const response = await axios.post(url, payload, {
-    headers: {
-      Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 15000
-  });
-
-  return response.data;
+  return postWhatsAppPayload(payload);
 }
 
 export async function sendAudioMessage(to, audio) {
-  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const payload = {
     messaging_product: 'whatsapp',
     to,
@@ -88,15 +144,7 @@ export async function sendAudioMessage(to, audio) {
     }
   };
 
-  const response = await axios.post(url, payload, {
-    headers: {
-      Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 15000
-  });
-
-  return response.data;
+  return postWhatsAppPayload(payload);
 }
 
 function payloadPhoneNumberId(payload = {}) {
