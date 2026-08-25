@@ -93,15 +93,7 @@ function sessionAuth(req, res, next) {
 }
 
 function canManageRecruiterUsers(req) {
-  const role = req.userRole || req.session?.userRole;
-  const source = req.userSource || req.session?.userSource;
-  const username = req.username || req.session?.username;
-  const accessScope = req.userAccessScope || req.session?.userAccessScope;
-  if (source === 'env' && (role === 'admin' || role === 'dev')) return true;
-  return source === 'db'
-    && role === 'admin'
-    && username === 'reclutador-general'
-    && accessScope === 'ALL';
+  return canCreateRecruiterUsers(req);
 }
 
 function ensureRecruiterUserManagementAccess(req, res) {
@@ -617,7 +609,7 @@ async function ensureVacancyIdAccess(prisma, req, vacancyId, res, returnTo = '/a
 }
 
 function buildManageableUsersWhere(accessContext = {}) {
-  const hiddenUsernames = ['reclutador-general', environmentAdminUsername()].filter(Boolean);
+  const hiddenUsernames = ['reclutador-general'];
   const visibilityWhere = accessContext.isDev
     ? {}
     : { username: { notIn: [...new Set(hiddenUsernames)] } };
@@ -2592,7 +2584,7 @@ export function adminRouter(prisma) {
       const remainingActiveBooking = await tx.interviewBooking.findFirst({
         where: {
           candidateId: booking.candidateId,
-          status: { in: ACTIVE_BOOKING_STATUSES }
+          status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES }
         },
         select: { id: true }
       });
