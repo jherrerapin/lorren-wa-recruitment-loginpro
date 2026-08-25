@@ -42,6 +42,8 @@
     .btn:hover:not(:disabled) { background: #f8fafc; }
     .hint { font-size: 13px; color: #6b7280; line-height: 1.5; }
     .template-reference { white-space: pre-wrap; border: 1px solid #dbeafe; background: #f8fbff; padding: 14px; border-radius: 10px; font-size: 14px; line-height: 1.55; margin-top: 12px; }
+    .quick-replies { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .quick-reply { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 999px; padding: 7px 11px; font-size: 12px; font-weight: 700; }
     .candidate-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
     .candidate-table th, .candidate-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
     .candidate-table th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; background: #f8fafc; }
@@ -83,7 +85,7 @@
     <div class="header">
       <div>
         <h1>Citaciones a entrevista</h1>
-        <p>Envía a candidatos aprobados una plantilla oficial de Meta. Cuando Meta confirme la entrega, el candidato pasa a Contactado y la coordinación queda en manos del número configurado para tu usuario.</p>
+        <p>Envía a candidatos aprobados una plantilla oficial de Meta. Cuando Meta acepte el envío, el candidato pasa a Contactado y queda en coordinación humana. Su respuesta de asistencia alimenta el bloque “Confirmados a entrevista” de la vacante sin crear una agenda automática.</p>
       </div>
       <a href="/admin" class="btn">Volver al panel</a>
     </div>
@@ -133,6 +135,11 @@
       <h2>Plantilla oficial de Meta</h2>
       <p class="hint">El texto real lo gobierna la plantilla aprobada en Meta. Si corriges el texto en Meta creando otra versión aprobada, cambia aquí el nombre o idioma correspondiente. El orden de las seis variables debe mantenerse.</p>
       <div class="template-reference"><%= templateReference %></div>
+      <div class="quick-replies" aria-label="Botones requeridos de la plantilla">
+        <span class="quick-reply">Confirmo asistencia</span>
+        <span class="quick-reply">No puedo asistir</span>
+      </div>
+      <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener esos dos botones <strong>Quick Reply</strong>, en ese orden. Lórren envía payloads estables para registrar la respuesta; cambiar este texto en el panel no modifica la plantilla aprobada en Meta.</p>
     </div>
 
     <div class="card">
@@ -178,7 +185,7 @@
         <% if (candidates.length === 0) { %>
           <div class="empty">No hay candidatos aprobados disponibles con los filtros actuales.</div>
         <% } else { %>
-          <p class="hint">Cada envío es individual por la API oficial. Una sola ronda debe corresponder a una misma vacante para compartir fecha, hora y dirección.</p>
+          <p class="hint">Cada envío es individual por la API oficial. Una sola ronda debe corresponder a una misma vacante para compartir fecha, hora y dirección. La confirmación del candidato es operativa y no crea un <code>InterviewBooking</code>.</p>
           <table class="candidate-table">
             <thead>
               <tr>
