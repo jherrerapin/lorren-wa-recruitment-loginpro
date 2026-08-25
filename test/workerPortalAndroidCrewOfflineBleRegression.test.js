@@ -24,64 +24,59 @@ test('APK usa la autoridad nativa de cuadrilla y no inicia el Web Bluetooth here
   assert.match(nativePresence, /\[data-crew-bluetooth-status\]/);
 });
 
-test('BLE Android conserva una sola autoridad local y no usa Wi-Fi como transporte runtime', async () => {
+test('Bluetooth Classic conserva una sola autoridad local y no usa Wi-Fi como transporte runtime', async () => {
   const [manager, mainActivity, manifest] = await Promise.all([
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
     read('mobile/android/app/src/main/AndroidManifest.xml')
   ]);
 
-  assert.match(manager, /BluetoothLeScanner/);
-  assert.match(manager, /BluetoothLeAdvertiser/);
-  assert.match(manager, /BluetoothGattServer/);
-  assert.match(manager, /BluetoothGattCallback/);
-  assert.match(manager, /BluetoothDevice\.TRANSPORT_LE/);
-  assert.match(manager, /ScanSettings\.SCAN_MODE_LOW_LATENCY/);
-  assert.match(manager, /AdvertiseSettings\.ADVERTISE_MODE_LOW_LATENCY/);
-  assert.match(manager, /AdvertiseSettings\.ADVERTISE_TX_POWER_HIGH/);
+  assert.match(manager, /BluetoothServerSocket/);
+  assert.match(manager, /BluetoothSocket/);
+  assert.match(manager, /listenUsingInsecureRfcommWithServiceRecord/);
+  assert.match(manager, /createInsecureRfcommSocketToServiceRecord/);
+  assert.match(manager, /bluetoothAdapter\.startDiscovery\(\)/);
+  assert.match(manager, /device\.fetchUuidsWithSdp\(\)/);
+  assert.match(manager, /BluetoothDevice\.ACTION_UUID/);
   assert.match(manager, /SERVICE_PARCEL_UUID/);
   assert.match(manager, /DeviceKeyStore\.signBase64\(canonical\)/);
   assert.match(manager, /DeviceKeyStore\.verifyBase64\(publicKey, canonical, signature\)/);
   assert.match(manager, /expectedProofCount > 0 && verifiedCount >= expectedProofCount/);
-  assert.doesNotMatch(manager, /Nearby\.getConnectionsClient|ConnectionsClient|Strategy\.P2P_|ConnectionType\.|setLowPower\(/);
+  assert.doesNotMatch(manager, /BluetoothLeAdvertiser|BluetoothGatt|Nearby\.getConnectionsClient|ConnectionsClient|Strategy\.P2P_|ConnectionType\.|setLowPower\(/);
   assert.doesNotMatch(manager, /WifiManager|setWifiEnabled|ACTION_WIFI_STATE_CHANGED|startLocalOnlyHotspot/);
 
   assert.match(manifest, /android\.permission\.BLUETOOTH_SCAN/);
   assert.match(manifest, /android\.permission\.BLUETOOTH_CONNECT/);
   assert.match(manifest, /android\.permission\.BLUETOOTH_ADVERTISE/);
+  assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_DISCOVERABLE/);
+  assert.match(mainActivity, /BLUETOOTH_DISCOVERABLE_SECONDS = 300/);
   assert.doesNotMatch(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
   assert.doesNotMatch(mainActivity, /hasNearbyWifiPermission|addNearbyWifiPermissionIfNeeded/);
 });
 
-test('replay físico: AUX escanea BLE, ENC anuncia/GATT y se acotan los dos stalls históricos', async () => {
+test('replay físico: AUX sirve RFCOMM, ENC descubre por Classic/SDP y ambos stalls quedan acotados', async () => {
   const manager = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
-  assert.match(manager, /synchronized void startReady\(String serviceRequestId\)[\s\S]{0,300}startReadyScanner\(true\)/);
-  assert.match(manager, /getBluetoothLeScanner\(\)/);
-  assert.match(manager, /readyScanner\.startScan\([\s\S]{0,260}readyScanSettings\(\)[\s\S]{0,180}auxiliaryScanCallback/);
-  assert.match(manager, /isLorrenAdvertisement\(result\)[\s\S]{0,220}connectAuxiliaryToLeader\(device\)/);
-  assert.match(manager, /device\.connectGatt\([\s\S]{0,180}BluetoothDevice\.TRANSPORT_LE/);
-  assert.match(manager, /AUXILIARY_EXCHANGE_TIMEOUT_MS = 12_000L/);
-  assert.match(manager, /handler\.postDelayed\(auxiliaryExchangeTimeout, AUXILIARY_EXCHANGE_TIMEOUT_MS\)/);
-  assert.match(manager, /closeAuxiliaryGatt\(\)[\s\S]{0,260}cancelAuxiliaryExchangeTimeout\(\)/);
+  assert.match(manager, /synchronized void startReady\(String serviceRequestId\)[\s\S]{0,300}startAuxiliaryServer\(\)/);
+  assert.match(manager, /listenUsingInsecureRfcommWithServiceRecord\([\s\S]{0,120}SERVICE_NAME[\s\S]{0,80}SERVICE_UUID/);
+  assert.match(manager, /serverSocket\.accept\(\)/);
+  assert.match(manager, /RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L/);
+  assert.match(manager, /handler\.postDelayed\(auxiliaryExchangeTimeout, RFCOMM_EXCHANGE_TIMEOUT_MS\)/);
+  assert.match(manager, /closeAuxiliarySocket\(\)[\s\S]{0,260}cancelAuxiliaryExchangeTimeout\(\)/);
 
-  assert.match(manager, /bluetoothAdapter\.getBluetoothLeAdvertiser\(\)/);
-  assert.match(manager, /bluetoothManager\.openGattServer\(appContext, gattServerCallback\)/);
-  assert.match(manager, /leaderGattServer\.addService\(service\)/);
-  assert.match(manager, /leaderAdvertiser\.startAdvertising\(settings, data, leaderAdvertiseCallback\)/);
-  assert.match(manager, /LEADER_START_TIMEOUT_MS = 25_000L/);
-  assert.match(manager, /onStartSuccess[\s\S]{0,420}cancelLeaderStartTimeout\(\)[\s\S]{0,260}scheduleLeaderTimeout\(attemptId, leaderTimeoutMs\)/);
-  assert.match(manager, /onStartFailure[\s\S]{0,300}advertising_unsupported/);
-
-  assert.match(manager, /Deque<PendingNotification> leaderNotificationQueue = new ArrayDeque<>\(\)/);
-  assert.match(manager, /PendingNotification leaderNotificationInFlight/);
-  assert.match(manager, /enqueueLeaderChallengeFrames/);
-  assert.match(manager, /if \(leaderNotificationInFlight != null\) return/);
-  assert.match(manager, /onNotificationSent[\s\S]{0,500}leaderNotificationInFlight = null[\s\S]{0,500}drainLeaderNotificationQueue\(\)/);
-  assert.match(manager, /scheduleLeaderTimeout[\s\S]{0,420}stopLeaderAdvertising\(\)[\s\S]{0,240}CONNECTION_GRACE_MS/);
+  assert.match(manager, /MIN_SCAN_MS = 25_000L/);
+  assert.match(manager, /bluetoothAdapter\.startDiscovery\(\)/);
+  assert.match(manager, /BluetoothAdapter\.ACTION_DISCOVERY_FINISHED/);
+  assert.match(manager, /device\.fetchUuidsWithSdp\(\)/);
+  assert.match(manager, /BluetoothDevice\.ACTION_UUID/);
+  assert.match(manager, /device\.createInsecureRfcommSocketToServiceRecord\(SERVICE_UUID\)/);
+  assert.match(manager, /socket\.connect\(\)/);
+  assert.match(manager, /handler\.postDelayed\(timeout, RFCOMM_EXCHANGE_TIMEOUT_MS\)/);
+  assert.match(manager, /scheduleLeaderTimeout\(nextAttemptId, timeoutMs\)/);
+  assert.match(manager, /WINDOW_CLOSED[\s\S]{0,180}stopLeaderDiscovery\(\)[\s\S]{0,240}CONNECTION_GRACE_MS/);
 });
 
-test('auxiliar entra READY y el botón manual no destruye un scan BLE activo', async () => {
+test('auxiliar entra READY y el botón manual no destruye un servidor RFCOMM activo', async () => {
   const [nativePresence, manager] = await Promise.all([
     read('mobile/android/app/src/main/assets/native-presence.js'),
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -101,8 +96,8 @@ test('auxiliar entra READY y el botón manual no destruye un scan BLE activo', a
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
   assert.match(ensureReady[1], /document\.visibilityState === 'hidden'/);
   assert.doesNotMatch(ensureReady[1], /document\.hasFocus/);
-  assert.match(manager, /readyScanner\.startScan/);
-  assert.match(manager, /emitDiagnostic\("AUX", "DISCOVERY_READY"\)[\s\S]{0,100}emitReady\(\)/);
+  assert.match(manager, /startAuxiliaryServer\(\)/);
+  assert.match(manager, /emitDiagnostic\("AUX", "RFCOMM_SERVER_READY"\)[\s\S]{0,100}emitReady\(\)/);
 
   const prepareButton = renderPanel[1].match(/const prepare = element\([\s\S]*?actions\.appendChild\(prepare\);/);
   assert.ok(prepareButton, 'falta acción manual de preparación del auxiliar');
@@ -159,7 +154,7 @@ test('auxiliar rearma una sola señal local al volver a primer plano', async () 
   assert.match(nativePresence, /visibilitychange[\s\S]{0,120}visibilityState === 'visible'[\s\S]{0,80}scheduleAuxiliaryRearm\(\)/);
 });
 
-test('scan con cero auxiliares usa una ventana continua y falla cerrado sin reiniciar advertising', async () => {
+test('scan con cero auxiliares usa una ventana Classic continua y falla cerrado sin reiniciar discovery', async () => {
   const [manager, nativePresence, verifier] = await Promise.all([
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
     read('mobile/android/app/src/main/assets/native-presence.js'),
@@ -167,10 +162,12 @@ test('scan con cero auxiliares usa una ventana continua y falla cerrado sin rein
   ]);
 
   assert.match(nativePresence, /const DEFAULT_SCAN_MS = 15_000/);
+  assert.match(manager, /MIN_SCAN_MS = 25_000L/);
   assert.match(manager, /input\.optInt\("expectedProofCount", 0\)/);
+  assert.match(manager, /Math\.max\([\s\S]{0,100}MIN_SCAN_MS[\s\S]{0,180}input\.optLong\("timeoutMs", MIN_SCAN_MS\)/);
   assert.match(manager, /expectedProofCount > 0 && verifiedCount >= expectedProofCount[\s\S]{0,120}completeLeaderScan\(attemptId\)/);
-  assert.match(manager, /onStartSuccess[\s\S]{0,420}scheduleLeaderTimeout\(attemptId, leaderTimeoutMs\)/);
-  assert.match(manager, /WINDOW_CLOSED[\s\S]{0,180}stopLeaderAdvertising\(\)[\s\S]{0,220}CONNECTION_GRACE_MS/);
+  assert.match(manager, /scheduleLeaderTimeout\(nextAttemptId, timeoutMs\)/);
+  assert.match(manager, /WINDOW_CLOSED[\s\S]{0,180}stopLeaderDiscovery\(\)[\s\S]{0,220}CONNECTION_GRACE_MS/);
   assert.match(nativePresence, /let autoRetryRemaining = 1;/);
   const zeroProofBranch = nativePresence.match(/if \(noAuxiliaryDetected\) \{([\s\S]*?)\n    \}\n\n    queueCompletedAttempt\(proofBundle\)/);
   assert.ok(zeroProofBranch, 'la rama cero-proof debe ocurrir antes de encolar');
