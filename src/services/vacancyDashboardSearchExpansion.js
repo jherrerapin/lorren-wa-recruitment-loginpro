@@ -31,6 +31,9 @@ const RECRUITMENT_BULK_STATUSES = [
   'CONTACTADO',
   'RECHAZADO'
 ];
+export const INTERVIEW_COORDINATION_HANDOFF_MODE = 'interview_coordination_handoff';
+export const INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD = 'INTERVIEW_ATTEND_YES';
+export const INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD = 'INTERVIEW_ATTEND_NO';
 
 export function historicalBulkCandidateStatuses(role = '') {
   return role === 'dev'
@@ -59,6 +62,59 @@ function timeValue(value) {
   if (!value) return 0;
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function normalizeAttendanceText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function attendanceStatusFromEvidence(message = {}) {
+  const payloadId = normalizeString(message?.rawPayload?.interactive?.button_reply?.id);
+  if (payloadId === INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD) {
+    return { status: 'CONFIRMADO', source: 'BUTTON' };
+  }
+  if (payloadId === INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD) {
+    return { status: 'NO_ASISTE', source: 'BUTTON' };
+  }
+
+  const text = normalizeAttendanceText(
+    message?.rawPayload?.interactive?.button_reply?.title || message?.body || ''
+  );
+  if (/^(confirmo asistencia|confirmo mi asistencia|confirmo|asisto|si asisto|si asistire|puedo asistir)$/.test(text)) {
+    return { status: 'CONFIRMADO', source: 'TEXT' };
+  }
+  if (/^(no puedo asistir|no podre asistir|no asistire|no asisto)$/.test(text)) {
+    return { status: 'NO_ASISTE', source: 'TEXT' };
+  }
+  return null;
+}
+
+export function deriveInterviewOutreachAttendance(candidate = {}) {
+  if (normalizeString(candidate.botResumeMode) !== INTERVIEW_COORDINATION_HANDOFF_MODE) {
+    return { status: null, respondedAt: null, source: null };
+  }
+
+  const handoffAt = timeValue(candidate.botPausedAt);
+  const messages = [...(Array.isArray(candidate.messages) ? candidate.messages : [])]
+    .filter((message) => timeValue(message?.createdAt) >= handoffAt)
+    .sort((a, b) => timeValue(b?.createdAt) - timeValue(a?.createdAt));
+
+  for (const message of messages) {
+    const evidence = attendanceStatusFromEvidence(message);
+    if (!evidence) continue;
+    return {
+      ...evidence,
+      respondedAt: message.createdAt || null
+    };
+  }
+
+  return { status: 'PENDIENTE', respondedAt: null, source: null };
 }
 
 function vacancyIsOpen(value = {}) {
@@ -193,6 +249,90 @@ function getRequestAccessContext(req = {}) {
     userAccessCity: req.userAccessCity || req.session?.userAccessCity,
     userAccessVacancyId: req.userAccessVacancyId || req.session?.userAccessVacancyId
   });
+}
+
+async function loadInterviewOutreachAttendanceCandidates(req, visibleVacancyIds = new Set()) {
+  const vacancyIds = [...visibleVacancyIds].filter(Boolean);
+  if (!vacancyIds.length) return [];
+  const accessContext = getRequestAccessContext(req);
+  return prisma.candidate.findMany({
+    where: {
+      AND: [
+        buildCandidateAccessWhere(accessContext),
+        { vacancyId: { in: vacancyIds } },
+        { status: 'CONTACTADO' },
+        { botResumeMode: INTERVIEW_COORDINATION_HANDOFF_MODE }
+      ]
+    },
+    orderBy: { botPausedAt: 'desc' },
+    select: {
+      id: true,
+      vacancyId: true,
+      fullName: true,
+      phone: true,
+      status: true,
+      botPausedAt: true,
+      botResumeMode: true,
+      messages: {
+        where: { direction: 'INBOUND' },
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+        select: {
+          body: true,
+          rawPayload: true,
+          createdAt: true
+        }
+      }
+    }
+  });
+}
+
+export async function applyInterviewOutreachAttendance(viewModel = {}, req = {}) {
+  const vacancyCityById = new Map();
+  for (const city of viewModel.cities || []) {
+    for (const vacancy of city.vacancies || []) {
+      vacancyCityById.set(String(vacancy.id || ''), city.name || vacancy.city || '');
+    }
+  }
+  const visibleVacancyIds = new Set([...vacancyCityById.keys()].filter(Boolean));
+  const candidates = await loadInterviewOutreachAttendanceCandidates(req, visibleVacancyIds);
+  const summaries = {};
+
+  for (const candidate of candidates) {
+    const vacancyId = String(candidate.vacancyId || '');
+    if (!visibleVacancyIds.has(vacancyId)) continue;
+    const attendance = deriveInterviewOutreachAttendance(candidate);
+    summaries[vacancyId] ||= {
+      vacancyId,
+      cityName: vacancyCityById.get(vacancyId) || '',
+      total: 0,
+      pendingCount: 0,
+      declinedCount: 0,
+      confirmed: []
+    };
+    const summary = summaries[vacancyId];
+    summary.total += 1;
+    if (attendance.status === 'CONFIRMADO') {
+      summary.confirmed.push({
+        id: candidate.id,
+        fullName: candidate.fullName || null,
+        phone: candidate.phone || null,
+        respondedAt: attendance.respondedAt || null,
+        source: attendance.source || null
+      });
+    } else if (attendance.status === 'NO_ASISTE') {
+      summary.declinedCount += 1;
+    } else {
+      summary.pendingCount += 1;
+    }
+  }
+
+  for (const summary of Object.values(summaries)) {
+    summary.confirmed.sort((a, b) => timeValue(b.respondedAt) - timeValue(a.respondedAt));
+  }
+
+  viewModel.interviewOutreachAttendanceByVacancy = summaries;
+  return viewModel;
 }
 
 export function compareCandidatesByRegisteredAtDesc(candidateA = {}, candidateB = {}) {
@@ -464,7 +604,8 @@ export async function expandVacancySearchCandidates(viewModel = {}, query = {}, 
     mergeVacancySearchResults(viewModel, searches, candidates, { isDev: accessContext.isDev });
   }
 
-  return applyVacancyApplicationCycleScope(viewModel, query);
+  await applyVacancyApplicationCycleScope(viewModel, query);
+  return applyInterviewOutreachAttendance(viewModel, req);
 }
 
 function isValidDateString(value) {
@@ -1026,6 +1167,158 @@ export function buildVacancyApplicationCycleScript(cycleMetadata = {}, role = ''
 </script>`;
 }
 
+export function buildInterviewOutreachAttendanceScript(attendanceByVacancy = {}) {
+  const serialized = JSON.stringify(attendanceByVacancy || {}).replaceAll('<', '\\u003c');
+  return `
+<script>
+  (function () {
+    const summaries = ${serialized};
+    const entries = Object.values(summaries || {});
+    if (!entries.length) return;
+
+    function formatPhone(value) {
+      const digits = String(value || '').replace(/\\D+/g, '');
+      return digits.startsWith('57') && digits.length > 10 ? digits.slice(2) : digits;
+    }
+
+    function formatResponseAt(value) {
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '';
+      return new Intl.DateTimeFormat('es-CO', {
+        timeZone: 'America/Bogota',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      }).format(date);
+    }
+
+    function stat(label, value) {
+      const span = document.createElement('span');
+      span.className = 'badge';
+      span.style.cssText = 'background:#f8fafc;color:var(--navy);border:1px solid var(--border);';
+      span.textContent = label + ': ' + value;
+      return span;
+    }
+
+    function detailHref(candidateId) {
+      const returnTo = window.location.pathname + window.location.search;
+      return '/admin/candidates/' + encodeURIComponent(candidateId) + '?returnTo=' + encodeURIComponent(returnTo);
+    }
+
+    entries.forEach((summary) => {
+      if (!summary?.vacancyId || Number(summary.total || 0) <= 0) return;
+      const panel = document.getElementById('vacancy-' + summary.vacancyId);
+      if (!panel || panel.querySelector('[data-interview-outreach-attendance]')) return;
+
+      const section = document.createElement('div');
+      section.className = 'section';
+      section.setAttribute('data-interview-outreach-attendance', summary.vacancyId);
+
+      const header = document.createElement('div');
+      header.className = 'section-header';
+      const title = document.createElement('span');
+      title.className = 'section-title';
+      title.textContent = 'Confirmados a entrevista';
+      const count = document.createElement('span');
+      count.className = 'section-count';
+      count.textContent = String((summary.confirmed || []).length);
+      header.append(title, count);
+      section.appendChild(header);
+
+      const note = document.createElement('p');
+      note.className = 'filter-note';
+      note.style.cssText = 'padding:0 0 10px;line-height:1.45;';
+      note.textContent = 'Confirmación operativa de citación Meta · no crea agenda automática ni activa entrevistas en la vacante.';
+      section.appendChild(note);
+
+      const stats = document.createElement('div');
+      stats.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;';
+      stats.append(
+        stat('Citados', Number(summary.total || 0)),
+        stat('Confirmados', (summary.confirmed || []).length),
+        stat('Pendientes', Number(summary.pendingCount || 0)),
+        stat('No asistirán', Number(summary.declinedCount || 0))
+      );
+      section.appendChild(stats);
+
+      const confirmed = Array.isArray(summary.confirmed) ? summary.confirmed : [];
+      if (!confirmed.length) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        const text = document.createElement('p');
+        text.textContent = 'Aún no hay confirmaciones de asistencia.';
+        empty.appendChild(text);
+        section.appendChild(empty);
+      } else {
+        const list = document.createElement('div');
+        list.className = 'candidates-list';
+        confirmed.slice(0, 25).forEach((candidate) => {
+          const row = document.createElement('div');
+          row.className = 'candidate-row';
+
+          const identity = document.createElement('div');
+          const name = document.createElement('div');
+          name.className = 'candidate-name';
+          name.textContent = candidate.fullName || 'Sin nombre';
+          identity.appendChild(name);
+          if (candidate.respondedAt) {
+            const responseAt = document.createElement('div');
+            responseAt.className = 'candidate-dev-meta';
+            responseAt.textContent = 'Confirmó asistencia: ' + formatResponseAt(candidate.respondedAt);
+            identity.appendChild(responseAt);
+          }
+
+          const phone = document.createElement('div');
+          phone.className = 'candidate-phone';
+          phone.textContent = 'Tel. ' + (formatPhone(candidate.phone) || 'Sin número');
+
+          const status = document.createElement('span');
+          status.className = 'badge badge-contactado';
+          status.textContent = 'Contactado';
+
+          const attendance = document.createElement('span');
+          attendance.className = 'badge badge-registrado';
+          attendance.textContent = 'Asiste';
+
+          const actions = document.createElement('div');
+          actions.className = 'action-stack';
+          const detail = document.createElement('a');
+          detail.className = 'link-detail';
+          detail.href = detailHref(candidate.id);
+          detail.textContent = 'Ver ->';
+          actions.appendChild(detail);
+
+          row.append(identity, phone, status, attendance, actions);
+          list.appendChild(row);
+        });
+        section.appendChild(list);
+        if (confirmed.length > 25) {
+          const more = document.createElement('div');
+          more.style.cssText = 'text-align:center;padding:8px;font-size:12px;color:var(--text-muted);';
+          more.textContent = '+ ' + (confirmed.length - 25) + ' confirmados más';
+          section.appendChild(more);
+        }
+      }
+
+      const exportBar = panel.querySelector('.export-bar');
+      if (exportBar) panel.insertBefore(section, exportBar);
+      else panel.appendChild(section);
+
+      const badges = panel.querySelector('.vacancy-badges');
+      if (badges && confirmed.length) {
+        const badge = document.createElement('span');
+        badge.className = 'badge badge-registrado';
+        badge.textContent = '✓ ' + confirmed.length + ' confirmado' + (confirmed.length === 1 ? '' : 's');
+        badges.appendChild(badge);
+      }
+    });
+  })();
+</script>`;
+}
+
 export function injectAdminApplicantControls(html, req, viewModel = {}) {
   if (typeof html !== 'string') return html;
   const dateRange = viewModel.applicantDateRange || normalizeApplicantDateRange(req?.query || {});
@@ -1043,7 +1336,8 @@ export function injectAdminApplicantControls(html, req, viewModel = {}) {
 
   const applicantScript = buildApplicantLinkScript(dateRange);
   const cycleScript = buildVacancyApplicationCycleScript(viewModel.vacancyApplicationCycles || {}, viewModel.role || '');
-  const scripts = `${applicantScript}\n${cycleScript}`;
+  const attendanceScript = buildInterviewOutreachAttendanceScript(viewModel.interviewOutreachAttendanceByVacancy || {});
+  const scripts = `${applicantScript}\n${cycleScript}\n${attendanceScript}`;
   return output.includes('</body>')
     ? output.replace('</body>', `${scripts}\n</body>`)
     : `${output}${scripts}`;
