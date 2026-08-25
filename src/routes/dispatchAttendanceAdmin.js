@@ -13,6 +13,7 @@ import {
   saveCrewAttendanceOperationCapability,
   saveCrewAttendanceServiceConfiguration
 } from '../modules/dispatch-attendance/application/crewAttendanceConfig.js';
+import { loadAttendanceBillingCounters } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
 import { resolveIncompleteDispatchBreakPenaltyEndAt } from '../modules/dispatch-attendance/domain/attendanceWorkdayPolicy.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
 import { dispatchPayrollRouter } from './dispatchPayroll.js';
@@ -254,6 +255,17 @@ export function dispatchAttendanceAdminRouter(prisma) {
   const formParser = express.urlencoded({ extended: false, limit: '16kb' });
 
   router.use('/nomina', dispatchPayrollRouter(prisma));
+
+  router.get('/billing-counter', async (_req, res) => {
+    applyNoStore(res);
+    try {
+      const counters = await loadAttendanceBillingCounters(prisma);
+      return res.status(200).json({ ok: true, ...counters });
+    } catch (error) {
+      console.error('[ATTENDANCE_BILLING_COUNTER_FAILED]', { code: error?.message });
+      return res.status(500).json({ ok: false, error: 'No fue posible cargar el contador de auxiliares del ciclo.' });
+    }
+  });
 
   router.get('/cuadrillas/config', async (req, res) => {
     applyNoStore(res);
