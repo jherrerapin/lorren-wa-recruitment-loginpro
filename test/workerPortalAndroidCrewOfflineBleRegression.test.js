@@ -24,7 +24,7 @@ test('APK usa la autoridad nativa de cuadrilla y no inicia el Web Bluetooth here
   assert.match(nativePresence, /\[data-crew-bluetooth-status\]/);
 });
 
-test('Nearby Connections conserva una sola autoridad: encargado hub y auxiliares discoverers sin cambiar radios', async () => {
+test('Nearby Connections conserva una sola autoridad BLE simétrica sin cambiar radios', async () => {
   const [nearby, gradle, manifest, mainActivity] = await Promise.all([
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
     read('mobile/android/app/build.gradle'),
@@ -39,8 +39,8 @@ test('Nearby Connections conserva una sola autoridad: encargado hub y auxiliares
   assert.match(nearby, /client\.startDiscovery/);
   assert.match(nearby, /startLeaderAdvertising/);
   assert.match(nearby, /client\.startAdvertising/);
-  assert.match(nearby, /setLowPower\(true\)/);
-  assert.match(nearby, /setLowPower\(false\)/);
+  assert.equal((nearby.match(/setLowPower\(true\)/g) || []).length, 3);
+  assert.doesNotMatch(nearby, /setLowPower\(false\)/);
   assert.equal((nearby.match(/ConnectionType\.NON_DISRUPTIVE/g) || []).length, 2);
   assert.doesNotMatch(nearby, /ConnectionType\.(?:BALANCED|DISRUPTIVE)/);
   assert.match(nearby, /Payload\.fromBytes/);
@@ -58,7 +58,7 @@ test('Nearby Connections conserva una sola autoridad: encargado hub y auxiliares
   assert.match(mainActivity, /addNearbyWifiPermissionIfNeeded\(missing\)/);
 });
 
-test('replay físico: auxiliar descubre por medio de bajo consumo y reintenta una solicitud de radio transitoria', async () => {
+test('replay físico: ambos roles usan Nearby low-power y AUX reintenta una solicitud de radio transitoria', async () => {
   const nearby = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
   const readyPath = nearby.match(
@@ -107,7 +107,7 @@ test('replay físico: auxiliar descubre por medio de bajo consumo y reintenta un
   );
   assert.ok(leaderAdvertising, 'falta advertising Nearby del encargado');
   assert.match(leaderAdvertising[1], /client\.startAdvertising/);
-  assert.match(leaderAdvertising[1], /setLowPower\(false\)/);
+  assert.match(leaderAdvertising[1], /setLowPower\(true\)/);
   assert.match(leaderAdvertising[1], /ConnectionType\.NON_DISRUPTIVE/);
   assert.doesNotMatch(leaderAdvertising[1], /ConnectionType\.BALANCED/);
   assert.match(leaderAdvertising[1], /emitLeaderScanStarted/);
@@ -126,7 +126,7 @@ test('replay físico: auxiliar descubre por medio de bajo consumo y reintenta un
   assert.doesNotMatch(nearby, /android\.bluetooth\.le|BluetoothGatt|BluetoothLeAdvertiser|BluetoothLeScanner/);
 });
 
-test('auxiliar entra READY tras confirmación de discovery y puede rearmarse manualmente sin depender de WAN', async () => {
+test('auxiliar entra READY tras confirmación de discovery y el botón manual no destruye una escucha activa', async () => {
   const [nativePresence, nearby] = await Promise.all([
     read('mobile/android/app/src/main/assets/native-presence.js'),
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -142,17 +142,21 @@ test('auxiliar entra READY tras confirmación de discovery y puede rearmarse man
   assert.match(startReady[1], /bridgeCall\('setReady'/);
   assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
   assert.doesNotMatch(startReady[1], /if \(!navigator\.onLine\)[\s\S]{0,120}return/);
-  assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,220}activeMode = 'READY'/);
+  assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,420}activeMode = 'READY'/);
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
   assert.match(ensureReady[1], /document\.visibilityState === 'hidden'/);
   assert.doesNotMatch(ensureReady[1], /document\.hasFocus/);
   assert.match(nearby, /client\.startDiscovery[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
   assert.match(nearby, /handleReadyDiscoveryFailure/);
-  assert.match(renderPanel[1], /Preparar para marcación/);
-  assert.match(renderPanel[1], /nativePresenceAuxReady/);
-  assert.match(renderPanel[1], /ensureAuxiliaryReady\(true\)/);
-  const prepareButton = renderPanel[1].match(/const prepare = element\('button'[\s\S]*?row\.appendChild\(actions\);/);
+
+  const prepareButton = renderPanel[1].match(/const prepare = element\([\s\S]*?actions\.appendChild\(prepare\);/);
   assert.ok(prepareButton, 'falta acción manual de preparación del auxiliar');
+  assert.match(prepareButton[0], /nativePresenceAuxReady/);
+  assert.match(prepareButton[0], /prepare\.disabled = \['PREPARING', 'READY'\]\.includes\(activeMode\)/);
+  assert.match(prepareButton[0], /if \(\['PREPARING', 'READY'\]\.includes\(activeMode\)\) return;/);
+  assert.match(prepareButton[0], /clearAuxiliaryRearm\(\)/);
+  assert.match(prepareButton[0], /ensureAuxiliaryReady\(\)/);
+  assert.doesNotMatch(prepareButton[0], /ensureAuxiliaryReady\(true\)/);
   assert.doesNotMatch(prepareButton[0], /fetch\(|provisionCredential\(/);
 });
 
