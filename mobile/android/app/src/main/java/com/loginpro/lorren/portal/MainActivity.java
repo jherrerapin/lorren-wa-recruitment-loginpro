@@ -57,7 +57,7 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         portalBaseUri = Uri.parse(normalizeBaseUrl(BuildConfig.PORTAL_BASE_URL));
         if (!"https".equalsIgnoreCase(portalBaseUri.getScheme()) || portalBaseUri.getHost() == null) {
-            throw new IllegalStateException("lorrenPortalBaseUrl must use https://");
+            throw new IllegalStateException("lorrenPortalBaseUrl must be an https origin");
         }
 
         webView = new WebView(this);
