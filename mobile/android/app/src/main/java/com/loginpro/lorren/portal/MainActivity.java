@@ -510,7 +510,7 @@ public final class MainActivity extends Activity {
         JSONObject event = new JSONObject();
         try {
             event.put("type", type);
-            event.put(key, value);
+            event.put("key", value);
         } catch (Exception ignored) {
         }
         return event;
