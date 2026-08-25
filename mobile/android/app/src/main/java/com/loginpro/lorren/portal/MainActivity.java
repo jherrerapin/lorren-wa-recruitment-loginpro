@@ -337,28 +337,16 @@ public final class MainActivity extends Activity {
         permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE);
     }
 
-    private boolean hasNearbyWifiPermission() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return true;
-        return hasPermission(Manifest.permission.NEARBY_WIFI_DEVICES);
-    }
-
-    private void addNearbyWifiPermissionIfNeeded(List<String> permissions) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU || hasNearbyWifiPermission()) return;
-        permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES);
-    }
-
     private List<String> nearbyTransportPermissions() {
         List<String> missing = new ArrayList<>();
         addNearbyLegacyLocationPermissionIfNeeded(missing);
         addNearbyBluetoothPermissionsIfNeeded(missing);
-        addNearbyWifiPermissionIfNeeded(missing);
         return missing;
     }
 
     private boolean nearbyTransportPermissionsGranted() {
         return hasNearbyLegacyLocationPermission()
-            && hasNearbyBluetoothPermissions()
-            && hasNearbyWifiPermission();
+            && hasNearbyBluetoothPermissions();
     }
 
     private List<String> attendancePermissions(boolean includeCamera) {

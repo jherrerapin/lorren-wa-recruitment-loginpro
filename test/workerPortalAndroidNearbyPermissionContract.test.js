@@ -16,27 +16,19 @@ function methodBody(source, signature, nextSignature) {
   return source.slice(start, end);
 }
 
-test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatibilidad por versión', async () => {
-  const [manifest, mainActivity, gradle] = await Promise.all([
+test('presencia BLE separa permisos de transporte, Wi-Fi y geocerca con compatibilidad por versión', async () => {
+  const [manifest, mainActivity, manager, gradle] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
     read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
+    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
     read('app/build.gradle')
   ]);
 
+  // Las declaraciones Wi-Fi históricas se conservan temporalmente por rollback,
+  // pero ya no forman parte del gate runtime de presencia.
   assert.match(manifest, /android\.permission\.ACCESS_WIFI_STATE/);
   assert.match(manifest, /android\.permission\.CHANGE_WIFI_STATE/);
-  assert.doesNotMatch(
-    manifest,
-    /android:maxSdkVersion="31"\s+android:name="android\.permission\.(?:ACCESS_WIFI_STATE|CHANGE_WIFI_STATE)"/
-  );
-  assert.match(
-    manifest,
-    /android:minSdkVersion="33"\s+android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
-  );
-  assert.doesNotMatch(
-    manifest,
-    /android:minSdkVersion="32"\s+android:name="android\.permission\.NEARBY_WIFI_DEVICES"/
-  );
+  assert.match(manifest, /android\.permission\.NEARBY_WIFI_DEVICES/);
   assert.doesNotMatch(manifest, /BLUETOOTH_SCAN[^>]*neverForLocation/);
   assert.match(manifest, /android\.permission\.ACCESS_COARSE_LOCATION/);
   assert.match(manifest, /android\.permission\.ACCESS_FINE_LOCATION/);
@@ -73,14 +65,6 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatib
     assert.match(bluetoothGroup, new RegExp(`Manifest\\.permission\\.${permission}`));
   }
 
-  const wifiGroup = methodBody(
-    mainActivity,
-    'private boolean hasNearbyWifiPermission()',
-    'private void addNearbyWifiPermissionIfNeeded'
-  );
-  assert.match(wifiGroup, /Build\.VERSION\.SDK_INT < Build\.VERSION_CODES\.TIRAMISU/);
-  assert.match(wifiGroup, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
-
   const transportPermissions = methodBody(
     mainActivity,
     'private List<String> nearbyTransportPermissions()',
@@ -88,7 +72,7 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatib
   );
   assert.match(transportPermissions, /addNearbyLegacyLocationPermissionIfNeeded\(missing\)/);
   assert.match(transportPermissions, /addNearbyBluetoothPermissionsIfNeeded\(missing\)/);
-  assert.match(transportPermissions, /addNearbyWifiPermissionIfNeeded\(missing\)/);
+  assert.doesNotMatch(transportPermissions, /Wifi|WIFI|NEARBY_WIFI_DEVICES/);
   assert.doesNotMatch(transportPermissions, /attendancePermissions/);
 
   const transportGranted = methodBody(
@@ -98,7 +82,10 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatib
   );
   assert.match(transportGranted, /hasNearbyLegacyLocationPermission\(\)/);
   assert.match(transportGranted, /hasNearbyBluetoothPermissions\(\)/);
-  assert.match(transportGranted, /hasNearbyWifiPermission\(\)/);
+  assert.doesNotMatch(transportGranted, /Wifi|WIFI|NEARBY_WIFI_DEVICES/);
+
+  assert.doesNotMatch(mainActivity, /hasNearbyWifiPermission|addNearbyWifiPermissionIfNeeded/);
+  assert.doesNotMatch(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
 
   const ensureNearby = methodBody(
     mainActivity,
@@ -125,7 +112,15 @@ test('Nearby de cuadrilla separa permisos de transporte y geocerca, con compatib
   assert.match(attendancePermissions, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
   assert.match(attendancePermissions, /missing\.addAll\(nearbyTransportPermissions\(\)\)/);
 
+  assert.match(manager, /BluetoothLeScanner/);
+  assert.match(manager, /BluetoothLeAdvertiser/);
+  assert.match(manager, /BluetoothGattServer/);
+  assert.match(manager, /BluetoothDevice\.TRANSPORT_LE/);
+  assert.doesNotMatch(manager, /Nearby\.getConnectionsClient|ConnectionsClient|WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
   assert.doesNotMatch(mainActivity, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
+
+  // La dependencia de Play Services queda declarada por rollback, pero ya no tiene
+  // importador en la autoridad runtime de presencia de esta rama.
   assert.match(gradle, /play-services-nearby:19\.4\.0/);
   assert.match(gradle, /coreLibraryDesugaringEnabled true/);
   assert.match(gradle, /coreLibraryDesugaring 'com\.android\.tools:desugar_jdk_libs:2\.1\.5'/);
