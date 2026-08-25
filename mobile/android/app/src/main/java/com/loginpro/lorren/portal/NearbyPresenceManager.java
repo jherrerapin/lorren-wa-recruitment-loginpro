@@ -54,8 +54,8 @@ final class NearbyPresenceManager {
     private static final ParcelUuid SERVICE_PARCEL_UUID = new ParcelUuid(SERVICE_UUID);
 
     // Bluetooth Classic inquiry suele consumir ~12 s. La ventana nativa deja
-    // margen para inquiry + SDP + RFCOMM, pero termina antes si llegan las proofs.
-    private static final long MIN_SCAN_MS = 25_000L;
+    // margen real para inquiry + SDP + RFCOMM y termina antes si llegan las proofs.
+    private static final long MIN_SCAN_MS = 35_000L;
     private static final long MAX_SCAN_MS = 45_000L;
     private static final long CONNECTION_GRACE_MS = 1_500L;
     private static final long RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L;
@@ -609,12 +609,13 @@ final class NearbyPresenceManager {
 
     private synchronized void completeLeaderScan(String completedAttemptId) {
         if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
+        int verifiedCount = proofsByKey.size();
+        int pendingCount = leaderConnectionAddresses.size();
+
         cancelLeaderTimeouts();
         stopLeaderDiscovery();
         closeLeaderSockets();
 
-        int verifiedCount = proofsByKey.size();
-        int pendingCount = leaderConnectionAddresses.size();
         emitDiagnostic("ENC", "SCAN_COMPLETE");
         emit("scan_complete", event -> {
             event.put("attemptId", completedAttemptId);
