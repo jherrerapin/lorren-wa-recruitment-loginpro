@@ -273,8 +273,6 @@ test('diagnóstico visible muestra checkpoints Nearby de ambos roles sin persist
     'DISCOVERY_READY',
     'ENDPOINT_FOUND',
     'CONNECTION_REQUEST',
-    'CONNECTION_INITIATED',
-    'CONNECTION_ESTABLISHED',
     'CHALLENGE_RECEIVED',
     'PROOF_DISPATCHED'
   ]) {
@@ -290,6 +288,10 @@ test('diagnóstico visible muestra checkpoints Nearby de ambos roles sin persist
   ]) {
     assert.match(presenceManager, new RegExp(`emitDiagnostic\\(\\"ENC\\", \\"${stage}\\"`));
   }
+  assert.match(presenceManager, /String actor = role == Role\.LEADER \? "ENC" : "AUX";/);
+  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_INITIATED"\)/);
+  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_ACCEPTED"\)/);
+  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_ESTABLISHED"\)/);
 
   assert.match(nativePresence, /const DIAGNOSTIC_LIMIT = 20/);
   assert.match(nativePresence, /function recordDiagnostic\(actor, stage, detail = \{\}\)/);
