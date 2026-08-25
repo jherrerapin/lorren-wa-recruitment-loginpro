@@ -468,6 +468,9 @@ async function editAuthenticatedProfile(req, res, {
   const confirmEmail = normalizeAppUserEmail(req.body?.confirmEmail);
   const phone = normalizeProfilePhone(req.body?.recoveryPhone);
   const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  const newPassword = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+  const confirmNewPassword = typeof req.body?.confirmNewPassword === 'string' ? req.body.confirmNewPassword : '';
+  const wantsPasswordChange = Boolean(newPassword || confirmNewPassword);
   const renderError = (status, error) => renderAccountProfile(res, {
     status,
     error,
@@ -488,6 +491,20 @@ async function editAuthenticatedProfile(req, res, {
   if (!currentPassword) {
     return renderError(400, 'Confirma tu contraseña actual para guardar los cambios.');
   }
+  if (wantsPasswordChange) {
+    if (newPassword.length < INITIAL_PASSWORD_MIN_LENGTH) {
+      return renderError(400, `La nueva contraseña debe tener al menos ${INITIAL_PASSWORD_MIN_LENGTH} caracteres.`);
+    }
+    if (Buffer.byteLength(newPassword, 'utf8') > BCRYPT_SAFE_MAX_BYTES) {
+      return renderError(400, 'La nueva contraseña es demasiado larga. Usa máximo 72 bytes.');
+    }
+    if (newPassword !== confirmNewPassword) {
+      return renderError(400, 'La nueva contraseña y su confirmación no coinciden.');
+    }
+    if (newPassword === currentPassword) {
+      return renderError(400, 'La nueva contraseña debe ser diferente de la contraseña actual.');
+    }
+  }
 
   const passwordMatches = await verifyAuthenticatedPassword(sessionData, profile, currentPassword, { env, bcryptModule });
   if (!passwordMatches) {
@@ -502,16 +519,22 @@ async function editAuthenticatedProfile(req, res, {
     return renderError(409, 'Ese correo ya está asociado a otro usuario.');
   }
 
+  const data = {
+    displayName,
+    email,
+    recoveryEmail: email,
+    recoveryPhone: phone.value
+  };
+  if (wantsPasswordChange) {
+    data.passwordHash = await bcryptModule.hash(newPassword, 10);
+    data.lastPasswordResetAt = new Date();
+  }
+
   let updatedProfile;
   try {
     updatedProfile = await prismaClient.appUser.update({
       where: { id: profile.id },
-      data: {
-        displayName,
-        email,
-        recoveryEmail: email,
-        recoveryPhone: phone.value
-      },
+      data,
       select: identitySelect()
     });
   } catch (error) {
@@ -522,7 +545,10 @@ async function editAuthenticatedProfile(req, res, {
   }
 
   syncSessionIdentity(sessionData, updatedProfile);
-  const params = new URLSearchParams({ success: 'Perfil actualizado correctamente.' });
+  const success = wantsPasswordChange
+    ? 'Perfil y contraseña actualizados correctamente.'
+    : 'Perfil actualizado correctamente.';
+  const params = new URLSearchParams({ success });
   return res.redirect(303, `${PROFILE_PATH}?${params.toString()}`);
 }
 
