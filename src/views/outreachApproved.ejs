@@ -92,9 +92,9 @@
 
     <div class="card">
       <h2>Filtros</h2>
-      <form method="get" action="/admin/outreach/approved" class="filters">
+      <form method="get" action="/admin/outreach/approved" class="filters" id="approvedOutreachFilters">
         <div class="field">
-          <label for="city">Ciudad</label>
+          <label for="city">Sucursal</label>
           <select id="city" name="city">
             <option value="">Todas</option>
             <% for (const city of cityOptions) { %>
@@ -196,6 +196,33 @@
           checkbox.checked = selectAll.checked;
         });
       });
+    }
+
+    const citySelect = document.getElementById('city');
+    const vacancySelect = document.getElementById('vacancyId');
+    if (citySelect && vacancySelect) {
+      const vacancyOptions = Array.from(vacancySelect.options).slice(1);
+      vacancyOptions.forEach((option) => {
+        option.dataset.city = String(option.textContent || '').split('·')[0].trim();
+      });
+
+      const syncVacanciesToCity = () => {
+        const selectedCity = citySelect.value;
+        const currentVacancy = vacancySelect.value;
+        let currentStillVisible = currentVacancy === '';
+
+        vacancyOptions.forEach((option) => {
+          const visible = !selectedCity || option.dataset.city === selectedCity;
+          option.hidden = !visible;
+          option.disabled = !visible;
+          if (visible && option.value === currentVacancy) currentStillVisible = true;
+        });
+
+        if (!currentStillVisible) vacancySelect.value = '';
+      };
+
+      citySelect.addEventListener('change', syncVacanciesToCity);
+      syncVacanciesToCity();
     }
 
     function openPreparedBatch() {
