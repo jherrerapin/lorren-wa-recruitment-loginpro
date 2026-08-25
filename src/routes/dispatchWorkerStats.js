@@ -9,11 +9,16 @@ import { dispatchAssignmentDateGuard } from './dispatchAssignmentDateGuard.js';
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 const NO_CONFIRM_STATUS = 'NO_CONFIRMO';
+const TEST_PROFILE_AUDIT_ACTION = 'DISPATCH_WORKER_TEST_PROFILE_UPDATED';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function currentRole(req) {
+  return normalizeString(req.session?.userRole || req.userRole)?.toLowerCase() || null;
 }
 
 function isOpsUser(req) {
@@ -37,6 +42,53 @@ function requireOps(req, res, next) {
 function requireDev(req, res, next) {
   const role = req.session?.userRole || req.userRole;
   if (role !== 'dev') return res.status(403).send('Acceso restringido a DEV');
+  return next();
+}
+
+function isTestWorkerBearingValue(value) {
+  return value?.isTestProfile === true || value?.worker?.isTestProfile === true;
+}
+
+function hideTestWorkersFromArray(value) {
+  if (!Array.isArray(value)) return value;
+  return value.filter((item) => !isTestWorkerBearingValue(item));
+}
+
+function hideTestAssignmentsFromRequest(request) {
+  if (!request || typeof request !== 'object' || !Array.isArray(request.assignments)) return request;
+  return {
+    ...request,
+    assignments: hideTestWorkersFromArray(request.assignments)
+  };
+}
+
+function sanitizeNonDevRenderLocals(locals = {}) {
+  const sanitized = { ...locals };
+  for (const [key, value] of Object.entries(sanitized)) {
+    if (Array.isArray(value)) sanitized[key] = hideTestWorkersFromArray(value);
+  }
+  if (Array.isArray(sanitized.serviceRequests)) {
+    sanitized.serviceRequests = sanitized.serviceRequests.map(hideTestAssignmentsFromRequest);
+  }
+  if (sanitized.selectedServiceRequest) {
+    sanitized.selectedServiceRequest = hideTestAssignmentsFromRequest(sanitized.selectedServiceRequest);
+  }
+  return sanitized;
+}
+
+function installTestProfileVisibilityGate(req, res, next) {
+  if (currentRole(req) === 'dev') return next();
+  const originalRender = res.render.bind(res);
+  res.render = (view, locals, callback) => {
+    let renderLocals = locals || {};
+    let renderCallback = callback;
+    if (typeof locals === 'function') {
+      renderCallback = locals;
+      renderLocals = {};
+    }
+    const sanitizedLocals = sanitizeNonDevRenderLocals(renderLocals);
+    return originalRender(view, sanitizedLocals, renderCallback);
+  };
   return next();
 }
 
@@ -97,6 +149,47 @@ function resetSummaryMessage(result = {}) {
   return `Entorno de prueba reiniciado: ${removed.join(', ')}.${evidenceWarning}`;
 }
 
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function escapeRegExp(value) {
+  return String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function injectTestProfileControls(html, workers = []) {
+  if (typeof html !== 'string' || html.includes('data-dev-test-profile-column')) return html;
+  let output = html.replace(
+    '<th>Origen</th><th>Acciones</th>',
+    '<th>Origen</th><th data-dev-test-profile-column>Prueba</th><th>Acciones</th>'
+  );
+  if (output === html) return html;
+
+  if (!output.includes('data-dev-test-profile-styles')) {
+    output = output.replace(
+      '</style>',
+      `    .dev-test-profile-form { display:inline-flex; align-items:center; margin:0; }\n    .dev-test-profile-toggle { display:inline-flex; align-items:center; gap:7px; cursor:pointer; user-select:none; }\n    .dev-test-profile-toggle input { margin:0; }\n    .dev-test-profile-label { display:inline-flex; align-items:center; border-radius:999px; padding:3px 8px; font-size:10px; font-weight:900; background:#f1f5f9; color:#475569; }\n    .dev-test-profile-label.active { background:#fef3c7; color:#92400e; }\n    <meta data-dev-test-profile-styles />\n  </style>`
+    );
+  }
+
+  for (const worker of Array.isArray(workers) ? workers : []) {
+    if (!worker?.id) continue;
+    const rowPattern = new RegExp(`(<tr\\s+data-id=["']${escapeRegExp(worker.id)}["'][\\s\\S]*?)(<td\\s+class=["']actions-cell["'])`, 'i');
+    const checked = worker.isTestProfile === true ? ' checked' : '';
+    const activeClass = worker.isTestProfile === true ? ' active' : '';
+    const statusLabel = worker.isTestProfile === true ? 'Prueba' : 'Real';
+    const workerName = escapeHtml(worker.fullName || 'auxiliar');
+    const form = `<td data-dev-test-profile-cell><form class="dev-test-profile-form" method="post" action="/admin/operaciones/personal/${encodeURIComponent(worker.id)}/test-profile"><label class="dev-test-profile-toggle" title="Excluir o incluir este auxiliar del entorno de prueba"><input type="checkbox" name="isTestProfile" value="true"${checked} onchange="this.form.submit()" aria-label="Marcar a ${workerName} como auxiliar de prueba"/><span class="dev-test-profile-label${activeClass}">${statusLabel}</span></label></form></td>`;
+    output = output.replace(rowPattern, `$1${form}$2`);
+  }
+  return output;
+}
+
 function injectTestResetControls(html) {
   if (typeof html !== 'string' || html.includes('/admin/operaciones/pruebas/reiniciar')) return html;
   const button = '<button type="button" class="btn btn-danger-outline" id="open-test-reset">Reiniciar entorno de prueba</button>';
@@ -154,7 +247,8 @@ function installTestResetRenderGate(res, next) {
         if (typeof renderCallback === 'function') return renderCallback(error);
         return next(error);
       }
-      const output = injectTestResetControls(html);
+      const withTestProfiles = injectTestProfileControls(html, renderLocals.workers);
+      const output = injectTestResetControls(withTestProfiles);
       if (typeof renderCallback === 'function') return renderCallback(null, output);
       return res.send(output);
     });
@@ -164,6 +258,7 @@ function installTestResetRenderGate(res, next) {
 export function dispatchWorkerStatsRouter(prisma) {
   const router = express.Router();
 
+  router.use(installTestProfileVisibilityGate);
   router.use('/asignaciones', requireOps, dispatchAssignmentDateGuard(prisma));
 
   router.get('/personal', requireOps, async (req, res, next) => {
@@ -181,6 +276,55 @@ export function dispatchWorkerStatsRouter(prisma) {
     }
     return next();
   });
+
+  router.post(
+    '/personal/:workerId/test-profile',
+    requireOps,
+    requireDev,
+    express.urlencoded({ extended: false }),
+    async (req, res) => {
+      const worker = await prisma.dispatchWorker.findUnique({
+        where: { id: req.params.workerId },
+        select: { id: true, fullName: true, isTestProfile: true }
+      });
+      if (!worker) return res.status(404).send('Auxiliar no encontrado');
+
+      const isTestProfile = normalizeString(req.body?.isTestProfile) === 'true';
+      if (worker.isTestProfile === isTestProfile) {
+        return res.redirect('/admin/operaciones/personal');
+      }
+
+      const actorUsername = normalizeString(req.session?.username || req.username) || 'dev';
+      const actorRole = normalizeString(req.session?.userRole || req.userRole) || 'dev';
+      await prisma.$transaction([
+        prisma.dispatchWorker.update({
+          where: { id: worker.id },
+          data: { isTestProfile }
+        }),
+        prisma.devAuditEvent.create({
+          data: {
+            entityType: 'DISPATCH_WORKER',
+            entityId: worker.id,
+            entityLabel: worker.fullName || null,
+            action: TEST_PROFILE_AUDIT_ACTION,
+            actorUsername,
+            actorRole,
+            actorSource: 'dashboard',
+            method: req.method || null,
+            path: String(req.originalUrl || req.url || '').split('?')[0],
+            fromValue: { isTestProfile: worker.isTestProfile === true },
+            toValue: { isTestProfile },
+            metadata: { billingExcluded: isTestProfile }
+          }
+        })
+      ]);
+
+      const message = isTestProfile
+        ? 'Auxiliar marcado como prueba. Queda excluido del contador de auxiliares facturables.'
+        : 'Auxiliar retirado de prueba. Volverá a ser elegible para el contador cuando cumpla la lógica de uso.';
+      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(message)}`);
+    }
+  );
 
   router.post(
     '/pruebas/reiniciar',
@@ -205,7 +349,9 @@ export function dispatchWorkerStatsRouter(prisma) {
       }
     });
 
-    if (!worker) return res.status(404).send('Auxiliar no encontrado');
+    if (!worker || (worker.isTestProfile === true && currentRole(req) !== 'dev')) {
+      return res.status(404).send('Auxiliar no encontrado');
+    }
 
     const assignments = await prisma.dispatchAssignment.findMany({
       where: { workerId: worker.id },
