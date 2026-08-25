@@ -1,6 +1,13 @@
 import axios from 'axios';
 import { attachAdContextToMessage } from './adContext.js';
 
+export const INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD = 'INTERVIEW_ATTEND_YES';
+export const INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD = 'INTERVIEW_ATTEND_NO';
+export const INTERVIEW_ATTENDANCE_QUICK_REPLY_PAYLOADS = [
+  INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
+  INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD
+];
+
 function requireTemplateString(value, label) {
   const normalized = String(value ?? '').trim();
   if (!normalized) throw new TypeError(`${label}_required`);
@@ -34,7 +41,10 @@ export function buildWhatsAppTemplatePayload(to, options = {}) {
     type: 'text',
     text: requireTemplateString(value, 'whatsapp_template_body_parameter')
   }));
-  const quickReplyComponents = buildTemplateQuickReplyComponents(options.quickReplyPayloads ?? []);
+  const quickReplyPayloads = options.quickReplyPayloads === undefined
+    ? INTERVIEW_ATTENDANCE_QUICK_REPLY_PAYLOADS
+    : options.quickReplyPayloads;
+  const quickReplyComponents = buildTemplateQuickReplyComponents(quickReplyPayloads);
 
   const template = {
     name,
