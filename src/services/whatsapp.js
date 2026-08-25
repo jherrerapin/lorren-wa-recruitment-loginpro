@@ -1,15 +1,46 @@
 import axios from 'axios';
 import { attachAdContextToMessage } from './adContext.js';
 
-export async function sendTextMessage(to, body) {
-  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
-  const payload = {
-    messaging_product: 'whatsapp',
-    to,
-    type: 'text',
-    text: { body }
-  };
+function requireTemplateString(value, label) {
+  const normalized = String(value ?? '').trim();
+  if (!normalized) throw new TypeError(`${label}_required`);
+  return normalized;
+}
 
+export function buildWhatsAppTemplatePayload(to, options = {}) {
+  const recipient = requireTemplateString(to, 'whatsapp_template_recipient');
+  const name = requireTemplateString(options.name, 'whatsapp_template_name');
+  const languageCode = requireTemplateString(options.languageCode, 'whatsapp_template_language');
+  const rawParameters = options.bodyParameters ?? [];
+  if (!Array.isArray(rawParameters)) {
+    throw new TypeError('whatsapp_template_body_parameters_invalid');
+  }
+  const bodyParameters = rawParameters.map((value) => ({
+    type: 'text',
+    text: requireTemplateString(value, 'whatsapp_template_body_parameter')
+  }));
+
+  const template = {
+    name,
+    language: { code: languageCode }
+  };
+  if (bodyParameters.length) {
+    template.components = [{
+      type: 'body',
+      parameters: bodyParameters
+    }];
+  }
+
+  return {
+    messaging_product: 'whatsapp',
+    to: recipient,
+    type: 'template',
+    template
+  };
+}
+
+async function postWhatsAppPayload(payload) {
+  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const response = await axios.post(url, payload, {
     headers: {
       Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
@@ -21,8 +52,22 @@ export async function sendTextMessage(to, body) {
   return response.data;
 }
 
+export async function sendTemplateMessage(to, options = {}) {
+  return postWhatsAppPayload(buildWhatsAppTemplatePayload(to, options));
+}
+
+export async function sendTextMessage(to, body) {
+  const payload = {
+    messaging_product: 'whatsapp',
+    to,
+    type: 'text',
+    text: { body }
+  };
+
+  return postWhatsAppPayload(payload);
+}
+
 export async function sendImageMessage(to, image, caption = '') {
-  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const payload = {
     messaging_product: 'whatsapp',
     to,
@@ -36,19 +81,10 @@ export async function sendImageMessage(to, image, caption = '') {
     payload.image.caption = caption;
   }
 
-  const response = await axios.post(url, payload, {
-    headers: {
-      Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 15000
-  });
-
-  return response.data;
+  return postWhatsAppPayload(payload);
 }
 
 export async function sendDocumentMessage(to, document, caption = '') {
-  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const payload = {
     messaging_product: 'whatsapp',
     to,
@@ -66,19 +102,10 @@ export async function sendDocumentMessage(to, document, caption = '') {
     payload.document.caption = caption;
   }
 
-  const response = await axios.post(url, payload, {
-    headers: {
-      Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 15000
-  });
-
-  return response.data;
+  return postWhatsAppPayload(payload);
 }
 
 export async function sendAudioMessage(to, audio) {
-  const url = `https://graph.facebook.com/v23.0/${process.env.META_PHONE_NUMBER_ID}/messages`;
   const payload = {
     messaging_product: 'whatsapp',
     to,
@@ -88,15 +115,7 @@ export async function sendAudioMessage(to, audio) {
     }
   };
 
-  const response = await axios.post(url, payload, {
-    headers: {
-      Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    timeout: 15000
-  });
-
-  return response.data;
+  return postWhatsAppPayload(payload);
 }
 
 function payloadPhoneNumberId(payload = {}) {
