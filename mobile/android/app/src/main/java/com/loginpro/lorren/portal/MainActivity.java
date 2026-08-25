@@ -34,7 +34,10 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_ENABLE_BLUETOOTH = 4105;
     private static final int REQUEST_ATTENDANCE_LOCATION = 4106;
     private static final int REQUEST_BLUETOOTH_DISCOVERABLE = 4107;
-    private static final int BLUETOOTH_DISCOVERABLE_SECONDS = 300;
+    
+    // CORRECCIÓN: Aumentamos la visibilidad Bluetooth al máximo permitido (3600 segundos = 1 hora)
+    private static final int BLUETOOTH_DISCOVERABLE_SECONDS = 3600; 
+    
     private static final String PORTAL_PATH = "/operaciones/portal";
     private static final String HANDOFF_PATH = "/operaciones/portal/sesion-transferencia/continuar";
     private static final String NATIVE_USER_AGENT_TOKEN = "LorrenNative/1";
