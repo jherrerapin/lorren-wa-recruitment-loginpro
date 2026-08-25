@@ -54,19 +54,29 @@ test('Bluetooth Classic conserva una sola autoridad local y no usa Wi-Fi como tr
   assert.doesNotMatch(mainActivity, /hasNearbyWifiPermission|addNearbyWifiPermissionIfNeeded/);
 });
 
-test('replay físico: AUX sirve RFCOMM, ENC descubre por Classic/SDP y ambos stalls quedan acotados', async () => {
+test('replay físico: AUX confirma discoverability y ENC no depende del broadcast FINISHED para iniciar SDP', async () => {
   const manager = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
   assert.match(manager, /synchronized void startReady\(String serviceRequestId\)[\s\S]{0,300}startAuxiliaryServer\(\)/);
+  assert.match(manager, /BluetoothAdapter\.SCAN_MODE_CONNECTABLE_DISCOVERABLE/);
+  assert.match(manager, /emitDiagnostic\("AUX", "DISCOVERABLE_CONFIRMED"\)/);
   assert.match(manager, /listenUsingInsecureRfcommWithServiceRecord\([\s\S]{0,120}SERVICE_NAME[\s\S]{0,80}SERVICE_UUID/);
   assert.match(manager, /serverSocket\.accept\(\)/);
   assert.match(manager, /RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L/);
   assert.match(manager, /handler\.postDelayed\(auxiliaryExchangeTimeout, RFCOMM_EXCHANGE_TIMEOUT_MS\)/);
   assert.match(manager, /closeAuxiliarySocket\(\)[\s\S]{0,260}cancelAuxiliaryExchangeTimeout\(\)/);
 
-  assert.match(manager, /MIN_SCAN_MS = 25_000L/);
+  assert.match(manager, /MIN_SCAN_MS = 35_000L/);
+  assert.match(manager, /INQUIRY_CHECKPOINT_MS = 15_000L/);
   assert.match(manager, /bluetoothAdapter\.startDiscovery\(\)/);
+  assert.match(manager, /BluetoothAdapter\.ACTION_DISCOVERY_STARTED/);
   assert.match(manager, /BluetoothAdapter\.ACTION_DISCOVERY_FINISHED/);
+  assert.match(manager, /filter\.addAction\(BluetoothAdapter\.ACTION_DISCOVERY_STARTED\)/);
+  assert.match(manager, /appContext\.registerReceiver\(leaderDiscoveryReceiver, filter\)/);
+  assert.doesNotMatch(manager, /registerReceiver\(leaderDiscoveryReceiver, filter, Context\.RECEIVER_EXPORTED\)/);
+  assert.match(manager, /scheduleLeaderInquiryCheckpoint\(nextAttemptId\)/);
+  assert.match(manager, /handler\.postDelayed\(leaderInquiryCheckpoint, INQUIRY_CHECKPOINT_MS\)/);
+  assert.match(manager, /CLASSIC_INQUIRY_CHECKPOINT[\s\S]{0,260}bluetoothAdapter\.cancelDiscovery\(\)[\s\S]{0,220}requestSdpForDiscoveredDevices\(\)/);
   assert.match(manager, /device\.fetchUuidsWithSdp\(\)/);
   assert.match(manager, /BluetoothDevice\.ACTION_UUID/);
   assert.match(manager, /device\.createInsecureRfcommSocketToServiceRecord\(SERVICE_UUID\)/);
@@ -76,7 +86,7 @@ test('replay físico: AUX sirve RFCOMM, ENC descubre por Classic/SDP y ambos sta
   assert.match(manager, /WINDOW_CLOSED[\s\S]{0,180}stopLeaderDiscovery\(\)[\s\S]{0,240}CONNECTION_GRACE_MS/);
 });
 
-test('auxiliar entra READY y el botón manual no destruye un servidor RFCOMM activo', async () => {
+test('auxiliar entra READY solo después de confirmar discoverability y el botón no destruye un servidor RFCOMM activo', async () => {
   const [nativePresence, manager] = await Promise.all([
     read('mobile/android/app/src/main/assets/native-presence.js'),
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
@@ -97,7 +107,7 @@ test('auxiliar entra READY y el botón manual no destruye un servidor RFCOMM act
   assert.match(ensureReady[1], /document\.visibilityState === 'hidden'/);
   assert.doesNotMatch(ensureReady[1], /document\.hasFocus/);
   assert.match(manager, /startAuxiliaryServer\(\)/);
-  assert.match(manager, /emitDiagnostic\("AUX", "RFCOMM_SERVER_READY"\)[\s\S]{0,100}emitReady\(\)/);
+  assert.match(manager, /SCAN_MODE_CONNECTABLE_DISCOVERABLE[\s\S]{0,300}DISCOVERABLE_CONFIRMED[\s\S]{0,420}RFCOMM_SERVER_READY[\s\S]{0,100}emitReady\(\)/);
 
   const prepareButton = renderPanel[1].match(/const prepare = element\([\s\S]*?actions\.appendChild\(prepare\);/);
   assert.ok(prepareButton, 'falta acción manual de preparación del auxiliar');
@@ -162,7 +172,7 @@ test('scan con cero auxiliares usa una ventana Classic continua y falla cerrado 
   ]);
 
   assert.match(nativePresence, /const DEFAULT_SCAN_MS = 15_000/);
-  assert.match(manager, /MIN_SCAN_MS = 25_000L/);
+  assert.match(manager, /MIN_SCAN_MS = 35_000L/);
   assert.match(manager, /input\.optInt\("expectedProofCount", 0\)/);
   assert.match(manager, /Math\.max\([\s\S]{0,100}MIN_SCAN_MS[\s\S]{0,180}input\.optLong\("timeoutMs", MIN_SCAN_MS\)/);
   assert.match(manager, /expectedProofCount > 0 && verifiedCount >= expectedProofCount[\s\S]{0,120}completeLeaderScan\(attemptId\)/);
