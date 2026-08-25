@@ -231,7 +231,8 @@ final class NearbyPresenceManager {
                     return;
                 }
             }
-            if (sentAt <= 0L || Math.abs(sentAt - System.currentTimeMillis()) > 2 * 60 * 1000L) {
+            // Corrección: Eliminado el Math.abs que bloqueaba a los auxiliares desfasados offline
+            if (sentAt <= 0L) {
                 finishAuxiliaryExchange(socket);
                 return;
             }
@@ -517,11 +518,10 @@ final class NearbyPresenceManager {
                 failLeaderPeer(address, "proof_invalid");
                 return;
             }
+            
+            // Corrección: Eliminado el Math.abs que bloqueaba a los auxiliares desfasados offline
             long respondedAt = proof.optLong("respondedAt", 0L);
-            if (
-                respondedAt <= 0L
-                || Math.abs(respondedAt - System.currentTimeMillis()) > 2 * 60 * 1000L
-            ) {
+            if (respondedAt <= 0L) {
                 failLeaderPeer(address, "proof_invalid");
                 return;
             }
