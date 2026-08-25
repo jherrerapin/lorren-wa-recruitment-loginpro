@@ -321,7 +321,6 @@ function isValidDateString(str) {
   return typeof str === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(str);
 }
 
-
 function normalizeCandidateDateRangeFilter(query = {}) {
   const dateFrom = isValidDateString(query.dateFrom) ? query.dateFrom : '';
   const dateTo = isValidDateString(query.dateTo) ? query.dateTo : '';
@@ -1157,6 +1156,7 @@ async function sendAdminOutboundMessage(prisma, candidate, body, rawPayload = {}
     sendText: sendTextMessage
   });
 }
+
 function buildManualInterviewReminderText(booking) {
   const fullName = normalizeString(booking?.candidate?.fullName);
   const firstName = fullName ? fullName.split(/\s+/)[0] : null;
@@ -1407,6 +1407,52 @@ async function loadApprovedOutreachCandidates(prisma, accessContext = null) {
   return candidates.sort(sortOutreachCandidates);
 }
 
+export async function markApprovedOutreachPreparedAsContacted(prisma, candidates = [], actorRole = 'admin') {
+  const candidateIds = [...new Set(
+    (Array.isArray(candidates) ? candidates : [])
+      .map((candidate) => normalizeString(candidate?.id))
+      .filter(Boolean)
+  )];
+  if (!candidateIds.length) return { count: 0 };
+  if (typeof prisma?.$transaction !== 'function') {
+    throw new TypeError('approved_outreach_prisma_transaction_required');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    if (typeof tx?.candidate?.updateMany !== 'function') {
+      throw new TypeError('approved_outreach_candidate_update_required');
+    }
+    if (typeof tx?.candidateAdminEvent?.createMany !== 'function') {
+      throw new TypeError('approved_outreach_audit_create_many_required');
+    }
+
+    const transition = await tx.candidate.updateMany({
+      where: {
+        id: { in: candidateIds },
+        status: 'APROBADO'
+      },
+      data: { status: 'CONTACTADO' }
+    });
+    const count = Number(transition?.count || 0);
+    if (count !== candidateIds.length) {
+      throw new Error('approved_outreach_status_conflict');
+    }
+
+    await tx.candidateAdminEvent.createMany({
+      data: candidateIds.map((candidateId) => ({
+        candidateId,
+        actorRole: normalizeString(actorRole) || 'system',
+        eventType: 'STATUS_CHANGED',
+        eventLabel: 'Incluido en mensajes a aprobados',
+        fromValue: 'Aprobado',
+        toValue: 'Contactado'
+      }))
+    });
+
+    return { count };
+  });
+}
+
 function parseVacancyBody(body) {
   const str = (v) => (typeof v === 'string' ? v.trim() || null : null);
   const int = (v) => { const n = parseInt(v, 10); return Number.isNaN(n) ? null : n; };
@@ -1528,6 +1574,7 @@ async function buildUniqueVacancyKey(prisma, title, city, excludeId = null) {
     suffix += 1;
   }
 }
+
 async function loadOperations(prisma, options = {}) {
   try {
     const allowedCities = Array.isArray(options.allowedCities) ? options.allowedCities.filter(Boolean) : [];
@@ -1949,28 +1996,51 @@ export function adminRouter(prisma) {
       .filter((option, index, array) => array.findIndex((item) => item.id === option.id) === index)
       .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
     const candidates = filterOutreachCandidates(allApprovedCandidates, outreachFilters);
-    const preparedRecipients = candidates
-      .filter((candidate) => selectedIds.has(candidate.id))
-      .map((candidate) => {
-        const personalizedMessage = personalizeOutreachMessage(outreachFilters.messageTemplate, candidate);
-        const params = new URLSearchParams({ returnTo: '/admin/outreach/approved' });
-        params.set('text', personalizedMessage);
-        return {
-          ...candidate,
-          personalizedMessage,
-          whatsappHref: `/admin/candidates/${candidate.id}/open-whatsapp?${params.toString()}`
-        };
-      });
+    const selectedCandidates = candidates.filter((candidate) => selectedIds.has(candidate.id));
+    let preparedRecipients = [];
+    let preparedSuccess = null;
+    let preparedError = null;
+    let remainingCandidates = candidates;
+
+    if (!selectedIds.size) {
+      preparedError = 'Selecciona al menos un candidato aprobado para preparar la ronda.';
+    } else if (selectedCandidates.length !== selectedIds.size) {
+      preparedError = 'Uno o más candidatos ya no están aprobados o no pertenecen al alcance actual. Actualiza la lista e intenta de nuevo.';
+    } else {
+      try {
+        await markApprovedOutreachPreparedAsContacted(prisma, selectedCandidates, req.userRole);
+        preparedRecipients = selectedCandidates.map((candidate) => {
+          const personalizedMessage = personalizeOutreachMessage(outreachFilters.messageTemplate, candidate);
+          const params = new URLSearchParams({ returnTo: '/admin/outreach/approved' });
+          params.set('text', personalizedMessage);
+          return {
+            ...candidate,
+            personalizedMessage,
+            whatsappHref: `/admin/candidates/${candidate.id}/open-whatsapp?${params.toString()}`
+          };
+        });
+        remainingCandidates = candidates.filter((candidate) => !selectedIds.has(candidate.id));
+        preparedSuccess = `Ronda preparada para ${preparedRecipients.length} candidato(s). Los seleccionados pasaron a Contactados.`;
+      } catch (error) {
+        console.error('[approved_outreach_prepare_status]', {
+          selectionCount: selectedCandidates.length,
+          error: error?.message || error
+        });
+        preparedError = error?.message === 'approved_outreach_status_conflict'
+          ? 'Uno o más candidatos cambiaron de estado mientras se preparaba la ronda. No se cambió ninguno; actualiza la lista e intenta de nuevo.'
+          : 'No fue posible preparar la ronda ni cambiar los candidatos a Contactados. Intenta de nuevo.';
+      }
+    }
 
     res.render('outreachApproved', {
       role: req.userRole,
-      candidates,
+      candidates: remainingCandidates,
       cityOptions,
       vacancyOptions,
       outreachFilters,
       preparedRecipients,
-      preparedSuccess: preparedRecipients.length ? `Ronda preparada para ${preparedRecipients.length} candidato(s).` : null,
-      preparedError: preparedRecipients.length ? null : 'Selecciona al menos un candidato aprobado para preparar la ronda.'
+      preparedSuccess,
+      preparedError
     });
   });
 
@@ -2017,8 +2087,8 @@ export function adminRouter(prisma) {
         scope,
         content,
         tags: tags || null,
-        vacancyId,
         candidateId,
+        vacancyId,
         createdBy: req.username || req.userRole || 'dev',
         updatedBy: req.username || req.userRole || 'dev'
       }
