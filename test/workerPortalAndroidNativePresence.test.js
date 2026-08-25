@@ -96,8 +96,8 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(presenceManager, /AdvertisingOptions\.Builder/);
   assert.match(presenceManager, /DiscoveryOptions\.Builder/);
   assert.match(presenceManager, /ConnectionOptions\.Builder/);
-  assert.match(presenceManager, /setLowPower\(true\)/);
-  assert.match(presenceManager, /setLowPower\(false\)/);
+  assert.doesNotMatch(presenceManager, /setLowPower\(true\)/);
+  assert.equal((presenceManager.match(/setLowPower\(false\)/g) || []).length, 3);
   assert.equal((presenceManager.match(/ConnectionType\.NON_DISRUPTIVE/g) || []).length, 2);
   assert.doesNotMatch(presenceManager, /ConnectionType\.(?:BALANCED|DISRUPTIVE)/);
   assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,420}startReadyDiscovery\(normalizedService, 0\)/);
@@ -181,7 +181,7 @@ test('auxiliar queda listo por visibilidad y discovery confirmado de Nearby, sin
   assert.match(startReady[1], /bridgeCall\('setReady'/);
   assert.doesNotMatch(startReady[1], /!navigator\.onLine[\s\S]{0,180}return/);
   assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
-  assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,220}activeMode = 'READY'/);
+  assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,420}activeMode = 'READY'/);
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
   assert.match(presenceManager, /startReadyDiscovery\(normalizedService, 0\)/);
   assert.match(presenceManager, /client\.startDiscovery[\s\S]{0,900}addOnSuccessListener[\s\S]{0,500}emit\("ready"/);
@@ -191,6 +191,38 @@ test('auxiliar queda listo por visibilidad y discovery confirmado de Nearby, sin
   assert.doesNotMatch(offlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
   assert.match(nativePresence, /window\.addEventListener\('focus', scheduleAuxiliaryRearm\)/);
   assert.match(nativePresence, /visibilityState === 'visible'[\s\S]{0,120}scheduleAuxiliaryRearm\(\)/);
+});
+
+test('replay físico: preparar manualmente no reinicia un AUX ya READY y Nearby usa potencia normal', async () => {
+  const [nativePresence, presenceManager] = await Promise.all([
+    read('app/src/main/assets/native-presence.js'),
+    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
+  ]);
+
+  const prepareBlock = nativePresence.match(
+    /const prepare = element\([\s\S]*?actions\.appendChild\(prepare\);/
+  );
+  assert.ok(prepareBlock, 'falta la acción manual del auxiliar');
+  assert.match(prepareBlock[0], /prepare\.disabled = \['PREPARING', 'READY'\]\.includes\(activeMode\)/);
+  assert.match(prepareBlock[0], /if \(\['PREPARING', 'READY'\]\.includes\(activeMode\)\) return;/);
+  assert.match(prepareBlock[0], /clearAuxiliaryRearm\(\)/);
+  assert.match(prepareBlock[0], /ensureAuxiliaryReady\(\)/);
+  assert.doesNotMatch(prepareBlock[0], /ensureAuxiliaryReady\(true\)/);
+  assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,360}prepare\.disabled = true[\s\S]{0,120}prepare\.textContent = 'Bluetooth listo'/);
+
+  const discovery = presenceManager.match(
+    /private void startReadyDiscovery\(String normalizedService, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private void handleReadyDiscoveryFailure/
+  );
+  const connection = presenceManager.match(
+    /private void requestAuxiliaryConnection\(String endpointId, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private final ConnectionLifecycleCallback/
+  );
+  assert.ok(discovery, 'falta discovery AUX');
+  assert.ok(connection, 'falta conexión AUX');
+  assert.match(discovery[1], /setLowPower\(false\)/);
+  assert.match(connection[1], /setLowPower\(false\)/);
+  assert.doesNotMatch(discovery[1], /setLowPower\(true\)/);
+  assert.doesNotMatch(connection[1], /setLowPower\(true\)/);
+  assert.match(connection[1], /ConnectionType\.NON_DISRUPTIVE/);
 });
 
 test('credencial persistida en Android es la autoridad para responder sin Internet', async () => {
