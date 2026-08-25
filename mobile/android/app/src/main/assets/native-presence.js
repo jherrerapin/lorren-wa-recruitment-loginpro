@@ -881,13 +881,24 @@
       row.appendChild(actions);
     } else {
       const actions = element('div', 'native-presence-actions');
-      const prepare = element('button', 'native-presence-btn secondary', 'Preparar para marcación');
+      const prepare = element(
+        'button',
+        'native-presence-btn secondary',
+        activeMode === 'READY'
+          ? 'Bluetooth listo'
+          : activeMode === 'PREPARING'
+            ? 'Preparando Bluetooth…'
+            : 'Preparar para marcación'
+      );
       prepare.type = 'button';
       prepare.dataset.nativePresenceAuxReady = 'true';
+      prepare.disabled = ['PREPARING', 'READY'].includes(activeMode);
       prepare.addEventListener('click', () => {
+        if (['PREPARING', 'READY'].includes(activeMode)) return;
+        clearAuxiliaryRearm();
         resetDiagnosticLog('APP', 'AUX_PREPARE_TAPPED');
         setStatus('Preparando Bluetooth para la marcación…', 'warning');
-        ensureAuxiliaryReady(true).catch(() => {
+        ensureAuxiliaryReady().catch(() => {
           setStatus('No fue posible preparar Bluetooth. Intenta nuevamente.', 'error');
         });
       });
@@ -984,6 +995,11 @@
     const context = currentContext();
     if (!context || context.isCrewLeader || ['PREPARING', 'READY'].includes(activeMode)) return;
     activeMode = 'PREPARING';
+    const prepare = document.querySelector(`#${PANEL_ID} [data-native-presence-aux-ready]`);
+    if (prepare) {
+      prepare.disabled = true;
+      prepare.textContent = 'Preparando Bluetooth…';
+    }
     setStatus('Preparando Bluetooth para la marcación…', 'warning');
     if (navigator.onLine && !credentialPrepared()) await provisionCredential();
     recordDiagnostic('APP', 'AUX_SET_READY_CALL');
@@ -991,6 +1007,10 @@
     if (!result?.ok) {
       recordDiagnostic('APP', 'AUX_SET_READY_REJECTED');
       activeMode = 'IDLE';
+      if (prepare) {
+        prepare.disabled = false;
+        prepare.textContent = 'Preparar para marcación';
+      }
       setStatus(publicNativeError(result?.error), 'warning');
       return;
     }
@@ -1249,6 +1269,11 @@
       const context = currentContext();
       if (!context || context.isCrewLeader) return;
       activeMode = 'READY';
+      const prepare = document.querySelector(`#${PANEL_ID} [data-native-presence-aux-ready]`);
+      if (prepare) {
+        prepare.disabled = true;
+        prepare.textContent = 'Bluetooth listo';
+      }
       setStatus('Bluetooth listo. Esperando la marcación del encargado.', '');
       showStop();
       return;
