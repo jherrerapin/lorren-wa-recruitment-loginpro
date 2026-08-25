@@ -8,7 +8,7 @@ function read(relativePath) {
   return readFile(new URL(relativePath, ROOT), 'utf8');
 }
 
-test('Android privado reutiliza el Portal y una sola autoridad BLE nativa sin introducir escritor de asistencia', async () => {
+test('Android privado reutiliza el Portal y una sola autoridad Bluetooth Classic sin introducir escritor de asistencia', async () => {
   const [
     rootBuild,
     appBuild,
@@ -49,7 +49,6 @@ test('Android privado reutiliza el Portal y una sola autoridad BLE nativa sin in
     assert.match(manifest, new RegExp(`android\\.permission\\.${permission}`));
   }
   assert.doesNotMatch(manifest, /BLUETOOTH_SCAN[^>]*neverForLocation/);
-  assert.match(manifest, /android\.hardware\.bluetooth_le/);
   assert.match(manifest, /android:usesCleartextTraffic="false"/);
   assert.match(manifest, /android:scheme="lorren"/);
   assert.match(manifest, /android:host="portal"/);
@@ -64,20 +63,19 @@ test('Android privado reutiliza el Portal y una sola autoridad BLE nativa sin in
   assert.match(mainActivity, /NATIVE_USER_AGENT_TOKEN = "LorrenNative\/1"/);
   assert.doesNotMatch(mainActivity, /Log\.[vdiew]|System\.out|System\.err/);
   assert.match(mainActivity, /attendancePermissions\(true\)/);
-  assert.match(mainActivity, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
-  assert.match(mainActivity, /hasNearbyLegacyLocationPermission\(\)/);
-  assert.match(mainActivity, /addNearbyLegacyLocationPermissionIfNeeded\(missing\)/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
   assert.doesNotMatch(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
   assert.doesNotMatch(mainActivity, /hasNearbyWifiPermission|addNearbyWifiPermissionIfNeeded/);
   assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_ENABLE/);
-  assert.match(mainActivity, /"bluetooth_unavailable"/);
-  assert.match(mainActivity, /"bluetooth_disabled"/);
-  assert.match(mainActivity, /nearbyTransportPermissionsGranted\(\)[\s\S]{0,180}hasNearbyLegacyLocationPermission\(\)[\s\S]{0,100}hasNearbyBluetoothPermissions\(\)/);
-  assert.doesNotMatch(mainActivity, /nearbyTransportPermissionsGranted\(\)[\s\S]{0,220}hasNearbyWifiPermission/);
-  assert.match(mainActivity, /ensureAttendanceLocationPermission\(\)[\s\S]{0,180}hasPreciseLocationPermission\(\)[\s\S]{0,180}REQUEST_ATTENDANCE_LOCATION/);
+  assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_DISCOVERABLE/);
+  assert.match(mainActivity, /BluetoothAdapter\.EXTRA_DISCOVERABLE_DURATION/);
+  assert.match(mainActivity, /BLUETOOTH_DISCOVERABLE_SECONDS = 300/);
+  assert.match(mainActivity, /BluetoothAdapter\.SCAN_MODE_CONNECTABLE_DISCOVERABLE/);
+  assert.match(mainActivity, /REQUEST_BLUETOOTH_DISCOVERABLE = 4107/);
+  assert.match(mainActivity, /onBluetoothDiscoverableResult\(resultCode > 0\)/);
+  assert.doesNotMatch(mainActivity, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
 
   assert.match(keyStore, /AndroidKeyStore/);
   assert.match(keyStore, /secp256r1/);
@@ -85,17 +83,16 @@ test('Android privado reutiliza el Portal y una sola autoridad BLE nativa sin in
   assert.match(keyStore, /setUserAuthenticationRequired\(false\)/);
   assert.doesNotMatch(keyStore, /encodeToString\([^\n]*getPrivate|privateKey\.getEncoded|getPrivate\(\)\.getEncoded/);
 
-  assert.match(presenceManager, /BluetoothLeScanner/);
-  assert.match(presenceManager, /BluetoothLeAdvertiser/);
-  assert.match(presenceManager, /BluetoothGattServer/);
-  assert.match(presenceManager, /BluetoothGattCallback/);
-  assert.match(presenceManager, /BluetoothDevice\.TRANSPORT_LE/);
-  assert.match(presenceManager, /ScanSettings\.SCAN_MODE_LOW_LATENCY/);
-  assert.match(presenceManager, /AdvertiseSettings\.ADVERTISE_MODE_LOW_LATENCY/);
-  assert.match(presenceManager, /AdvertiseSettings\.ADVERTISE_TX_POWER_HIGH/);
-  assert.match(presenceManager, /setConnectable\(true\)/);
+  assert.match(presenceManager, /BluetoothServerSocket/);
+  assert.match(presenceManager, /BluetoothSocket/);
+  assert.match(presenceManager, /listenUsingInsecureRfcommWithServiceRecord/);
+  assert.match(presenceManager, /createInsecureRfcommSocketToServiceRecord/);
+  assert.match(presenceManager, /bluetoothAdapter\.startDiscovery\(\)/);
+  assert.match(presenceManager, /fetchUuidsWithSdp\(\)/);
+  assert.match(presenceManager, /BluetoothDevice\.ACTION_UUID/);
   assert.match(presenceManager, /SERVICE_PARCEL_UUID/);
-  assert.doesNotMatch(presenceManager, /Nearby\.getConnectionsClient|ConnectionsClient|Strategy\.P2P_|ConnectionType\.|setLowPower\(/);
+  assert.match(presenceManager, /MIN_SCAN_MS = 25_000L/);
+  assert.doesNotMatch(presenceManager, /BluetoothLeAdvertiser|BluetoothGatt|Nearby\.getConnectionsClient|ConnectionsClient|Strategy\.P2P_|ConnectionType\.|setLowPower\(/);
   assert.doesNotMatch(presenceManager, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
   assert.match(presenceManager, /"attemptId"/);
   assert.match(presenceManager, /"serviceRequestId"/);
@@ -108,9 +105,9 @@ test('Android privado reutiliza el Portal y una sola autoridad BLE nativa sin in
   assert.match(bridge, /JS_NAME = "LorrenAndroidPresence"/);
   assert.match(bridge, /"attendanceWriter", false/);
   assert.match(bridge, /"presenceCredentialReady", hasUsablePresenceCredential\(\)/);
-  assert.match(bridge, /setReady\(/);
-  assert.match(bridge, /startCrewScan\(/);
-  assert.match(bridge, /getProofBundle\(/);
+  assert.match(bridge, /pendingReadyServiceRequestId/);
+  assert.match(bridge, /activity\.ensureNearbyDiscoverable\(\)/);
+  assert.match(bridge, /onBluetoothDiscoverableResult\(boolean granted\)/);
   assert.match(bridge, /manager\.startReady/);
   assert.match(bridge, /manager\.startLeaderScan/);
   assert.match(bridge, /startCrewScan\(String inputJson\)[\s\S]{0,260}activity\.ensureAttendanceLocationPermission\(\)/);
@@ -131,10 +128,11 @@ test('Android privado reutiliza el Portal y una sola autoridad BLE nativa sin in
   }
 });
 
-test('auxiliar queda listo por visibilidad con scan BLE activo y sin depender de WAN ni foco del WebView', async () => {
-  const [nativePresence, presenceManager] = await Promise.all([
+test('auxiliar queda listo por visibilidad con servidor RFCOMM y sin depender de WAN ni foco del WebView', async () => {
+  const [nativePresence, presenceManager, bridge] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
-    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
+    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
+    read('app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java')
   ]);
   const memberStatus = nativePresence.match(
     /function memberStatus\(context, member, markType\) \{([\s\S]*?)\n  \}\n\n  function expectedAuxiliaryProofCount/
@@ -168,20 +166,22 @@ test('auxiliar queda listo por visibilidad con scan BLE activo y sin depender de
   assert.doesNotMatch(startReady[1], /activeMode = 'READY'/);
   assert.match(nativePresence, /if \(type === 'ready'\)[\s\S]{0,420}activeMode = 'READY'/);
   assert.match(nativePresence, /Bluetooth listo\. Esperando la marcación del encargado\./);
-  assert.match(presenceManager, /startReadyScanner\(true\)/);
-  assert.match(presenceManager, /getBluetoothLeScanner\(\)/);
-  assert.match(presenceManager, /readyScanner\.startScan\([\s\S]{0,260}readyScanSettings\(\)[\s\S]{0,200}auxiliaryScanCallback/);
-  assert.match(presenceManager, /emitDiagnostic\("AUX", "DISCOVERY_READY"\)[\s\S]{0,100}emitReady\(\)/);
+  assert.match(presenceManager, /startAuxiliaryServer\(\)/);
+  assert.match(presenceManager, /listenUsingInsecureRfcommWithServiceRecord/);
+  assert.match(presenceManager, /emitDiagnostic\("AUX", "RFCOMM_SERVER_READY"\)[\s\S]{0,80}emitReady\(\)/);
+  assert.match(bridge, /if \(!activity\.ensureNearbyDiscoverable\(\)\) return jsonOk\(\)/);
+  assert.match(bridge, /onBluetoothDiscoverableResult[\s\S]{0,650}manager\.startReady\(serviceRequestId\)/);
   assert.match(onlineHandler[1], /ensureAuxiliaryReady\(\)/);
   assert.match(offlineHandler[1], /ensureAuxiliaryReady\(\)/);
   assert.doesNotMatch(onlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
   assert.doesNotMatch(offlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
 });
 
-test('replay físico: el botón no destruye READY y BLE tiene watchdogs acotados y cola global de notificaciones', async () => {
-  const [nativePresence, presenceManager] = await Promise.all([
+test('replay físico: el botón no destruye READY y la marcación usa discovery Classic + SDP + RFCOMM con timeout amplio', async () => {
+  const [nativePresence, presenceManager, mainActivity] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
-    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
+    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
+    read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java')
   ]);
 
   const prepareBlock = nativePresence.match(
@@ -193,30 +193,19 @@ test('replay físico: el botón no destruye READY y BLE tiene watchdogs acotados
   assert.match(prepareBlock[0], /ensureAuxiliaryReady\(\)/);
   assert.doesNotMatch(prepareBlock[0], /ensureAuxiliaryReady\(true\)/);
 
-  assert.match(presenceManager, /LEADER_START_TIMEOUT_MS = 25_000L/);
-  assert.match(presenceManager, /AUXILIARY_EXCHANGE_TIMEOUT_MS = 12_000L/);
-  assert.match(presenceManager, /scheduleAuxiliaryExchangeTimeout\(gatt\)/);
-  assert.match(presenceManager, /handler\.postDelayed\(auxiliaryExchangeTimeout, AUXILIARY_EXCHANGE_TIMEOUT_MS\)/);
-  assert.match(presenceManager, /cancelAuxiliaryExchangeTimeout\(\)/);
-  assert.match(presenceManager, /BluetoothDevice\.TRANSPORT_LE/);
-  assert.match(presenceManager, /requestConnectionPriority\(BluetoothGatt\.CONNECTION_PRIORITY_HIGH\)/);
-  assert.match(presenceManager, /requestMtu\(REQUESTED_MTU\)/);
-  assert.match(presenceManager, /SERVICE_DISCOVERY_FALLBACK_MS = 700L/);
-
-  assert.match(presenceManager, /Deque<PendingNotification> leaderNotificationQueue = new ArrayDeque<>\(\)/);
-  assert.match(presenceManager, /PendingNotification leaderNotificationInFlight/);
-  assert.match(presenceManager, /enqueueLeaderChallengeFrames/);
-  assert.match(presenceManager, /if \(leaderNotificationInFlight != null\) return/);
-  assert.match(presenceManager, /onNotificationSent[\s\S]{0,500}leaderNotificationInFlight = null[\s\S]{0,500}drainLeaderNotificationQueue\(\)/);
-
-  const startSuccess = presenceManager.match(
-    /public void onStartSuccess\(AdvertiseSettings settingsInEffect\) \{([\s\S]*?)\n        \}\n\n        @Override\n        public void onStartFailure/
-  );
-  assert.ok(startSuccess, 'falta callback real de advertising BLE');
-  assert.match(startSuccess[1], /cancelLeaderStartTimeout\(\)/);
-  assert.match(startSuccess[1], /ADVERTISING_READY/);
-  assert.match(startSuccess[1], /scheduleLeaderTimeout\(attemptId, leaderTimeoutMs\)/);
-  assert.match(presenceManager, /handler\.postDelayed\(leaderStartTimeout, LEADER_START_TIMEOUT_MS\)/);
+  assert.match(mainActivity, /ACTION_REQUEST_DISCOVERABLE/);
+  assert.match(mainActivity, /BLUETOOTH_DISCOVERABLE_SECONDS = 300/);
+  assert.match(presenceManager, /MIN_SCAN_MS = 25_000L/);
+  assert.match(presenceManager, /RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L/);
+  assert.match(presenceManager, /bluetoothAdapter\.startDiscovery\(\)/);
+  assert.match(presenceManager, /BluetoothAdapter\.ACTION_DISCOVERY_FINISHED/);
+  assert.match(presenceManager, /device\.fetchUuidsWithSdp\(\)/);
+  assert.match(presenceManager, /BluetoothDevice\.ACTION_UUID/);
+  assert.match(presenceManager, /device\.createInsecureRfcommSocketToServiceRecord\(SERVICE_UUID\)/);
+  assert.match(presenceManager, /socket\.connect\(\)/);
+  assert.match(presenceManager, /handler\.postDelayed\(timeout, RFCOMM_EXCHANGE_TIMEOUT_MS\)/);
+  assert.match(presenceManager, /WINDOW_CLOSED[\s\S]{0,180}stopLeaderDiscovery\(\)[\s\S]{0,220}CONNECTION_GRACE_MS/);
+  assert.doesNotMatch(presenceManager, /BluetoothLeAdvertiser|BluetoothGattServer|BluetoothGattCallback/);
 });
 
 test('credencial persistida en Android es la autoridad para responder sin Internet', async () => {
@@ -246,18 +235,19 @@ test('sin contexto de cuadrilla el módulo nativo no tapa ni reemplaza el Portal
   assert.match(nativePresence, /if \(!context\?\.isCrewLeader\) return;/);
 });
 
-test('advertisement BLE del encargado publica solo UUID técnico y no PII', async () => {
+test('servicio RFCOMM publica solo UUID/nombre técnico y no PII', async () => {
   const presenceManager = await read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
-  assert.match(presenceManager, /new AdvertiseData\.Builder\(\)[\s\S]{0,220}addServiceUuid\(SERVICE_PARCEL_UUID\)/);
-  assert.match(presenceManager, /setIncludeDeviceName\(false\)/);
-  assert.match(presenceManager, /setIncludeTxPowerLevel\(false\)/);
+  assert.match(presenceManager, /SERVICE_NAME = "LORREN_CREW_PRESENCE"/);
+  assert.match(presenceManager, /listenUsingInsecureRfcommWithServiceRecord\([\s\S]{0,120}SERVICE_NAME[\s\S]{0,80}SERVICE_UUID/);
+  assert.match(presenceManager, /fetchUuidsWithSdp\(\)/);
+  assert.match(presenceManager, /SERVICE_PARCEL_UUID\.equals/);
   assert.doesNotMatch(presenceManager, /fullName|workerName|documentNumber|phoneNumber/i);
   assert.match(presenceManager, /keyId\(publicKey\)/);
   assert.match(presenceManager, /proofsByKey\.put\(keyId, stored\)/);
 });
 
-test('BLE solo transporta la prueba; servidor y cola siguen siendo autoridades de asistencia', async () => {
+test('Bluetooth Classic solo transporta la prueba; servidor y cola siguen siendo autoridades de asistencia', async () => {
   const [nativePresence, bridge, presenceManager] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java'),
@@ -281,7 +271,7 @@ test('diagnóstico visible conserva checkpoints sanitizados de ambos roles', asy
   ]);
 
   const diagnosticEmitter = presenceManager.match(
-    /private void emitDiagnostic\(String actor, String stage, int statusCode, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private void emitError/
+    /private void emitDiagnostic\(String actor, String stage\) \{([\s\S]*?)\n    \}\n\n    private void emitError/
   );
   assert.ok(diagnosticEmitter, 'falta emisor diagnóstico nativo sanitizado');
   assert.match(diagnosticEmitter[1], /emit\("diagnostic"/);
@@ -293,10 +283,9 @@ test('diagnóstico visible conserva checkpoints sanitizados de ambos roles', asy
   );
 
   for (const stage of [
-    'DISCOVERY_START',
-    'DISCOVERY_READY',
-    'ENDPOINT_FOUND',
-    'CONNECTION_REQUEST',
+    'RFCOMM_SERVER_START',
+    'RFCOMM_SERVER_READY',
+    'RFCOMM_CONNECTION_ACCEPTED',
     'CONNECTION_ESTABLISHED',
     'CHALLENGE_RECEIVED',
     'PROOF_DISPATCHED'
@@ -304,9 +293,13 @@ test('diagnóstico visible conserva checkpoints sanitizados de ambos roles', asy
     assert.match(presenceManager, new RegExp(`emitDiagnostic\\(\\"AUX\\", \\"${stage}\\"`));
   }
   for (const stage of [
-    'ADVERTISING_START',
-    'ADVERTISING_READY',
-    'CONNECTION_ESTABLISHED',
+    'CLASSIC_DISCOVERY_START',
+    'CLASSIC_DISCOVERY_READY',
+    'CLASSIC_DEVICE_FOUND',
+    'SDP_REQUESTED',
+    'SDP_MATCHED',
+    'RFCOMM_CONNECTING',
+    'RFCOMM_CONNECTED',
     'CHALLENGE_DISPATCHED',
     'PROOF_RECEIVED_RAW',
     'PROOF_VERIFIED',
