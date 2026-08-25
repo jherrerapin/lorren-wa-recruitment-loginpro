@@ -100,7 +100,7 @@ test('Android privado reutiliza el Portal y Nearby Connections sin introducir un
   assert.match(presenceManager, /setLowPower\(false\)/);
   assert.equal((presenceManager.match(/ConnectionType\.NON_DISRUPTIVE/g) || []).length, 2);
   assert.doesNotMatch(presenceManager, /ConnectionType\.(?:BALANCED|DISRUPTIVE)/);
-  assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,260}startReadyDiscovery\(normalizedService, 0\)/);
+  assert.match(presenceManager, /startReady\(String serviceRequestId\)[\s\S]{0,420}startReadyDiscovery\(normalizedService, 0\)/);
   assert.match(presenceManager, /startLeaderScan\(JSONObject input\)[\s\S]{0,1400}startLeaderAdvertising\(nextAttemptId, serviceRequestId, timeoutMs, 0\)/);
   assert.match(presenceManager, /client\.startAdvertising/);
   assert.match(presenceManager, /client\.startDiscovery/);
@@ -246,4 +246,65 @@ test('Nearby solo transporta la prueba; servidor y cola siguen siendo autoridade
   assert.match(presenceManager, /DeviceKeyStore\.verifyBase64\(publicKey, canonical, signature\)/);
   assert.match(nativePresence, /offline\.queueCrewPresence/);
   assert.doesNotMatch(nativePresence, /fetch\([^\n]*(?:llegada|salida|almuerzo)/i);
+});
+
+test('diagnóstico visible muestra checkpoints Nearby de ambos roles sin persistir ni exponer identificadores', async () => {
+  const [nativePresence, presenceManager] = await Promise.all([
+    read('app/src/main/assets/native-presence.js'),
+    read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
+  ]);
+
+  const diagnosticEmitter = presenceManager.match(
+    /private void emitDiagnostic\(String actor, String stage, int statusCode, int retryCount\) \{([\s\S]*?)\n    \}\n\n    private void emitError/
+  );
+  assert.ok(diagnosticEmitter, 'falta emisor diagnóstico nativo sanitizado');
+  assert.match(diagnosticEmitter[1], /emit\("diagnostic"/);
+  assert.match(diagnosticEmitter[1], /event\.put\("actor", actor\)/);
+  assert.match(diagnosticEmitter[1], /event\.put\("stage", stage\)/);
+  assert.match(diagnosticEmitter[1], /event\.put\("statusCode", statusCode\)/);
+  assert.match(diagnosticEmitter[1], /event\.put\("retryCount", retryCount\)/);
+  assert.doesNotMatch(
+    diagnosticEmitter[1],
+    /endpointId|workerId|serviceRequestId|attemptId|challenge|credential|publicKey|signature/
+  );
+
+  for (const stage of [
+    'DISCOVERY_START',
+    'DISCOVERY_READY',
+    'ENDPOINT_FOUND',
+    'CONNECTION_REQUEST',
+    'CHALLENGE_RECEIVED',
+    'PROOF_DISPATCHED'
+  ]) {
+    assert.match(presenceManager, new RegExp(`emitDiagnostic\\(\\"AUX\\", \\"${stage}\\"`));
+  }
+  for (const stage of [
+    'ADVERTISING_START',
+    'ADVERTISING_READY',
+    'CHALLENGE_DISPATCHED',
+    'PROOF_RECEIVED_RAW',
+    'PROOF_VERIFIED',
+    'SCAN_COMPLETE'
+  ]) {
+    assert.match(presenceManager, new RegExp(`emitDiagnostic\\(\\"ENC\\", \\"${stage}\\"`));
+  }
+  assert.match(presenceManager, /String actor = role == Role\.LEADER \? "ENC" : "AUX";/);
+  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_INITIATED"\)/);
+  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_ACCEPTED"\)/);
+  assert.match(presenceManager, /emitDiagnostic\(actor, "CONNECTION_ESTABLISHED"\)/);
+
+  assert.match(nativePresence, /const DIAGNOSTIC_LIMIT = 20/);
+  assert.match(nativePresence, /function recordDiagnostic\(actor, stage, detail = \{\}\)/);
+  assert.match(nativePresence, /dataNativePresenceDiagnostics|nativePresenceDiagnostics/);
+  assert.match(nativePresence, /if \(type === 'diagnostic'\)[\s\S]{0,140}recordDiagnostic\(detail\.actor, detail\.stage, detail\)/);
+  assert.match(nativePresence, /Temporal y solo visible en este teléfono\. No guarda identificadores ni se envía al servidor\./);
+  assert.match(nativePresence, /QUEUE_WRITE_START/);
+  assert.match(nativePresence, /QUEUE_STORED/);
+  assert.match(nativePresence, /SYNC_DEFERRED/);
+
+  const recordDiagnostic = nativePresence.match(
+    /function recordDiagnostic\(actor, stage, detail = \{\}\) \{([\s\S]*?)\n  \}\n\n  function resetDiagnosticLog/
+  );
+  assert.ok(recordDiagnostic, 'falta autoridad de traza visible en memoria');
+  assert.doesNotMatch(recordDiagnostic[1], /fetch\(|localStorage|sessionStorage|bridgeCall\(/);
 });

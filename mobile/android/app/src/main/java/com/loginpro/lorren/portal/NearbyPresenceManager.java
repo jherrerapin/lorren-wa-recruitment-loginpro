@@ -92,6 +92,7 @@ final class NearbyPresenceManager {
         stopAllInternal(false);
         role = Role.READY;
         readyServiceRequestId = normalizedService;
+        emitDiagnostic("AUX", "READY_REQUESTED");
         startReadyDiscovery(normalizedService, 0);
     }
 
@@ -100,6 +101,7 @@ final class NearbyPresenceManager {
             .setStrategy(STRATEGY)
             .setLowPower(true)
             .build();
+        emitDiagnostic("AUX", "DISCOVERY_START", Integer.MIN_VALUE, retryCount);
         try {
             client.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
                 .addOnSuccessListener(unused -> {
@@ -109,6 +111,7 @@ final class NearbyPresenceManager {
                             return;
                         }
                     }
+                    emitDiagnostic("AUX", "DISCOVERY_READY");
                     emit("ready", event -> event.put("serviceRequestId", normalizedService));
                 })
                 .addOnFailureListener(error -> handleReadyDiscoveryFailure(
@@ -126,7 +129,9 @@ final class NearbyPresenceManager {
         int retryCount,
         Exception error
     ) {
+        int statusCode = nearbyStatusCode(error);
         if (retryCount < MAX_START_RETRIES && isRecoverableStartFailure(error)) {
+            emitDiagnostic("AUX", "DISCOVERY_RETRY", statusCode, retryCount + 1);
             resetNearbyClientForRetry();
             handler.postDelayed(() -> {
                 synchronized (NearbyPresenceManager.this) {
@@ -136,6 +141,7 @@ final class NearbyPresenceManager {
             }, NEARBY_RESTART_DELAY_MS);
             return;
         }
+        emitDiagnostic("AUX", "DISCOVERY_FAILED", statusCode, retryCount);
         synchronized (this) {
             if (role == Role.READY && readyServiceRequestId.equals(normalizedService)) {
                 role = Role.IDLE;
@@ -167,6 +173,7 @@ final class NearbyPresenceManager {
         expectedProofCount = nextExpectedProofCount;
         proofsByKey.clear();
         requestedEndpoints.clear();
+        emitDiagnostic("ENC", "SCAN_REQUESTED");
 
         if (expectedProofCount == 0) {
             emitLeaderScanStarted(nextAttemptId, serviceRequestId, timeoutMs);
@@ -187,6 +194,7 @@ final class NearbyPresenceManager {
             .setLowPower(false)
             .setConnectionType(ConnectionType.NON_DISRUPTIVE)
             .build();
+        emitDiagnostic("ENC", "ADVERTISING_START", Integer.MIN_VALUE, retryCount);
         try {
             client.startAdvertising(
                 ENDPOINT_NAME,
@@ -201,6 +209,7 @@ final class NearbyPresenceManager {
                             return;
                         }
                     }
+                    emitDiagnostic("ENC", "ADVERTISING_READY");
                     emitLeaderScanStarted(nextAttemptId, serviceRequestId, timeoutMs);
                     scheduleLeaderScanTimeout(nextAttemptId, timeoutMs);
                 })
@@ -229,7 +238,9 @@ final class NearbyPresenceManager {
         int retryCount,
         Exception error
     ) {
+        int statusCode = nearbyStatusCode(error);
         if (retryCount < MAX_START_RETRIES && isRecoverableStartFailure(error)) {
+            emitDiagnostic("ENC", "ADVERTISING_RETRY", statusCode, retryCount + 1);
             resetNearbyClientForRetry();
             handler.postDelayed(() -> {
                 synchronized (NearbyPresenceManager.this) {
@@ -244,6 +255,7 @@ final class NearbyPresenceManager {
             }, NEARBY_RESTART_DELAY_MS);
             return;
         }
+        emitDiagnostic("ENC", "ADVERTISING_FAILED", statusCode, retryCount);
         synchronized (this) {
             if (role == Role.LEADER && attemptId.equals(nextAttemptId)) role = Role.IDLE;
             cancelLeaderTimers();
@@ -273,6 +285,7 @@ final class NearbyPresenceManager {
         scanTimeout = () -> {
             synchronized (NearbyPresenceManager.this) {
                 if (role != Role.LEADER || !attemptId.equals(nextAttemptId)) return;
+                emitDiagnostic("ENC", "WINDOW_CLOSED");
                 client.stopAdvertising();
                 scanCompleteTimeout = () -> completeLeaderScan(nextAttemptId);
                 handler.postDelayed(scanCompleteTimeout, CONNECTION_GRACE_MS);
@@ -323,13 +336,16 @@ final class NearbyPresenceManager {
                     || !requestedEndpoints.add(endpointId)
                 ) return;
             }
+            emitDiagnostic("AUX", "ENDPOINT_FOUND");
             requestAuxiliaryConnection(endpointId, 0);
         }
 
         @Override
         public void onEndpointLost(String endpointId) {
             synchronized (NearbyPresenceManager.this) {
-                if (role == Role.READY) requestedEndpoints.remove(endpointId);
+                if (role == Role.READY && requestedEndpoints.remove(endpointId)) {
+                    emitDiagnostic("AUX", "ENDPOINT_LOST");
+                }
             }
         }
     };
@@ -339,18 +355,21 @@ final class NearbyPresenceManager {
             .setLowPower(true)
             .setConnectionType(ConnectionType.NON_DISRUPTIVE)
             .build();
+        emitDiagnostic("AUX", "CONNECTION_REQUEST", Integer.MIN_VALUE, retryCount);
         client.requestConnection(
             ENDPOINT_NAME,
             endpointId,
             connectionLifecycleCallback,
             connectionOptions
         ).addOnFailureListener(error -> {
+            int statusCode = nearbyStatusCode(error);
             synchronized (NearbyPresenceManager.this) {
                 if (role != Role.READY || !requestedEndpoints.contains(endpointId)) return;
                 if (
                     retryCount < MAX_CONNECTION_REQUEST_RETRIES
                     && isRecoverableConnectionRequestFailure(error)
                 ) {
+                    emitDiagnostic("AUX", "CONNECTION_REQUEST_RETRY", statusCode, retryCount + 1);
                     handler.postDelayed(() -> {
                         synchronized (NearbyPresenceManager.this) {
                             if (role != Role.READY || !requestedEndpoints.contains(endpointId)) return;
@@ -361,6 +380,7 @@ final class NearbyPresenceManager {
                 }
                 requestedEndpoints.remove(endpointId);
             }
+            emitDiagnostic("AUX", "CONNECTION_REQUEST_FAILED", statusCode, retryCount);
             emitError("connection_request_failed");
         });
     }
@@ -377,15 +397,24 @@ final class NearbyPresenceManager {
                     client.rejectConnection(endpointId);
                     return;
                 }
+                String actor = role == Role.LEADER ? "ENC" : "AUX";
+                emitDiagnostic(actor, "CONNECTION_INITIATED");
                 if (role == Role.LEADER && requestedEndpoints.add(endpointId)) {
                     int pendingCount = requestedEndpoints.size();
                     emit("endpoint_found", event -> event.put("pendingCount", pendingCount));
                 }
                 client.acceptConnection(endpointId, payloadCallback)
+                    .addOnSuccessListener(unused -> emitDiagnostic(actor, "CONNECTION_ACCEPTED"))
                     .addOnFailureListener(error -> {
                         synchronized (NearbyPresenceManager.this) {
                             requestedEndpoints.remove(endpointId);
                         }
+                        emitDiagnostic(
+                            actor,
+                            "CONNECTION_ACCEPT_FAILED",
+                            nearbyStatusCode(error),
+                            -1
+                        );
                         emitError("connection_accept_failed");
                     });
             }
@@ -395,11 +424,19 @@ final class NearbyPresenceManager {
         public void onConnectionResult(String endpointId, ConnectionResolution resolution) {
             synchronized (NearbyPresenceManager.this) {
                 Status status = resolution == null ? null : resolution.getStatus();
+                String actor = role == Role.LEADER ? "ENC" : role == Role.READY ? "AUX" : "APP";
                 if (status == null || !status.isSuccess()) {
                     requestedEndpoints.remove(endpointId);
+                    emitDiagnostic(
+                        actor,
+                        "CONNECTION_FAILED",
+                        status == null ? Integer.MIN_VALUE : status.getStatusCode(),
+                        -1
+                    );
                     emitError("connection_failed");
                     return;
                 }
+                emitDiagnostic(actor, "CONNECTION_ESTABLISHED");
                 if (role == Role.LEADER) sendChallenge(endpointId);
             }
         }
@@ -422,8 +459,10 @@ final class NearbyPresenceManager {
                 String type = message.optString("type");
                 synchronized (NearbyPresenceManager.this) {
                     if (role == Role.READY && "challenge".equals(type)) {
+                        emitDiagnostic("AUX", "CHALLENGE_RECEIVED");
                         respondToChallenge(endpointId, message);
                     } else if (role == Role.LEADER && "proof".equals(type)) {
+                        emitDiagnostic("ENC", "PROOF_RECEIVED_RAW");
                         acceptProof(endpointId, message);
                     }
                 }
@@ -439,6 +478,8 @@ final class NearbyPresenceManager {
                 update.getStatus() == PayloadTransferUpdate.Status.FAILURE
                 || update.getStatus() == PayloadTransferUpdate.Status.CANCELED
             ) {
+                String actor = role == Role.LEADER ? "ENC" : role == Role.READY ? "AUX" : "APP";
+                emitDiagnostic(actor, "PAYLOAD_FAILED");
                 emitError("payload_transfer_failed");
             }
         }
@@ -454,6 +495,7 @@ final class NearbyPresenceManager {
             payload.put("challenge", challenge);
             payload.put("sentAt", challengeSentAt);
             sendBytes(endpointId, payload);
+            emitDiagnostic("ENC", "CHALLENGE_DISPATCHED");
         } catch (Exception ignored) {
             emitError("challenge_build_failed");
         }
@@ -504,6 +546,7 @@ final class NearbyPresenceManager {
             response.put("credential", credential);
             response.put("credentialState", credential.isEmpty() ? "UNPROVISIONED" : "PROVISIONED");
             sendBytes(endpointId, response);
+            emitDiagnostic("AUX", "PROOF_DISPATCHED");
             emit("proof_sent", event -> event.put("serviceRequestId", incomingServiceRequestId));
         } catch (Exception ignored) {
             emitError("proof_sign_failed");
@@ -525,6 +568,7 @@ final class NearbyPresenceManager {
             String signature = requiredToken(proof.optString("signature"), "signature");
             String canonical = canonicalProof(attemptId, scanServiceRequestId, challenge, respondedAt);
             if (!DeviceKeyStore.verifyBase64(publicKey, canonical, signature)) {
+                emitDiagnostic("ENC", "PROOF_SIGNATURE_INVALID");
                 emitError("proof_signature_invalid");
                 client.disconnectFromEndpoint(endpointId);
                 requestedEndpoints.remove(endpointId);
@@ -548,6 +592,7 @@ final class NearbyPresenceManager {
 
             int verifiedCount = proofsByKey.size();
             int pendingCount = requestedEndpoints.size();
+            emitDiagnostic("ENC", "PROOF_VERIFIED");
             emit("proof_received", event -> {
                 event.put("deviceKeyId", keyId);
                 event.put("verifiedCount", verifiedCount);
@@ -563,6 +608,7 @@ final class NearbyPresenceManager {
         } catch (Exception ignored) {
             requestedEndpoints.remove(endpointId);
             client.disconnectFromEndpoint(endpointId);
+            emitDiagnostic("ENC", "PROOF_INVALID");
             emitError("proof_invalid");
         }
     }
@@ -581,6 +627,7 @@ final class NearbyPresenceManager {
 
         int verifiedCount = proofsByKey.size();
         int pendingCount = requestedEndpoints.size();
+        emitDiagnostic("ENC", "SCAN_COMPLETE");
         emit("scan_complete", event -> {
             event.put("attemptId", completedAttemptId);
             event.put("verifiedCount", verifiedCount);
@@ -718,6 +765,19 @@ final class NearbyPresenceManager {
         } catch (Exception ignored) {
             // Los eventos de UI no son autoridad de asistencia.
         }
+    }
+
+    private void emitDiagnostic(String actor, String stage) {
+        emitDiagnostic(actor, stage, Integer.MIN_VALUE, -1);
+    }
+
+    private void emitDiagnostic(String actor, String stage, int statusCode, int retryCount) {
+        emit("diagnostic", event -> {
+            event.put("actor", actor);
+            event.put("stage", stage);
+            if (statusCode != Integer.MIN_VALUE) event.put("statusCode", statusCode);
+            if (retryCount >= 0) event.put("retryCount", retryCount);
+        });
     }
 
     private void emitError(String code) {
