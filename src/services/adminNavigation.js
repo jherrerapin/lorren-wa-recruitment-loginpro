@@ -1,6 +1,7 @@
 import { canCreateRecruiterUsers } from './appUsers.js';
 
 const RECRUITMENT_PATH = '/admin';
+const PROFILE_PATH = '/account/profile';
 const BRANCHES_PATH = '/admin/locations';
 const USERS_PATH = '/admin/users';
 const OPERATIONS_PATH = '/admin/operaciones';
@@ -138,7 +139,11 @@ function sessionIdentity(req = {}) {
     return `<div class="admin-session-identity is-impersonating" data-session-identity="true"><span class="admin-session-mode">Vista como</span><strong class="admin-session-user-name">${safeName}</strong><form method="post" action="/admin/users/impersonation/stop"><button type="submit" class="admin-session-return">Volver a DEV</button></form></div>`;
   }
 
-  return `<div class="admin-session-identity" data-session-identity="true"><span class="admin-session-user-name">${safeName}</span></div>`;
+  if (session.userRole === 'dev' && session.userSource === 'env') {
+    return `<div class="admin-session-identity" data-session-identity="true"><span class="admin-session-user-name">${safeName}</span></div>`;
+  }
+
+  return `<a class="admin-session-identity" data-session-identity="true" href="${PROFILE_PATH}" title="Editar mi perfil" aria-label="Editar mi perfil" style="text-decoration:none;"><span class="admin-session-mode">Mi perfil</span><span class="admin-session-user-name">${safeName}</span></a>`;
 }
 
 export function buildAdminModuleNavbar(req = {}, originalNav = '') {

@@ -14,6 +14,7 @@ export const ADMIN_SESSION_DEFAULTS = Object.freeze({
 });
 
 const IDENTITY_PATH = '/account/identity';
+const PROFILE_PATH = '/account/profile';
 const IMPERSONATE_PATH = /^\/admin\/users\/([^/]+)\/impersonate$/;
 const IMPERSONATION_STOP_PATH = '/admin/users/impersonation/stop';
 const MIGRATED_USERNAME_SENTINEL = '__login_requires_email__';
@@ -25,6 +26,17 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeProfilePhone(value) {
+  const raw = normalizeString(value);
+  if (!raw) return { valid: true, value: null, displayValue: '' };
+  if (!/^[+\d\s().-]+$/.test(raw)) return { valid: false, value: null, displayValue: raw };
+  const digits = raw.replace(/\D+/g, '');
+  if (digits.length < 7 || digits.length > 15) {
+    return { valid: false, value: null, displayValue: raw };
+  }
+  return { valid: true, value: digits, displayValue: digits };
 }
 
 function requestPath(req = {}) {
@@ -101,6 +113,7 @@ function identitySelect() {
     passwordHash: true,
     displayName: true,
     email: true,
+    recoveryPhone: true,
     identityMigratedAt: true,
     lastPasswordResetAt: true,
     createdAt: true,
@@ -244,6 +257,19 @@ async function verifyEnvironmentCredential(plain, configured, bcryptModule = bcr
   return plain === configured;
 }
 
+async function verifyAuthenticatedPassword(sessionData, profile, currentPassword, {
+  env,
+  bcryptModule
+}) {
+  if (!currentPassword) return false;
+  if (sessionData.userSource === 'env') {
+    const configuredPassword = sessionData.userRole === 'admin' ? env.ADMIN_PASS : null;
+    return verifyEnvironmentCredential(currentPassword, configuredPassword, bcryptModule);
+  }
+  if (profile?.passwordHash) return bcryptModule.compare(currentPassword, profile.passwordHash);
+  return false;
+}
+
 function renderIdentityMigration(res, values = {}) {
   return res.status(values.status || 200).render('identityMigration', {
     error: values.error || null,
@@ -314,13 +340,7 @@ async function migrateAuthenticatedIdentity(req, res, {
     }
   }
 
-  let passwordMatches = false;
-  if (sessionData.userSource === 'env') {
-    const configuredPassword = sessionData.userRole === 'admin' ? env.ADMIN_PASS : null;
-    passwordMatches = await verifyEnvironmentCredential(currentPassword, configuredPassword, bcryptModule);
-  } else if (profile?.passwordHash) {
-    passwordMatches = await bcryptModule.compare(currentPassword, profile.passwordHash);
-  }
+  const passwordMatches = await verifyAuthenticatedPassword(sessionData, profile, currentPassword, { env, bcryptModule });
   if (!passwordMatches) {
     return renderError(401, 'La contraseña actual no es correcta.');
   }
@@ -398,6 +418,112 @@ async function migrateAuthenticatedIdentity(req, res, {
   if (!profile) return renderError(500, 'No fue posible actualizar tu acceso.');
   syncSessionIdentity(sessionData, profile);
   return res.redirect(303, '/admin');
+}
+
+function renderAccountProfile(res, values = {}) {
+  return res.status(values.status || 200).render('accountProfile', {
+    error: values.error || null,
+    success: values.success || null,
+    displayName: values.displayName || '',
+    email: values.email || '',
+    recoveryPhone: values.recoveryPhone || ''
+  });
+}
+
+async function editAuthenticatedProfile(req, res, {
+  prismaClient,
+  bcryptModule,
+  env,
+  profile
+}) {
+  const sessionData = req.session || {};
+  if (!sessionData.userRole) return res.redirect('/login');
+  if (sessionData.devImpersonation) return res.status(403).send('No puedes editar el perfil mientras estás en una vista impersonada.');
+  if (sessionData.userRole === 'dev' && sessionData.userSource === 'env') {
+    return res.status(403).send('El perfil de la cuenta técnica DEV se administra fuera de esta pantalla.');
+  }
+  if (!profile || profile.isActive === false) {
+    return renderAccountProfile(res, {
+      status: profile?.isActive === false ? 403 : 404,
+      error: 'No fue posible cargar un perfil activo para esta sesión.',
+      displayName: sessionData.displayName || '',
+      email: sessionData.userEmail || ''
+    });
+  }
+  if (!['GET', 'POST'].includes(req.method)) {
+    return res.status(405).send('Método no permitido');
+  }
+
+  if (req.method === 'GET') {
+    return renderAccountProfile(res, {
+      success: normalizeString(req.query?.success),
+      displayName: profile.displayName || sessionData.displayName || '',
+      email: profile.email || sessionData.userEmail || '',
+      recoveryPhone: profile.recoveryPhone || ''
+    });
+  }
+
+  const displayName = normalizeString(req.body?.displayName);
+  const email = normalizeAppUserEmail(req.body?.email);
+  const confirmEmail = normalizeAppUserEmail(req.body?.confirmEmail);
+  const phone = normalizeProfilePhone(req.body?.recoveryPhone);
+  const currentPassword = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+  const renderError = (status, error) => renderAccountProfile(res, {
+    status,
+    error,
+    displayName: displayName || '',
+    email: email || '',
+    recoveryPhone: phone.displayValue
+  });
+
+  if (!displayName || displayName.length < 3 || displayName.length > 120) {
+    return renderError(400, 'Ingresa un nombre completo válido.');
+  }
+  if (!email || !confirmEmail || email !== confirmEmail) {
+    return renderError(400, 'Ingresa el mismo correo electrónico en ambos campos.');
+  }
+  if (!phone.valid) {
+    return renderError(400, 'Ingresa un teléfono válido de 7 a 15 dígitos o deja el campo vacío.');
+  }
+  if (!currentPassword) {
+    return renderError(400, 'Confirma tu contraseña actual para guardar los cambios.');
+  }
+
+  const passwordMatches = await verifyAuthenticatedPassword(sessionData, profile, currentPassword, { env, bcryptModule });
+  if (!passwordMatches) {
+    return renderError(401, 'La contraseña actual no es correcta.');
+  }
+
+  const emailOwner = await prismaClient.appUser.findUnique({
+    where: { email },
+    select: { id: true }
+  });
+  if (emailOwner && emailOwner.id !== profile.id) {
+    return renderError(409, 'Ese correo ya está asociado a otro usuario.');
+  }
+
+  let updatedProfile;
+  try {
+    updatedProfile = await prismaClient.appUser.update({
+      where: { id: profile.id },
+      data: {
+        displayName,
+        email,
+        recoveryEmail: email,
+        recoveryPhone: phone.value
+      },
+      select: identitySelect()
+    });
+  } catch (error) {
+    if (error?.code === 'P2002') {
+      return renderError(409, 'Ese correo ya está asociado a otro usuario.');
+    }
+    throw error;
+  }
+
+  syncSessionIdentity(sessionData, updatedProfile);
+  const params = new URLSearchParams({ success: 'Perfil actualizado correctamente.' });
+  return res.redirect(303, `${PROFILE_PATH}?${params.toString()}`);
 }
 
 function sessionSnapshot(sessionData = {}) {
@@ -522,7 +648,17 @@ async function handleIdentitySessionRequest(req, res, {
     return { handled: true, result: await stopDevImpersonation(req, res, prismaClient) };
   }
 
-  if (!req.session?.userRole) return { handled: false };
+  if (!req.session?.userRole) {
+    if (path === PROFILE_PATH) return { handled: true, result: res.redirect('/login') };
+    return { handled: false };
+  }
+  if (path === PROFILE_PATH && req.session.devImpersonation) {
+    return {
+      handled: true,
+      result: res.status(403).send('No puedes editar el perfil mientras estás en una vista impersonada.')
+    };
+  }
+
   const profile = await findSessionProfile(prismaClient, req.session);
   if (profile) syncSessionIdentity(req.session, profile);
 
@@ -530,6 +666,16 @@ async function handleIdentitySessionRequest(req, res, {
     return {
       handled: true,
       result: await migrateAuthenticatedIdentity(req, res, { prismaClient, bcryptModule, env })
+    };
+  }
+
+  if (path === PROFILE_PATH) {
+    if (identityPending(req.session, profile) || initialPasswordChangePending(req.session, profile)) {
+      return { handled: true, result: res.redirect(303, IDENTITY_PATH) };
+    }
+    return {
+      handled: true,
+      result: await editAuthenticatedProfile(req, res, { prismaClient, bcryptModule, env, profile })
     };
   }
 
