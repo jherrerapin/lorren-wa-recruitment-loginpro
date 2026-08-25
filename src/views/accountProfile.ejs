@@ -37,8 +37,8 @@
     </div>
     <section class="card">
       <h1>Mi perfil</h1>
-      <p class="lead">Corrige o completa tus datos personales. Estos cambios afectan únicamente tu propia cuenta.</p>
-      <div class="notice">Tu correo es también tu identificador de acceso. Para proteger la cuenta, debes confirmar tu contraseña actual antes de guardar.</div>
+      <p class="lead">Corrige o completa tus datos personales y, si lo necesitas, cambia tu contraseña. Estos cambios afectan únicamente tu propia cuenta.</p>
+      <div class="notice">Tu correo es también tu identificador de acceso. Para proteger la cuenta, debes confirmar tu contraseña actual antes de guardar cualquier cambio.</div>
       <% if (error) { %><div class="error"><%= error %></div><% } %>
       <% if (success) { %><div class="success"><%= success %></div><% } %>
       <form method="post" action="/account/profile" autocomplete="on">
@@ -59,6 +59,13 @@
         <label>Contraseña actual
           <input name="currentPassword" type="password" autocomplete="current-password" required />
           <span class="hint">Se usa únicamente para confirmar que eres el titular de esta cuenta.</span>
+        </label>
+        <label>Nueva contraseña
+          <input name="newPassword" type="password" minlength="12" autocomplete="new-password" />
+          <span class="hint">Opcional. Déjala vacía si no quieres cambiarla. Si la cambias, usa al menos 12 caracteres y una contraseña diferente de la actual.</span>
+        </label>
+        <label>Confirmar nueva contraseña
+          <input name="confirmNewPassword" type="password" minlength="12" autocomplete="new-password" />
         </label>
         <button type="submit">Guardar cambios</button>
       </form>

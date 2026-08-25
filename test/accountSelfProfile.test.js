@@ -186,6 +186,80 @@ test('el usuario actualiza únicamente sus datos personales aunque manipule camp
   assert.deepEqual(result.events.at(-1), ['redirect', 303, '/account/profile?success=Perfil+actualizado+correctamente.']);
 });
 
+test('el usuario puede cambiar su propia contraseña desde Mi perfil', async () => {
+  const baseProfile = profile();
+  let updated = null;
+  const prismaClient = {
+    appUser: {
+      findUnique: async ({ where }) => {
+        if (where.id === 'user-self-1') return baseProfile;
+        if (where.email === 'persona@example.test') return { id: 'user-self-1' };
+        return null;
+      },
+      update: async ({ where, data }) => {
+        updated = { where, data };
+        return { ...baseProfile, ...data };
+      }
+    }
+  };
+  const { middleware } = createHarness({ sessionData: dbSession(), prismaClient });
+  const result = await runMiddleware(middleware, {
+    method: 'POST', path: '/account/profile', originalUrl: '/account/profile',
+    body: {
+      displayName: 'Persona Prueba',
+      email: 'persona@example.test',
+      confirmEmail: 'persona@example.test',
+      recoveryPhone: '3001234567',
+      currentPassword: 'correct-password',
+      newPassword: 'TEST-Nueva-Clave-2026',
+      confirmNewPassword: 'TEST-Nueva-Clave-2026'
+    }
+  });
+
+  assert.deepEqual(updated?.where, { id: 'user-self-1' });
+  assert.equal(updated?.data?.passwordHash, 'hash:TEST-Nueva-Clave-2026');
+  assert.ok(updated?.data?.lastPasswordResetAt instanceof Date);
+  assert.equal(updated?.data?.displayName, 'Persona Prueba');
+  assert.equal(updated?.data?.email, 'persona@example.test');
+  assert.equal(updated?.data?.recoveryPhone, '3001234567');
+  assert.deepEqual(result.events.at(-1), ['redirect', 303, '/account/profile?success=Perfil+y+contrase%C3%B1a+actualizados+correctamente.']);
+});
+
+test('cambio de contraseña rechaza política incompleta sin escribir el perfil', async () => {
+  const scenarios = [
+    { newPassword: 'corta', confirmNewPassword: 'corta', error: /al menos 12/i },
+    { newPassword: 'TEST-Nueva-Clave-2026', confirmNewPassword: 'TEST-Otra-Clave-2026', error: /no coinciden/i },
+    { newPassword: 'correct-password', confirmNewPassword: 'correct-password', error: /diferente de la contraseña actual/i },
+    { newPassword: 'A'.repeat(73), confirmNewPassword: 'A'.repeat(73), error: /máximo 72 bytes/i }
+  ];
+
+  for (const scenario of scenarios) {
+    let updates = 0;
+    const prismaClient = {
+      appUser: {
+        findUnique: async ({ where }) => where.id === 'user-self-1' ? profile() : null,
+        update: async () => { updates += 1; }
+      }
+    };
+    const { middleware } = createHarness({ sessionData: dbSession(), prismaClient });
+    const result = await runMiddleware(middleware, {
+      method: 'POST', path: '/account/profile', originalUrl: '/account/profile',
+      body: {
+        displayName: 'Persona Prueba',
+        email: 'persona@example.test',
+        confirmEmail: 'persona@example.test',
+        recoveryPhone: '3001234567',
+        currentPassword: 'correct-password',
+        ...scenario
+      }
+    });
+
+    assert.equal(updates, 0);
+    assert.equal(result.events.some((event) => event[0] === 'status' && event[1] === 400), true);
+    assert.match(result.events.find((event) => event[0] === 'render')?.[2]?.error || '', scenario.error);
+  }
+});
+
 test('contraseña incorrecta impide cualquier escritura del perfil', async () => {
   let updates = 0;
   const prismaClient = {
@@ -269,7 +343,9 @@ test('DEV impersonando no puede abrir ni escribir el perfil del usuario objetivo
         email: 'manipulado@example.test',
         confirmEmail: 'manipulado@example.test',
         recoveryPhone: '3000000000',
-        currentPassword: 'correct-password'
+        currentPassword: 'correct-password',
+        newPassword: 'TEST-Manipulada-2026',
+        confirmNewPassword: 'TEST-Manipulada-2026'
       } : {}
     });
     assert.equal(result.events.some((event) => event[0] === 'status' && event[1] === 403), true);
@@ -308,5 +384,7 @@ test('la vista de Mi perfil no expone controles administrativos ni selector de u
   assert.match(source, /name="email"/);
   assert.match(source, /name="recoveryPhone"/);
   assert.match(source, /name="currentPassword"/);
+  assert.match(source, /name="newPassword"/);
+  assert.match(source, /name="confirmNewPassword"/);
   assert.doesNotMatch(source, /name="userId"|name="role"|name="accessScope"|canAccessDispatch|dispatchAlertPhone/);
 });
