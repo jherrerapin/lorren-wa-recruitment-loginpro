@@ -43,6 +43,14 @@ function requireSendText(sendText) {
   return sendText;
 }
 
+function normalizeAfterFinalize(afterFinalize) {
+  if (afterFinalize == null) return null;
+  if (typeof afterFinalize !== 'function') {
+    throw new TypeError('manual_outbound_after_finalize_invalid');
+  }
+  return afterFinalize;
+}
+
 function requireNow(now) {
   if (typeof now !== 'function') throw new TypeError('manual_outbound_clock_required');
   return () => {
@@ -215,6 +223,7 @@ export function getManualOutboundUserMessage(error, fallback = 'No fue posible e
 export async function deliverManualOutboundText(prismaInput, input = {}, dependencies = {}) {
   const prisma = requirePrismaRoot(prismaInput);
   const sendText = requireSendText(dependencies.sendText);
+  const afterFinalize = normalizeAfterFinalize(dependencies.afterFinalize);
   const now = requireNow(dependencies.now || (() => new Date()));
   const candidateId = requireNonEmptyString(input.candidateId, 'manual_outbound_candidate_id');
   const phone = requireNonEmptyString(input.phone, 'manual_outbound_phone');
@@ -356,6 +365,16 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
         expected: preparation.claimed,
         sentAt
       });
+
+      if (candidateResult.count === 1 && afterFinalize) {
+        await afterFinalize(tx, {
+          candidateId,
+          sentAt,
+          providerMessageId,
+          messageId: preparation.messageId,
+          candidateResult
+        });
+      }
 
       await updateOutboundConversationDelivery(tx, {
         messageId: preparation.messageId,
