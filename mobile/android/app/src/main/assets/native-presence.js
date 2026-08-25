@@ -12,8 +12,61 @@
   const DEFAULT_SCAN_MS = 15_000;
   const AUTO_RETRY_DELAY_MS = 1_500;
   const AUXILIARY_REARM_DELAY_MS = 250;
+  const DIAGNOSTIC_LIMIT = 20;
   const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
   const MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
+  const DIAGNOSTIC_STAGE_LABELS = Object.freeze({
+    AUX_PREPARE_TAPPED: 'preparación manual solicitada',
+    AUX_SET_READY_CALL: 'llamando a Android para quedar listo',
+    AUX_SET_READY_ACCEPTED: 'Android aceptó preparar la escucha',
+    AUX_SET_READY_REJECTED: 'Android rechazó preparar la escucha',
+    LEADER_SCAN_REQUESTED: 'marcación iniciada desde la interfaz',
+    LEADER_SCAN_RETRY_REQUESTED: 'reintento de marcación iniciado',
+    LEADER_SCAN_BRIDGE_ACCEPTED: 'Android aceptó iniciar la búsqueda',
+    LEADER_SCAN_BRIDGE_REJECTED: 'Android rechazó iniciar la búsqueda',
+    READY_REQUESTED: 'preparación nativa recibida',
+    DISCOVERY_START: 'iniciando escucha Nearby',
+    DISCOVERY_READY: 'escucha Nearby activa',
+    DISCOVERY_RETRY: 'reintentando inicio de escucha',
+    DISCOVERY_FAILED: 'no se pudo iniciar la escucha',
+    ENDPOINT_FOUND: 'anuncio del encargado encontrado',
+    ENDPOINT_LOST: 'anuncio del encargado perdido',
+    CONNECTION_REQUEST: 'solicitando conexión al teléfono cercano',
+    CONNECTION_REQUEST_RETRY: 'reintentando solicitud de conexión',
+    CONNECTION_REQUEST_FAILED: 'falló la solicitud de conexión',
+    CONNECTION_INITIATED: 'negociación de conexión iniciada',
+    CONNECTION_ACCEPTED: 'conexión aceptada localmente',
+    CONNECTION_ACCEPT_FAILED: 'falló la aceptación de conexión',
+    CONNECTION_ESTABLISHED: 'conexión Nearby establecida',
+    CONNECTION_FAILED: 'la conexión Nearby no se estableció',
+    CHALLENGE_RECEIVED: 'reto de marcación recibido',
+    CHALLENGE_DISPATCHED: 'reto de marcación enviado',
+    PROOF_DISPATCHED: 'prueba firmada enviada al encargado',
+    PROOF_RECEIVED_RAW: 'prueba recibida; verificando firma',
+    PROOF_VERIFIED: 'prueba local verificada',
+    PROOF_SIGNATURE_INVALID: 'firma de prueba inválida',
+    PROOF_INVALID: 'prueba local inválida',
+    PAYLOAD_FAILED: 'falló la transferencia local',
+    SCAN_REQUESTED: 'búsqueda nativa solicitada',
+    ADVERTISING_START: 'iniciando anuncio Nearby',
+    ADVERTISING_READY: 'anuncio Nearby activo',
+    ADVERTISING_RETRY: 'reintentando inicio del anuncio',
+    ADVERTISING_FAILED: 'no se pudo iniciar el anuncio',
+    WINDOW_CLOSED: 'terminó la ventana de anuncio',
+    SCAN_COMPLETE: 'búsqueda local terminada',
+    LOCATION_READY: 'ubicación del encargado lista',
+    QUEUE_WRITE_START: 'guardando marcación en la cola local',
+    QUEUE_STORED: 'marcación guardada en la cola local',
+    SYNC_REQUESTED: 'sincronización con servidor solicitada',
+    SYNC_DEFERRED: 'sin Internet; sincronización queda pendiente',
+    SYNC_CONFIRMED: 'servidor confirmó la marcación',
+    SYNC_REJECTED: 'servidor rechazó la marcación',
+    SYNC_RETRY_SCHEDULED: 'servidor pendiente; se reintentará sincronizar',
+    PERMISSIONS_GRANTED: 'permisos Nearby autorizados',
+    PERMISSIONS_DENIED: 'permisos Nearby no autorizados',
+    BLUETOOTH_ENABLED: 'Bluetooth activo',
+    BLUETOOTH_DISABLED: 'Bluetooth apagado'
+  });
   const TRANSIENT_SCAN_ERRORS = new Set([
     'connection_failed',
     'connection_request_failed',
@@ -53,6 +106,7 @@
   const phoneExceptionsByService = new Map();
   const serverMemberStatusesByScope = new Map();
   const localQueuedMarksByService = new Map();
+  const diagnosticEvents = [];
 
   function parseBridgeResult(value) {
     if (typeof value !== 'string') return null;
@@ -291,6 +345,73 @@
     return node;
   }
 
+  function diagnosticStageLabel(stage) {
+    return DIAGNOSTIC_STAGE_LABELS[stage]
+      || String(stage || '').toLowerCase().replace(/_/g, ' ');
+  }
+
+  function diagnosticTime(value) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '--:--:--';
+    return date.toLocaleTimeString('es-CO', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+  }
+
+  function renderDiagnosticLog(panel = document.getElementById(PANEL_ID)) {
+    if (!panel) return;
+    const list = panel.querySelector('[data-native-presence-diagnostics]');
+    if (!list) return;
+    list.replaceChildren();
+    if (!diagnosticEvents.length) {
+      list.appendChild(element('div', 'native-presence-diagnostic-empty', 'Sin eventos todavía.'));
+      return;
+    }
+    diagnosticEvents.forEach((item) => {
+      const metadata = [];
+      if (Number.isFinite(item.statusCode)) metadata.push(`status=${item.statusCode}`);
+      if (Number.isInteger(item.retryCount) && item.retryCount >= 0) metadata.push(`retry=${item.retryCount}`);
+      const suffix = metadata.length ? ` · ${metadata.join(' · ')}` : '';
+      list.appendChild(element(
+        'div',
+        'native-presence-diagnostic-row',
+        `${diagnosticTime(item.at)} · ${item.actor} · ${item.stage} · ${diagnosticStageLabel(item.stage)}${suffix}`
+      ));
+    });
+  }
+
+  function recordDiagnostic(actor, stage, detail = {}) {
+    const rawActor = String(actor || '').trim().toUpperCase();
+    const safeActor = ['AUX', 'ENC', 'APP'].includes(rawActor) ? rawActor : 'APP';
+    const safeStage = String(stage || '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9_]/g, '')
+      .slice(0, 64);
+    if (!safeStage) return;
+    const statusCode = Number(detail?.statusCode);
+    const retryCount = Number(detail?.retryCount);
+    diagnosticEvents.push({
+      at: new Date(),
+      actor: safeActor,
+      stage: safeStage,
+      statusCode: Number.isFinite(statusCode) ? statusCode : null,
+      retryCount: Number.isInteger(retryCount) && retryCount >= 0 ? retryCount : null
+    });
+    if (diagnosticEvents.length > DIAGNOSTIC_LIMIT) {
+      diagnosticEvents.splice(0, diagnosticEvents.length - DIAGNOSTIC_LIMIT);
+    }
+    renderDiagnosticLog();
+  }
+
+  function resetDiagnosticLog(actor, stage) {
+    diagnosticEvents.length = 0;
+    recordDiagnostic(actor, stage);
+  }
+
   function installStyles() {
     if (document.querySelector('style[data-native-presence-styles]')) return;
     const style = document.createElement('style');
@@ -301,6 +422,7 @@
       .native-presence-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px;align-items:end}.native-presence-field{display:grid;gap:4px}.native-presence-field label{font-size:11px;font-weight:850;color:#34553e}.native-presence-field select{width:100%;min-height:42px;border:1px solid #b9c9bd;border-radius:10px;background:#fff;padding:8px 10px;color:#173b25;font:inherit}
       .native-presence-actions{display:grid;gap:7px}.native-presence-btn{min-height:44px;border:0;border-radius:11px;padding:9px 13px;background:#176c36;color:#fff;font:inherit;font-size:13px;font-weight:850;cursor:pointer}.native-presence-btn.secondary{background:#e4ece7;color:#234a30}.native-presence-btn:disabled{opacity:.55;cursor:wait}
       .native-presence-status{padding:10px 11px;border-radius:11px;background:#eaf8ef;color:#176c36;font-size:12px;font-weight:800;line-height:1.45}.native-presence-status.warning{background:#fff6df;color:#76520b}.native-presence-status.error{background:#fff1f2;color:#9f1239}
+      .native-presence-diagnostics{border:1px dashed #aebbb2;border-radius:11px;background:#fff;padding:8px 10px}.native-presence-diagnostics summary{cursor:pointer;font-size:11px;font-weight:900;color:#34553e}.native-presence-diagnostic-help{margin:6px 0;font-size:9px;line-height:1.35;color:#718078}.native-presence-diagnostic-list{display:grid;gap:4px;max-height:210px;overflow:auto}.native-presence-diagnostic-row,.native-presence-diagnostic-empty{font-family:monospace;font-size:9px;line-height:1.4;color:#35453b;overflow-wrap:anywhere}.native-presence-diagnostic-empty{color:#718078}
       .native-presence-count{font-size:26px;font-weight:900;color:#176c36;line-height:1}.native-presence-small{font-size:11px;color:#647568}
       .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-history{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.native-presence-member-mark{display:inline-flex;padding:4px 6px;border-radius:8px;background:#eaf8ef;color:#176c36;font-size:9px;font-weight:850;white-space:nowrap}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
       @media(max-width:620px){.native-presence-row{grid-template-columns:1fr}.native-presence-btn{width:100%}.native-presence-member{grid-template-columns:minmax(0,1fr)}.native-presence-member-side{justify-content:flex-start}}
@@ -763,6 +885,7 @@
       prepare.type = 'button';
       prepare.dataset.nativePresenceAuxReady = 'true';
       prepare.addEventListener('click', () => {
+        resetDiagnosticLog('APP', 'AUX_PREPARE_TAPPED');
         setStatus('Preparando Bluetooth para la marcación…', 'warning');
         ensureAuxiliaryReady(true).catch(() => {
           setStatus('No fue posible preparar Bluetooth. Intenta nuevamente.', 'error');
@@ -791,6 +914,19 @@
     status.dataset.nativePresenceStatus = 'true';
     panel.appendChild(status);
 
+    const diagnostics = element('details', 'native-presence-diagnostics');
+    diagnostics.open = true;
+    diagnostics.appendChild(element('summary', '', 'Diagnóstico local'));
+    diagnostics.appendChild(element(
+      'div',
+      'native-presence-diagnostic-help',
+      'Temporal y solo visible en este teléfono. No guarda identificadores ni se envía al servidor.'
+    ));
+    const diagnosticList = element('div', 'native-presence-diagnostic-list');
+    diagnosticList.dataset.nativePresenceDiagnostics = 'true';
+    diagnostics.appendChild(diagnosticList);
+    panel.appendChild(diagnostics);
+
     if (context?.isCrewLeader) {
       renderCrewMembers(panel, context, presentationMarkType);
       const countWrap = element('div');
@@ -816,6 +952,7 @@
     insertPanel(panel);
     hideIndividualCrewMarks();
     updateCount();
+    renderDiagnosticLog(panel);
   }
 
   function insertPanel(panel) {
@@ -849,12 +986,15 @@
     activeMode = 'PREPARING';
     setStatus('Preparando Bluetooth para la marcación…', 'warning');
     if (navigator.onLine && !credentialPrepared()) await provisionCredential();
+    recordDiagnostic('APP', 'AUX_SET_READY_CALL');
     const result = bridgeCall('setReady', context.serviceRequestId);
     if (!result?.ok) {
+      recordDiagnostic('APP', 'AUX_SET_READY_REJECTED');
       activeMode = 'IDLE';
       setStatus(publicNativeError(result?.error), 'warning');
       return;
     }
+    recordDiagnostic('APP', 'AUX_SET_READY_ACCEPTED');
     setStatus('Activando escucha Bluetooth…', 'warning');
   }
 
@@ -868,9 +1008,12 @@
     retryMarkType = normalizedMark;
     if (normalizedMark !== 'ARRIVAL') phoneExceptionSet(context.serviceRequestId).clear();
     if (!automaticRetry) {
+      resetDiagnosticLog('APP', 'LEADER_SCAN_REQUESTED');
       autoRetryRemaining = 1;
       retryNotDetectedCount = 0;
       hasCompletedLeaderScan = false;
+    } else {
+      recordDiagnostic('APP', 'LEADER_SCAN_RETRY_REQUESTED');
     }
     scanTransientFailureCount = 0;
     scanVerifiedCount = 0;
@@ -897,10 +1040,12 @@
     if (navigator.onLine && !credentialPrepared()) await provisionCredential();
     const result = bridgeCall('startCrewScan', JSON.stringify(payload));
     if (!result?.ok) {
+      recordDiagnostic('APP', 'LEADER_SCAN_BRIDGE_REJECTED');
       activeAttempt = null;
       setStatus(publicNativeError(result?.error), 'warning');
       return;
     }
+    recordDiagnostic('APP', 'LEADER_SCAN_BRIDGE_ACCEPTED');
     activeMode = 'LEADER';
     renderPanel();
     showStop();
@@ -974,9 +1119,16 @@
     const nativeLocation = nativeLocationFromBundle(bundle);
     const offline = window.LorrenWorkerPortalOffline;
     if (typeof offline?.queueCrewPresence !== 'function') throw new Error('offline_queue_unavailable');
+    recordDiagnostic('APP', 'QUEUE_WRITE_START');
     const queued = await offline.queueCrewPresence({ ...attempt, ...nativeLocation, proofBundle: bundle });
     rememberQueuedMark(attempt.serviceRequestId, attempt.markType);
-    if (navigator.onLine && typeof offline.syncNow === 'function') offline.syncNow().catch(() => {});
+    recordDiagnostic('APP', 'QUEUE_STORED');
+    if (navigator.onLine && typeof offline.syncNow === 'function') {
+      recordDiagnostic('APP', 'SYNC_REQUESTED');
+      offline.syncNow().catch(() => {});
+    } else {
+      recordDiagnostic('APP', 'SYNC_DEFERRED');
+    }
     return { queued, proofCount: bundle.proofs.length, markType: attempt.markType };
   }
 
@@ -1057,8 +1209,16 @@
     const detail = event?.detail;
     if (!detail || typeof detail !== 'object') return;
     const type = String(detail.type || '');
+    if (type === 'diagnostic') {
+      recordDiagnostic(detail.actor, detail.stage, detail);
+      return;
+    }
     if (type === 'permissions') {
       const context = currentContext();
+      recordDiagnostic(
+        context?.isCrewLeader ? 'ENC' : 'AUX',
+        detail.granted ? 'PERMISSIONS_GRANTED' : 'PERMISSIONS_DENIED'
+      );
       if (detail.granted && context && !context.isCrewLeader) {
         setStatus('Permisos listos. Preparando Bluetooth…', 'warning');
         scheduleAuxiliaryRearm();
@@ -1071,6 +1231,10 @@
     }
     if (type === 'bluetooth') {
       const context = currentContext();
+      recordDiagnostic(
+        context?.isCrewLeader ? 'ENC' : 'AUX',
+        detail.enabled ? 'BLUETOOTH_ENABLED' : 'BLUETOOTH_DISABLED'
+      );
       if (detail.enabled && context && !context.isCrewLeader) {
         setStatus('Bluetooth listo. Preparando escucha local…', 'warning');
         scheduleAuxiliaryRearm();
@@ -1113,6 +1277,7 @@
       return;
     }
     if (type === 'native_location_ready') {
+      recordDiagnostic('ENC', 'LOCATION_READY');
       if (pendingCompletedScan && activeAttempt) {
         const completion = pendingCompletedScan;
         const markType = normalizeMarkType(completion.markType || activeAttempt.markType) || 'ARRIVAL';
@@ -1146,6 +1311,8 @@
     }
     if (type === 'error') {
       const code = String(detail.code || 'native_error');
+      const errorStage = `ERROR_${code.toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 48)}`;
+      recordDiagnostic(currentContext()?.isCrewLeader ? 'ENC' : 'AUX', errorStage);
       if (activeMode === 'LEADER' && TRANSIENT_SCAN_ERRORS.has(code)) scanTransientFailureCount += 1;
       if (NATIVE_START_ERRORS.has(code)) {
         activeMode = 'IDLE';
@@ -1163,6 +1330,7 @@
     const message = event?.data;
     if (!message || typeof message !== 'object') return;
     if (message.type === 'CREW_PRESENCE_SYNCED') {
+      recordDiagnostic('APP', 'SYNC_CONFIRMED');
       const payload = message.payload || {};
       const serviceRequestId = String(payload.serviceRequestId || selectedServiceRequestId || '').trim();
       const markType = normalizeMarkType(payload.markType) || 'ARRIVAL';
@@ -1181,6 +1349,7 @@
       return;
     }
     if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {
+      recordDiagnostic('APP', 'SYNC_REJECTED');
       const serviceRequestId = String(message.serviceRequestId || message.payload?.serviceRequestId || selectedServiceRequestId || '').trim();
       const queuedMarkType = [...queuedMarkSet(serviceRequestId)].map(normalizeMarkType).find(Boolean) || null;
       const markType = normalizeMarkType(message.payload?.markType)
@@ -1194,6 +1363,7 @@
     }
     if (message.type === 'CREW_PRESENCE_SYNC_RETRY') {
       if (Number(message.retryAfterMs || 0) > 0) {
+        recordDiagnostic('APP', 'SYNC_RETRY_SCHEDULED');
         const markType = normalizeMarkType(retryMarkType) || onlineQueuedMarkType(currentContext()) || 'ARRIVAL';
         setStatus(`La ${markInfo(markType).noun} de cuadrilla sigue enviada pero aún no está confirmada. Lórren la reintentará automáticamente.`, 'warning');
       }
