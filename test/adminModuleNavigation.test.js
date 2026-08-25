@@ -62,7 +62,12 @@ test('Sucursales y Usuarios comparten el flujo visual primario sin entrar en des
 });
 
 test('Sucursales queda fuera de Reclutamiento y se marca activo como enlace independiente', () => {
-  const recruitment = nav(injectAdminModuleNavigation(baseHtml, req('/admin', { canAccessStatistics: true })));
+  const recruitment = nav(injectAdminModuleNavigation(baseHtml, req('/admin', {
+    canAccessStatistics: true,
+    userSource: 'db',
+    username: 'reclutador-general',
+    userAccessScope: 'ALL'
+  })));
   const recruitmentMenu = moduleMenu(recruitment, 'recruitment');
   assert.match(recruitmentMenu, /href="\/admin">Panel de candidatos<\/a>/);
   assert.doesNotMatch(recruitmentMenu, /href="\/admin\/locations"|>Sucursales<\/a>|href="\/admin\/vacancies"|>Vacantes<\/a>|>Ciudades<\/a>/);
@@ -168,7 +173,11 @@ test('dashboard de despacho queda compacto cuando todos sus accesos ya estan en 
 });
 
 test('Usuarios se marca activo sin marcar Reclutamiento como modulo activo', () => {
-  const navbar = nav(injectAdminModuleNavigation(baseHtml, req('/admin/users')));
+  const navbar = nav(injectAdminModuleNavigation(baseHtml, req('/admin/users', {
+    userSource: 'db',
+    username: 'reclutador-general',
+    userAccessScope: 'ALL'
+  })));
   assert.match(standaloneLink(navbar, 'users'), /class="admin-module-standalone-link is-active"/);
   assert.doesNotMatch(moduleMenu(navbar, 'recruitment'), /admin-module-menu is-active/);
 });

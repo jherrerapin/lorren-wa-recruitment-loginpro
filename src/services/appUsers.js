@@ -157,16 +157,11 @@ export function generateRecoveryCode() {
 }
 
 /**
- * Crear una cuenta y conceder permisos adicionales son capacidades distintas.
- * Cualquier usuario autenticado del panel con rol admin/dev puede crear cuentas;
- * el alcance del creador limita después qué sucursales/vacantes puede asignar.
+ * El módulo Usuarios administra cuentas de terceros y por eso usa una sola
+ * autoridad restrictiva: DEV o la cuenta histórica reclutador-general.
+ * El displayName no participa en autorización y puede cambiar libremente.
  */
 export function canCreateRecruiterUsers(source = {}) {
-  const role = sourceValue(source, 'userRole') || sourceValue(source, 'role');
-  return role === 'dev' || role === 'admin';
-}
-
-export function canManageUserModulePermissions(source = {}) {
   const role = sourceValue(source, 'userRole') || sourceValue(source, 'role');
   if (role === 'dev') return true;
 
@@ -178,6 +173,10 @@ export function canManageUserModulePermissions(source = {}) {
     && role === 'admin'
     && username === 'reclutador-general'
     && accessScope === 'ALL';
+}
+
+export function canManageUserModulePermissions(source = {}) {
+  return canCreateRecruiterUsers(source);
 }
 
 export function getAccessContext(source = {}) {

@@ -34,8 +34,8 @@ test('el nombre humano enlaza Mi perfil fuera de módulos y no expone el correo'
   assert.match(html, /<span class="spacer"><\/span>\s*<a class="admin-session-identity"/);
 });
 
-test('un reclutador ordinario ve Usuarios como módulo de creación', () => {
-  const html = buildAdminModuleNavbar({
+test('solo la cuenta histórica reclutador-general ve Usuarios entre los administradores DB', () => {
+  const ordinary = buildAdminModuleNavbar({
     originalUrl: '/admin',
     session: {
       userRole: 'admin',
@@ -45,8 +45,19 @@ test('un reclutador ordinario ve Usuarios como módulo de creación', () => {
       userAccessScope: 'CITY'
     }
   });
+  assert.doesNotMatch(primaryGroup(ordinary), /data-standalone-link="users"/);
 
-  assert.match(primaryGroup(html), /data-standalone-link="users"/);
+  const general = buildAdminModuleNavbar({
+    originalUrl: '/admin',
+    session: {
+      userRole: 'admin',
+      userSource: 'db',
+      username: 'reclutador-general',
+      displayName: 'Cuenta General Prueba',
+      userAccessScope: 'ALL'
+    }
+  });
+  assert.match(primaryGroup(general), /data-standalone-link="users"/);
 });
 
 test('DEV puede entrar como la cuenta administrativa heredada sin habilitar sus acciones protegidas', () => {
