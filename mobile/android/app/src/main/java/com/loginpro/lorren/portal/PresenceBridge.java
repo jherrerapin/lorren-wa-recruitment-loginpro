@@ -44,6 +44,7 @@ final class PresenceBridge {
     private LocationListener pendingLocationListener;
     private Runnable pendingLocationTimeout;
     private JSONObject leaderLocationProof;
+    private String pendingReadyServiceRequestId = "";
 
     PresenceBridge(MainActivity activity) {
         this.activity = activity;
@@ -102,15 +103,56 @@ final class PresenceBridge {
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) return jsonError(readinessError);
         try {
-            manager.startReady(serviceRequestId);
+            String normalizedServiceRequestId = requiredToken(serviceRequestId, "serviceRequestId");
+            synchronized (this) {
+                pendingReadyServiceRequestId = normalizedServiceRequestId;
+            }
+            if (!activity.ensureNearbyDiscoverable()) return jsonOk();
+            synchronized (this) {
+                pendingReadyServiceRequestId = "";
+            }
+            manager.startReady(normalizedServiceRequestId);
             return jsonOk();
         } catch (Exception error) {
+            synchronized (this) {
+                pendingReadyServiceRequestId = "";
+            }
             return jsonError("ready_failed");
+        }
+    }
+
+    void onBluetoothDiscoverableResult(boolean granted) {
+        String serviceRequestId;
+        synchronized (this) {
+            serviceRequestId = pendingReadyServiceRequestId;
+            pendingReadyServiceRequestId = "";
+        }
+        if (serviceRequestId.isEmpty()) return;
+        if (!granted) {
+            emitPresenceError("discovery_failed");
+            return;
+        }
+        if (!hasUsablePresenceCredential()) {
+            emitPresenceError("native_presence_credential_required");
+            return;
+        }
+        String readinessError = activity.ensureNearbyRadioReady();
+        if (readinessError != null) {
+            emitPresenceError(readinessError);
+            return;
+        }
+        try {
+            manager.startReady(serviceRequestId);
+        } catch (Exception error) {
+            emitPresenceError("ready_failed");
         }
     }
 
     @JavascriptInterface
     public String stopReady() {
+        synchronized (this) {
+            pendingReadyServiceRequestId = "";
+        }
         manager.stopReady();
         return jsonOk();
     }
@@ -196,6 +238,9 @@ final class PresenceBridge {
     }
 
     void shutdown() {
+        synchronized (this) {
+            pendingReadyServiceRequestId = "";
+        }
         cancelPendingLocation();
         manager.shutdown();
     }
@@ -591,7 +636,7 @@ final class PresenceBridge {
         });
     }
 
-    private void emitLocationError(String code) {
+    private void emitPresenceError(String code) {
         try {
             JSONObject event = new JSONObject();
             event.put("type", "error");
@@ -599,6 +644,10 @@ final class PresenceBridge {
             activity.emitPresenceEvent(event);
         } catch (Exception ignored) {
         }
+    }
+
+    private void emitLocationError(String code) {
+        emitPresenceError(code);
     }
 
     private void emitAttendanceLocationError(

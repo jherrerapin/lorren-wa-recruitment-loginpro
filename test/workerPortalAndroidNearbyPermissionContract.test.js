@@ -16,7 +16,7 @@ function methodBody(source, signature, nextSignature) {
   return source.slice(start, end);
 }
 
-test('presencia BLE separa permisos de transporte, Wi-Fi y geocerca con compatibilidad por versión', async () => {
+test('presencia Bluetooth Classic separa permisos de transporte, Wi-Fi y geocerca con compatibilidad por versión', async () => {
   const [manifest, mainActivity, manager, gradle] = await Promise.all([
     read('app/src/main/AndroidManifest.xml'),
     read('app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
@@ -35,7 +35,6 @@ test('presencia BLE separa permisos de transporte, Wi-Fi y geocerca con compatib
   assert.match(manifest, /android\.permission\.BLUETOOTH_SCAN/);
   assert.match(manifest, /android\.permission\.BLUETOOTH_CONNECT/);
   assert.match(manifest, /android\.permission\.BLUETOOTH_ADVERTISE/);
-  assert.match(manifest, /android\.hardware\.bluetooth_le/);
 
   const legacyLocationGranted = methodBody(
     mainActivity,
@@ -104,6 +103,17 @@ test('presencia BLE separa permisos de transporte, Wi-Fi y geocerca con compatib
   assert.match(ensureAttendanceLocation, /locationRuntimePermissions\(\)/);
   assert.match(ensureAttendanceLocation, /REQUEST_ATTENDANCE_LOCATION/);
 
+  const discoverableGate = methodBody(
+    mainActivity,
+    'boolean ensureNearbyDiscoverable()',
+    'private String[] locationRuntimePermissions()'
+  );
+  assert.match(discoverableGate, /BluetoothAdapter\.SCAN_MODE_CONNECTABLE_DISCOVERABLE/);
+  assert.match(discoverableGate, /requestBluetoothDiscoverable\(\)/);
+  assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_DISCOVERABLE/);
+  assert.match(mainActivity, /BluetoothAdapter\.EXTRA_DISCOVERABLE_DURATION/);
+  assert.match(mainActivity, /BLUETOOTH_DISCOVERABLE_SECONDS = 300/);
+
   const attendancePermissions = methodBody(
     mainActivity,
     'private List<String> attendancePermissions(boolean includeCamera)',
@@ -112,11 +122,13 @@ test('presencia BLE separa permisos de transporte, Wi-Fi y geocerca con compatib
   assert.match(attendancePermissions, /addPreciseLocationPermissionsIfNeeded\(missing\)/);
   assert.match(attendancePermissions, /missing\.addAll\(nearbyTransportPermissions\(\)\)/);
 
-  assert.match(manager, /BluetoothLeScanner/);
-  assert.match(manager, /BluetoothLeAdvertiser/);
-  assert.match(manager, /BluetoothGattServer/);
-  assert.match(manager, /BluetoothDevice\.TRANSPORT_LE/);
-  assert.doesNotMatch(manager, /Nearby\.getConnectionsClient|ConnectionsClient|WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
+  assert.match(manager, /BluetoothServerSocket/);
+  assert.match(manager, /BluetoothSocket/);
+  assert.match(manager, /listenUsingInsecureRfcommWithServiceRecord/);
+  assert.match(manager, /createInsecureRfcommSocketToServiceRecord/);
+  assert.match(manager, /startDiscovery\(\)/);
+  assert.match(manager, /fetchUuidsWithSdp\(\)/);
+  assert.doesNotMatch(manager, /BluetoothLeAdvertiser|BluetoothGatt|Nearby\.getConnectionsClient|ConnectionsClient|WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
   assert.doesNotMatch(mainActivity, /WifiManager|setWifiEnabled|startLocalOnlyHotspot/);
 
   // La dependencia de Play Services queda declarada por rollback, pero ya no tiene
