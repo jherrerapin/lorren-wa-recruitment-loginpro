@@ -25,6 +25,7 @@ import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
 import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
 import { referralAttributionMiddleware } from './services/referralAttribution.js';
+import { interviewCoordinationHandoffMiddleware } from './services/botAutomationPolicy.js';
 import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
@@ -557,7 +558,7 @@ app.get('/recover', (req, res) => {
   res.render('recover', {
     error: null,
     username: normalizeString(req.query.username) || '',
-    success: normalizeString(req.query.success)
+    success: null
   });
 });
 
@@ -617,6 +618,7 @@ app.get('/logout', destroySession);
 app.use(wrapAsyncRouter(dispatchMultiShiftRequestsRouter()));
 app.use('/webhook', campaignAttributionMiddleware(prisma));
 app.use('/webhook', referralAttributionMiddleware(prisma));
+app.use('/webhook', interviewCoordinationHandoffMiddleware(prisma));
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/operaciones', wrapAsyncRouter(publicDispatchClientRouter()));
