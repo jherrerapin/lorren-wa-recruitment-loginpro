@@ -1295,7 +1295,7 @@
         setStatus('Bluetooth listo. Preparando escucha local…', 'warning');
         scheduleAuxiliaryRearm();
       } else {
-        setStatus(detail.granted
+        setStatus(detail.enabled
           ? 'Bluetooth listo. Pulsa nuevamente para continuar.'
           : 'Bluetooth sigue apagado. Actívalo para continuar.', detail.enabled ? 'warning' : 'error');
       }
