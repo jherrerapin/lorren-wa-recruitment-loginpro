@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { canManageUserModulePermissions } from './appUsers.js';
 import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.js';
 import { injectAdminModuleNavigation } from './adminNavigation.js';
@@ -277,11 +278,22 @@ function isHtmlResponse(body, res) {
   return contentType.includes('text/html') || body.trimStart().startsWith('<!DOCTYPE html') || body.trimStart().startsWith('<html');
 }
 
+export function sanitizeUsersPermissionCopy(html) {
+  if (typeof html !== 'string') return html;
+  return html
+    .replaceAll('Los permisos adicionales solo pueden ser concedidos por DEV o reclutador-general.', '')
+    .replaceAll('Puedes crear usuarios dentro de tu alcance. Los permisos adicionales del panel los asigna DEV o reclutador-general.', '')
+    .replaceAll('Solo DEV y reclutador-general pueden modificar estos permisos.', '');
+}
+
 function injectPayrollUsersScript(html, req) {
   const path = String(req.originalUrl || '').split('?')[0];
-  const role = req.session?.userRole || req.userRole;
-  if (path !== '/admin/users' || role !== 'dev' || html.includes(PAYROLL_USERS_SCRIPT)) return html;
-  return html.replace(/<\/body>/i, `  <script src="${PAYROLL_USERS_SCRIPT}"></script>\n</body>`);
+  if (path !== '/admin/users' || !canManageUserModulePermissions(req) || html.includes(PAYROLL_USERS_SCRIPT)) return html;
+  const canManageTestWorkspace = (req.session?.userRole || req.userRole) === 'dev';
+  return html.replace(
+    /<\/body>/i,
+    `  <script src="${PAYROLL_USERS_SCRIPT}" data-can-manage-test-workspace="${canManageTestWorkspace ? 'true' : 'false'}"></script>\n</body>`
+  );
 }
 
 function normalizeProgrammingPresentation(html, req) {
@@ -305,7 +317,11 @@ function installAdminHtmlBridge(req, res) {
   res.send = (body) => {
     if (!isHtmlResponse(body, res)) return originalSend(body);
     const withNavigation = injectAdminModuleNavigation(body, req);
-    const withPayrollUsers = injectPayrollUsersScript(withNavigation, req);
+    const path = String(req.originalUrl || '').split('?')[0];
+    const withPrivateCopyRemoved = path === '/admin/users'
+      ? sanitizeUsersPermissionCopy(withNavigation)
+      : withNavigation;
+    const withPayrollUsers = injectPayrollUsersScript(withPrivateCopyRemoved, req);
     const withProgrammingCopy = normalizeProgrammingPresentation(withPayrollUsers, req);
     return originalSend(injectProgrammingContactsScript(withProgrammingCopy, req));
   };
