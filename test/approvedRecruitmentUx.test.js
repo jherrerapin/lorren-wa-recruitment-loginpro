@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ejs from 'ejs';
-import { enhanceApprovedRecruitmentUx } from '../src/services/approvedRecruitmentUx.js';
+import {
+  enhanceApprovedRecruitmentUx,
+  vacancyStatusFilterDefinitions
+} from '../src/services/approvedRecruitmentUx.js';
 import { normalizeInterviewOutreachConfig } from '../src/routes/admin.js';
 
 function readSource(path) {
@@ -63,6 +66,51 @@ test('inyecta filtro Aprobados en el listado legado sin duplicarlo', () => {
   assert.match(enhanced, /approvedLink\.textContent = 'Aprobados'/);
   assert.match(enhanced, /badge-aprobado/);
   assert.equal(enhanceApprovedRecruitmentUx(enhanced), enhanced);
+});
+
+test('los filtros por vacante son compartidos salvo Nuevos, que queda solo para DEV', () => {
+  const recruiterFilters = vacancyStatusFilterDefinitions('admin');
+  const devFilters = vacancyStatusFilterDefinitions('dev');
+
+  assert.deepEqual(
+    recruiterFilters.map(({ scope, label }) => [scope, label]),
+    [
+      ['registered', 'Registrados'],
+      ['approved', 'Aprobados'],
+      ['contacted', 'Contactados'],
+      ['contracted', 'Contratados'],
+      ['rejected', 'Rechazados']
+    ]
+  );
+  assert.equal(recruiterFilters.some(({ scope }) => scope === 'new'), false);
+  assert.deepEqual(
+    devFilters.map(({ scope }) => scope),
+    ['registered', 'approved', 'new', 'contacted', 'contracted', 'rejected']
+  );
+});
+
+test('cada panel de vacante recibe navegación de estado con su vacancyId', () => {
+  const html = [
+    '<html><body>',
+    '<section class="vacancy-panel" data-vacancy-panel="vacancy-example-1">',
+    '<div class="vacancy-header"></div>',
+    '<div class="vacancy-role">Auxiliar — Ciudad de ejemplo</div>',
+    '</section>',
+    '<section class="vacancy-panel" data-vacancy-panel="vacancy-example-2">',
+    '<div class="vacancy-header"></div>',
+    '<div class="vacancy-role">Operador — Otra ciudad</div>',
+    '</section>',
+    '</body></html>'
+  ].join('');
+  const enhanced = enhanceApprovedRecruitmentUx(html);
+
+  assert.match(enhanced, /data-vacancy-status-filters/);
+  assert.match(enhanced, /panel\.dataset\.vacancyPanel/);
+  assert.match(enhanced, /url\.searchParams\.set\('vacancyId', vacancyId\)/);
+  assert.match(enhanced, /filter\.approvedOnly/);
+  assert.match(enhanced, /url\.searchParams\.set\('approvedOnly', '1'\)/);
+  assert.match(enhanced, /isDevUi \? devVacancyStatusFilters : recruiterVacancyStatusFilters/);
+  assert.match(enhanced, /a\[href="\/admin\/monitor"\]/);
 });
 
 test('el enlace Mensajes a aprobados se contextualiza por vacante y sucursal', () => {
