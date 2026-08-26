@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { MessageType } from '@prisma/client';
+import { MessageDirection, MessageType } from '@prisma/client';
 import { safeErrorMessage } from './errorSanitization.js';
 import {
   claimManualOutboundDelivery,
@@ -14,9 +14,18 @@ import {
   persistOutboundConversationMessage,
   updateOutboundConversationDelivery
 } from './conversationMessageRepository.js';
+import { getWhatsappWindowState } from './reminderPolicy.js';
+import { sendTextMessage as sendWhatsappTextMessage } from './whatsapp.js';
 
 const DEFAULT_DEDUPE_WINDOW_MS = 30_000;
 const PENDING_RECONCILIATION_MESSAGE = 'WhatsApp confirmó el envío, pero la actualización interna quedó pendiente. No reenvíes el mensaje; revisa la conversación y el estado del candidato.';
+const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
+
+export const MANUAL_OUTBOUND_TRANSPORT = Object.freeze({
+  CONFIGURED: 'CONFIGURED',
+  FREE_TEXT: 'FREE_TEXT',
+  TEMPLATE: 'TEMPLATE'
+});
 
 function requireNonEmptyString(value, label, { preserve = false } = {}) {
   const raw = String(value ?? '');
@@ -158,6 +167,43 @@ function sentPendingReconciliationError({ providerMessageId, messageId, cause = 
   return error;
 }
 
+function isoOrNull(value) {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) return null;
+  return value.toISOString();
+}
+
+export function resolveManualOutboundTransport({ source = '', lastInboundAt = null, now = new Date() } = {}) {
+  if (String(source || '') !== INTERVIEW_OUTREACH_SOURCE) {
+    return {
+      transport: MANUAL_OUTBOUND_TRANSPORT.CONFIGURED,
+      whatsappWindowOpen: null,
+      whatsappWindowExpiresAt: null
+    };
+  }
+
+  const window = getWhatsappWindowState(lastInboundAt, now);
+  return {
+    transport: window.isOpen
+      ? MANUAL_OUTBOUND_TRANSPORT.FREE_TEXT
+      : MANUAL_OUTBOUND_TRANSPORT.TEMPLATE,
+    whatsappWindowOpen: window.isOpen,
+    whatsappWindowExpiresAt: isoOrNull(window.expiresAt)
+  };
+}
+
+async function loadLatestInboundAt(prisma, candidateId) {
+  const rows = await prisma.message.findMany({
+    where: {
+      candidateId,
+      direction: MessageDirection.INBOUND
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 1,
+    select: { createdAt: true }
+  });
+  return rows[0]?.createdAt || null;
+}
+
 async function loadCandidateForManualOutbound(client, candidateId) {
   return client.candidate.findUnique({
     where: { id: candidateId },
@@ -247,6 +293,13 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
     ? Math.max(1, Number(dependencies.dedupeWindowMs))
     : DEFAULT_DEDUPE_WINDOW_MS;
   const startedAt = now();
+  const lastInboundAt = source === INTERVIEW_OUTREACH_SOURCE
+    ? await loadLatestInboundAt(prisma, candidateId)
+    : null;
+  const transport = resolveManualOutboundTransport({ source, lastInboundAt, now: startedAt });
+  const sendCustomerCareText = transport.transport === MANUAL_OUTBOUND_TRANSPORT.FREE_TEXT
+    ? requireSendText(dependencies.sendCustomerCareText || sendWhatsappTextMessage)
+    : null;
   const duplicateQuery = {
     candidateId,
     body,
@@ -304,6 +357,9 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
         delivery: {
           state: 'SENDING',
           provider: 'META_WHATSAPP',
+          transport: transport.transport,
+          whatsappWindowOpen: transport.whatsappWindowOpen,
+          whatsappWindowExpiresAt: transport.whatsappWindowExpiresAt,
           startedAt: startedAt.toISOString(),
           updatedAt: startedAt.toISOString(),
           dedupeKey,
@@ -334,7 +390,9 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
 
   let providerResponse;
   try {
-    providerResponse = await sendText(phone, body);
+    providerResponse = transport.transport === MANUAL_OUTBOUND_TRANSPORT.FREE_TEXT
+      ? await sendCustomerCareText(phone, body)
+      : await sendText(phone, body);
   } catch (error) {
     const confirmedRejection = isConfirmedProviderRejection(error);
     const occurredAt = now();
@@ -429,6 +487,7 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
   return {
     sent: true,
     deliveryState: 'SENT',
+    transport: transport.transport,
     providerMessageId,
     messageId: preparation.messageId,
     candidateStateCount: finalization.count,
