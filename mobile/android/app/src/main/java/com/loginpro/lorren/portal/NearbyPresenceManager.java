@@ -49,6 +49,7 @@ final class NearbyPresenceManager {
     private static final long MIN_SCAN_MS = 35_000L;
     private static final long MAX_SCAN_MS = 45_000L;
     private static final long CONNECTION_GRACE_MS = 1_500L;
+    private static final int MAX_MESSAGE_BYTES = 16_384;
 
     private enum Role { IDLE, READY, LEADER }
 
