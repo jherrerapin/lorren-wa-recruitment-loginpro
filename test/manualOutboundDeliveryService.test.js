@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import { MessageDirection } from '@prisma/client';
 import {
   deliverManualOutboundText,
-  getManualOutboundUserMessage
+  getManualOutboundUserMessage,
+  MANUAL_OUTBOUND_TRANSPORT
 } from '../src/services/manualOutboundDeliveryService.js';
 import {
   MANUAL_OUTBOUND_SENDING_MODE,
@@ -167,6 +168,16 @@ const input = {
   rawPayload: {
     source: 'admin_outbound',
     action: 'free_text',
+    preserveExactBody: true
+  }
+};
+
+const interviewInput = {
+  ...input,
+  body: 'Citación de entrevista de prueba.',
+  rawPayload: {
+    source: 'admin_interview_template',
+    action: 'send_interview_template',
     preserveExactBody: true
   }
 };
@@ -379,4 +390,77 @@ test('bloquea una entrega ya reclamada antes de contactar al proveedor', async (
 
   assert.equal(harness.calls.sends.length, 0);
   assert.equal(harness.state.messages.length, 0);
+});
+
+test('outreach de entrevista dentro de 24h usa texto libre y no invoca plantilla', async () => {
+  const inboundAt = new Date('2026-07-16T00:30:00.000Z');
+  const harness = createHarness({
+    candidate: baseCandidate,
+    messages: [{
+      id: 'inbound-window-open',
+      candidateId: baseCandidate.id,
+      direction: MessageDirection.INBOUND,
+      body: 'Tengo una pregunta.',
+      createdAt: inboundAt,
+      rawPayload: {},
+      respondedAt: new Date('2026-07-16T00:30:01.000Z')
+    }]
+  });
+  const calls = { template: 0, freeText: 0 };
+
+  const result = await deliverManualOutboundText(harness.prisma, interviewInput, {
+    sendText: async () => {
+      calls.template += 1;
+      return { messages: [{ id: 'wamid.template.should-not-send' }] };
+    },
+    sendCustomerCareText: async (phone, body) => {
+      calls.freeText += 1;
+      harness.calls.sends.push({ phone, body });
+      return { messages: [{ id: 'wamid.free.1' }] };
+    },
+    now: createClock('2026-07-16T01:00:00.000Z', '2026-07-16T01:00:02.000Z')
+  });
+
+  assert.equal(result.sent, true);
+  assert.equal(calls.freeText, 1);
+  assert.equal(calls.template, 0);
+  const outbound = harness.state.messages.find((message) => message.direction === MessageDirection.OUTBOUND);
+  assert.equal(outbound.rawPayload.delivery.transport, MANUAL_OUTBOUND_TRANSPORT.FREE_TEXT);
+  assert.equal(outbound.rawPayload.delivery.whatsappWindowOpen, true);
+});
+
+test('outreach de entrevista fuera de 24h conserva la plantilla aprobada', async () => {
+  const harness = createHarness({
+    candidate: baseCandidate,
+    messages: [{
+      id: 'inbound-window-closed',
+      candidateId: baseCandidate.id,
+      direction: MessageDirection.INBOUND,
+      body: 'Mensaje antiguo.',
+      createdAt: new Date('2026-07-14T23:00:00.000Z'),
+      rawPayload: {},
+      respondedAt: new Date('2026-07-14T23:00:01.000Z')
+    }]
+  });
+  const calls = { template: 0, freeText: 0 };
+
+  const result = await deliverManualOutboundText(harness.prisma, interviewInput, {
+    sendText: async (phone, body) => {
+      calls.template += 1;
+      harness.calls.sends.push({ phone, body });
+      return { messages: [{ id: 'wamid.template.1' }] };
+    },
+    sendCustomerCareText: async () => {
+      calls.freeText += 1;
+      return { messages: [{ id: 'wamid.free.should-not-send' }] };
+    },
+    now: createClock('2026-07-16T01:00:00.000Z', '2026-07-16T01:00:02.000Z')
+  });
+
+  assert.equal(result.sent, true);
+  assert.equal(calls.template, 1);
+  assert.equal(calls.freeText, 0);
+  const outbound = harness.state.messages.find((message) => message.direction === MessageDirection.OUTBOUND);
+  assert.equal(outbound.rawPayload.delivery.transport, MANUAL_OUTBOUND_TRANSPORT.TEMPLATE);
+  assert.equal(outbound.rawPayload.delivery.whatsappWindowOpen, false);
 });
