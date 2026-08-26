@@ -1,11 +1,39 @@
 const SCRIPT_MARK = 'data-approved-recruitment-ux';
 
+const RECRUITER_VACANCY_STATUS_FILTERS = Object.freeze([
+  Object.freeze({ scope: 'registered', routeScope: 'registered', label: 'Registrados' }),
+  Object.freeze({ scope: 'approved', routeScope: 'registered', label: 'Aprobados', approvedOnly: true }),
+  Object.freeze({ scope: 'contacted', routeScope: 'contacted', label: 'Contactados' }),
+  Object.freeze({ scope: 'contracted', routeScope: 'contracted', label: 'Contratados' }),
+  Object.freeze({ scope: 'rejected', routeScope: 'rejected', label: 'Rechazados' })
+]);
+
+const DEV_NEW_VACANCY_STATUS_FILTER = Object.freeze({
+  scope: 'new',
+  routeScope: 'new',
+  label: 'Nuevos'
+});
+
+export function vacancyStatusFilterDefinitions(role = 'admin') {
+  const filters = RECRUITER_VACANCY_STATUS_FILTERS.map((filter) => ({ ...filter }));
+  if (String(role || '').trim().toLowerCase() === 'dev') {
+    filters.splice(2, 0, { ...DEV_NEW_VACANCY_STATUS_FILTER });
+  }
+  return filters;
+}
+
 function approvedRecruitmentScript() {
+  const recruiterVacancyStatusFilters = JSON.stringify(vacancyStatusFilterDefinitions('admin'));
+  const devVacancyStatusFilters = JSON.stringify(vacancyStatusFilterDefinitions('dev'));
+
   return `
 <script ${SCRIPT_MARK}>
 (() => {
   const currentUrl = new URL(window.location.href);
   const approvedOnly = currentUrl.searchParams.get('approvedOnly') === '1';
+  const recruiterVacancyStatusFilters = ${recruiterVacancyStatusFilters};
+  const devVacancyStatusFilters = ${devVacancyStatusFilters};
+  const isDevUi = Boolean(document.querySelector('a[href="/admin/monitor"]'));
 
   function adminUrlFromAnchor(anchor) {
     try {
@@ -13,6 +41,50 @@ function approvedRecruitmentScript() {
     } catch {
       return null;
     }
+  }
+
+  function installVacancyStatusFilters(panel, vacancyId) {
+    if (panel.querySelector('[data-vacancy-status-filters]')) return;
+
+    const filters = isDevUi ? devVacancyStatusFilters : recruiterVacancyStatusFilters;
+    const filterBar = document.createElement('div');
+    filterBar.dataset.vacancyStatusFilters = vacancyId;
+    filterBar.setAttribute('aria-label', 'Filtrar registros de esta vacante por estado');
+    Object.assign(filterBar.style, {
+      display: 'flex',
+      gap: '6px',
+      flexWrap: 'wrap',
+      padding: '10px 18px',
+      borderBottom: '1px solid var(--border-soft)',
+      background: 'var(--surface)'
+    });
+
+    filters.forEach((filter) => {
+      const url = new URL('/admin', window.location.origin);
+      url.searchParams.set('status', filter.routeScope);
+      url.searchParams.set('vacancyId', vacancyId);
+      if (filter.approvedOnly) url.searchParams.set('approvedOnly', '1');
+
+      const link = document.createElement('a');
+      link.href = url.pathname + url.search;
+      link.textContent = filter.label;
+      link.dataset.vacancyStatusScope = filter.scope;
+      Object.assign(link.style, {
+        border: '1px solid var(--border)',
+        background: 'var(--surface)',
+        color: 'var(--navy)',
+        padding: '6px 14px',
+        borderRadius: '20px',
+        fontSize: '13px',
+        fontWeight: '600',
+        textDecoration: 'none'
+      });
+      filterBar.appendChild(link);
+    });
+
+    const header = panel.querySelector('.vacancy-header');
+    if (header) header.insertAdjacentElement('afterend', filterBar);
+    else panel.prepend(filterBar);
   }
 
   const legacyTable = document.getElementById('legacy-candidates-table');
@@ -82,6 +154,9 @@ function approvedRecruitmentScript() {
   document.querySelectorAll('[data-vacancy-panel]').forEach((panel) => {
     const vacancyId = String(panel.dataset.vacancyPanel || '').trim();
     if (!vacancyId) return;
+
+    installVacancyStatusFilters(panel, vacancyId);
+
     const outreachLink = Array.from(panel.querySelectorAll('a')).find((anchor) => {
       const url = adminUrlFromAnchor(anchor);
       return url?.pathname === '/admin/outreach/approved';
