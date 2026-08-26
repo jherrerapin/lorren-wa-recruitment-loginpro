@@ -31,9 +31,10 @@ import java.util.Set;
 
 /**
  * Autoridad nativa única de presencia local de cuadrilla.
- * 
+ *
  * Implementación definitiva usando Google Nearby Connections (P2P_STAR).
- * Soluciona los bloqueos de hardware y elimina la necesidad de visibilidad manual.
+ * Soluciona los bloqueos de hardware, elimina la visibilidad manual y,
+ * fundamentalmente, corrige el bug de mapeo nativo-web.
  */
 final class NearbyPresenceManager {
     interface EventSink {
@@ -71,8 +72,8 @@ final class NearbyPresenceManager {
     private long challengeSentAt = 0L;
     private int expectedProofCount = 0;
     private long leaderTimeoutMs = MIN_SCAN_MS;
-    
-    private final Map<String, JSONObject> proofsByKey = new LinkedHashMap<>();
+
+    private final Map<String, JSONObject> proofsByAuxiliaryIdentifier = new LinkedHashMap<>();
     private final Set<String> leaderConnectionEndpoints = new LinkedHashSet<>();
     private Runnable leaderTimeout;
     private Runnable leaderCompleteTimeout;
@@ -104,10 +105,10 @@ final class NearbyPresenceManager {
         public void onConnectionResult(@NonNull String endpointId, @NonNull ConnectionResolution result) {
             synchronized (NearbyPresenceManager.this) {
                 if (role == Role.IDLE) return;
-                
+
                 if (result.getStatus().isSuccess()) {
                     emitDiagnostic(role == Role.LEADER ? "ENC" : "AUX", "CONNECTION_ESTABLISHED");
-                    
+
                     if (role == Role.LEADER) {
                         leaderConnectionEndpoints.add(endpointId);
                         sendChallengeToAuxiliary(endpointId);
@@ -136,7 +137,7 @@ final class NearbyPresenceManager {
         @Override
         public void onPayloadReceived(@NonNull String endpointId, @NonNull Payload payload) {
             if (payload.getType() != Payload.Type.BYTES) return;
-            
+
             try {
                 String jsonString = new String(payload.asBytes(), StandardCharsets.UTF_8);
                 JSONObject message = new JSONObject(jsonString);
@@ -212,7 +213,7 @@ final class NearbyPresenceManager {
 
         Payload bytesPayload = Payload.fromBytes(response.toString().getBytes(StandardCharsets.UTF_8));
         connectionsClient.sendPayload(endpointId, bytesPayload);
-        
+
         emitDiagnostic("AUX", "PROOF_DISPATCHED");
         String completedService = readyServiceRequestId;
         emit("proof_sent", event -> event.put("serviceRequestId", completedService));
@@ -264,7 +265,7 @@ final class NearbyPresenceManager {
         challenge = nextChallenge;
         expectedProofCount = nextExpectedProofCount;
         leaderTimeoutMs = timeoutMs;
-        proofsByKey.clear();
+        proofsByAuxiliaryIdentifier.clear();
         leaderConnectionEndpoints.clear();
 
         emitDiagnostic("ENC", "SCAN_REQUESTED");
@@ -321,14 +322,16 @@ final class NearbyPresenceManager {
             long respondedAt = proof.optLong("respondedAt", 0L);
             String publicKey = requiredToken(proof.optString("publicKey"), "publicKey");
             String signature = requiredToken(proof.optString("signature"), "signature");
-            
+
             String canonical = canonicalProof(attemptId, scanServiceRequestId, challenge, respondedAt);
             if (!DeviceKeyStore.verifyBase64(publicKey, canonical, signature)) {
                 emitDiagnostic("ENC", "PROOF_SIGNATURE_INVALID");
                 throw new Exception("invalid_signature");
             }
 
-            String keyId = keyId(publicKey);
+            // CORRECCIÓN DE MAPEO: Calculamos el identificador persistente e inequívoco
+            String auxiliaryIdentifier = persistentAuxiliaryIdentifier(publicKey);
+
             JSONObject stored = new JSONObject();
             stored.put("version", 1);
             stored.put("serviceRequestId", scanServiceRequestId);
@@ -339,20 +342,23 @@ final class NearbyPresenceManager {
             stored.put("signature", signature);
             stored.put("credential", proof.optString("credential", ""));
             stored.put("credentialState", proof.optString("credentialState", "UNPROVISIONED"));
-            stored.put("deviceKeyId", keyId);
-            
-            proofsByKey.put(keyId, stored);
-            
+
+            // Inyectamos explícitamente el identificador que la web debe usar para el mapeo
+            stored.put("auxiliaryIdentifier", auxiliaryIdentifier);
+
+            proofsByAuxiliaryIdentifier.put(auxiliaryIdentifier, stored);
+
             // Ya obtuvimos la prueba, desconectamos para liberar recursos
             connectionsClient.disconnectFromEndpoint(endpointId);
             leaderConnectionEndpoints.remove(endpointId);
 
-            int verifiedCount = proofsByKey.size();
+            int verifiedCount = proofsByAuxiliaryIdentifier.size();
             int pendingCount = leaderConnectionEndpoints.size();
             emitDiagnostic("ENC", "PROOF_VERIFIED");
-            
+
+            // Evento para actualización rápida de la UI nativa.
             emit("proof_received", event -> {
-                event.put("deviceKeyId", keyId);
+                event.put("auxiliaryIdentifier", auxiliaryIdentifier); // Inyectamos el ID inequívoco
                 event.put("verifiedCount", verifiedCount);
                 event.put("pendingCount", pendingCount);
                 event.put("credentialProvisioned", !stored.optString("credential").isEmpty());
@@ -374,7 +380,7 @@ final class NearbyPresenceManager {
                 if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
                 emitDiagnostic("ENC", "WINDOW_CLOSED");
                 connectionsClient.stopDiscovery();
-                
+
                 leaderCompleteTimeout = () -> completeLeaderScan(completedAttemptId);
                 handler.postDelayed(leaderCompleteTimeout, CONNECTION_GRACE_MS);
             }
@@ -402,8 +408,8 @@ final class NearbyPresenceManager {
 
     private synchronized void completeLeaderScan(String completedAttemptId) {
         if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
-        
-        int verifiedCount = proofsByKey.size();
+
+        int verifiedCount = proofsByAuxiliaryIdentifier.size();
         int pendingCount = leaderConnectionEndpoints.size();
 
         emitDiagnostic("ENC", "SCAN_COMPLETE");
@@ -413,7 +419,7 @@ final class NearbyPresenceManager {
             event.put("pendingCount", pendingCount);
             event.put("expectedProofCount", expectedProofCount);
         });
-        
+
         stopAllInternal(false);
     }
 
@@ -450,10 +456,10 @@ final class NearbyPresenceManager {
         challengeSentAt = 0L;
         expectedProofCount = 0;
         leaderTimeoutMs = MIN_SCAN_MS;
-        proofsByKey.clear();
+        proofsByAuxiliaryIdentifier.clear();
         leaderConnectionEndpoints.clear();
         connectedLeaderEndpointId = null;
-        
+
         role = Role.IDLE;
         if (notify) emit("stopped", event -> {});
     }
@@ -467,7 +473,8 @@ final class NearbyPresenceManager {
             result.put("serviceRequestId", scanServiceRequestId);
             result.put("challenge", challenge);
             result.put("challengeSentAt", challengeSentAt);
-            for (JSONObject proof : proofsByKey.values()) {
+            for (JSONObject proof : proofsByAuxiliaryIdentifier.values()) {
+                // Ya contiene el 'auxiliaryIdentifier' inyectado
                 proofs.put(new JSONObject(proof.toString()));
             }
             result.put("proofs", proofs);
@@ -479,11 +486,18 @@ final class NearbyPresenceManager {
         return "lorren-presence-v1\n" + attemptId + "\n" + serviceRequestId + "\n" + challenge + "\n" + respondedAt;
     }
 
-    private static String keyId(String publicKeyBase64) throws Exception {
+    /**
+     * Calcula un identificador persistente, robusto e inequívoco para el auxiliar
+     * basado en su llave pública. Este es el identificador que la web DEBE usar
+     * para mapear la prueba al auxiliar específico en la base de datos.
+     *
+     * Usa SHA-256 sobre la llave pública base64 y devuelve el hash hex completo.
+     */
+    private static String persistentAuxiliaryIdentifier(String publicKeyBase64) throws Exception {
         byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(android.util.Base64.decode(publicKeyBase64, android.util.Base64.NO_WRAP));
         StringBuilder builder = new StringBuilder();
-        for (int index = 0; index < 6; index += 1) {
-            builder.append(String.format("%02x", digest[index] & 0xff));
+        for (byte b : digest) {
+            builder.append(String.format("%02x", b & 0xff));
         }
         return builder.toString();
     }
@@ -498,6 +512,7 @@ final class NearbyPresenceManager {
         String credential = credentialProvider.credential();
         if (credential == null) return "";
         String normalized = credential.trim();
+        // Usamos la constante MAX_MESSAGE_BYTES ya restaurada.
         return normalized.length() > MAX_MESSAGE_BYTES ? "" : normalized;
     }
 
