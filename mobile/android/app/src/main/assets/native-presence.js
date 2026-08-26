@@ -570,6 +570,37 @@
     return Boolean(persistedMarkAt(member, markType));
   }
 
+  function memberEligibleForMark(member, markType) {
+    const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    if (memberHasPersistedMark(member, normalizedMark)) return false;
+    if (normalizedMark === 'ARRIVAL') return true;
+    if (!memberHasPersistedMark(member, 'ARRIVAL')) return false;
+    if (normalizedMark === 'BREAK_END') {
+      return memberHasPersistedMark(member, 'BREAK_START');
+    }
+    if (normalizedMark === 'DEPARTURE' && memberHasPersistedMark(member, 'BREAK_START')) {
+      return memberHasPersistedMark(member, 'BREAK_END');
+    }
+    return true;
+  }
+
+  function memberPresentationMarkType(member, markType) {
+    const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    if (member?.isLeader || normalizedMark === 'ARRIVAL' || memberHasPersistedMark(member, normalizedMark)) {
+      return normalizedMark;
+    }
+    if (!memberHasPersistedMark(member, 'ARRIVAL')) return 'ARRIVAL';
+    if (normalizedMark === 'BREAK_END' && !memberHasPersistedMark(member, 'BREAK_START')) {
+      return 'BREAK_START';
+    }
+    if (
+      normalizedMark === 'DEPARTURE'
+      && memberHasPersistedMark(member, 'BREAK_START')
+      && !memberHasPersistedMark(member, 'BREAK_END')
+    ) return 'BREAK_END';
+    return normalizedMark;
+  }
+
   function formatPersistedMarkTime(value) {
     if (!value) return '';
     const date = new Date(value);
@@ -598,14 +629,18 @@
   function expectedAuxiliaryProofCount(context, markType) {
     if (!context?.isCrewLeader || !Array.isArray(context.members)) return 0;
     return context.members.filter((member) => (
-      !member.isLeader && memberStatus(context, member, markType) === 'PENDING'
+      !member.isLeader
+      && memberEligibleForMark(member, markType)
+      && memberStatus(context, member, markType) === 'PENDING'
     )).length;
   }
 
   function pendingAuxiliaryCount(context, markType) {
     if (!context?.isCrewLeader || !Array.isArray(context.members)) return 0;
     return context.members.filter((member) => (
-      !member.isLeader && memberStatus(context, member, markType) === 'PENDING'
+      !member.isLeader
+      && memberEligibleForMark(member, markType)
+      && memberStatus(context, member, markType) === 'PENDING'
     )).length;
   }
 
@@ -657,8 +692,9 @@
     const list = element('div', 'native-presence-members');
     list.setAttribute('aria-label', 'Integrantes de la cuadrilla');
     context.members.forEach((member) => {
-      const status = memberStatus(context, member, normalizedMark);
-      const presentation = memberStatusPresentation(status, normalizedMark);
+      const memberMarkType = memberPresentationMarkType(member, normalizedMark);
+      const status = memberStatus(context, member, memberMarkType);
+      const presentation = memberStatusPresentation(status, memberMarkType);
       const row = element('div', 'native-presence-member');
       row.dataset.nativePresenceMember = member.workerId;
       const copy = element('div', 'native-presence-member-copy');
@@ -1259,7 +1295,7 @@
         setStatus('Bluetooth listo. Preparando escucha local…', 'warning');
         scheduleAuxiliaryRearm();
       } else {
-        setStatus(detail.enabled
+        setStatus(detail.granted
           ? 'Bluetooth listo. Pulsa nuevamente para continuar.'
           : 'Bluetooth sigue apagado. Actívalo para continuar.', detail.enabled ? 'warning' : 'error');
       }
