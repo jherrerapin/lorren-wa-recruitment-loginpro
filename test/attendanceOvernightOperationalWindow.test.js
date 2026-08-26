@@ -12,6 +12,9 @@ const NIGHT_START = new Date('2026-08-14T03:00:00.000Z'); // 13-ago 22:00 Bogot�
 const NIGHT_BREAK = new Date('2026-08-14T07:00:00.000Z'); // 14-ago 02:00 Bogotá
 const NIGHT_DEPARTURE = new Date('2026-08-14T12:00:00.000Z'); // 14-ago 07:00 Bogotá
 const NEXT_NIGHT = new Date('2026-08-15T03:00:00.000Z'); // 14-ago 22:00 Bogotá
+const DAY_START = new Date('2026-08-13T11:00:00.000Z'); // 13-ago 06:00 Bogotá
+const DAY_ARRIVAL = new Date('2026-08-13T10:56:00.000Z'); // 13-ago 05:56 Bogotá
+const DAY_BREAK_AFTER_DERIVED_END = new Date('2026-08-13T19:09:00.000Z'); // 13-ago 14:09 Bogotá
 
 function operationPoint() {
   return {
@@ -53,6 +56,40 @@ function overnightAssignment({ marks = [] } = {}) {
       serviceDate: SERVICE_DATE,
       startTime: '22:00',
       endTime: null,
+      operationPoint: operationPoint()
+    }
+  };
+}
+
+function daytimeAssignment({ endTime = null, marks = [] } = {}) {
+  return {
+    id: 'assignment-day-test',
+    workerId: 'worker-day-test',
+    serviceRequestId: 'request-day-test',
+    status: 'CONFIRMED',
+    attendanceSession: {
+      id: 'session-day-test',
+      assignmentId: 'assignment-day-test',
+      expectedStartAt: DAY_START,
+      expectedEndAt: null,
+      arrivalReportedAt: DAY_ARRIVAL,
+      departureReportedAt: null,
+      validationStatus: 'AUTO_VALIDATED',
+      attendanceStatus: 'ARRIVAL_REPORTED',
+      punctualityStatus: 'ON_TIME',
+      riskScore: 0,
+      riskFlags: [],
+      workedMinutes: null,
+      marks
+    },
+    serviceRequest: {
+      clientName: 'Cliente Prueba',
+      operationPointName: 'Operación Prueba',
+      cityName: 'Bogotá',
+      address: 'Dirección de prueba',
+      serviceDate: SERVICE_DATE,
+      startTime: '06:00',
+      endTime,
       operationPoint: operationPoint()
     }
   };
@@ -101,6 +138,19 @@ function attendancePrisma(assignment) {
     }
   };
   return prisma;
+}
+
+function portalPrisma(assignment) {
+  return {
+    dispatchAssignment: {
+      async findMany() { return [assignment]; }
+    },
+    dispatchWorker: {
+      async findUnique() {
+        return { fullName: 'Auxiliar Prueba', documentNumber: 'DOC-TEST-001' };
+      }
+    }
+  };
 }
 
 function markInput(at, overrides = {}) {
@@ -168,6 +218,67 @@ test('un turno diurno sin endTime termina en la misma fecha operativa y no obtie
   assert.equal(window.overnight, false);
 });
 
+test('un turno diurno sin endTime mantiene inicio de almuerzo después de las 8 horas derivadas mientras la jornada sigue abierta', async () => {
+  const assignment = daytimeAssignment();
+  const window = resolveDispatchAttendanceOperationalWindow(
+    assignment.serviceRequest,
+    assignment.attendanceSession
+  );
+
+  assert.equal(window.derivedOperationalEnd, true);
+  assert.equal(window.operationalEndAt.toISOString(), '2026-08-13T19:00:00.000Z');
+  assert.equal(window.continuityClosesAt.toISOString(), '2026-08-14T05:00:00.000Z');
+  assert.ok(DAY_BREAK_AFTER_DERIVED_END > window.operationalEndAt);
+  assert.ok(DAY_BREAK_AFTER_DERIVED_END < window.continuityClosesAt);
+
+  const [projection] = await loadWorkerPortalAssignments(portalPrisma(assignment), {
+    workerId: assignment.workerId,
+    now: DAY_BREAK_AFTER_DERIVED_END
+  });
+  assert.equal(projection.canStartBreak, true);
+  assert.equal(projection.breakActionType, 'BREAK_START');
+  assert.equal(projection.canRegisterDeparture, true);
+
+  const result = await registerDispatchBreak(attendancePrisma(assignment), markInput(DAY_BREAK_AFTER_DERIVED_END, {
+    assignmentId: assignment.id,
+    expectedWorkerId: assignment.workerId,
+    markType: 'BREAK_START',
+    evidenceStorageKey: null,
+    evidenceMimeType: null
+  }));
+  assert.equal(result.recorded, true);
+  assert.equal(result.attendanceMark.markType, 'BREAK_START');
+});
+
+test('un fin explícito conserva el cierre de inicio de almuerzo', async () => {
+  const assignment = daytimeAssignment({ endTime: '14:00' });
+  const window = resolveDispatchAttendanceOperationalWindow(
+    assignment.serviceRequest,
+    assignment.attendanceSession
+  );
+
+  assert.equal(window.derivedOperationalEnd, false);
+  assert.equal(window.operationalEndAt.toISOString(), '2026-08-13T19:00:00.000Z');
+
+  const [projection] = await loadWorkerPortalAssignments(portalPrisma(assignment), {
+    workerId: assignment.workerId,
+    now: DAY_BREAK_AFTER_DERIVED_END
+  });
+  assert.equal(projection.canStartBreak, false);
+  assert.equal(projection.breakActionType, null);
+
+  await assert.rejects(
+    () => registerDispatchBreak(attendancePrisma(assignment), markInput(DAY_BREAK_AFTER_DERIVED_END, {
+      assignmentId: assignment.id,
+      expectedWorkerId: assignment.workerId,
+      markType: 'BREAK_START',
+      evidenceStorageKey: null,
+      evidenceMimeType: null
+    })),
+    /attendance_break_operational_window_invalid/
+  );
+});
+
 test('el auxiliar puede iniciar almuerzo a las 02:00 de X+1 en una jornada de las 22:00', async () => {
   const assignment = overnightAssignment();
   const prisma = attendancePrisma(assignment);
@@ -219,16 +330,7 @@ test('la salida a las 22:00 de la noche siguiente no puede cerrar la jornada ant
 
 test('el portal mantiene accionable la madrugada y bloquea la noche siguiente para la misma sesión', async () => {
   const assignment = overnightAssignment();
-  const prisma = {
-    dispatchAssignment: {
-      async findMany() { return [assignment]; }
-    },
-    dispatchWorker: {
-      async findUnique() {
-        return { fullName: 'Auxiliar Prueba', documentNumber: 'DOC-TEST-001' };
-      }
-    }
-  };
+  const prisma = portalPrisma(assignment);
 
   const [duringShift] = await loadWorkerPortalAssignments(prisma, {
     workerId: 'worker-test',
