@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ejs from 'ejs';
 import { enhanceApprovedRecruitmentUx } from '../src/services/approvedRecruitmentUx.js';
+import { normalizeInterviewOutreachConfig } from '../src/routes/admin.js';
 
 function readSource(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -83,7 +84,7 @@ test('Outreach aprobado encadena Sucursal -> Vacante en el navegador', () => {
   assert.match(view, /citySelect\.addEventListener\('change', syncVacanciesToCity\)/);
 });
 
-test('ADMIN no ve detalles técnicos de la plantilla pero conserva el contrato de envío', () => {
+test('ADMIN no recibe detalles técnicos de la plantilla en el HTML', () => {
   const html = renderInterviewOutreach('admin');
 
   assert.doesNotMatch(html, /Plantilla oficial de Meta/);
@@ -96,14 +97,25 @@ test('ADMIN no ve detalles técnicos de la plantilla pero conserva el contrato d
   assert.doesNotMatch(html, /variable 5|variable 6/);
   assert.doesNotMatch(html, /Enviar citaciones por Meta/);
   assert.doesNotMatch(html, /Citaciones confirmadas por Meta/);
+  assert.doesNotMatch(html, /name="templateName"|name="templateLanguage"/);
+  assert.doesNotMatch(html, /citacion_entrevista_loginpro|es_CO/);
 
-  assert.match(html, /type="hidden" name="templateName" value="citacion_entrevista_loginpro"/);
-  assert.match(html, /type="hidden" name="templateLanguage" value="es_CO"/);
   assert.match(html, /<label for="interviewDate">Fecha de entrevista<\/label>/);
   assert.match(html, /<label for="interviewTime">Hora de entrevista<\/label>/);
   assert.match(html, /<label for="interviewAddress">Dirección de citación<\/label>/);
   assert.match(html, /<label for="coordinatorPhone">WhatsApp de coordinación<\/label>/);
   assert.match(html, />Enviar citaciones<\/button>/);
+});
+
+test('backend conserva la plantilla canónica cuando ADMIN no envía campos técnicos', () => {
+  const config = normalizeInterviewOutreachConfig({
+    interviewDate: '2026-08-28',
+    interviewTime: '09:00',
+    interviewAddress: 'Sede de ejemplo'
+  });
+
+  assert.equal(config.templateName, 'citacion_entrevista_loginpro');
+  assert.equal(config.templateLanguage, 'es_CO');
 });
 
 test('DEV conserva controles y documentación técnica de la plantilla', () => {
@@ -116,8 +128,6 @@ test('DEV conserva controles y documentación técnica de la plantilla', () => {
   assert.match(html, /payloads estables/);
   assert.match(html, /id="templateName" name="templateName" value="citacion_entrevista_loginpro"/);
   assert.match(html, /id="templateLanguage" name="templateLanguage" value="es_CO"/);
-  assert.doesNotMatch(html, /type="hidden" name="templateName"/);
-  assert.doesNotMatch(html, /type="hidden" name="templateLanguage"/);
 });
 
 test('la mejora global se aplica a las respuestas HTML', () => {
