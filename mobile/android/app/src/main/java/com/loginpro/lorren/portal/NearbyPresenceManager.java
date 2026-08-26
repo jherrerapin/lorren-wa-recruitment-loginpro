@@ -34,7 +34,7 @@ import java.util.Set;
  *
  * Implementación definitiva usando Google Nearby Connections (P2P_STAR).
  * Soluciona los bloqueos de hardware, elimina la visibilidad manual y,
- * fundamentalmente, corrige el bug de mapeo nativo-web.
+ * fundamentalmente, corrige el bug de concurrencia con el GPS.
  */
 final class NearbyPresenceManager {
     interface EventSink {
@@ -165,7 +165,7 @@ final class NearbyPresenceManager {
 
     synchronized void startReady(String serviceRequestId) {
         String normalizedService = requiredToken(serviceRequestId, "serviceRequestId");
-        stopAllInternal(false);
+        stopAllInternal(false, true); // Apaga y limpia la memoria
         role = Role.READY;
         readyServiceRequestId = normalizedService;
         emitDiagnostic("AUX", "READY_REQUESTED");
@@ -225,7 +225,7 @@ final class NearbyPresenceManager {
     }
 
     private synchronized void failReady(String code) {
-        stopAllInternal(false);
+        stopAllInternal(false, true);
         emitError(code);
     }
 
@@ -258,15 +258,13 @@ final class NearbyPresenceManager {
         long timeoutMs = Math.max(MIN_SCAN_MS, Math.min(MAX_SCAN_MS, input.optLong("timeoutMs", MIN_SCAN_MS)));
         int nextExpectedProofCount = Math.max(0, input.optInt("expectedProofCount", 0));
 
-        stopAllInternal(false);
+        stopAllInternal(false, true); // Apaga y limpia memoría de escaneos anteriores
         role = Role.LEADER;
         attemptId = nextAttemptId;
         scanServiceRequestId = serviceRequestId;
         challenge = nextChallenge;
         expectedProofCount = nextExpectedProofCount;
         leaderTimeoutMs = timeoutMs;
-        proofsByAuxiliaryIdentifier.clear();
-        leaderConnectionEndpoints.clear();
 
         emitDiagnostic("ENC", "SCAN_REQUESTED");
 
@@ -329,7 +327,6 @@ final class NearbyPresenceManager {
                 throw new Exception("invalid_signature");
             }
 
-            // CORRECCIÓN DE MAPEO: Calculamos el identificador persistente e inequívoco
             String auxiliaryIdentifier = persistentAuxiliaryIdentifier(publicKey);
 
             JSONObject stored = new JSONObject();
@@ -342,13 +339,10 @@ final class NearbyPresenceManager {
             stored.put("signature", signature);
             stored.put("credential", proof.optString("credential", ""));
             stored.put("credentialState", proof.optString("credentialState", "UNPROVISIONED"));
-
-            // Inyectamos explícitamente el identificador que la web debe usar para el mapeo
             stored.put("auxiliaryIdentifier", auxiliaryIdentifier);
 
             proofsByAuxiliaryIdentifier.put(auxiliaryIdentifier, stored);
 
-            // Ya obtuvimos la prueba, desconectamos para liberar recursos
             connectionsClient.disconnectFromEndpoint(endpointId);
             leaderConnectionEndpoints.remove(endpointId);
 
@@ -356,9 +350,8 @@ final class NearbyPresenceManager {
             int pendingCount = leaderConnectionEndpoints.size();
             emitDiagnostic("ENC", "PROOF_VERIFIED");
 
-            // Evento para actualización rápida de la UI nativa.
             emit("proof_received", event -> {
-                event.put("auxiliaryIdentifier", auxiliaryIdentifier); // Inyectamos el ID inequívoco
+                event.put("auxiliaryIdentifier", auxiliaryIdentifier);
                 event.put("verifiedCount", verifiedCount);
                 event.put("pendingCount", pendingCount);
                 event.put("credentialProvisioned", !stored.optString("credential").isEmpty());
@@ -402,7 +395,7 @@ final class NearbyPresenceManager {
     }
 
     private synchronized void failLeaderStart(String code) {
-        stopAllInternal(false);
+        stopAllInternal(false, true);
         emitError(code);
     }
 
@@ -420,7 +413,8 @@ final class NearbyPresenceManager {
             event.put("expectedProofCount", expectedProofCount);
         });
 
-        stopAllInternal(false);
+        // CORRECCIÓN DE LA CONDICIÓN DE CARRERA: Apaga antenas (false) pero NO borra la memoria de pruebas (false)
+        stopAllInternal(false, false); 
     }
 
     // =========================================================================
@@ -428,18 +422,22 @@ final class NearbyPresenceManager {
     // =========================================================================
 
     synchronized void stopReady() {
-        if (role == Role.READY) stopAllInternal(true);
+        if (role == Role.READY) stopAllInternal(true, true);
     }
 
     synchronized void stopLeaderScan() {
-        if (role == Role.LEADER) stopAllInternal(true);
+        if (role == Role.LEADER) stopAllInternal(true, true);
     }
 
     synchronized void shutdown() {
-        stopAllInternal(false);
+        stopAllInternal(false, true);
     }
 
-    private synchronized void stopAllInternal(boolean notify) {
+    /**
+     * @param notify Envía un evento "stopped" al puente JavaScript.
+     * @param clearData Si es true, borra la sesión actual y el historial de pruebas guardado.
+     */
+    private synchronized void stopAllInternal(boolean notify, boolean clearData) {
         if (leaderTimeout != null) handler.removeCallbacks(leaderTimeout);
         if (leaderCompleteTimeout != null) handler.removeCallbacks(leaderCompleteTimeout);
         leaderTimeout = null;
@@ -449,14 +447,17 @@ final class NearbyPresenceManager {
         connectionsClient.stopDiscovery();
         connectionsClient.stopAllEndpoints();
 
-        readyServiceRequestId = "";
-        attemptId = "";
-        scanServiceRequestId = "";
-        challenge = "";
-        challengeSentAt = 0L;
-        expectedProofCount = 0;
-        leaderTimeoutMs = MIN_SCAN_MS;
-        proofsByAuxiliaryIdentifier.clear();
+        if (clearData) {
+            readyServiceRequestId = "";
+            attemptId = "";
+            scanServiceRequestId = "";
+            challenge = "";
+            challengeSentAt = 0L;
+            expectedProofCount = 0;
+            leaderTimeoutMs = MIN_SCAN_MS;
+            proofsByAuxiliaryIdentifier.clear();
+        }
+
         leaderConnectionEndpoints.clear();
         connectedLeaderEndpointId = null;
 
@@ -474,7 +475,6 @@ final class NearbyPresenceManager {
             result.put("challenge", challenge);
             result.put("challengeSentAt", challengeSentAt);
             for (JSONObject proof : proofsByAuxiliaryIdentifier.values()) {
-                // Ya contiene el 'auxiliaryIdentifier' inyectado
                 proofs.put(new JSONObject(proof.toString()));
             }
             result.put("proofs", proofs);
@@ -486,13 +486,6 @@ final class NearbyPresenceManager {
         return "lorren-presence-v1\n" + attemptId + "\n" + serviceRequestId + "\n" + challenge + "\n" + respondedAt;
     }
 
-    /**
-     * Calcula un identificador persistente, robusto e inequívoco para el auxiliar
-     * basado en su llave pública. Este es el identificador que la web DEBE usar
-     * para mapear la prueba al auxiliar específico en la base de datos.
-     *
-     * Usa SHA-256 sobre la llave pública base64 y devuelve el hash hex completo.
-     */
     private static String persistentAuxiliaryIdentifier(String publicKeyBase64) throws Exception {
         byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(android.util.Base64.decode(publicKeyBase64, android.util.Base64.NO_WRAP));
         StringBuilder builder = new StringBuilder();
@@ -512,7 +505,6 @@ final class NearbyPresenceManager {
         String credential = credentialProvider.credential();
         if (credential == null) return "";
         String normalized = credential.trim();
-        // Usamos la constante MAX_MESSAGE_BYTES ya restaurada.
         return normalized.length() > MAX_MESSAGE_BYTES ? "" : normalized;
     }
 
@@ -525,7 +517,6 @@ final class NearbyPresenceManager {
             JSONObject event = new JSONObject();
             event.put("type", type);
             writer.write(event);
-            // Aseguramos que se emite en el hilo principal
             handler.post(() -> eventSink.emit(event));
         } catch (Exception ignored) {}
     }
