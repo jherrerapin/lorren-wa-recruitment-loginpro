@@ -85,13 +85,17 @@
     <div class="header">
       <div>
         <h1>Citaciones a entrevista</h1>
-        <p>Envía a candidatos aprobados una plantilla oficial de Meta. Cuando Meta acepte el envío, el candidato pasa a Contactado y queda en coordinación humana. Su respuesta de asistencia alimenta el bloque “Confirmados a entrevista” de la vacante sin crear una agenda automática.</p>
+        <% if (role === 'dev') { %>
+          <p>Envía a candidatos aprobados una plantilla oficial de Meta. Cuando Meta acepte el envío, el candidato pasa a Contactado y queda en coordinación humana. Su respuesta de asistencia alimenta el bloque “Confirmados a entrevista” de la vacante sin crear una agenda automática.</p>
+        <% } else { %>
+          <p>Envía citaciones a candidatos aprobados. Cuando el envío se confirme, el candidato pasa a Contactado y queda en coordinación humana. Su respuesta de asistencia alimenta el bloque “Confirmados a entrevista” de la vacante.</p>
+        <% } %>
       </div>
       <a href="/admin" class="btn">Volver al panel</a>
     </div>
 
     <% if (preparedSuccess) { %>
-      <div class="alert alert-success"><%= preparedSuccess %></div>
+      <div class="alert alert-success"><%= role === 'dev' ? preparedSuccess : 'Las citaciones confirmadas se enviaron correctamente y los candidatos quedaron en coordinación humana.' %></div>
     <% } %>
     <% if (preparedError) { %>
       <div class="alert alert-error"><%= preparedError %></div>
@@ -131,32 +135,40 @@
       </form>
     </div>
 
-    <div class="card">
-      <h2>Plantilla oficial de Meta</h2>
-      <p class="hint">El texto real lo gobierna la plantilla aprobada en Meta. Si corriges el texto en Meta creando otra versión aprobada, cambia aquí el nombre o idioma correspondiente. El orden de las seis variables debe mantenerse.</p>
-      <div class="template-reference"><%= templateReference %></div>
-      <div class="quick-replies" aria-label="Botones requeridos de la plantilla">
-        <span class="quick-reply">Confirmo asistencia</span>
-        <span class="quick-reply">No puedo asistir</span>
+    <% if (role === 'dev') { %>
+      <div class="card">
+        <h2>Plantilla oficial de Meta</h2>
+        <p class="hint">El texto real lo gobierna la plantilla aprobada en Meta. Si corriges el texto en Meta creando otra versión aprobada, cambia aquí el nombre o idioma correspondiente. El orden de las seis variables debe mantenerse.</p>
+        <div class="template-reference"><%= templateReference %></div>
+        <div class="quick-replies" aria-label="Botones requeridos de la plantilla">
+          <span class="quick-reply">Confirmo asistencia</span>
+          <span class="quick-reply">No puedo asistir</span>
+        </div>
+        <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener esos dos botones <strong>Quick Reply</strong>, en ese orden. Lórren envía payloads estables para registrar la respuesta; cambiar este texto en el panel no modifica la plantilla aprobada en Meta.</p>
       </div>
-      <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener esos dos botones <strong>Quick Reply</strong>, en ese orden. Lórren envía payloads estables para registrar la respuesta; cambiar este texto en el panel no modifica la plantilla aprobada en Meta.</p>
-    </div>
+    <% } %>
 
     <div class="card">
       <h2>Enviar citaciones</h2>
       <form method="post" action="/admin/outreach/approved/prepare" id="approvedInterviewOutreachForm">
         <input type="hidden" name="city" value="<%= outreachFilters.city %>" />
         <input type="hidden" name="vacancyId" value="<%= outreachFilters.vacancyId %>" />
+        <% if (role !== 'dev') { %>
+          <input type="hidden" name="templateName" value="<%= outreachConfig.templateName %>" />
+          <input type="hidden" name="templateLanguage" value="<%= outreachConfig.templateLanguage %>" />
+        <% } %>
 
         <div class="config-grid">
-          <div class="field">
-            <label for="templateName">Nombre de plantilla</label>
-            <input id="templateName" name="templateName" value="<%= outreachConfig.templateName %>" required autocomplete="off" />
-          </div>
-          <div class="field">
-            <label for="templateLanguage">Idioma Meta</label>
-            <input id="templateLanguage" name="templateLanguage" value="<%= outreachConfig.templateLanguage %>" required autocomplete="off" />
-          </div>
+          <% if (role === 'dev') { %>
+            <div class="field">
+              <label for="templateName">Nombre de plantilla</label>
+              <input id="templateName" name="templateName" value="<%= outreachConfig.templateName %>" required autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="templateLanguage">Idioma Meta</label>
+              <input id="templateLanguage" name="templateLanguage" value="<%= outreachConfig.templateLanguage %>" required autocomplete="off" />
+            </div>
+          <% } %>
           <div class="field">
             <label for="interviewDate">Fecha de entrevista</label>
             <input type="date" id="interviewDate" name="interviewDate" value="<%= outreachConfig.interviewDate %>" required />
@@ -169,12 +181,12 @@
 
         <div class="config-grid" style="margin-top:12px;">
           <div class="field" style="flex: 2 1 420px;">
-            <label for="interviewAddress">Dirección de citación — variable 5</label>
+            <label for="interviewAddress">Dirección de citación</label>
             <textarea id="interviewAddress" name="interviewAddress" required><%= outreachConfig.interviewAddress %></textarea>
             <span class="hint">Puedes corregirla para esta ronda sin alterar la dirección guardada de la vacante.</span>
           </div>
           <div class="field">
-            <label for="coordinatorPhone">WhatsApp de coordinación — variable 6</label>
+            <label for="coordinatorPhone">WhatsApp de coordinación</label>
             <input id="coordinatorPhone" value="<%= coordinatorContact?.displayPhone || 'Sin número configurado' %>" readonly />
             <span class="hint">Se toma del teléfono configurado para el usuario que está ejecutando la citación.</span>
           </div>
@@ -185,7 +197,11 @@
         <% if (candidates.length === 0) { %>
           <div class="empty">No hay candidatos aprobados disponibles con los filtros actuales.</div>
         <% } else { %>
-          <p class="hint">Cada envío es individual por la API oficial. Una sola ronda debe corresponder a una misma vacante para compartir fecha, hora y dirección. La confirmación del candidato es operativa y no crea un <code>InterviewBooking</code>.</p>
+          <% if (role === 'dev') { %>
+            <p class="hint">Cada envío es individual por la API oficial. Una sola ronda debe corresponder a una misma vacante para compartir fecha, hora y dirección. La confirmación del candidato es operativa y no crea un <code>InterviewBooking</code>.</p>
+          <% } else { %>
+            <p class="hint">Selecciona candidatos de una sola vacante por ronda para compartir la misma fecha, hora y dirección.</p>
+          <% } %>
           <table class="candidate-table">
             <thead>
               <tr>
@@ -212,8 +228,8 @@
             </tbody>
           </table>
           <div class="toolbar">
-            <button type="submit" class="btn btn-primary" <%= coordinatorContact?.apiPhone ? '' : 'disabled' %>>Enviar citaciones por Meta</button>
-            <span class="hint">Solo los envíos aceptados por Meta pasarán a Contactados.</span>
+            <button type="submit" class="btn btn-primary" <%= coordinatorContact?.apiPhone ? '' : 'disabled' %>><%= role === 'dev' ? 'Enviar citaciones por Meta' : 'Enviar citaciones' %></button>
+            <span class="hint"><%= role === 'dev' ? 'Solo los envíos aceptados por Meta pasarán a Contactados.' : 'Solo los envíos confirmados pasarán a Contactados.' %></span>
           </div>
         <% } %>
       </form>
@@ -221,7 +237,7 @@
 
     <% if (preparedRecipients.length > 0) { %>
       <div class="card">
-        <h2>Citaciones confirmadas por Meta</h2>
+        <h2><%= role === 'dev' ? 'Citaciones confirmadas por Meta' : 'Citaciones enviadas' %></h2>
         <div class="delivery-list">
           <% for (const recipient of preparedRecipients) { %>
             <div class="delivery-item">
