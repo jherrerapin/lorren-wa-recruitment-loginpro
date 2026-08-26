@@ -149,8 +149,6 @@ final class PresenceBridge {
 
     @JavascriptInterface
     public String getProofBundle() {
-        // CORRECCIÓN: Devolvemos el bundle original directamente como lo genera el Manager.
-        // No borramos campos que el backend necesita (attemptId, serviceRequestId, challenge).
         JSONObject bundle = manager.proofBundle();
         try {
             JSONObject proof;
