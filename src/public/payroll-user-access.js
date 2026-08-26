@@ -1,24 +1,33 @@
 'use strict';
 
 (() => {
-  const PERMISSIONS = [
-    {
-      id: 'payroll',
-      apiBase: '/admin/operaciones/asistencia/nomina/api/users',
-      pendingKey: 'lorren-payroll-access-after-create',
-      title: 'Nómina y tiempo trabajado',
-      description: 'Permiso independiente para cortes, conceptos y exportaciones. No activa Operaciones ni Asistencia.',
-      summary: 'Nómina y tiempo trabajado'
-    },
-    {
-      id: 'test-workspace',
-      apiBase: '/admin/operaciones/pruebas/api/users',
-      pendingKey: 'lorren-test-workspace-access-after-create',
-      title: 'Entorno de pruebas de asistencia y nómina',
-      description: 'Permite usar auxiliares, clientes y operaciones existentes dentro de registros DEV_TEST aislados. No modifica la operación real.',
-      summary: 'Entorno de pruebas'
-    }
-  ];
+  const script = document.currentScript;
+  const canManageTestWorkspace = script?.dataset?.canManageTestWorkspace === 'true';
+  const payrollPermission = {
+    id: 'payroll',
+    apiBase: '/admin/locations/users',
+    accessSuffix: 'payroll-access',
+    pendingKey: 'lorren-payroll-access-after-create',
+    title: 'Nómina y tiempo trabajado',
+    description: 'Permiso independiente para cortes, conceptos y exportaciones. No activa Operaciones ni Asistencia.',
+    summary: 'Nómina y tiempo trabajado'
+  };
+  const testWorkspacePermission = {
+    id: 'test-workspace',
+    apiBase: '/admin/operaciones/pruebas/api/users',
+    accessSuffix: 'access',
+    pendingKey: 'lorren-test-workspace-access-after-create',
+    title: 'Entorno de pruebas de asistencia y nómina',
+    description: 'Permite usar auxiliares, clientes y operaciones existentes dentro de registros DEV_TEST aislados. No modifica la operación real.',
+    summary: 'Entorno de pruebas'
+  };
+  const PERMISSIONS = canManageTestWorkspace
+    ? [payrollPermission, testWorkspacePermission]
+    : [payrollPermission];
+
+  function accessUrl(config, userId) {
+    return `${config.apiBase}/${encodeURIComponent(userId)}/${config.accessSuffix}`;
+  }
 
   async function request(url, options = {}) {
     const response = await fetch(url, {
@@ -105,7 +114,7 @@
       checkbox.disabled = true;
       status.textContent = 'Guardando permiso…';
       try {
-        const payload = await request(`${config.apiBase}/${encodeURIComponent(userId)}/access`, {
+        const payload = await request(accessUrl(config, userId), {
           method: 'POST',
           body: JSON.stringify({ enabled: requested })
         });
@@ -127,10 +136,10 @@
     const userId = decodeURIComponent(match[1]);
     await Promise.all(PERMISSIONS.map(async (config) => {
       try {
-        const payload = await request(`${config.apiBase}/${encodeURIComponent(userId)}/access`, { method: 'GET' });
+        const payload = await request(accessUrl(config, userId), { method: 'GET' });
         permissionControl({ form, userId, initial: payload.enabled === true, config });
       } catch {
-        // El control solo se renderiza cuando DEV puede consultar su estado.
+        // El control solo se renderiza cuando el actor puede consultar ese permiso.
       }
     }));
   }
@@ -143,19 +152,19 @@
   }
 
   async function applyPendingCreatePermissions() {
-    const username = new URLSearchParams(window.location.search).get('username');
-    if (!username) return;
+    const userId = new URLSearchParams(window.location.search).get('userId');
+    if (!userId) return;
     for (const config of PERMISSIONS) {
       if (sessionStorage.getItem(config.pendingKey) !== 'true') continue;
       sessionStorage.removeItem(config.pendingKey);
       try {
-        await request(`${config.apiBase}/by-username/${encodeURIComponent(username)}/access`, {
+        await request(accessUrl(config, userId), {
           method: 'POST',
           body: JSON.stringify({ enabled: true })
         });
-        showNotice(`${config.title} habilitado para ${username}.`);
+        showNotice(`${config.title} habilitado para el usuario creado.`);
       } catch {
-        showNotice(`El usuario ${username} se creó, pero no fue posible activar ${config.title}.`, false);
+        showNotice(`El usuario se creó, pero no fue posible activar ${config.title}.`, false);
       }
     }
   }
