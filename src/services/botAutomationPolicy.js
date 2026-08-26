@@ -6,6 +6,13 @@ const NON_AUTO_RESUMABLE_MODES = new Set([
 const INTERVIEW_COORDINATION_HANDOFF_MODE = 'interview_coordination_handoff';
 const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
 
+export const INTERVIEW_COORDINATION_HANDOFF_REPLY_POLICY = Object.freeze({
+  situation: 'interview_coordination_handoff_question',
+  decision: 'answer_current_question_without_resuming_candidate_flow',
+  fallbackIntent: 'interview_coordination_handoff_question',
+  source: 'interview_coordination_handoff_reply'
+});
+
 function isManualResumeMode(candidate = {}) {
   const mode = String(candidate?.botResumeMode || '').trim();
   return mode === 'manual_resume_dashboard'
@@ -21,6 +28,16 @@ function isManualPauseReason(candidate = {}) {
 
 function normalizeDigits(value = '') {
   return String(value || '').replace(/\D+/g, '');
+}
+
+function normalizeComparableText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function formatCoordinatorPhone(value = '') {
@@ -39,6 +56,15 @@ function extractCoordinatorPhoneFromText(value = '') {
   return null;
 }
 
+function deliveredInterviewOutreachMessages(recentMessages = []) {
+  return (Array.isArray(recentMessages) ? [...recentMessages].reverse() : [])
+    .filter((message) => (
+      String(message?.direction || '').toUpperCase() === 'OUTBOUND'
+      && message?.rawPayload?.source === INTERVIEW_OUTREACH_SOURCE
+      && message?.rawPayload?.delivery?.state === 'SENT'
+    ));
+}
+
 export function shouldAnswerInterviewCoordinationHandoffQuestion(candidate = {}, { isQuestion = false } = {}) {
   return Boolean(
     candidate?.botPaused
@@ -47,16 +73,42 @@ export function shouldAnswerInterviewCoordinationHandoffQuestion(candidate = {},
   );
 }
 
+export function resolveInterviewCoordinationOutreachContext(recentMessages = []) {
+  const delivered = deliveredInterviewOutreachMessages(recentMessages)[0] || null;
+  const body = String(delivered?.body || '').trim();
+  const scheduleMatch = body.match(/Te esperamos el\s+(.+?)\s+a las\s+(.+?)\s+en\s+(.+?)(?:\.\s*(?:\n|$))/i);
+  return {
+    message: body || null,
+    coordinatorPhone: extractCoordinatorPhoneFromText(body),
+    interviewDate: scheduleMatch?.[1]?.trim() || null,
+    interviewTime: scheduleMatch?.[2]?.trim() || null,
+    interviewAddress: scheduleMatch?.[3]?.trim() || null
+  };
+}
+
 export function resolveInterviewCoordinationContact(recentMessages = []) {
-  const messages = Array.isArray(recentMessages) ? [...recentMessages].reverse() : [];
-  for (const message of messages) {
-    if (String(message?.direction || '').toUpperCase() !== 'OUTBOUND') continue;
-    if (message?.rawPayload?.source !== INTERVIEW_OUTREACH_SOURCE) continue;
-    if (message?.rawPayload?.delivery?.state !== 'SENT') continue;
-    const phone = extractCoordinatorPhoneFromText(message?.body || '');
-    if (phone) return phone;
+  return resolveInterviewCoordinationOutreachContext(recentMessages).coordinatorPhone;
+}
+
+export function buildInterviewCoordinationFallbackAnswer(inboundText = '', outreachContext = {}, vacancyFallback = '') {
+  const normalized = normalizeComparableText(inboundText);
+  const date = String(outreachContext?.interviewDate || '').trim();
+  const time = String(outreachContext?.interviewTime || '').trim();
+  const address = String(outreachContext?.interviewAddress || '').trim();
+
+  if (/\b(cuando|fecha|dia)\b/.test(normalized) && date) {
+    return `Tu citación está programada para ${date}${time ? ` a las ${time}` : ''}.`;
   }
-  return null;
+  if (/\b(hora|horario)\b/.test(normalized) && time) {
+    return `La hora indicada en tu citación es ${time}${date ? ` del ${date}` : ''}.`;
+  }
+  if (/\b(donde|direccion|ubicacion|lugar|presentarme|presentar)\b/.test(normalized) && address) {
+    return `La dirección indicada en tu citación es ${address}.`;
+  }
+
+  const fallback = String(vacancyFallback || '').trim();
+  if (fallback) return fallback;
+  return 'No tengo información suficiente para confirmar ese punto con seguridad desde este chat.';
 }
 
 export function appendInterviewCoordinationReferral(answer = '', coordinatorPhone = null) {
@@ -75,7 +127,7 @@ export function appendInterviewCoordinationReferral(answer = '', coordinatorPhon
 
 export function shouldResumeAutomationOnInbound(candidate = {}) {
   if (!candidate?.botPaused) return false;
-  const mode = String(candidate?.botResumeMode || '').trim();
+  const mode = String(candidate.botResumeMode || '').trim();
   if (NON_AUTO_RESUMABLE_MODES.has(mode)) return false;
   return isManualResumeMode(candidate) || isManualPauseReason(candidate) || Boolean(candidate?.botPausedBy);
 }
