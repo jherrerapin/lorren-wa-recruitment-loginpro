@@ -32,7 +32,7 @@ import java.util.Set;
 /**
  * Autoridad nativa única de presencia local de cuadrilla.
  *
- * Implementación usando Google Nearby Connections (P2P_STAR).
+ * Implementación definitiva usando Google Nearby Connections (P2P_STAR).
  */
 final class NearbyPresenceManager {
     interface EventSink {
@@ -413,6 +413,8 @@ final class NearbyPresenceManager {
             event.put("expectedProofCount", expectedProofCount);
         });
 
+        // IMPORTANTE: Aquí pasamos (false, false) para apagar la antena
+        // PERO conservar las pruebas en memoria para que el JS las recoja tras el GPS.
         stopAllInternal(false, false); 
     }
 
