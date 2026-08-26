@@ -153,10 +153,6 @@
       <form method="post" action="/admin/outreach/approved/prepare" id="approvedInterviewOutreachForm">
         <input type="hidden" name="city" value="<%= outreachFilters.city %>" />
         <input type="hidden" name="vacancyId" value="<%= outreachFilters.vacancyId %>" />
-        <% if (role !== 'dev') { %>
-          <input type="hidden" name="templateName" value="<%= outreachConfig.templateName %>" />
-          <input type="hidden" name="templateLanguage" value="<%= outreachConfig.templateLanguage %>" />
-        <% } %>
 
         <div class="config-grid">
           <% if (role === 'dev') { %>
