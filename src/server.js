@@ -558,7 +558,7 @@ app.get('/recover', (req, res) => {
   res.render('recover', {
     error: null,
     username: normalizeString(req.query.username) || '',
-    success: null
+    success: normalizeString(req.query.success)
   });
 });
 
