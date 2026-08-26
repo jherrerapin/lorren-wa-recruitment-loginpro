@@ -32,9 +32,7 @@ import java.util.Set;
 /**
  * Autoridad nativa única de presencia local de cuadrilla.
  *
- * Implementación definitiva usando Google Nearby Connections (P2P_STAR).
- * Soluciona los bloqueos de hardware, elimina la visibilidad manual y,
- * fundamentalmente, corrige el bug de concurrencia con el GPS.
+ * Implementación usando Google Nearby Connections (P2P_STAR).
  */
 final class NearbyPresenceManager {
     interface EventSink {
@@ -73,7 +71,7 @@ final class NearbyPresenceManager {
     private int expectedProofCount = 0;
     private long leaderTimeoutMs = MIN_SCAN_MS;
 
-    private final Map<String, JSONObject> proofsByAuxiliaryIdentifier = new LinkedHashMap<>();
+    private final Map<String, JSONObject> proofsByKey = new LinkedHashMap<>();
     private final Set<String> leaderConnectionEndpoints = new LinkedHashSet<>();
     private Runnable leaderTimeout;
     private Runnable leaderCompleteTimeout;
@@ -165,7 +163,7 @@ final class NearbyPresenceManager {
 
     synchronized void startReady(String serviceRequestId) {
         String normalizedService = requiredToken(serviceRequestId, "serviceRequestId");
-        stopAllInternal(false, true); // Apaga y limpia la memoria
+        stopAllInternal(false, true); 
         role = Role.READY;
         readyServiceRequestId = normalizedService;
         emitDiagnostic("AUX", "READY_REQUESTED");
@@ -258,13 +256,15 @@ final class NearbyPresenceManager {
         long timeoutMs = Math.max(MIN_SCAN_MS, Math.min(MAX_SCAN_MS, input.optLong("timeoutMs", MIN_SCAN_MS)));
         int nextExpectedProofCount = Math.max(0, input.optInt("expectedProofCount", 0));
 
-        stopAllInternal(false, true); // Apaga y limpia memoría de escaneos anteriores
+        stopAllInternal(false, true);
         role = Role.LEADER;
         attemptId = nextAttemptId;
         scanServiceRequestId = serviceRequestId;
         challenge = nextChallenge;
         expectedProofCount = nextExpectedProofCount;
         leaderTimeoutMs = timeoutMs;
+        proofsByKey.clear();
+        leaderConnectionEndpoints.clear();
 
         emitDiagnostic("ENC", "SCAN_REQUESTED");
 
@@ -327,7 +327,7 @@ final class NearbyPresenceManager {
                 throw new Exception("invalid_signature");
             }
 
-            String auxiliaryIdentifier = persistentAuxiliaryIdentifier(publicKey);
+            String keyId = keyId(publicKey);
 
             JSONObject stored = new JSONObject();
             stored.put("version", 1);
@@ -339,19 +339,19 @@ final class NearbyPresenceManager {
             stored.put("signature", signature);
             stored.put("credential", proof.optString("credential", ""));
             stored.put("credentialState", proof.optString("credentialState", "UNPROVISIONED"));
-            stored.put("auxiliaryIdentifier", auxiliaryIdentifier);
+            stored.put("deviceKeyId", keyId);
 
-            proofsByAuxiliaryIdentifier.put(auxiliaryIdentifier, stored);
+            proofsByKey.put(keyId, stored);
 
             connectionsClient.disconnectFromEndpoint(endpointId);
             leaderConnectionEndpoints.remove(endpointId);
 
-            int verifiedCount = proofsByAuxiliaryIdentifier.size();
+            int verifiedCount = proofsByKey.size();
             int pendingCount = leaderConnectionEndpoints.size();
             emitDiagnostic("ENC", "PROOF_VERIFIED");
 
             emit("proof_received", event -> {
-                event.put("auxiliaryIdentifier", auxiliaryIdentifier);
+                event.put("deviceKeyId", keyId);
                 event.put("verifiedCount", verifiedCount);
                 event.put("pendingCount", pendingCount);
                 event.put("credentialProvisioned", !stored.optString("credential").isEmpty());
@@ -402,7 +402,7 @@ final class NearbyPresenceManager {
     private synchronized void completeLeaderScan(String completedAttemptId) {
         if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
 
-        int verifiedCount = proofsByAuxiliaryIdentifier.size();
+        int verifiedCount = proofsByKey.size();
         int pendingCount = leaderConnectionEndpoints.size();
 
         emitDiagnostic("ENC", "SCAN_COMPLETE");
@@ -413,7 +413,6 @@ final class NearbyPresenceManager {
             event.put("expectedProofCount", expectedProofCount);
         });
 
-        // CORRECCIÓN DE LA CONDICIÓN DE CARRERA: Apaga antenas (false) pero NO borra la memoria de pruebas (false)
         stopAllInternal(false, false); 
     }
 
@@ -433,10 +432,6 @@ final class NearbyPresenceManager {
         stopAllInternal(false, true);
     }
 
-    /**
-     * @param notify Envía un evento "stopped" al puente JavaScript.
-     * @param clearData Si es true, borra la sesión actual y el historial de pruebas guardado.
-     */
     private synchronized void stopAllInternal(boolean notify, boolean clearData) {
         if (leaderTimeout != null) handler.removeCallbacks(leaderTimeout);
         if (leaderCompleteTimeout != null) handler.removeCallbacks(leaderCompleteTimeout);
@@ -455,7 +450,7 @@ final class NearbyPresenceManager {
             challengeSentAt = 0L;
             expectedProofCount = 0;
             leaderTimeoutMs = MIN_SCAN_MS;
-            proofsByAuxiliaryIdentifier.clear();
+            proofsByKey.clear();
         }
 
         leaderConnectionEndpoints.clear();
@@ -474,7 +469,7 @@ final class NearbyPresenceManager {
             result.put("serviceRequestId", scanServiceRequestId);
             result.put("challenge", challenge);
             result.put("challengeSentAt", challengeSentAt);
-            for (JSONObject proof : proofsByAuxiliaryIdentifier.values()) {
+            for (JSONObject proof : proofsByKey.values()) {
                 proofs.put(new JSONObject(proof.toString()));
             }
             result.put("proofs", proofs);
@@ -486,11 +481,11 @@ final class NearbyPresenceManager {
         return "lorren-presence-v1\n" + attemptId + "\n" + serviceRequestId + "\n" + challenge + "\n" + respondedAt;
     }
 
-    private static String persistentAuxiliaryIdentifier(String publicKeyBase64) throws Exception {
+    private static String keyId(String publicKeyBase64) throws Exception {
         byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(android.util.Base64.decode(publicKeyBase64, android.util.Base64.NO_WRAP));
         StringBuilder builder = new StringBuilder();
-        for (byte b : digest) {
-            builder.append(String.format("%02x", b & 0xff));
+        for (int index = 0; index < 6; index += 1) {
+            builder.append(String.format("%02x", digest[index] & 0xff));
         }
         return builder.toString();
     }
