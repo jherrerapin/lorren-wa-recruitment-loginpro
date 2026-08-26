@@ -12,7 +12,8 @@ import {
   buildInterviewOutreachAttendanceScript,
   deriveInterviewOutreachAttendance,
   INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD as DASHBOARD_CONFIRM_PAYLOAD,
-  INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD as DASHBOARD_DECLINE_PAYLOAD
+  INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD as DASHBOARD_DECLINE_PAYLOAD,
+  summarizeInterviewOutreachAttendanceCandidates
 } from '../src/services/vacancyDashboardSearchExpansion.js';
 import {
   buildWhatsAppTemplatePayload,
@@ -174,6 +175,68 @@ test('texto explícito posterior al handoff funciona como compatibilidad sin des
   assert.equal(result.source, 'TEXT');
 });
 
+test('el resumen por vacante conserva confirmados, no asistentes y pendientes con identidad', () => {
+  const vacancyId = 'vacancy-attendance-test';
+  const candidates = [
+    {
+      ...handoffCandidate([
+        inboundMessage({
+          id: INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
+          title: 'Confirmo asistencia',
+          createdAt: '2026-08-25T14:05:00.000Z'
+        })
+      ]),
+      id: 'candidate-confirmed-test',
+      vacancyId,
+      fullName: 'Persona Confirmada'
+    },
+    {
+      ...handoffCandidate([
+        inboundMessage({
+          id: INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD,
+          title: 'No puedo asistir',
+          createdAt: '2026-08-25T14:15:00.000Z'
+        })
+      ]),
+      id: 'candidate-declined-test',
+      vacancyId,
+      fullName: 'Persona No Asiste'
+    },
+    {
+      ...handoffCandidate([]),
+      id: 'candidate-pending-test',
+      vacancyId,
+      fullName: 'Persona Pendiente'
+    },
+    {
+      ...handoffCandidate([]),
+      id: 'candidate-outside-scope-test',
+      vacancyId: 'vacancy-not-visible-test',
+      fullName: 'Persona Fuera de Alcance'
+    }
+  ];
+
+  const summaries = summarizeInterviewOutreachAttendanceCandidates(
+    candidates,
+    new Map([[vacancyId, 'Ciudad Prueba']])
+  );
+  const summary = summaries[vacancyId];
+
+  assert.equal(Object.keys(summaries).length, 1);
+  assert.equal(summary.total, 3);
+  assert.equal(summary.confirmedCount, 1);
+  assert.equal(summary.declinedCount, 1);
+  assert.equal(summary.pendingCount, 1);
+  assert.deepEqual(
+    summary.responses.map(({ id, attendanceStatus }) => [id, attendanceStatus]),
+    [
+      ['candidate-declined-test', 'NO_ASISTE'],
+      ['candidate-confirmed-test', 'CONFIRMADO'],
+      ['candidate-pending-test', 'PENDIENTE']
+    ]
+  );
+});
+
 test('la confirmación operativa no auto-reanuda a Lórren', () => {
   assert.equal(shouldResumeAutomationOnInbound(handoffCandidate()), false);
 });
@@ -263,30 +326,62 @@ test('la configuración usa teléfono colombiano persistido y construye las seis
   assert.equal(delivery.parameters[5], '+57 300 765 4321');
 });
 
-test('el script del dashboard monta Confirmados a entrevista sin convertirlo en agenda automática', () => {
+test('el dashboard muestra la respuesta individual de todos los citados sin crear agenda automática', () => {
   const script = buildInterviewOutreachAttendanceScript({
     'vacancy-test': {
       vacancyId: 'vacancy-test',
       total: 3,
+      confirmedCount: 1,
       pendingCount: 1,
       declinedCount: 1,
-      confirmed: [{
-        id: 'candidate-confirmed-test',
-        fullName: 'Persona Confirmada',
-        phone: '573001234567',
-        respondedAt: '2026-08-25T14:05:00.000Z'
-      }]
+      responses: [
+        {
+          id: 'candidate-confirmed-test',
+          fullName: 'Persona Confirmada',
+          phone: '573001234567',
+          attendanceStatus: 'CONFIRMADO',
+          respondedAt: '2026-08-25T14:05:00.000Z'
+        },
+        {
+          id: 'candidate-declined-test',
+          fullName: 'Persona No Asiste',
+          phone: '573001234568',
+          attendanceStatus: 'NO_ASISTE',
+          respondedAt: '2026-08-25T14:15:00.000Z'
+        },
+        {
+          id: 'candidate-pending-test',
+          fullName: 'Persona Pendiente',
+          phone: '573001234569',
+          attendanceStatus: 'PENDIENTE',
+          respondedAt: null
+        }
+      ]
     }
   });
 
-  assert.match(script, /Confirmados a entrevista/);
+  assert.match(script, /Respuestas de citación/);
   assert.match(script, /no crea agenda automática/);
   assert.match(script, /No asistirán/);
   assert.match(script, /candidate-confirmed-test/);
+  assert.match(script, /candidate-declined-test/);
+  assert.match(script, /candidate-pending-test/);
+  assert.match(script, /Asiste/);
+  assert.match(script, /No asiste/);
+  assert.match(script, /Pendiente/);
+  assert.match(script, /Sin respuesta hasta el momento/);
+  assert.doesNotMatch(script, /responses\.slice|confirmados más/);
   assert.doesNotMatch(script, /InterviewBooking|interviewBooking\.create/);
 
   const body = script.replace(/^\s*<script>\s*/, '').replace(/\s*<\/script>\s*$/, '');
   assert.doesNotThrow(() => new Function(body));
+});
+
+test('la consulta de respuestas conserva la autoridad de acceso por usuario y vacante', () => {
+  const source = readFileSync(new URL('../src/services/vacancyDashboardSearchExpansion.js', import.meta.url), 'utf8');
+  assert.match(source, /buildCandidateAccessWhere\(accessContext\)/);
+  assert.match(source, /\{ vacancyId: \{ in: vacancyIds \} \}/);
+  assert.match(source, /visibleVacancyIds/);
 });
 
 test('la vista explica los dos botones Meta y no usa diálogos nativos', () => {

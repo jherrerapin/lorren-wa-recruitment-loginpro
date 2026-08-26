@@ -287,6 +287,52 @@ async function loadInterviewOutreachAttendanceCandidates(req, visibleVacancyIds 
   });
 }
 
+export function summarizeInterviewOutreachAttendanceCandidates(candidates = [], vacancyCityById = new Map()) {
+  const visibleVacancyIds = new Set([...vacancyCityById.keys()].filter(Boolean));
+  const summaries = {};
+
+  for (const candidate of candidates) {
+    const vacancyId = String(candidate.vacancyId || '');
+    if (!visibleVacancyIds.has(vacancyId)) continue;
+    const attendance = deriveInterviewOutreachAttendance(candidate);
+    const attendanceStatus = attendance.status || 'PENDIENTE';
+    summaries[vacancyId] ||= {
+      vacancyId,
+      cityName: vacancyCityById.get(vacancyId) || '',
+      total: 0,
+      confirmedCount: 0,
+      pendingCount: 0,
+      declinedCount: 0,
+      responses: []
+    };
+
+    const summary = summaries[vacancyId];
+    summary.total += 1;
+    if (attendanceStatus === 'CONFIRMADO') summary.confirmedCount += 1;
+    else if (attendanceStatus === 'NO_ASISTE') summary.declinedCount += 1;
+    else summary.pendingCount += 1;
+
+    summary.responses.push({
+      id: candidate.id,
+      fullName: candidate.fullName || null,
+      phone: candidate.phone || null,
+      attendanceStatus,
+      respondedAt: attendance.respondedAt || null,
+      source: attendance.source || null
+    });
+  }
+
+  for (const summary of Object.values(summaries)) {
+    summary.responses.sort((a, b) => {
+      const responseDifference = timeValue(b.respondedAt) - timeValue(a.respondedAt);
+      if (responseDifference !== 0) return responseDifference;
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+  }
+
+  return summaries;
+}
+
 export async function applyInterviewOutreachAttendance(viewModel = {}, req = {}) {
   const vacancyCityById = new Map();
   for (const city of viewModel.cities || []) {
@@ -296,42 +342,10 @@ export async function applyInterviewOutreachAttendance(viewModel = {}, req = {})
   }
   const visibleVacancyIds = new Set([...vacancyCityById.keys()].filter(Boolean));
   const candidates = await loadInterviewOutreachAttendanceCandidates(req, visibleVacancyIds);
-  const summaries = {};
-
-  for (const candidate of candidates) {
-    const vacancyId = String(candidate.vacancyId || '');
-    if (!visibleVacancyIds.has(vacancyId)) continue;
-    const attendance = deriveInterviewOutreachAttendance(candidate);
-    summaries[vacancyId] ||= {
-      vacancyId,
-      cityName: vacancyCityById.get(vacancyId) || '',
-      total: 0,
-      pendingCount: 0,
-      declinedCount: 0,
-      confirmed: []
-    };
-    const summary = summaries[vacancyId];
-    summary.total += 1;
-    if (attendance.status === 'CONFIRMADO') {
-      summary.confirmed.push({
-        id: candidate.id,
-        fullName: candidate.fullName || null,
-        phone: candidate.phone || null,
-        respondedAt: attendance.respondedAt || null,
-        source: attendance.source || null
-      });
-    } else if (attendance.status === 'NO_ASISTE') {
-      summary.declinedCount += 1;
-    } else {
-      summary.pendingCount += 1;
-    }
-  }
-
-  for (const summary of Object.values(summaries)) {
-    summary.confirmed.sort((a, b) => timeValue(b.respondedAt) - timeValue(a.respondedAt));
-  }
-
-  viewModel.interviewOutreachAttendanceByVacancy = summaries;
+  viewModel.interviewOutreachAttendanceByVacancy = summarizeInterviewOutreachAttendanceCandidates(
+    candidates,
+    vacancyCityById
+  );
   return viewModel;
 }
 
@@ -1208,6 +1222,16 @@ export function buildInterviewOutreachAttendanceScript(attendanceByVacancy = {})
       return '/admin/candidates/' + encodeURIComponent(candidateId) + '?returnTo=' + encodeURIComponent(returnTo);
     }
 
+    function attendancePresentation(status) {
+      if (status === 'CONFIRMADO') {
+        return { label: 'Asiste', badgeClass: 'badge-registrado', responsePrefix: 'Confirmó asistencia' };
+      }
+      if (status === 'NO_ASISTE') {
+        return { label: 'No asiste', badgeClass: 'badge-rechazado', responsePrefix: 'Indicó que no asistirá' };
+      }
+      return { label: 'Pendiente', badgeClass: 'badge-contactado', responsePrefix: 'Sin respuesta' };
+    }
+
     entries.forEach((summary) => {
       if (!summary?.vacancyId || Number(summary.total || 0) <= 0) return;
       const panel = document.getElementById('vacancy-' + summary.vacancyId);
@@ -1221,10 +1245,10 @@ export function buildInterviewOutreachAttendanceScript(attendanceByVacancy = {})
       header.className = 'section-header';
       const title = document.createElement('span');
       title.className = 'section-title';
-      title.textContent = 'Confirmados a entrevista';
+      title.textContent = 'Respuestas de citación';
       const count = document.createElement('span');
       count.className = 'section-count';
-      count.textContent = String((summary.confirmed || []).length);
+      count.textContent = String(Number(summary.total || 0));
       header.append(title, count);
       section.appendChild(header);
 
@@ -1238,24 +1262,24 @@ export function buildInterviewOutreachAttendanceScript(attendanceByVacancy = {})
       stats.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;';
       stats.append(
         stat('Citados', Number(summary.total || 0)),
-        stat('Confirmados', (summary.confirmed || []).length),
+        stat('Confirmados', Number(summary.confirmedCount || 0)),
         stat('Pendientes', Number(summary.pendingCount || 0)),
         stat('No asistirán', Number(summary.declinedCount || 0))
       );
       section.appendChild(stats);
 
-      const confirmed = Array.isArray(summary.confirmed) ? summary.confirmed : [];
-      if (!confirmed.length) {
+      const responses = Array.isArray(summary.responses) ? summary.responses : [];
+      if (!responses.length) {
         const empty = document.createElement('div');
         empty.className = 'empty-state';
         const text = document.createElement('p');
-        text.textContent = 'Aún no hay confirmaciones de asistencia.';
+        text.textContent = 'Aún no hay respuestas de citación para mostrar.';
         empty.appendChild(text);
         section.appendChild(empty);
       } else {
         const list = document.createElement('div');
         list.className = 'candidates-list';
-        confirmed.slice(0, 25).forEach((candidate) => {
+        responses.forEach((candidate) => {
           const row = document.createElement('div');
           row.className = 'candidate-row';
 
@@ -1264,12 +1288,14 @@ export function buildInterviewOutreachAttendanceScript(attendanceByVacancy = {})
           name.className = 'candidate-name';
           name.textContent = candidate.fullName || 'Sin nombre';
           identity.appendChild(name);
-          if (candidate.respondedAt) {
-            const responseAt = document.createElement('div');
-            responseAt.className = 'candidate-dev-meta';
-            responseAt.textContent = 'Confirmó asistencia: ' + formatResponseAt(candidate.respondedAt);
-            identity.appendChild(responseAt);
-          }
+
+          const presentation = attendancePresentation(candidate.attendanceStatus);
+          const responseAt = document.createElement('div');
+          responseAt.className = 'candidate-dev-meta';
+          responseAt.textContent = candidate.respondedAt
+            ? presentation.responsePrefix + ': ' + formatResponseAt(candidate.respondedAt)
+            : 'Sin respuesta hasta el momento.';
+          identity.appendChild(responseAt);
 
           const phone = document.createElement('div');
           phone.className = 'candidate-phone';
@@ -1280,8 +1306,8 @@ export function buildInterviewOutreachAttendanceScript(attendanceByVacancy = {})
           status.textContent = 'Contactado';
 
           const attendance = document.createElement('span');
-          attendance.className = 'badge badge-registrado';
-          attendance.textContent = 'Asiste';
+          attendance.className = 'badge ' + presentation.badgeClass;
+          attendance.textContent = presentation.label;
 
           const actions = document.createElement('div');
           actions.className = 'action-stack';
@@ -1295,23 +1321,18 @@ export function buildInterviewOutreachAttendanceScript(attendanceByVacancy = {})
           list.appendChild(row);
         });
         section.appendChild(list);
-        if (confirmed.length > 25) {
-          const more = document.createElement('div');
-          more.style.cssText = 'text-align:center;padding:8px;font-size:12px;color:var(--text-muted);';
-          more.textContent = '+ ' + (confirmed.length - 25) + ' confirmados más';
-          section.appendChild(more);
-        }
       }
 
       const exportBar = panel.querySelector('.export-bar');
       if (exportBar) panel.insertBefore(section, exportBar);
       else panel.appendChild(section);
 
+      const confirmedCount = Number(summary.confirmedCount || 0);
       const badges = panel.querySelector('.vacancy-badges');
-      if (badges && confirmed.length) {
+      if (badges && confirmedCount) {
         const badge = document.createElement('span');
         badge.className = 'badge badge-registrado';
-        badge.textContent = '✓ ' + confirmed.length + ' confirmado' + (confirmed.length === 1 ? '' : 's');
+        badge.textContent = '✓ ' + confirmedCount + ' confirmado' + (confirmedCount === 1 ? '' : 's');
         badges.appendChild(badge);
       }
     });
