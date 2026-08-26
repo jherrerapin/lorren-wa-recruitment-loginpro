@@ -8,6 +8,7 @@ import {
   normalizeUserAccessScope
 } from '../services/appUsers.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
+import { resolvePayrollFeatureAccess, setPayrollFeatureAccess } from '../services/payrollFeatureAccess.js';
 
 function sessionAuth(req, res, next) {
   const role = req.session?.userRole;
@@ -27,6 +28,32 @@ function canManageRecruiterUsers(req) {
 
 function isProtectedRecruiterProfile(user = {}) {
   return user.username === 'reclutador-general';
+}
+
+function payrollAccessActor(req) {
+  return {
+    actorUserId: req.userId || req.session?.userId || null,
+    actorUsername: req.username || req.session?.username || null,
+    actorRole: req.userRole || req.session?.userRole || null,
+    actorSource: req.userSource || req.session?.userSource || null,
+    actorAccessScope: req.userAccessScope || req.session?.userAccessScope || 'ALL',
+    ipAddress: normalize(req.ip),
+    userAgent: normalize(req.get?.('user-agent'))
+  };
+}
+
+async function loadPayrollPermissionTarget(prisma, userId) {
+  if (!userId) return null;
+  return prisma.appUser.findUnique({
+    where: { id: userId },
+    select: { id: true, username: true, role: true, isActive: true }
+  });
+}
+
+function canEditPayrollPermissionTarget(req, user) {
+  if (!user || user.role !== 'ADMIN') return false;
+  if (req.userRole === 'dev') return true;
+  return !isProtectedRecruiterProfile(user);
 }
 
 function flash(res, type, msg) {
@@ -410,6 +437,42 @@ export function locationsRouter(prisma) {
       flash(res, 'error', 'Error al eliminar la vacante.');
     }
     return res.redirect('/admin/locations');
+  });
+
+  router.get('/users/:id/payroll-access', async (req, res) => {
+    if (!canManageUserModulePermissions(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const user = await loadPayrollPermissionTarget(prisma, req.params.id);
+    if (!user || user.role !== 'ADMIN') return res.status(404).json({ ok: false, error: 'user_not_found' });
+    if (!canEditPayrollPermissionTarget(req, user)) return res.status(403).json({ ok: false, error: 'forbidden' });
+
+    try {
+      const access = await resolvePayrollFeatureAccess(prisma, {
+        userRole: 'admin',
+        userId: user.id,
+        username: user.username
+      });
+      return res.json({ ok: true, enabled: access.allowed === true, userId: user.id });
+    } catch (_error) {
+      return res.status(400).json({ ok: false, error: 'payroll_access_failed' });
+    }
+  });
+
+  router.post('/users/:id/payroll-access', async (req, res) => {
+    if (!canManageUserModulePermissions(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const user = await loadPayrollPermissionTarget(prisma, req.params.id);
+    if (!user || user.role !== 'ADMIN') return res.status(404).json({ ok: false, error: 'user_not_found' });
+    if (!canEditPayrollPermissionTarget(req, user)) return res.status(403).json({ ok: false, error: 'forbidden' });
+
+    try {
+      const result = await setPayrollFeatureAccess(prisma, {
+        targetUserId: user.id,
+        enabled: req.body?.enabled === true,
+        ...payrollAccessActor(req)
+      });
+      return res.json({ ok: true, ...result });
+    } catch (_error) {
+      return res.status(400).json({ ok: false, error: 'payroll_access_failed' });
+    }
   });
 
   router.post('/users/:id/access', async (req, res) => {
