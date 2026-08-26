@@ -236,7 +236,10 @@ function momentInside(value, startAt, exclusiveEndAt) {
 }
 
 export function isDispatchBreakStartWithinOperationalWindow(window, value) {
-  return momentInside(value, window?.recordingOpensAt || window?.expectedStartAt, window?.operationalEndAt);
+  const closesAt = window?.derivedOperationalEnd === true
+    ? window?.continuityClosesAt
+    : window?.operationalEndAt;
+  return momentInside(value, window?.recordingOpensAt || window?.expectedStartAt, closesAt);
 }
 
 export function isDispatchBreakEndWithinOperationalWindow(window, value) {
