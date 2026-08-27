@@ -27,6 +27,8 @@ const MAX_CV_SIZE_BYTES = 5 * 1024 * 1024;
 const ALLOWED_CV_MIME_TYPES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']);
 const ALLOWED_CV_EXTENSIONS = ['.pdf', '.doc', '.docx'];
 const ASSIGNMENT_REQUESTS_LOOKBACK_DAYS = 60;
+const DEFAULT_ABSENCE_GRACE_MINUTES = 15;
+const DISABLED_OPERATIONAL_STATUSES = ['DISABLED', 'INACTIVE'];
 
 const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'];
 
@@ -93,13 +95,48 @@ function workerRestErrorMessage(error) {
   };
   return messages[error?.message] || 'No fue posible guardar el descanso.';
 }
-function todayIsoDate() { return new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota' })).toISOString().slice(0, 10); }
+function todayIsoDate(now = new Date()) { return new Date(now.toLocaleString('en-US', { timeZone: 'America/Bogota' })).toISOString().slice(0, 10); }
+function bogotaMinuteOfDay(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'America/Bogota',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(now).filter((part) => part.type === 'hour' || part.type === 'minute').map((part) => [part.type, Number(part.value)]));
+  return Number.isInteger(parts.hour) && Number.isInteger(parts.minute) ? (parts.hour * 60) + parts.minute : null;
+}
+function parseClockMinutes(value) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(value || ''));
+  return match ? (Number(match[1]) * 60) + Number(match[2]) : null;
+}
+function serviceRequestDateKey(value) {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+function shouldReleaseAssignmentOnWorkerDeactivation(assignment, now = new Date()) {
+  if (assignment?.attendanceSession) return false;
+  const serviceDate = serviceRequestDateKey(assignment?.serviceRequest?.serviceDate);
+  const today = todayIsoDate(now);
+  if (!serviceDate) return false;
+  if (serviceDate > today) return true;
+  if (serviceDate < today) return false;
+  const startMinutes = parseClockMinutes(assignment?.serviceRequest?.startTime);
+  const currentMinutes = bogotaMinuteOfDay(now);
+  if (startMinutes === null || currentMinutes === null) return false;
+  const configuredGrace = Number(assignment?.serviceRequest?.operationPoint?.absenceGraceMinutes);
+  const graceMinutes = Number.isFinite(configuredGrace) && configuredGrace >= 0 ? configuredGrace : DEFAULT_ABSENCE_GRACE_MINUTES;
+  return currentMinutes <= startMinutes + graceMinutes;
+}
 function normalizeDateParam(value) { const rawValue = normalizeString(value); if (!rawValue) return todayIsoDate(); if (!/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) return todayIsoDate(); return rawValue; }
 function buildUtcDayRangeFromDateValue(value) { const start = new Date(value); start.setUTCHours(0, 0, 0, 0); const end = new Date(start); end.setUTCDate(end.getUTCDate() + 1); return { start, end }; }
 function serviceRequestServiceData(service) { return { serviceId: service?.id || null, serviceName: service?.name || null }; }
 function buildOperationalCityFilter(compatibleOperationalCityIds) { if (!compatibleOperationalCityIds.length) return {}; return { cities: { some: { cityId: { in: compatibleOperationalCityIds } } } }; }
 function cleanDistinctStrings(rows, fieldName) { return [...new Set(rows.map((row) => normalizeString(row[fieldName])).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')); }
-function buildDispatchEligibilityFilter() { return { operationalStatus: 'CONTRATADO' }; }
+function buildDispatchEligibilityFilter(status) {
+  const normalizedStatus = normalizeString(status)?.toUpperCase();
+  if (DISABLED_OPERATIONAL_STATUSES.includes(normalizedStatus)) return { operationalStatus: { in: DISABLED_OPERATIONAL_STATUSES } };
+  return { operationalStatus: 'CONTRATADO' };
+}
 
 function buildWorkerData(body = {}) {
   return {
@@ -227,16 +264,28 @@ async function replaceWorkerRelations(prisma, workerId, body) {
 /**
  * cancelWorkerActiveAssignments
  *
- * Al desactivar un auxiliar, cancela sus asignaciones pendientes
- * (ASSIGNED, CONFIRMATION_PENDING) y marca las CONFIRMED como NO_CONFIRMO
- * para que el operador sepa que necesita buscar reemplazo.
- * Recalcula el estado de cada solicitud afectada.
+ * Al desactivar un auxiliar, libera únicamente compromisos que todavía son operativos.
+ * Las asignaciones ya causadas o con sesión de asistencia se conservan para historial y nómina.
  */
 async function cancelWorkerActiveAssignments(prisma, workerId) {
-  const activeAssignments = await prisma.dispatchAssignment.findMany({
+  const candidates = await prisma.dispatchAssignment.findMany({
     where: { workerId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } },
-    select: { id: true, serviceRequestId: true, status: true }
+    select: {
+      id: true,
+      serviceRequestId: true,
+      status: true,
+      serviceRequest: {
+        select: {
+          serviceDate: true,
+          startTime: true,
+          operationPoint: { select: { absenceGraceMinutes: true } }
+        }
+      },
+      attendanceSession: { select: { id: true } }
+    }
   });
+  const now = new Date();
+  const activeAssignments = candidates.filter((assignment) => shouldReleaseAssignmentOnWorkerDeactivation(assignment, now));
   if (!activeAssignments.length) return [];
 
   const affectedRequestIds = [...new Set(activeAssignments.map((a) => a.serviceRequestId))];
@@ -332,7 +381,31 @@ export function dispatchOpsExtrasRouter(prisma) {
     return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent(message)}`);
   });
 
-  router.post('/asignaciones/assign', requireOps, async (req, res) => { const serviceRequestId = normalizeString(req.body.serviceRequestId); const workerId = normalizeString(req.body.workerId); if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos'); const [serviceRequest, worker] = await Promise.all([prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }), prisma.dispatchWorker.findUnique({ where: { id: workerId }, select: { id: true } })]); if (!serviceRequest || !worker) return res.status(404).send('Solicitud o auxiliar no encontrado'); const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } }); if (activeCount >= serviceRequest.requiredWorkers) { await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmacion de los auxiliares.')); } const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } }); if (existing) { if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya esta asignado a esta solicitud.')); await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } }); } else { await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } }); } await recalculateServiceRequestStatus(prisma, serviceRequestId); return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmacion.')); });
+  router.post('/asignaciones/assign', requireOps, async (req, res) => {
+    const serviceRequestId = normalizeString(req.body.serviceRequestId);
+    const workerId = normalizeString(req.body.workerId);
+    if (!serviceRequestId || !workerId) return res.status(400).send('serviceRequestId y workerId son requeridos');
+    const [serviceRequest, worker] = await Promise.all([
+      prisma.dispatchServiceRequest.findUnique({ where: { id: serviceRequestId }, select: { id: true, requiredWorkers: true } }),
+      prisma.dispatchWorker.findFirst({ where: { id: workerId, operationalStatus: 'CONTRATADO' }, select: { id: true } })
+    ]);
+    if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
+    if (!worker) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar no está activo y no puede recibir nuevas asignaciones.'));
+    const activeCount = await prisma.dispatchAssignment.count({ where: { serviceRequestId, status: { in: ACTIVE_ASSIGNMENT_STATUSES } } });
+    if (activeCount >= serviceRequest.requiredWorkers) {
+      await recalculateServiceRequestStatus(prisma, serviceRequestId);
+      return res.redirect(redirectToAssignment(serviceRequestId, 'La solicitud ya tiene cobertura completa. Espera confirmacion de los auxiliares.'));
+    }
+    const existing = await prisma.dispatchAssignment.findUnique({ where: { serviceRequestId_workerId: { serviceRequestId, workerId } } });
+    if (existing) {
+      if (ACTIVE_ASSIGNMENT_STATUSES.includes(existing.status)) return res.redirect(redirectToAssignment(serviceRequestId, 'El auxiliar ya esta asignado a esta solicitud.'));
+      await prisma.dispatchAssignment.update({ where: { id: existing.id }, data: { status: 'CONFIRMATION_PENDING', notes: null, createdByUsername: req.session?.username || req.username || null } });
+    } else {
+      await prisma.dispatchAssignment.create({ data: { serviceRequestId, workerId, status: 'CONFIRMATION_PENDING', createdByUsername: req.session?.username || req.username || null } });
+    }
+    await recalculateServiceRequestStatus(prisma, serviceRequestId);
+    return res.redirect(redirectToAssignment(serviceRequestId, 'Auxiliar asignado. Queda pendiente de confirmacion.'));
+  });
   router.post('/asignaciones/descansos', requireOps, async (req, res) => {
     const serviceRequestId = normalizeString(req.body.serviceRequestId);
     const restDate = normalizeString(req.body.restDate);
@@ -419,7 +492,9 @@ export function dispatchOpsExtrasRouter(prisma) {
   router.get('/personal', requireOps, async (req, res) => {
     const operationalCityId = normalizeString(req.query.operationalCityId);
     const vacancyId = normalizeString(req.query.vacancyId);
-    const eligibilityFilter = buildDispatchEligibilityFilter();
+    const requestedStatus = normalizeString(req.query.status)?.toUpperCase();
+    const inactiveView = DISABLED_OPERATIONAL_STATUSES.includes(requestedStatus);
+    const eligibilityFilter = buildDispatchEligibilityFilter(requestedStatus);
     const [workers, cities, vacancies] = await Promise.all([
       prisma.dispatchWorker.findMany({
         where: {
@@ -435,12 +510,12 @@ export function dispatchOpsExtrasRouter(prisma) {
     ]);
     return res.render('operacionesPersonal', {
       pageTitle: 'Personal operativo',
-      subtitle: 'Equipo disponible para asignacion.',
+      subtitle: inactiveView ? 'Personal inactivo / desactivado.' : 'Equipo disponible para asignacion.',
       activeSection: 'personal',
       workers,
       cities,
       vacancies,
-      filters: { operationalCityId: operationalCityId || '', vacancyId: vacancyId || '' },
+      filters: { operationalCityId: operationalCityId || '', vacancyId: vacancyId || '', status: inactiveView ? 'DISABLED' : 'CONTRATADO' },
       message: normalizeString(req.query.message),
       role: req.session?.userRole || req.userRole,
       canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch)
@@ -605,9 +680,9 @@ export function dispatchOpsExtrasRouter(prisma) {
       const affectedRequestIds = await cancelWorkerActiveAssignments(prisma, worker.id);
       const affectedCount = affectedRequestIds.length;
       const warningNote = affectedCount > 0
-        ? ` Se cancelaron sus asignaciones activas en ${affectedCount} solicitud${affectedCount !== 1 ? 'es' : ''}. Revisa y asigna reemplazos.`
+        ? ` Se liberaron sus asignaciones todavía operativas en ${affectedCount} solicitud${affectedCount !== 1 ? 'es' : ''}. Revisa y asigna reemplazos.`
         : '';
-      return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent(`Auxiliar desactivado.${warningNote} Ya no aparece en el listado activo.`)}`);
+      return res.redirect(`/admin/operaciones/personal?status=DISABLED&message=${encodeURIComponent(`Auxiliar desactivado.${warningNote} Su historial de trabajo se conserva.`)}`);
     }
 
     return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar reactivado. Ya aparece disponible para asignaciones.')}`);
