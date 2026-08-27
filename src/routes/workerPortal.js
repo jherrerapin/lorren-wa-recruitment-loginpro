@@ -325,6 +325,10 @@ function crewPresencePublicError(error) {
     || code === 'crew_presence_native_location_time_mismatch'
     || code === 'crew_presence_mock_location_detected'
     || code === 'crew_group_arrival_leader_presence_required'
+    || code === 'crew_group_arrival_manual_target_conflict'
+    || code === 'crew_group_arrival_manual_target_invalid'
+    || code === 'crew_group_arrival_manual_target_not_assigned'
+    || code === 'crew_group_arrival_manual_leader_arrival_required'
     || code === 'crew_group_mark_leader_presence_required'
     || code === 'crew_group_mark_leader_not_assigned'
   ) return [409, code];
@@ -700,6 +704,97 @@ export function workerPortalRouter(prisma, options = {}) {
       const [status, code] = crewPresencePublicError(error);
       if (status >= 500) console.error('[WORKER_PORTAL_CREW_PRESENCE_CREDENTIAL_FAILED]', { code });
       return strictError(res, status, code, 'No fue posible preparar este teléfono para asistencia.');
+    }
+  });
+
+  router.post('/cuadrillas/presencia/entrada-manual', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      if (!isNativeAndroidRequest(req)) {
+        return strictError(res, 409, 'native_attendance_required', 'Esta marcación requiere la app de Lórren.');
+      }
+
+      const assignmentId = normalizedString(req.body?.assignmentId, 160);
+      const serviceRequestId = normalizedString(req.body?.serviceRequestId, 160);
+      const targetAssignmentId = normalizedString(req.body?.targetAssignmentId, 160);
+      const idempotencyKey = normalizedString(req.body?.idempotencyKey, 100);
+      if (
+        !assignmentId
+        || !serviceRequestId
+        || !targetAssignmentId
+        || !idempotencyKey
+        || targetAssignmentId === assignmentId
+      ) {
+        return strictError(res, 400, 'crew_manual_arrival_invalid', 'La entrada pendiente no es válida.');
+      }
+
+      const assignment = await loadBiometricAssignmentFn(portalSession.workerId, assignmentId, now);
+      if (
+        !assignment
+        || assignment.serviceRequest?.id !== serviceRequestId
+        || assignment.serviceRequest?.operationPoint?.attendanceEnabled !== true
+      ) {
+        return strictError(res, 409, 'assignment_not_available', 'La cuadrilla ya no está disponible para esta marcación.');
+      }
+
+      const nativeLocation = requireNativeAttendanceLocation(req, res, portalSession, {
+        assignmentId,
+        markType: 'ARRIVAL',
+        idempotencyKey,
+        captureMode: ONLINE_WEB_CAPTURE_MODE
+      }, now);
+      if (!nativeLocation) return;
+      const location = await requireStrictAttendanceLocation(
+        prisma,
+        res,
+        assignment.serviceRequest.operationPoint,
+        nativeLocation,
+        { allowCrossOperation: false }
+      );
+      if (!location) return;
+
+      const result = await registerCrewPresenceArrivalFn({
+        leaderWorkerId: portalSession.workerId,
+        assignmentId,
+        manualTargetAssignmentId: targetAssignmentId,
+        idempotencyKey,
+        now,
+        captureMode: ONLINE_WEB_CAPTURE_MODE,
+        clientCapturedAt: nativeLocation.clientCapturedAt,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracyMeters: location.accuracyMeters,
+        installationIdHash: null,
+        persistentStorageAvailable: true,
+        presenceValidated: false,
+        forceMajeure: false,
+        ipAddress: normalizedString(req.ip, 120),
+        userAgent: normalizedString(req.get?.('user-agent'), 500)
+      });
+      if (!result?.applied || !result.summary) {
+        return strictError(res, 409, 'crew_manual_arrival_not_available', 'La entrada pendiente ya no está disponible.');
+      }
+      const targetResult = (result.summary.results || [])
+        .find((item) => item.assignmentId === targetAssignmentId && item.isLeader === false);
+      if (!targetResult || !['RECORDED', 'REPLAYED', 'ALREADY_RECORDED'].includes(targetResult.status)) {
+        return strictError(res, 409, 'crew_manual_arrival_not_recorded', 'No fue posible registrar la entrada pendiente.');
+      }
+
+      return res.status(200).json({
+        ok: true,
+        markType: 'ARRIVAL',
+        serviceRequestId,
+        targetAssignmentId,
+        status: targetResult.status,
+        requiresReview: targetResult.pendingReview === true
+      });
+    } catch (error) {
+      const [status, code] = crewPresencePublicError(error);
+      if (status >= 500) console.error('[WORKER_PORTAL_CREW_MANUAL_ARRIVAL_FAILED]', { code });
+      return strictError(res, status, code, 'No fue posible registrar la entrada pendiente.');
     }
   });
 

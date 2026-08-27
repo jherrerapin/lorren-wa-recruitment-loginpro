@@ -7,6 +7,7 @@
 
   const CONTEXT_PATH = '/operaciones/portal/cuadrillas/proximidad/contexto';
   const CREDENTIAL_PATH = '/operaciones/portal/cuadrillas/presencia/credencial';
+  const MANUAL_ARRIVAL_PATH = '/operaciones/portal/cuadrillas/presencia/entrada-manual';
   const CACHE_KEY = 'lorren-native-presence-context-v1';
   const PANEL_ID = 'lorren-native-presence-panel';
   const DEFAULT_SCAN_MS = 15_000;
@@ -103,6 +104,7 @@
   let provisioningPromise = null;
   let pendingPhoneExceptionWorkerId = '';
   let pendingCompletedScan = null;
+  let pendingManualArrival = null;
   const phoneExceptionsByService = new Map();
   const serverMemberStatusesByScope = new Map();
   const localQueuedMarksByService = new Map();
@@ -424,7 +426,7 @@
       .native-presence-status{padding:10px 11px;border-radius:11px;background:#eaf8ef;color:#176c36;font-size:12px;font-weight:800;line-height:1.45}.native-presence-status.warning{background:#fff6df;color:#76520b}.native-presence-status.error{background:#fff1f2;color:#9f1239}
       .native-presence-diagnostics{border:1px dashed #aebbb2;border-radius:11px;background:#fff;padding:8px 10px}.native-presence-diagnostics summary{cursor:pointer;font-size:11px;font-weight:900;color:#34553e}.native-presence-diagnostic-help{margin:6px 0;font-size:9px;line-height:1.35;color:#718078}.native-presence-diagnostic-list{display:grid;gap:4px;max-height:210px;overflow:auto}.native-presence-diagnostic-row,.native-presence-diagnostic-empty{font-family:monospace;font-size:9px;line-height:1.4;color:#35453b;overflow-wrap:anywhere}.native-presence-diagnostic-empty{color:#718078}
       .native-presence-count{font-size:26px;font-weight:900;color:#176c36;line-height:1}.native-presence-small{font-size:11px;color:#647568}
-      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-history{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.native-presence-member-mark{display:inline-flex;padding:4px 6px;border-radius:8px;background:#eaf8ef;color:#176c36;font-size:9px;font-weight:850;white-space:nowrap}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
+      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-history{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.native-presence-member-mark{display:inline-flex;padding:4px 6px;border-radius:8px;background:#eaf8ef;color:#176c36;font-size:9px;font-weight:850;white-space:nowrap}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-member-action:disabled{opacity:.55;cursor:wait}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
       @media(max-width:620px){.native-presence-row{grid-template-columns:1fr}.native-presence-btn{width:100%}.native-presence-member{grid-template-columns:minmax(0,1fr)}.native-presence-member-side{justify-content:flex-start}}
     `;
     document.head.appendChild(style);
@@ -570,6 +572,37 @@
     return Boolean(persistedMarkAt(member, markType));
   }
 
+  function memberEligibleForMark(member, markType) {
+    const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    if (memberHasPersistedMark(member, normalizedMark)) return false;
+    if (normalizedMark === 'ARRIVAL') return true;
+    if (!memberHasPersistedMark(member, 'ARRIVAL')) return false;
+    if (normalizedMark === 'BREAK_END') {
+      return memberHasPersistedMark(member, 'BREAK_START');
+    }
+    if (normalizedMark === 'DEPARTURE' && memberHasPersistedMark(member, 'BREAK_START')) {
+      return memberHasPersistedMark(member, 'BREAK_END');
+    }
+    return true;
+  }
+
+  function memberPresentationMarkType(member, markType) {
+    const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    if (member?.isLeader || normalizedMark === 'ARRIVAL' || memberHasPersistedMark(member, normalizedMark)) {
+      return normalizedMark;
+    }
+    if (!memberHasPersistedMark(member, 'ARRIVAL')) return 'ARRIVAL';
+    if (normalizedMark === 'BREAK_END' && !memberHasPersistedMark(member, 'BREAK_START')) {
+      return 'BREAK_START';
+    }
+    if (
+      normalizedMark === 'DEPARTURE'
+      && memberHasPersistedMark(member, 'BREAK_START')
+      && !memberHasPersistedMark(member, 'BREAK_END')
+    ) return 'BREAK_END';
+    return normalizedMark;
+  }
+
   function formatPersistedMarkTime(value) {
     if (!value) return '';
     const date = new Date(value);
@@ -605,7 +638,9 @@
   function pendingAuxiliaryCount(context, markType) {
     if (!context?.isCrewLeader || !Array.isArray(context.members)) return 0;
     return context.members.filter((member) => (
-      !member.isLeader && memberStatus(context, member, markType) === 'PENDING'
+      !member.isLeader
+      && memberEligibleForMark(member, markType)
+      && memberStatus(context, member, markType) === 'PENDING'
     )).length;
   }
 
@@ -657,8 +692,9 @@
     const list = element('div', 'native-presence-members');
     list.setAttribute('aria-label', 'Integrantes de la cuadrilla');
     context.members.forEach((member) => {
-      const status = memberStatus(context, member, normalizedMark);
-      const presentation = memberStatusPresentation(status, normalizedMark);
+      const memberMarkType = memberPresentationMarkType(member, normalizedMark);
+      const status = memberStatus(context, member, memberMarkType);
+      const presentation = memberStatusPresentation(status, memberMarkType);
       const row = element('div', 'native-presence-member');
       row.dataset.nativePresenceMember = member.workerId;
       const copy = element('div', 'native-presence-member-copy');
@@ -671,8 +707,22 @@
       side.appendChild(element('span', `native-presence-badge ${presentation.className}`, presentation.label));
 
       if (
-        normalizedMark === 'ARRIVAL'
-        && hasCompletedLeaderScan
+        memberMarkType === 'ARRIVAL'
+        && normalizedMark !== 'ARRIVAL'
+        && !member.isLeader
+        && status === 'PENDING'
+      ) {
+        const manualArrival = element('button', 'native-presence-member-action', 'Marcar entrada');
+        manualArrival.type = 'button';
+        manualArrival.dataset.nativePresenceManualArrival = member.workerId;
+        manualArrival.disabled = !navigator.onLine || Boolean(pendingManualArrival);
+        manualArrival.addEventListener('click', () => startManualArrival(member));
+        side.appendChild(manualArrival);
+      }
+
+      if (
+        memberMarkType === 'ARRIVAL'
+        && (hasCompletedLeaderScan || normalizedMark !== 'ARRIVAL')
         && !member.isLeader
         && status === 'PENDING'
       ) {
@@ -702,7 +752,8 @@
       row.append(copy, side);
 
       if (
-        normalizedMark === 'ARRIVAL'
+        memberMarkType === 'ARRIVAL'
+        && (hasCompletedLeaderScan || normalizedMark !== 'ARRIVAL')
         && pendingPhoneExceptionWorkerId === member.workerId
         && status === 'PENDING'
       ) {
@@ -747,10 +798,86 @@
       : `crew_${Date.now()}_${randomToken(12)}`;
   }
 
+  async function startManualArrival(member) {
+    const context = currentContext();
+    if (
+      !context?.isCrewLeader
+      || !member
+      || member.isLeader
+      || memberHasPersistedMark(member, 'ARRIVAL')
+      || pendingManualArrival
+    ) return;
+    if (!navigator.onLine) {
+      setStatus('Conéctate para registrar esta entrada.', 'warning');
+      return;
+    }
+    if (!credentialPrepared()) await provisionCredential();
+    const idempotencyKey = newAttemptId();
+    pendingManualArrival = {
+      assignmentId: context.assignmentId,
+      serviceRequestId: context.serviceRequestId,
+      targetAssignmentId: member.assignmentId,
+      workerId: member.workerId,
+      idempotencyKey
+    };
+    renderPanel();
+    const result = bridgeCall('requestAttendanceLocation', JSON.stringify({
+      assignmentId: context.assignmentId,
+      markType: 'ARRIVAL',
+      idempotencyKey
+    }));
+    if (!result?.ok) {
+      pendingManualArrival = null;
+      renderPanel();
+      setStatus(publicNativeError(result?.error), 'error');
+      return;
+    }
+    setStatus('Validando ubicación para registrar la entrada…', 'warning');
+  }
+
+  async function submitManualArrival(nativeLocationProof) {
+    const pending = pendingManualArrival;
+    if (!pending) return;
+    try {
+      const response = await fetch(MANUAL_ARRIVAL_PATH, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'worker-portal'
+        },
+        body: JSON.stringify({
+          assignmentId: pending.assignmentId,
+          serviceRequestId: pending.serviceRequestId,
+          targetAssignmentId: pending.targetAssignmentId,
+          idempotencyKey: pending.idempotencyKey,
+          nativeLocationProof
+        })
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload?.ok !== true) {
+        throw new Error(String(payload?.message || 'No fue posible registrar la entrada pendiente.'));
+      }
+      phoneExceptionSet(pending.serviceRequestId).delete(pending.workerId);
+      serverStatusMap(pending.serviceRequestId, 'ARRIVAL').set(pending.workerId, 'REGISTERED');
+      contexts = await loadContexts();
+      pendingManualArrival = null;
+      renderPanel();
+      setStatus('Entrada registrada.', '');
+    } catch (error) {
+      pendingManualArrival = null;
+      renderPanel();
+      setStatus(error?.message || 'No fue posible registrar la entrada pendiente.', 'error');
+    }
+  }
+
   function publicNativeError(code) {
     const messages = {
       permissions_required: 'Autoriza los permisos solicitados por Android para continuar.',
       native_presence_credential_required: 'Este teléfono necesita conectarse una vez para preparar o renovar su credencial de asistencia.',
+      native_location_credential_required: 'Este teléfono necesita conectarse una vez para preparar o renovar su credencial de asistencia.',
       bluetooth_disabled: 'Bluetooth está apagado. Actívalo para continuar.',
       bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible para verificar la cuadrilla.',
       advertising_failed: 'No fue posible iniciar la señal Bluetooth del encargado. Intenta nuevamente.',
@@ -817,6 +944,7 @@
 
   function resetLeaderAttemptState() {
     pendingPhoneExceptionWorkerId = '';
+    pendingManualArrival = null;
     retryNotDetectedCount = 0;
     retryMarkType = '';
     hasCompletedLeaderScan = false;
@@ -1085,6 +1213,7 @@
     activeMode = 'IDLE';
     activeAttempt = null;
     pendingCompletedScan = null;
+    pendingManualArrival = null;
   }
 
   function nativeLocationFromBundle(proofBundle) {
@@ -1278,6 +1407,30 @@
       showStop();
       return;
     }
+    if (type === 'attendance_location_ready') {
+      const pending = pendingManualArrival;
+      if (
+        !pending
+        || String(detail.assignmentId || '') !== pending.assignmentId
+        || normalizeMarkType(detail.markType) !== 'ARRIVAL'
+        || String(detail.idempotencyKey || '') !== pending.idempotencyKey
+      ) return;
+      submitManualArrival(detail.proof).catch(() => {});
+      return;
+    }
+    if (type === 'attendance_location_error') {
+      const pending = pendingManualArrival;
+      if (
+        !pending
+        || String(detail.assignmentId || '') !== pending.assignmentId
+        || normalizeMarkType(detail.markType) !== 'ARRIVAL'
+        || String(detail.idempotencyKey || '') !== pending.idempotencyKey
+      ) return;
+      pendingManualArrival = null;
+      renderPanel();
+      setStatus(publicNativeError(String(detail.code || 'native_location_unavailable')), 'error');
+      return;
+    }
     if (type === 'scan_started') {
       activeMode = 'LEADER';
       const markType = normalizeMarkType(activeAttempt?.markType) || 'ARRIVAL';
@@ -1422,6 +1575,7 @@
     window.LorrenWorkerPortalOffline?.syncNow?.().catch(() => {});
   });
   window.addEventListener('offline', () => {
+    pendingManualArrival = null;
     renderPanel();
     ensureAuxiliaryReady().catch(() => {});
   });

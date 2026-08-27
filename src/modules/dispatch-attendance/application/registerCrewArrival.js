@@ -97,6 +97,9 @@ function reviewReason(input, isLeader) {
       ? 'Llegada de encargado validada mediante sesión activa, geocerca y comprobación local de cuadrilla.'
       : 'Llegada delegada: integrante incluido únicamente después de una prueba local de presencia verificable.';
   }
+  if (input.manualTargetArrival && !isLeader) {
+    return 'Llegada tardía delegada y confirmada por responsable de cuadrilla.';
+  }
   return input.forceMajeure
     ? 'Fuerza mayor: uno o más auxiliares estaban sin celular; llegada delegada por responsable de cuadrilla.'
     : 'Llegada delegada y confirmada por responsable de cuadrilla.';
@@ -108,6 +111,9 @@ function reviewNotes(input, isLeader) {
     return isLeader
       ? `${base} El encargado forma parte del total de la cuadrilla y se procesó una sola vez.`
       : base;
+  }
+  if (input.manualTargetArrival && !isLeader) {
+    return 'Llegada manual tardía desde la app Android: el servidor validó la sesión activa del encargado, su ubicación nativa firmada, la geocerca y la pertenencia del auxiliar al mismo servicio. El dispositivo del encargado no se atribuyó al auxiliar.';
   }
   const base = 'Marcación grupal: la sesión y ubicación del responsable fueron validadas por el servidor y el flujo reportó una lectura Bluetooth consistente con la operación. No se solicitó reconocimiento facial para esta acción grupal.';
   return input.forceMajeure
@@ -187,11 +193,18 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
   const captureMode = normalizeCaptureMode(input.captureMode);
   const now = requireDate(input.now ?? new Date(), 'crew_group_arrival_now');
   const presenceValidated = input.presenceValidated === true;
+  const manualTargetAssignmentId = typeof input.manualTargetAssignmentId === 'string' && input.manualTargetAssignmentId.trim()
+    ? input.manualTargetAssignmentId.trim().slice(0, 160)
+    : null;
+  const targetedManualArrival = Boolean(manualTargetAssignmentId);
   const forceMajeure = presenceValidated ? false : input.forceMajeure === true;
   const validatedWorkerIds = presenceValidated
     ? normalizeValidatedWorkerIds(input.validatedWorkerIds)
     : null;
 
+  if (presenceValidated && targetedManualArrival) {
+    throw new Error('crew_group_arrival_manual_target_conflict');
+  }
   if (
     captureMode !== ONLINE_WEB_CAPTURE_MODE
     && !(presenceValidated && captureMode === OFFLINE_WEB_CAPTURE_MODE)
@@ -231,17 +244,34 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     orderBy: { createdAt: 'asc' }
   });
 
-  if (!members.some((member) => member.id === leaderAssignmentId && member.workerId === leaderWorkerId)) {
-    throw new Error('crew_group_arrival_leader_not_assigned');
+  const leaderMember = members.find(
+    (member) => member.id === leaderAssignmentId && member.workerId === leaderWorkerId
+  );
+  if (!leaderMember) throw new Error('crew_group_arrival_leader_not_assigned');
+
+  let selectedWorkerSet = null;
+  let selectedMembers = members;
+  if (presenceValidated) {
+    selectedWorkerSet = new Set(validatedWorkerIds);
+    selectedMembers = members.filter((member) => selectedWorkerSet.has(member.workerId));
+  } else if (targetedManualArrival) {
+    if (manualTargetAssignmentId === leaderAssignmentId) {
+      throw new Error('crew_group_arrival_manual_target_invalid');
+    }
+    const targetMember = members.find((member) => member.id === manualTargetAssignmentId);
+    if (!targetMember || targetMember.workerId === leaderWorkerId) {
+      throw new Error('crew_group_arrival_manual_target_not_assigned');
+    }
+    if (!leaderMember.attendanceSession?.arrivalReportedAt) {
+      throw new Error('crew_group_arrival_manual_leader_arrival_required');
+    }
+    selectedMembers = [leaderMember, targetMember];
   }
 
-  const selectedWorkerSet = presenceValidated ? new Set(validatedWorkerIds) : null;
-  const selectedMembers = presenceValidated
-    ? members.filter((member) => selectedWorkerSet.has(member.workerId))
-    : members;
+  const selectedAssignmentIds = new Set(selectedMembers.map((member) => member.id));
   const previouslyRecordedOutsideSelection = presenceValidated
     ? members.filter((member) => (
-        !selectedWorkerSet.has(member.workerId)
+        !selectedAssignmentIds.has(member.id)
         && Boolean(member.attendanceSession?.arrivalReportedAt)
       )).length
     : 0;
@@ -264,7 +294,9 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       latitude: input.latitude,
       longitude: input.longitude,
       accuracyMeters: input.accuracyMeters,
-      installationIdHash: isLeader || !presenceValidated ? (input.installationIdHash ?? null) : null,
+      installationIdHash: isLeader || (!presenceValidated && !targetedManualArrival)
+        ? (input.installationIdHash ?? null)
+        : null,
       persistentStorageAvailable: true,
       hasFreshPhoto: false,
       evidenceStorageKey: null,
@@ -276,10 +308,11 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     if (isLeader) {
       leaderResult = memberResult;
       if (!memberResult.recorded) {
-        // El flujo legacy conserva el bloqueo. En presencia verificable, una llegada previa
-        // del encargado no impide completar a integrantes detectados en un nuevo intento,
-        // porque sesión, dispositivo y geocerca del encargado se revalidan otra vez.
-        if (!presenceValidated || !duplicateArrival(memberResult)) {
+        // En presencia verificable y en una llegada tardía dirigida, una llegada previa
+        // del encargado no impide completar al auxiliar seleccionado.
+        const canContinueAfterLeaderDuplicate = (presenceValidated || targetedManualArrival)
+          && duplicateArrival(memberResult);
+        if (!canContinueAfterLeaderDuplicate) {
           return {
             applied: true,
             leaderResult,
@@ -298,6 +331,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
           leaderWorkerId,
           forceMajeure,
           presenceValidated,
+          manualTargetArrival: targetedManualArrival,
           isLeader: true,
           now
         }, options);
@@ -336,6 +370,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       leaderWorkerId,
       forceMajeure,
       presenceValidated,
+      manualTargetArrival: targetedManualArrival,
       isLeader: false,
       now
     }, options);
@@ -357,10 +392,9 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
   const reviewPendingCount = results.filter((item) => item.pendingReview === true).length;
   const delegatedCount = results.filter((item) => item.isLeader === false && ['RECORDED', 'REPLAYED'].includes(item.status)).length;
   const processedCount = newlyRecordedCount + replayedCount + alreadyRecordedCount;
-  const notDetectedCount = Math.max(
-    0,
-    members.length - selectedMembers.length - previouslyRecordedOutsideSelection
-  );
+  const notDetectedCount = targetedManualArrival
+    ? 0
+    : Math.max(0, members.length - selectedMembers.length - previouslyRecordedOutsideSelection);
 
   return {
     applied: true,
@@ -379,6 +413,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       delegatedCount,
       forceMajeure,
       presenceValidated,
+      manualTargetAssignmentId: targetedManualArrival ? manualTargetAssignmentId : null,
       results
     }
   };
