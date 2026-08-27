@@ -12,7 +12,11 @@ import {
   workerPortalCookieOptions,
   workerPortalRouter
 } from '../src/routes/workerPortal.js';
-import { WORKER_PORTAL_SESSION_COOKIE_NAME } from '../src/modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
+import {
+  WORKER_PORTAL_SESSION_CONTINUITY_MAX_AGE_MS,
+  WORKER_PORTAL_SESSION_COOKIE_NAME
+} from '../src/modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
+import { createPrismaWorkerPortalSessionRepository } from '../src/modules/dispatch-attendance/infrastructure/prismaWorkerPortalSessionRepository.js';
 
 const ACTIVATION_TOKEN = 'A'.repeat(43);
 const SESSION_TOKEN = 'B'.repeat(43);
@@ -217,7 +221,7 @@ test('errores de configuración de activación producen 503 sin exponer secretos
   }
 });
 
-test('la portada activa carga asignaciones usando solo el worker de la sesión', async () => {
+test('la portada activa carga asignaciones y renueva las mismas cookies de sesión e instalación', async () => {
   let observedWorkerId;
   const assignments = [{ id: 'assignment-public', clientName: 'Cliente' }];
   const router = buildRouter({
@@ -238,7 +242,12 @@ test('la portada activa carga asignaciones usando solo el worker de la sesión',
   const { res, state } = responseDouble();
 
   await routeHandler(router, '/', 'get')(
-    requestDouble({ cookies: { [WORKER_PORTAL_SESSION_COOKIE_NAME]: SESSION_TOKEN } }),
+    requestDouble({
+      cookies: {
+        [WORKER_PORTAL_SESSION_COOKIE_NAME]: SESSION_TOKEN,
+        [WORKER_PORTAL_INSTALLATION_COOKIE_NAME]: INSTALLATION_ID
+      }
+    }),
     res
   );
 
@@ -248,6 +257,109 @@ test('la portada activa carga asignaciones usando solo el worker de la sesión',
   assert.equal(state.render.locals.workerId, undefined);
   assert.equal(state.render.locals.deviceId, undefined);
   assert.equal(state.render.locals.sessionId, undefined);
+
+  const sessionCookie = state.cookies.find((item) => item.name === WORKER_PORTAL_SESSION_COOKIE_NAME);
+  const installationCookie = state.cookies.find((item) => item.name === WORKER_PORTAL_INSTALLATION_COOKIE_NAME);
+  assert.ok(sessionCookie);
+  assert.equal(sessionCookie.value, SESSION_TOKEN);
+  assert.equal(sessionCookie.options.httpOnly, true);
+  assert.equal(sessionCookie.options.secure, true);
+  assert.equal(sessionCookie.options.sameSite, 'lax');
+  assert.equal(sessionCookie.options.maxAge, WORKER_PORTAL_SESSION_CONTINUITY_MAX_AGE_MS);
+  assert.ok(installationCookie);
+  assert.equal(installationCookie.value, INSTALLATION_ID);
+});
+
+test('la resolución normal nunca inventa otra instalación si la cookie de instalación falta', async () => {
+  let randomUuidCalls = 0;
+  const router = buildRouter({
+    randomUUIDFn: () => {
+      randomUuidCalls += 1;
+      return INSTALLATION_ID;
+    },
+    resolveSessionFn: async () => ({
+      workerId: 'worker-continuity',
+      deviceId: 'device-continuity',
+      sessionId: 'session-continuity',
+      expiresAt: EXPIRES_AT
+    })
+  });
+  const { res, state } = responseDouble();
+
+  await routeHandler(router, '/', 'get')(
+    requestDouble({ cookies: { [WORKER_PORTAL_SESSION_COOKIE_NAME]: SESSION_TOKEN } }),
+    res
+  );
+
+  assert.equal(state.render.locals.mode, 'active');
+  assert.equal(randomUuidCalls, 0);
+  assert.equal(state.cookies.some((item) => item.name === WORKER_PORTAL_INSTALLATION_COOKIE_NAME), false);
+  assert.equal(state.cookies.some((item) => item.name === WORKER_PORTAL_SESSION_COOKIE_NAME), true);
+});
+
+test('sesión histórica vencida se renueva solo si sesión, auxiliar y dispositivo siguen autorizados', async () => {
+  let query = null;
+  let touch = null;
+  const historicalExpiry = new Date(NOW.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const prisma = {
+    dispatchWorker: {},
+    dispatchWorkerActivation: {},
+    dispatchWorkerDevice: {},
+    dispatchWorkerPortalSession: {
+      async findFirst(input) {
+        query = input;
+        return {
+          id: 'session-historical',
+          workerId: 'worker-historical',
+          workerDeviceId: 'device-historical',
+          expiresAt: historicalExpiry
+        };
+      },
+      async updateMany(input) {
+        touch = input;
+        return { count: 1 };
+      }
+    }
+  };
+  const repository = createPrismaWorkerPortalSessionRepository(prisma);
+  const result = await repository.resolveActiveSession({
+    sessionTokenHash: 'c'.repeat(64),
+    now: NOW
+  });
+
+  assert.equal(Object.hasOwn(query.where, 'expiresAt'), false);
+  assert.equal(query.where.status, 'ACTIVE');
+  assert.equal(query.where.revokedAt, null);
+  assert.deepEqual(query.where.worker.is.operationalStatus.in, ['ACTIVE', 'CONTRATADO']);
+  assert.equal(query.where.workerDevice.is.authorizationType, 'PRIMARY');
+  assert.equal(query.where.workerDevice.is.status, 'ACTIVE');
+  assert.equal(query.where.workerDevice.is.revokedAt, null);
+  assert.equal(touch.data.lastSeenAt, NOW);
+  assert.ok(touch.data.expiresAt.getTime() > NOW.getTime());
+  assert.ok(result.expiresAt.getTime() > NOW.getTime());
+});
+
+test('revocación real, baja del auxiliar o dispositivo inválido siguen cerrando la sesión', async () => {
+  const prisma = {
+    dispatchWorker: {},
+    dispatchWorkerActivation: {},
+    dispatchWorkerDevice: {},
+    dispatchWorkerPortalSession: {
+      async findFirst() {
+        return null;
+      },
+      async updateMany() {
+        throw new Error('must_not_touch_invalid_session');
+      }
+    }
+  };
+  const repository = createPrismaWorkerPortalSessionRepository(prisma);
+
+  const result = await repository.resolveActiveSession({
+    sessionTokenHash: 'd'.repeat(64),
+    now: NOW
+  });
+  assert.equal(result, null);
 });
 
 test('sesión ausente o revocada muestra acceso inactivo y limpia una cookie existente', async () => {
