@@ -482,7 +482,10 @@ export async function loadAttendanceAdminBoard(prisma, input = {}) {
 
   const assignments = await prisma.dispatchAssignment.findMany({
     where: {
-      status: { in: [...ACTIVE_ASSIGNMENT_STATUSES] },
+      OR: [
+        { status: { in: [...ACTIVE_ASSIGNMENT_STATUSES] } },
+        { attendanceSession: { isNot: null } }
+      ],
       serviceRequest: {
         serviceDate: { gte: range.gte, lte: range.lte }
       }
