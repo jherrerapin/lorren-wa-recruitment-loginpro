@@ -10,7 +10,9 @@ import {
 } from '../modules/dispatch-attendance/domain/deviceActivationPolicy.js';
 import {
   WORKER_PORTAL_SESSION_COOKIE_NAME,
-  WORKER_PORTAL_SESSION_COOKIE_PATH
+  WORKER_PORTAL_SESSION_COOKIE_PATH,
+  buildWorkerPortalSessionContinuityExpiry,
+  buildWorkerPortalSessionCookie
 } from '../modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
 import {
   activateWorkerPortalSession,
@@ -411,6 +413,22 @@ function clearWorkerPortalSessionCookie(res) {
   });
 }
 
+function renewWorkerPortalPersistence(req, res, now) {
+  const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
+  if (!rawSessionToken) return;
+  const continuityExpiresAt = buildWorkerPortalSessionContinuityExpiry(now);
+  const sessionCookie = buildWorkerPortalSessionCookie(continuityExpiresAt, now);
+  res.cookie(sessionCookie.name, rawSessionToken, sessionCookie.options);
+
+  const rawInstallationId = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
+  if (!rawInstallationId) return;
+  try {
+    setWorkerPortalInstallationCookie(res, normalizeInstallationId(rawInstallationId));
+  } catch {
+    // La resolución normal nunca inventa o reemplaza una instalación inválida.
+  }
+}
+
 function renderPortal(res, mode, nonce, options = {}) {
   res.set('X-Lorren-Worker-Portal-Mode', mode);
   return res.render('workerPortal', {
@@ -778,6 +796,7 @@ export function workerPortalRouter(prisma, options = {}) {
         return renderPortal(res, 'inactive', nonce);
       }
       const assignments = await loadAssignmentsFn(prisma, { workerId: portalSession.workerId, now });
+      renewWorkerPortalPersistence(req, res, now);
       return renderPortal(res, 'active', nonce, { expiresAt: portalSession.expiresAt, assignments });
     } catch (error) {
       if (INVALID_SESSION_COOKIE_CODES.has(errorCode(error))) {
