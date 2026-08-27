@@ -145,10 +145,10 @@ test('APK oculta las marcaciones individuales CREW y no deriva almuerzo o salida
   assert.doesNotMatch(nativePresence, /captureVerification|captureEnrollment|Verificación facial/);
 });
 
-test('sin teléfono no se presenta como diagnóstico antes de completar una entrada', async () => {
+test('sin teléfono aparece después del intento de entrada y se conserva si la cuadrilla ya avanzó', async () => {
   const nativePresence = await read('mobile/android/app/src/main/assets/native-presence.js');
 
-  assert.match(nativePresence, /normalizedMark === 'ARRIVAL'[\s\S]{0,100}&& hasCompletedLeaderScan/);
+  assert.match(nativePresence, /memberMarkType === 'ARRIVAL'[\s\S]{0,120}\(hasCompletedLeaderScan \|\| normalizedMark !== 'ARRIVAL'\)/);
   assert.match(nativePresence, /Reportar sin teléfono/);
   assert.match(nativePresence, /¿Confirmar que está presente pero no tiene su teléfono\?/);
   assert.doesNotMatch(nativePresence, /native-presence-member-action', 'Sin teléfono'/);
