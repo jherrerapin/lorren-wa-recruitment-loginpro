@@ -38,6 +38,10 @@ function requirePanelSession(req, res, next) {
   return next();
 }
 
+function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next);
+}
+
 function normalizeCandidateIds(value) {
   const rawValues = Array.isArray(value) ? value : [value];
   return [...new Set(rawValues
@@ -87,11 +91,12 @@ function userMessage(error, fallback) {
 export function approvedOutreachActionsRouter(prisma, options = {}) {
   const router = express.Router();
   const sendText = options.sendText || sendTextMessage;
+  const deliver = options.deliver || deliverManualOutboundText;
   const now = typeof options.now === 'function' ? options.now : () => new Date();
 
   router.use(requirePanelSession);
 
-  router.get('/window-status', async (req, res) => {
+  router.get('/window-status', asyncRoute(async (req, res) => {
     const candidateIds = normalizeCandidateIds(req.query.candidateIds);
     if (!candidateIds.length) return res.json({ ok: true, candidates: [] });
 
@@ -114,9 +119,9 @@ export function approvedOutreachActionsRouter(prisma, options = {}) {
     )));
 
     return res.json({ ok: true, candidates: states });
-  });
+  }));
 
-  router.post('/:candidateId/free-text', express.urlencoded({ extended: true }), async (req, res) => {
+  router.post('/:candidateId/free-text', express.urlencoded({ extended: true }), asyncRoute(async (req, res) => {
     const candidateId = normalizeString(req.params.candidateId);
     const customBody = typeof req.body?.customBody === 'string' ? req.body.customBody : '';
     if (!candidateId) return res.status(400).json({ ok: false, error: 'candidate_required' });
@@ -154,7 +159,7 @@ export function approvedOutreachActionsRouter(prisma, options = {}) {
     }
 
     try {
-      await deliverManualOutboundText(prisma, {
+      await deliver(prisma, {
         candidateId: candidate.id,
         phone: candidate.phone,
         body: customBody,
@@ -185,6 +190,15 @@ export function approvedOutreachActionsRouter(prisma, options = {}) {
         message: userMessage(error, 'No fue posible enviar el mensaje en este momento.')
       });
     }
+  }));
+
+  router.use((error, _req, res, _next) => {
+    console.error('[approved_outreach_actions]', error);
+    return res.status(500).json({
+      ok: false,
+      error: 'approved_outreach_action_failed',
+      message: 'No fue posible completar la acción en este momento.'
+    });
   });
 
   return router;
