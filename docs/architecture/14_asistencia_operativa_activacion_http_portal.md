@@ -6,6 +6,8 @@ Implementación relacionada con #509 y #587. Continúa la política de sesión d
 
 Esta fase conecta la activación y resolución de sesión a HTTP. Todavía no muestra asignaciones, no captura ubicación o fotografía y no registra llegada o salida.
 
+La continuidad de la sesión PWA se consolida posteriormente en #1461 sobre la misma sesión y el mismo dispositivo autorizado, sin crear una autoridad de autenticación paralela.
+
 ## Problema
 
 Un enlace de activación de un solo uso no debe consumirse mediante una petición `GET`.
@@ -72,14 +74,14 @@ Valor: UUID v4
 HttpOnly: true
 Secure: true
 SameSite: Strict
-Path: /operaciones/portal
+Path: /
 Domain: ausente
 Duración: 365 días
 ```
 
 El UUID no se guarda directamente en la base de datos. La autoridad de #582 calcula un HMAC-SHA-256 usando `ATTENDANCE_INSTALLATION_PEPPER`, y el adaptador Prisma solo recibe ese HMAC.
 
-Si la cookie falta o contiene un valor inválido, el servidor genera un UUID v4 nuevo y reemplaza el valor.
+Durante una activación, si la cookie falta o contiene un valor inválido, el servidor genera un UUID v4 nuevo y reemplaza el valor. Durante una resolución normal de una sesión ya válida no se inventa otra instalación: si la cookie válida existe, #1461 renueva **ese mismo UUID**; si falta o es inválida, se requiere el flujo de activación correspondiente.
 
 ## Sesión
 
@@ -89,12 +91,31 @@ Después de validar la activación, la autoridad devuelve un token de sesión ge
 Nombre: __Secure-lorren-attendance
 HttpOnly: true
 Secure: true
-SameSite: Strict
-Path: /operaciones/portal
+SameSite: Lax
+Path: /
 Domain: ausente
 ```
 
 La base de datos conserva únicamente SHA-256 del token. El token crudo no se incluye en respuestas JSON, logs o redirecciones.
+
+### Continuidad del PWA
+
+Antes de #1461, `expiresAt` funcionaba como un vencimiento absoluto de autenticación —siete días por defecto— aunque el auxiliar siguiera habilitado y su dispositivo principal continuara autorizado.
+
+Después de #1461, la resolución válida continúa dependiendo de las autoridades existentes:
+
+- hash exacto de la sesión;
+- `DispatchWorkerPortalSession.status = ACTIVE`;
+- sesión sin revocación;
+- auxiliar `ACTIVE` o `CONTRATADO`;
+- dispositivo `PRIMARY / ACTIVE`;
+- dispositivo sin revocación y con autorización vigente.
+
+`expiresAt` se conserva por compatibilidad de esquema y auditoría, pero un valor histórico vencido no invalida por sí solo una sesión que todavía cumple esas condiciones. La resolución actualiza `lastSeenAt` y renueva `expiresAt` a un horizonte de continuidad de 365 días.
+
+Cuando `GET /operaciones/portal` resuelve la sesión correctamente, vuelve a emitir el **mismo token** en una cookie HttpOnly/Secure con 365 días desde esa apertura. Si la instalación válida está presente, renueva la misma cookie de instalación. Una lista vacía de turnos no desactiva al auxiliar ni invalida la sesión.
+
+El navegador puede borrar cookies o imponer límites de persistencia. Si la cookie cruda ya desapareció, el servidor no intenta reconstruirla desde el hash de base de datos o desde el identificador de instalación; esa restricción se mantiene deliberadamente para no debilitar la autenticación.
 
 ## Variables
 
@@ -112,7 +133,7 @@ Opcionalmente puede configurarse:
 ATTENDANCE_PORTAL_SESSION_TTL_MINUTES
 ```
 
-Si no se define, se mantiene el TTL de siete días fijado por la política de #582. Los límites admitidos siguen siendo entre 15 minutos y 30 días.
+El valor mantiene el horizonte inicial de activación y sus límites de 15 minutos a 30 días. Desde #1461 ya no funciona como una regla autónoma de baja para una sesión que posteriormente sigue activa, no revocada y vinculada a un auxiliar/dispositivo autorizados; una resolución válida aplica el horizonte de continuidad renovable.
 
 No se agregan variables automáticamente en Railway durante este PR.
 
@@ -174,20 +195,22 @@ Los logs conservan únicamente un código técnico. Nunca registran token de act
 
 Una sesión solo se muestra como activa cuando el adaptador de #586 confirma que:
 
-- la sesión sigue activa y vigente;
+- la sesión sigue activa y no revocada;
 - el auxiliar sigue habilitado;
 - el dispositivo sigue autorizado como principal;
 - las relaciones continúan siendo coherentes.
 
+`expiresAt` histórico ya no constituye por sí solo una segunda autoridad de rechazo. La portada renueva la persistencia de una sesión válida y una lista vacía de asignaciones sigue representando una sesión activa sin turnos disponibles.
+
 La vista no recibe ni presenta `workerId`, `deviceId` o `sessionId`.
 
-Si la sesión falta, venció o fue revocada, se limpia la cookie del navegador y se muestra un estado genérico de activación requerida.
+Si la sesión falta o fue revocada —incluyendo baja del auxiliar o revocación/reemplazo del dispositivo principal— se limpia la cookie del navegador y se muestra un estado genérico de activación requerida.
 
 ## Seguridad de cookies
 
 OWASP recomienda intercambiar identificadores de sesión mediante cookies con `Secure`, `HttpOnly` y `SameSite`, evitando parámetros URL. MDN documenta que el prefijo `__Secure-` exige `Secure` y un origen HTTPS.
 
-Se mantiene `__Secure-` en lugar de `__Host-` porque las cookies se restringen deliberadamente a `Path=/operaciones/portal`; `__Host-` exige `Path=/`.
+La continuidad de #1461 no introduce refresh token, almacenamiento JavaScript ni un segundo secreto. Se reemite el mismo token cuya validez continúa controlada server-side por sesión, auxiliar y dispositivo.
 
 ## Fuera de alcance
 
@@ -220,7 +243,7 @@ El envío automático por WhatsApp debe permanecer en una fase posterior, despu�
 
 Revertir el router, su montaje, la vista, las pruebas y este documento.
 
-La tabla `DispatchWorkerPortalSession` de #586 puede permanecer sin consumidores. Este PR no crea migraciones ni transforma datos.
+La tabla `DispatchWorkerPortalSession` de #586 puede permanecer sin consumidores. #1461 no crea migraciones ni transforma datos; su rollback es un revert de código/documentación.
 
 ## Frontera HTTP reforzada
 

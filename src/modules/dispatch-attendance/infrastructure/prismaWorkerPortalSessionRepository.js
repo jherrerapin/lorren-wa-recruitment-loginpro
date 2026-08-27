@@ -1,3 +1,4 @@
+import { buildWorkerPortalSessionContinuityExpiry } from '../domain/workerPortalSessionPolicy.js';
 import { runSerializableActivationTransaction } from './prismaPrimaryDeviceActivationRepository.js';
 
 const ACTIVE_WORKER_STATUSES = Object.freeze(['ACTIVE', 'CONTRATADO']);
@@ -223,7 +224,6 @@ export function createPrismaWorkerPortalSessionRepository(
           sessionTokenHash: input.sessionTokenHash,
           status: ACTIVE_SESSION_STATUS,
           revokedAt: null,
-          expiresAt: { gt: input.now },
           worker: {
             is: {
               operationalStatus: { in: [...ACTIVE_WORKER_STATUSES] }
@@ -242,15 +242,16 @@ export function createPrismaWorkerPortalSessionRepository(
       });
       if (!session) return null;
 
+      const continuityExpiresAt = buildWorkerPortalSessionContinuityExpiry(input.now);
       const touched = await prisma.dispatchWorkerPortalSession.updateMany({
         where: {
           id: session.id,
           status: ACTIVE_SESSION_STATUS,
-          revokedAt: null,
-          expiresAt: { gt: input.now }
+          revokedAt: null
         },
         data: {
-          lastSeenAt: input.now
+          lastSeenAt: input.now,
+          expiresAt: continuityExpiresAt
         }
       });
       if (touched.count !== 1) return null;
@@ -259,7 +260,9 @@ export function createPrismaWorkerPortalSessionRepository(
         workerId: session.workerId,
         deviceId: session.workerDeviceId,
         sessionId: session.id,
-        expiresAt: session.expiresAt
+        expiresAt: validDate(session.expiresAt) && session.expiresAt.getTime() > input.now.getTime()
+          ? session.expiresAt
+          : continuityExpiresAt
       };
     }
   };
