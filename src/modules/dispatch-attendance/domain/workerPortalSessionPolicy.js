@@ -5,6 +5,8 @@ export const WORKER_PORTAL_SESSION_TOKEN_LENGTH = 43;
 export const WORKER_PORTAL_SESSION_DEFAULT_TTL_MINUTES = 7 * 24 * 60;
 export const WORKER_PORTAL_SESSION_MIN_TTL_MINUTES = 15;
 export const WORKER_PORTAL_SESSION_MAX_TTL_MINUTES = 30 * 24 * 60;
+export const WORKER_PORTAL_SESSION_CONTINUITY_DAYS = 365;
+export const WORKER_PORTAL_SESSION_CONTINUITY_MAX_AGE_MS = WORKER_PORTAL_SESSION_CONTINUITY_DAYS * 24 * 60 * 60 * 1000;
 export const WORKER_PORTAL_SESSION_COOKIE_NAME = '__Secure-lorren-attendance';
 export const WORKER_PORTAL_SESSION_COOKIE_PATH = '/';
 
@@ -64,6 +66,11 @@ export function buildWorkerPortalSessionExpiry(now = new Date(), ttlMinutes) {
   const issuedAt = validDate(now, 'worker_portal_session_now');
   const ttl = normalizeTtlMinutes(ttlMinutes);
   return new Date(issuedAt.getTime() + ttl * 60 * 1000);
+}
+
+export function buildWorkerPortalSessionContinuityExpiry(now = new Date()) {
+  const current = validDate(now, 'worker_portal_session_continuity_now');
+  return new Date(current.getTime() + WORKER_PORTAL_SESSION_CONTINUITY_MAX_AGE_MS);
 }
 
 export function buildWorkerPortalSessionCookie(expiresAt, now = new Date()) {
