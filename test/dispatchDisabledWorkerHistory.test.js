@@ -64,9 +64,9 @@ test('personal separa activos de desactivados y conserva acceso a historial', ()
   assert.match(personnelView, /value="DISABLED"/);
   assert.match(personnelView, /Inactivos \/ desactivados/);
   assert.match(personnelView, />Estado<\/th>/);
-  assert.match(personnelView, />Reactivar<%=/);
+  assert.match(personnelView, /workerActive \? 'Desactivar' : 'Reactivar'/);
   assert.match(personnelView, /\/personal\/<%= w\.id %>\/historial/);
-  assert.match(personnelView, /Su historial de trabajo se conserva|registros históricos/);
+  assert.match(personnelView, /registros históricos/);
 });
 
 test('nuevas asignaciones solo aceptan auxiliares CONTRATADO también en el POST', () => {
