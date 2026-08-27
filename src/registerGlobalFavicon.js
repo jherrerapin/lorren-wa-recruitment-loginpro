@@ -1,5 +1,6 @@
 import express from 'express';
 import { enhanceApprovedRecruitmentUx } from './services/approvedRecruitmentUx.js';
+import { ensureApprovedOutreachWindowUi } from './services/approvedOutreachWindowUi.js';
 import { enhanceCvAnalysisExportSelection } from './services/cvAnalysisExportUi.js';
 import { ensureGlobalFavicon } from './services/htmlFavicon.js';
 import { removeRecruiterTechnicalCopy } from './services/recruiterFacingCopy.js';
@@ -18,9 +19,11 @@ if (!express.response[PATCH_MARK]) {
 
   express.response.send = function sendWithGlobalHtmlEnhancements(body) {
     const output = typeof body === 'string'
-      ? enhanceApprovedRecruitmentUx(
-        removeRecruiterTechnicalCopy(
-          enhanceCvAnalysisExportSelection(ensureGlobalFavicon(body))
+      ? ensureApprovedOutreachWindowUi(
+        enhanceApprovedRecruitmentUx(
+          removeRecruiterTechnicalCopy(
+            enhanceCvAnalysisExportSelection(ensureGlobalFavicon(body))
+          )
         )
       )
       : body;
