@@ -114,3 +114,31 @@ test('el flujo ejecutado mantiene dispatchOpsExtras como autoridad de personal y
   assert.doesNotMatch(server, /dispatchWorkerExitReasons/);
   assert.doesNotMatch(server, /dispatchAssignmentConfirmationsRouter/);
 });
+
+test('la reparación histórica restaura solo degradaciones demostrables y recalcula cobertura', () => {
+  const migration = source('prisma/migrations/20260827145000_repair_dispatch_deactivation_history/migration.sql');
+
+  assert.match(migration, /assignment\."status" IN \('NO_CONFIRMO', 'CANCELLED'\)/);
+  assert.match(migration, /Auxiliar desactivado desde el modulo de personal/);
+  assert.match(migration, /Auxiliar desactivado desde el módulo de personal/);
+  assert.match(migration, /Auxiliar retirado del flujo\. Causal/);
+  assert.match(migration, /attendance\."id" IS NOT NULL/);
+  assert.match(migration, /assignment\."status" = 'NO_CONFIRMO'/);
+  assert.match(migration, /assignment\."updatedAt" >/);
+  assert.match(migration, /COALESCE\(point\."absenceGraceMinutes", 15\)/);
+  assert.match(migration, /SET "status" = 'CONFIRMED'/);
+
+  assert.match(migration, /"AffectedRequests" AS/);
+  assert.match(migration, /"OperationalCoverage" AS/);
+  assert.match(migration, /assignment\."status" IN \('ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'\)/);
+  assert.match(migration, /COALESCE\(worker\."isTestProfile", false\) = false/);
+  assert.match(migration, /THEN 'ASSIGNMENT_COMPLETE'/);
+  assert.match(migration, /THEN 'PENDING_CONFIRMATION'/);
+  assert.match(migration, /THEN 'ASSIGNMENT_PARTIAL'/);
+  assert.match(migration, /ELSE 'PENDING_ASSIGNMENT'/);
+
+  assert.doesNotMatch(migration, /SET "status" = 'ASSIGNED'/);
+  assert.doesNotMatch(migration, /SET "status" = 'CONFIRMATION_PENDING'/);
+  assert.doesNotMatch(migration, /DELETE FROM "DispatchAssignment"/);
+  assert.doesNotMatch(migration, /DELETE FROM "DispatchAttendanceSession"/);
+});
