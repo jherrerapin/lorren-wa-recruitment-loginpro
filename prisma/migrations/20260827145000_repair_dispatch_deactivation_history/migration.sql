@@ -16,8 +16,6 @@ SET "status" = 'CONFIRMED'
 FROM "DispatchServiceRequest" request
 LEFT JOIN "DispatchOperationPoint" point
   ON point."id" = request."operationPointId"
-LEFT JOIN "DispatchAttendanceSession" attendance
-  ON attendance."assignmentId" = assignment."id"
 WHERE request."id" = assignment."serviceRequestId"
   AND assignment."status" IN ('NO_CONFIRMO', 'CANCELLED')
   AND (
@@ -26,7 +24,11 @@ WHERE request."id" = assignment."serviceRequestId"
     OR assignment."notes" ILIKE 'Auxiliar retirado del flujo. Causal:%'
   )
   AND (
-    attendance."id" IS NOT NULL
+    EXISTS (
+      SELECT 1
+      FROM "DispatchAttendanceSession" attendance
+      WHERE attendance."assignmentId" = assignment."id"
+    )
     OR (
       assignment."status" = 'NO_CONFIRMO'
       AND (
