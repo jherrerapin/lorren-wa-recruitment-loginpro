@@ -7,18 +7,19 @@ import {
   resolveDispatchServiceRequestPolicy
 } from '../src/services/dispatchServiceRequestPolicy.js';
 
-function requestAt({ isTestClient = false, serviceDate = '2026-07-25', startTime = '10:00' } = {}) {
+function requestAt({ isTestClient = false, serviceDate = '2026-07-25', startTime = '10:00', source = 'PUBLIC_LINK' } = {}) {
   return {
     id: 'request-1',
     serviceDate: new Date(`${serviceDate}T00:00:00-05:00`),
     startTime,
+    source,
     operationPoint: {
       client: { id: 'client-1', name: 'Cliente', isTestClient }
     }
   };
 }
 
-test('cliente real conserva edición y eliminación hasta el instante exacto de dos horas', () => {
+test('solicitud externa conserva edición y eliminación hasta el instante exacto de dos horas', () => {
   const request = requestAt();
   const start = new Date('2026-07-25T10:00:00-05:00');
   const before = resolveDispatchServiceRequestPolicy(request, new Date(start.getTime() + DISPATCH_SERVICE_REQUEST_EDIT_GRACE_MS - 1));
@@ -33,6 +34,22 @@ test('cliente real conserva edición y eliminación hasta el instante exacto de 
   assert.equal(after.canDelete, false);
 });
 
+test('solicitud interna sigue editable todo el día operativo sin extender su eliminación', () => {
+  const request = requestAt({ source: 'INTERNAL', serviceDate: '2026-07-25', startTime: '05:00' });
+  const afterRegularGrace = resolveDispatchServiceRequestPolicy(request, new Date('2026-07-25T20:00:00-05:00'));
+  const finalMillisecond = resolveDispatchServiceRequestPolicy(request, new Date('2026-07-25T23:59:59.999-05:00'));
+  const nextDay = resolveDispatchServiceRequestPolicy(request, new Date('2026-07-26T00:00:00-05:00'));
+
+  assert.equal(afterRegularGrace.isInternalRequest, true);
+  assert.equal(afterRegularGrace.canEdit, true);
+  assert.equal(afterRegularGrace.canDelete, false, 'el cambio no debe ampliar la eliminación');
+  assert.equal(afterRegularGrace.editLockAt, '2026-07-26T05:00:00.000Z');
+  assert.equal(afterRegularGrace.deleteLockAt, '2026-07-25T12:00:00.000Z');
+  assert.equal(finalMillisecond.canEdit, true);
+  assert.equal(nextDay.canEdit, false);
+  assert.match(nextDay.editBlockedReason, /cerró su día operativo/);
+});
+
 test('cliente de prueba puede eliminar una solicitud antigua pero no editarla', () => {
   const request = requestAt({ isTestClient: true });
   const policy = resolveDispatchServiceRequestPolicy(request, new Date('2027-07-25T10:00:00-05:00'));
@@ -42,7 +59,7 @@ test('cliente de prueba puede eliminar una solicitud antigua pero no editarla', 
 });
 
 test('una solicitud sin fecha utilizable no queda bloqueada por tiempo', () => {
-  const policy = resolveDispatchServiceRequestPolicy({ operationPoint: { client: { isTestClient: false } } }, new Date('2027-01-01T00:00:00Z'));
+  const policy = resolveDispatchServiceRequestPolicy({ source: 'PUBLIC_LINK', operationPoint: { client: { isTestClient: false } } }, new Date('2027-01-01T00:00:00Z'));
   assert.equal(policy.editLockAt, null);
   assert.equal(policy.canEdit, true);
   assert.equal(policy.canDelete, true);
@@ -155,6 +172,8 @@ test('contratos del repositorio conectan la marca y la autoridad server-side', (
   assert.match(bridgeCore, /resolveDispatchServiceRequestPolicy/);
   assert.match(bridgeCore, /isTestClient/);
   assert.match(opsExtras, /deleteDispatchServiceRequestWithPolicy/);
+  assert.match(opsExtras, /source:\s*'INTERNAL'/);
+  assert.match(publicClient, /source:\s*'PUBLIC_LINK'/);
   assert.match(opsExtras, /res\.render\('operacionesAsignacionesConfirmacion'/);
   assert.match(publicClient, /deleteDispatchServiceRequestWithPolicy/);
   assert.match(publicClient, /isTestClient/);

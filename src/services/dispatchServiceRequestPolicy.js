@@ -1,4 +1,4 @@
-import { dispatchServiceDateKey } from './dispatchDate.js';
+import { addDispatchIsoDays, dispatchServiceDateKey } from './dispatchDate.js';
 import { deleteObjectFromR2 } from './storage.js';
 
 export const DISPATCH_SERVICE_REQUEST_EDIT_GRACE_HOURS = 2;
@@ -24,6 +24,18 @@ function normalizeTime(value) {
   return `${match[1].padStart(2, '0')}:${match[2]}`;
 }
 
+function isInternalDispatchServiceRequest(request = {}) {
+  return String(request.source || '').trim().toUpperCase() === 'INTERNAL';
+}
+
+function dispatchServiceRequestOperationalDayEndAt(request = {}) {
+  const date = dispatchServiceDateKey(request.serviceDate);
+  if (!date) return null;
+  const nextDate = addDispatchIsoDays(date, 1);
+  const boundary = new Date(`${nextDate}T00:00:00-05:00`);
+  return Number.isNaN(boundary.getTime()) ? null : boundary;
+}
+
 export function dispatchServiceRequestStartAt(request = {}) {
   const date = dispatchServiceDateKey(request.serviceDate);
   if (!date) return null;
@@ -33,21 +45,33 @@ export function dispatchServiceRequestStartAt(request = {}) {
 
 export function resolveDispatchServiceRequestPolicy(request = {}, now = new Date()) {
   const startAt = dispatchServiceRequestStartAt(request);
-  const lockAt = startAt ? new Date(startAt.getTime() + DISPATCH_SERVICE_REQUEST_EDIT_GRACE_MS) : null;
-  const isTimeLocked = Boolean(lockAt && now.getTime() > lockAt.getTime());
+  const regularLockAt = startAt ? new Date(startAt.getTime() + DISPATCH_SERVICE_REQUEST_EDIT_GRACE_MS) : null;
+  const isInternalRequest = isInternalDispatchServiceRequest(request);
+  const operationalDayEndAt = isInternalRequest ? dispatchServiceRequestOperationalDayEndAt(request) : null;
+  const editLockAt = operationalDayEndAt || regularLockAt;
+  const isEditTimeLocked = Boolean(editLockAt && (
+    isInternalRequest
+      ? now.getTime() >= editLockAt.getTime()
+      : now.getTime() > editLockAt.getTime()
+  ));
+  const isDeleteTimeLocked = Boolean(regularLockAt && now.getTime() > regularLockAt.getTime());
   const isTestClient = request.operationPoint?.client?.isTestClient === true;
 
   return {
     isTestClient,
+    isInternalRequest,
     startAt: startAt?.toISOString() || null,
-    editLockAt: lockAt?.toISOString() || null,
-    isTimeLocked,
-    canEdit: !isTimeLocked,
-    canDelete: isTestClient || !isTimeLocked,
-    editBlockedReason: isTimeLocked
-      ? `Esta solicitud superó las ${DISPATCH_SERVICE_REQUEST_EDIT_GRACE_HOURS} horas posteriores a la hora de inicio del servicio y quedó solo para consulta.`
+    editLockAt: editLockAt?.toISOString() || null,
+    deleteLockAt: regularLockAt?.toISOString() || null,
+    isTimeLocked: isEditTimeLocked,
+    canEdit: !isEditTimeLocked,
+    canDelete: isTestClient || !isDeleteTimeLocked,
+    editBlockedReason: isEditTimeLocked
+      ? isInternalRequest
+        ? 'Esta solicitud interna ya cerró su día operativo y quedó solo para consulta.'
+        : `Esta solicitud superó las ${DISPATCH_SERVICE_REQUEST_EDIT_GRACE_HOURS} horas posteriores a la hora de inicio del servicio y quedó solo para consulta.`
       : null,
-    deleteBlockedReason: isTimeLocked && !isTestClient
+    deleteBlockedReason: isDeleteTimeLocked && !isTestClient
       ? `Esta solicitud superó las ${DISPATCH_SERVICE_REQUEST_EDIT_GRACE_HOURS} horas posteriores a la hora de inicio del servicio y ya no puede eliminarse.`
       : null
   };
