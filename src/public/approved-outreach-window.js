@@ -1,6 +1,7 @@
 (() => {
   if (window.location.pathname !== '/admin/outreach/approved') return;
 
+  const STATUS_BATCH_SIZE = 100;
   const table = document.querySelector('table.candidate-table');
   if (!table) return;
 
@@ -101,30 +102,42 @@
     if (state.windowOpen) status.insertAdjacentElement('afterend', buildFreeTextControls(state));
   }
 
-  async function loadStates() {
+  async function fetchStateBatch(batch) {
     const query = new URLSearchParams();
-    query.set('candidateIds', candidates.map((candidate) => candidate.candidateId).join(','));
+    query.set('candidateIds', batch.map((candidate) => candidate.candidateId).join(','));
+    const response = await fetch('/admin/outreach/approved/window-status?' + query.toString(), {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' }
+    });
+    if (!response.ok) throw new Error('window_status_failed');
+    const payload = await response.json();
+    return Array.isArray(payload.candidates) ? payload.candidates : [];
+  }
+
+  function installUnavailableState(candidate) {
+    if (candidate.nameCell.querySelector('[data-approved-window-status]')) return;
+    const status = document.createElement('div');
+    status.dataset.approvedWindowStatus = candidate.candidateId;
+    status.style.cssText = 'font-size:12px;color:#6b7280;margin-top:4px;';
+    status.textContent = 'No fue posible consultar la ventana de 24 h.';
+    candidate.name.insertAdjacentElement('afterend', status);
+  }
+
+  async function loadStates() {
+    const stateById = new Map();
     try {
-      const response = await fetch('/admin/outreach/approved/window-status?' + query.toString(), {
-        credentials: 'same-origin',
-        headers: { Accept: 'application/json' }
-      });
-      if (!response.ok) throw new Error('window_status_failed');
-      const payload = await response.json();
-      const stateById = new Map((payload.candidates || []).map((state) => [state.candidateId, state]));
+      for (let index = 0; index < candidates.length; index += STATUS_BATCH_SIZE) {
+        const batch = candidates.slice(index, index + STATUS_BATCH_SIZE);
+        const states = await fetchStateBatch(batch);
+        states.forEach((state) => stateById.set(state.candidateId, state));
+      }
       candidates.forEach((candidate) => {
         const state = stateById.get(candidate.candidateId);
         if (state) installState(candidate, state);
+        else installUnavailableState(candidate);
       });
     } catch (_error) {
-      candidates.forEach((candidate) => {
-        if (candidate.nameCell.querySelector('[data-approved-window-status]')) return;
-        const status = document.createElement('div');
-        status.dataset.approvedWindowStatus = candidate.candidateId;
-        status.style.cssText = 'font-size:12px;color:#6b7280;margin-top:4px;';
-        status.textContent = 'No fue posible consultar la ventana de 24 h.';
-        candidate.name.insertAdjacentElement('afterend', status);
-      });
+      candidates.forEach(installUnavailableState);
     }
   }
 
