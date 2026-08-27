@@ -4,7 +4,9 @@
 
 Implementación relacionada con #509 y #587. Continúa la política de sesión de #582 y la persistencia integrada en #586.
 
-Esta fase conecta la activación y resolución de sesión a HTTP. Las entregas posteriores añadieron asignaciones, asistencia y PWA sobre la misma sesión; la continuidad de esa sesión se consolida en #1461 sin crear una autoridad de autenticación paralela.
+Esta fase conecta la activación y resolución de sesión a HTTP. Todavía no muestra asignaciones, no captura ubicación o fotografía y no registra llegada o salida.
+
+La continuidad de la sesión PWA se consolida posteriormente en #1461 sobre la misma sesión y el mismo dispositivo autorizado, sin crear una autoridad de autenticación paralela.
 
 ## Problema
 
@@ -14,7 +16,7 @@ Aplicaciones de mensajería, filtros corporativos, antivirus y generadores de pr
 
 También sería inseguro conservar el token en:
 
-- parámetros de consulta después de consumirlo;
+- parámetros de consulta;
 - rutas del servidor;
 - HTML renderizado;
 - almacenamiento local del navegador;
@@ -24,14 +26,23 @@ También sería inseguro conservar el token en:
 
 ## Formato del enlace
 
-El flujo vigente acepta la activación en la URL pública y la elimina del historial antes de continuar. La página pública ejecuta esta secuencia:
+El formato previsto para la futura emisión administrativa es:
 
-1. obtiene el token de activación entregado al navegador;
-2. ejecuta `history.replaceState()` para limpiar la URL visible;
-3. valida localmente su formato;
-4. lo envía una sola vez mediante `POST /operaciones/portal/activar`;
-5. recibe una URL limpia;
-6. navega a `/operaciones/portal`.
+```text
+https://<host>/operaciones/portal/activar#token=<token>
+```
+
+El fragmento, todo lo que aparece después de `#`, no forma parte de la petición HTTP enviada al servidor.
+
+La página pública ejecuta esta secuencia:
+
+1. lee el fragmento en el navegador;
+2. extrae el token;
+3. ejecuta `history.replaceState()` para eliminarlo del historial visible;
+4. valida localmente su formato;
+5. lo envía una sola vez mediante `POST /operaciones/portal/activar`;
+6. recibe una URL limpia;
+7. navega a `/operaciones/portal`.
 
 El `GET /operaciones/portal/activar` solo entrega la página y nunca llama la autoridad de activación.
 
@@ -43,7 +54,7 @@ El `GET /operaciones/portal/activar` solo entrega la página y nunca llama la au
 /operaciones/portal
 ```
 
-La frontera de activación conserva:
+Expone inicialmente:
 
 ```text
 GET  /operaciones/portal/activar
@@ -51,11 +62,11 @@ POST /operaciones/portal/activar
 GET  /operaciones/portal
 ```
 
-No se crea una segunda sesión, un refresh token independiente ni un endpoint paralelo de autenticación.
+No existe una ruta `GET /activar/:token` ni una variante con `?token=`.
 
 ## Instalación
 
-El navegador conserva una cookie independiente:
+El navegador recibe una cookie independiente:
 
 ```text
 Nombre: __Secure-lorren-installation
@@ -65,12 +76,12 @@ Secure: true
 SameSite: Strict
 Path: /
 Domain: ausente
-Horizonte persistente: 365 días
+Duración: 365 días
 ```
 
-El UUID no se guarda directamente en la base de datos. La autoridad de activación calcula un HMAC-SHA-256 usando `ATTENDANCE_INSTALLATION_PEPPER`, y el adaptador Prisma solo recibe ese HMAC.
+El UUID no se guarda directamente en la base de datos. La autoridad de #582 calcula un HMAC-SHA-256 usando `ATTENDANCE_INSTALLATION_PEPPER`, y el adaptador Prisma solo recibe ese HMAC.
 
-Durante una activación, si la cookie falta o contiene un valor inválido, el servidor genera un UUID v4 nuevo. Durante una resolución normal del PWA esto **no** ocurre: si la instalación existente es válida se renueva la misma cookie; si falta o es inválida, la portada no inventa silenciosamente otra identidad de dispositivo.
+Durante una activación, si la cookie falta o contiene un valor inválido, el servidor genera un UUID v4 nuevo y reemplaza el valor. Durante una resolución normal de una sesión ya válida no se inventa otra instalación: si la cookie válida existe, #1461 renueva **ese mismo UUID**; si falta o es inválida, se requiere el flujo de activación correspondiente.
 
 ## Sesión
 
@@ -85,33 +96,26 @@ Path: /
 Domain: ausente
 ```
 
-La base de datos conserva únicamente SHA-256 del token. El token crudo no se incluye en respuestas JSON, logs o redirecciones y no se copia a `localStorage`, `sessionStorage` o IndexedDB.
+La base de datos conserva únicamente SHA-256 del token. El token crudo no se incluye en respuestas JSON, logs o redirecciones.
 
 ### Continuidad del PWA
 
-Históricamente `expiresAt` funcionaba como un vencimiento absoluto de la sesión —siete días por defecto— aunque el auxiliar siguiera contratado y su dispositivo continuara autorizado. Esto podía sacar al usuario del PWA sin que hubiera existido una baja operativa.
+Antes de #1461, `expiresAt` funcionaba como un vencimiento absoluto de autenticación —siete días por defecto— aunque el auxiliar siguiera habilitado y su dispositivo principal continuara autorizado.
 
-Desde #1461, la resolución de una sesión activa se apoya en las autoridades que realmente representan acceso vigente:
+Después de #1461, la resolución válida continúa dependiendo de las autoridades existentes:
 
 - hash exacto de la sesión;
 - `DispatchWorkerPortalSession.status = ACTIVE`;
 - sesión sin revocación;
-- auxiliar con estado operativo permitido (`ACTIVE` o `CONTRATADO`);
+- auxiliar `ACTIVE` o `CONTRATADO`;
 - dispositivo `PRIMARY / ACTIVE`;
-- dispositivo sin revocación;
-- autorización del dispositivo aún válida.
+- dispositivo sin revocación y con autorización vigente.
 
-`expiresAt` se conserva por compatibilidad de esquema, auditoría y consumidores existentes, pero un valor histórico ya vencido no invalida por sí solo una sesión que todavía cumple todas las condiciones anteriores. Una resolución válida actualiza `lastSeenAt` y renueva `expiresAt` a un horizonte de continuidad de 365 días.
+`expiresAt` se conserva por compatibilidad de esquema y auditoría, pero un valor histórico vencido no invalida por sí solo una sesión que todavía cumple esas condiciones. La resolución actualiza `lastSeenAt` y renueva `expiresAt` a un horizonte de continuidad de 365 días.
 
-Al abrir correctamente `GET /operaciones/portal`, el servidor vuelve a emitir **el mismo token de sesión** como cookie HttpOnly/Secure con 365 días desde esa apertura. Si la cookie de instalación válida está presente, también renueva la misma instalación. Esto permite migrar sesiones ya emitidas antes del cambio siempre que el navegador todavía entregue su cookie antigua.
+Cuando `GET /operaciones/portal` resuelve la sesión correctamente, vuelve a emitir el **mismo token** en una cookie HttpOnly/Secure con 365 días desde esa apertura. Si la instalación válida está presente, renueva la misma cookie de instalación. Una lista vacía de turnos no desactiva al auxiliar ni invalida la sesión.
 
-No tener turnos asignados o no abrir el PWA durante un periodo corto no cambia `operationalStatus` ni revoca sesión o dispositivo. No existe un job de desactivación basado en `lastSeenAt` o ausencia de asignaciones.
-
-### Límite del navegador
-
-La aplicación no puede prometer persistencia literalmente infinita de una cookie: el navegador puede borrar datos del sitio, el usuario puede eliminarlos y los navegadores pueden imponer límites a cookies persistentes. Por eso se usa un horizonte largo renovable, no un token permanente expuesto al cliente.
-
-Si el navegador ya eliminó una cookie antigua antes de desplegar esta corrección, el servidor no puede reconstruir el token crudo a partir del hash guardado —deliberadamente— y esa instalación necesita una nueva activación. No se debilita este límite recuperando sesión solo con el identificador de instalación.
+El navegador puede borrar cookies o imponer límites de persistencia. Si la cookie cruda ya desapareció, el servidor no intenta reconstruirla desde el hash de base de datos o desde el identificador de instalación; esa restricción se mantiene deliberadamente para no debilitar la autenticación.
 
 ## Variables
 
@@ -129,9 +133,9 @@ Opcionalmente puede configurarse:
 ATTENDANCE_PORTAL_SESSION_TTL_MINUTES
 ```
 
-Ese valor conserva su función de horizonte inicial al crear la sesión y valida los límites históricos entre 15 minutos y 30 días. Ya no funciona como una regla autónoma de desactivación para una sesión que posteriormente sigue activa, no revocada y vinculada a un auxiliar/dispositivo autorizados; la resolución válida aplica el horizonte de continuidad renovable.
+El valor mantiene el horizonte inicial de activación y sus límites de 15 minutos a 30 días. Desde #1461 ya no funciona como una regla autónoma de baja para una sesión que posteriormente sigue activa, no revocada y vinculada a un auxiliar/dispositivo autorizados; una resolución válida aplica el horizonte de continuidad renovable.
 
-No se agregan variables automáticamente en Railway durante este cambio.
+No se agregan variables automáticamente en Railway durante este PR.
 
 ## Cabeceras
 
@@ -146,11 +150,24 @@ X-Content-Type-Options: nosniff
 X-Frame-Options: DENY
 ```
 
-La página usa una política CSP con nonce y no convierte las credenciales de sesión en datos accesibles para JavaScript.
+La página usa una política CSP con nonce:
+
+```text
+default-src 'none'
+script-src 'nonce-...'
+style-src 'unsafe-inline'
+connect-src 'self'
+img-src 'self' data:
+base-uri 'none'
+form-action 'self'
+frame-ancestors 'none'
+```
+
+No carga JavaScript, CSS, fuentes, analítica o imágenes de terceros.
 
 ## Errores
 
-Token de activación inválido, vencido, consumido o revocado produce la misma respuesta pública:
+Token inválido, vencido, consumido o revocado produce la misma respuesta pública:
 
 ```json
 {
@@ -172,18 +189,18 @@ Errores de configuración, como ausencia del pepper, devuelven:
 
 Los logs conservan únicamente un código técnico. Nunca registran token de activación, token de sesión o UUID de instalación.
 
-## Portada del PWA
+## Portada mínima
 
 `GET /operaciones/portal` busca la cookie de sesión y ejecuta `resolveWorkerPortalSession()`.
 
-Una sesión se muestra como activa únicamente cuando el adaptador confirma que:
+Una sesión solo se muestra como activa cuando el adaptador de #586 confirma que:
 
-- la sesión está activa y no revocada;
+- la sesión sigue activa y no revocada;
 - el auxiliar sigue habilitado;
-- el dispositivo principal sigue autorizado;
+- el dispositivo sigue autorizado como principal;
 - las relaciones continúan siendo coherentes.
 
-Una lista vacía de asignaciones no vuelve inactiva la sesión: el auxiliar puede abrir el PWA y ver que no tiene turnos activos.
+`expiresAt` histórico ya no constituye por sí solo una segunda autoridad de rechazo. La portada renueva la persistencia de una sesión válida y una lista vacía de asignaciones sigue representando una sesión activa sin turnos disponibles.
 
 La vista no recibe ni presenta `workerId`, `deviceId` o `sessionId`.
 
@@ -191,32 +208,47 @@ Si la sesión falta o fue revocada —incluyendo baja del auxiliar o revocación
 
 ## Seguridad de cookies
 
-Se mantiene el intercambio de identificadores de sesión mediante cookies `Secure` y `HttpOnly`, evitando parámetros URL persistentes y almacenamiento JavaScript. La continuidad no introduce un segundo secreto: reemite el mismo token cuya validez continúa controlada server-side por sesión, auxiliar y dispositivo.
+OWASP recomienda intercambiar identificadores de sesión mediante cookies con `Secure`, `HttpOnly` y `SameSite`, evitando parámetros URL. MDN documenta que el prefijo `__Secure-` exige `Secure` y un origen HTTPS.
 
-Una nueva activación conserva la revocación transaccional de sesiones anteriores y del dispositivo principal anterior. Por tanto, ampliar la persistencia del navegador no impide invalidar inmediatamente una sesión desde el servidor.
+La continuidad de #1461 no introduce refresh token, almacenamiento JavaScript ni un segundo secreto. Se reemite el mismo token cuya validez continúa controlada server-side por sesión, auxiliar y dispositivo.
 
-## Fuera de alcance de #1461
+## Fuera de alcance
 
-- APK/Android nativo, Nearby, Bluetooth o RFCOMM;
-- cambios de geocerca, biometría o writers de asistencia;
-- nuevos refresh tokens o tokens visibles a JavaScript;
-- Prisma o migraciones;
-- jobs;
-- `src/routes/webhook.js`;
-- cambios automáticos en Railway o despliegue manual.
+- botón administrativo para emitir activaciones;
+- envío de enlaces por WhatsApp;
+- listado de asignaciones;
+- GPS y geocerca;
+- cámara y fotografía;
+- marcación de llegada o salida;
+- revisión del coordinador;
+- cierre de sesión con revocación en base de datos;
+- PWA instalable;
+- migraciones nuevas;
+- despliegue manual en Railway.
 
-## Pruebas
+## Próximo paso
 
-La regresión de continuidad debe cubrir al menos:
+Después de integrar esta ruta, la siguiente entrega debe permitir que `dev` emita una activación para un auxiliar desde el panel operativo y copie o envíe el enlace con fragmento.
 
-- una sesión con `expiresAt` histórico ya pasado que sigue activa y vinculada a auxiliar/dispositivo válidos;
-- renovación de `lastSeenAt` y del horizonte persistido;
-- conservación de filtros `ACTIVE`, no revocado, worker habilitado y dispositivo `PRIMARY / ACTIVE`;
-- renovación de la misma cookie de sesión en la portada;
-- renovación de la misma instalación cuando existe;
-- ausencia de creación silenciosa de una instalación durante resolución normal;
-- sesión inválida/revocada continúa devolviendo acceso inactivo.
+El envío automático por WhatsApp debe permanecer en una fase posterior, después de validar manualmente:
+
+- Railway con HTTPS;
+- cookies aceptadas en Android y iPhone;
+- apertura desde WhatsApp;
+- ausencia del token en logs e historial;
+- activación única;
+- revocación de la sesión anterior.
 
 ## Rollback
 
-Revertir el PR de #1461. No hay migraciones ni transformación de datos. Las columnas, hashes de sesión, relaciones con dispositivo y mecanismos de revocación permanecen intactos.
+Revertir el router, su montaje, la vista, las pruebas y este documento.
+
+La tabla `DispatchWorkerPortalSession` de #586 puede permanecer sin consumidores. #1461 no crea migraciones ni transforma datos; su rollback es un revert de código/documentación.
+
+## Frontera HTTP reforzada
+
+La ruta del portal se monta antes de los parsers JSON globales. `POST /activar` aplica su propio límite de 4 KB, captura localmente JSON inválido o demasiado grande y no propaga el cuerpo al logger global.
+
+Antes del parser y de PostgreSQL se ejecuta un guard de intentos por dirección de red. La implementación predeterminada mantiene una ventana acotada, un número máximo de intentos y un máximo de claves; expulsa entradas vencidas o menos recientes. El guard es inyectable para sustituirlo por un adaptador compartido cuando el servicio opere con múltiples réplicas.
+
+Los rechazos esperados de tokens inválidos, vencidos, consumidos o revocados no generan un warning por solicitud. Los errores inesperados o de configuración se registran únicamente mediante códigos sanitizados.
