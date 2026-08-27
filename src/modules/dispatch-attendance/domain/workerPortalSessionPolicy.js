@@ -76,8 +76,9 @@ export function buildWorkerPortalSessionContinuityExpiry(now = new Date()) {
 export function buildWorkerPortalSessionCookie(expiresAt, now = new Date()) {
   const issuedAt = validDate(now, 'worker_portal_session_cookie_now');
   const expiry = validDate(expiresAt, 'worker_portal_session_cookie_expiry');
-  const maxAge = expiry.getTime() - issuedAt.getTime();
-  if (maxAge <= 0) throw new Error('worker_portal_session_cookie_expired');
+  const requestedMaxAge = expiry.getTime() - issuedAt.getTime();
+  if (requestedMaxAge <= 0) throw new Error('worker_portal_session_cookie_expired');
+  const maxAge = Math.max(requestedMaxAge, WORKER_PORTAL_SESSION_CONTINUITY_MAX_AGE_MS);
 
   return {
     name: WORKER_PORTAL_SESSION_COOKIE_NAME,
