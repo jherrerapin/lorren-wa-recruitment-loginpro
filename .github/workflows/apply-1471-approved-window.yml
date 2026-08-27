@@ -1,0 +1,154 @@
+name: Apply 1471 approved window indicator
+
+on:
+  push:
+    branches:
+      - feat/1471-approved-window-indicator
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/1471-approved-window-indicator
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply scoped patch
+        shell: bash
+        run: |
+          node <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+
+          function replaceOnce(source, before, after, label) {
+            const first = source.indexOf(before);
+            if (first < 0) throw new Error(`missing patch anchor: ${label}`);
+            if (source.indexOf(before, first + before.length) >= 0) {
+              throw new Error(`non-unique patch anchor: ${label}`);
+            }
+            return source.slice(0, first) + after + source.slice(first + before.length);
+          }
+
+          function update(path, transform) {
+            const current = readFileSync(path, 'utf8');
+            const next = transform(current);
+            if (next === current) throw new Error(`no changes produced: ${path}`);
+            writeFileSync(path, next);
+          }
+
+          update('src/services/manualOutboundDeliveryService.js', (source) => replaceOnce(
+            source,
+            "const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';",
+            "export const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';",
+            'export interview outreach source'
+          ));
+
+          update('src/routes/admin.js', (input) => {
+            let source = input;
+            source = replaceOnce(
+              source,
+              "import {\n  deliverManualOutboundText,\n  getManualOutboundUserMessage\n} from '../services/manualOutboundDeliveryService.js';",
+              "import {\n  deliverManualOutboundText,\n  getManualOutboundUserMessage,\n  INTERVIEW_OUTREACH_SOURCE,\n  resolveManualOutboundTransport\n} from '../services/manualOutboundDeliveryService.js';",
+              'manual outbound imports'
+            );
+            source = replaceOnce(
+              source,
+              "  return { parameters, body };\n}\n\nfunction sortOutreachCandidates(a, b) {",
+              "  return { parameters, body };\n}\n\nexport function decorateApprovedOutreachCandidateTransport(candidate = {}, now = new Date()) {\n  const { messages, ...visibleCandidate } = candidate;\n  const lastInboundAt = messages?.[0]?.createdAt || null;\n  return {\n    ...visibleCandidate,\n    outreachDelivery: resolveManualOutboundTransport({\n      source: INTERVIEW_OUTREACH_SOURCE,\n      lastInboundAt,\n      now\n    })\n  };\n}\n\nfunction sortOutreachCandidates(a, b) {",
+              'outreach transport decorator'
+            );
+            source = replaceOnce(
+              source,
+              "      createdAt: true,\n      botResumeMode: true,\n      vacancy: {",
+              "      createdAt: true,\n      botResumeMode: true,\n      messages: {\n        where: { direction: MessageDirection.INBOUND },\n        orderBy: { createdAt: 'desc' },\n        take: 1,\n        select: { createdAt: true }\n      },\n      vacancy: {",
+              'latest inbound relation'
+            );
+            source = replaceOnce(
+              source,
+              "  return candidates\n    .filter((candidate) => !MANUAL_OUTBOUND_BLOCKING_MODES.has(String(candidate.botResumeMode || '')))\n    .sort(sortOutreachCandidates);",
+              "  const now = new Date();\n  return candidates\n    .filter((candidate) => !MANUAL_OUTBOUND_BLOCKING_MODES.has(String(candidate.botResumeMode || '')))\n    .map((candidate) => decorateApprovedOutreachCandidateTransport(candidate, now))\n    .sort(sortOutreachCandidates);",
+              'decorate approved candidates'
+            );
+            source = replaceOnce(
+              source,
+              "              source: 'admin_interview_template',",
+              "              source: INTERVIEW_OUTREACH_SOURCE,",
+              'shared outreach source'
+            );
+            return source;
+          });
+
+          update('src/views/outreachApproved.ejs', (input) => {
+            let source = input;
+            source = replaceOnce(
+              source,
+              "    .candidate-name { font-weight: 700; color: #1e2d3d; }\n    .candidate-meta { font-size: 12px; color: #6b7280; margin-top: 4px; }",
+              "    .candidate-name { font-weight: 700; color: #1e2d3d; }\n    .candidate-window { font-size: 12px; font-weight: 700; margin-top: 4px; }\n    .candidate-window-open { color: #15803d; }\n    .candidate-window-closed { color: #b45309; }\n    .candidate-meta { font-size: 12px; color: #6b7280; margin-top: 4px; }",
+              'candidate window styles'
+            );
+            source = replaceOnce(
+              source,
+              "                    <div class=\"candidate-name\"><%= candidate.fullName || 'Sin nombre' %></div>\n                    <div class=\"candidate-meta\">Creado: <%= new Date(candidate.createdAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' }) %></div>",
+              "                    <div class=\"candidate-name\"><%= candidate.fullName || 'Sin nombre' %></div>\n                    <% const isWindowOpen = candidate.outreachDelivery?.whatsappWindowOpen === true; %>\n                    <div class=\"candidate-window <%= isWindowOpen ? 'candidate-window-open' : 'candidate-window-closed' %>\"><%= isWindowOpen ? 'Ventana 24 h abierta · se enviará mensaje libre' : 'Ventana 24 h cerrada · se usará plantilla' %></div>\n                    <div class=\"candidate-meta\">Creado: <%= new Date(candidate.createdAt).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' }) %></div>",
+              'candidate window indicator'
+            );
+            return source;
+          });
+
+          update('test/approvedRecruitmentUx.test.js', (input) => {
+            let source = input;
+            source = replaceOnce(
+              source,
+              "import { normalizeInterviewOutreachConfig } from '../src/routes/admin.js';",
+              "import {\n  decorateApprovedOutreachCandidateTransport,\n  normalizeInterviewOutreachConfig\n} from '../src/routes/admin.js';",
+              'admin test imports'
+            );
+            source = replaceOnce(
+              source,
+              "function renderInterviewOutreach(role = 'admin') {\n  return ejs.render(readSource('src/views/outreachApproved.ejs'), {",
+              "function renderInterviewOutreach(role = 'admin', candidateOverrides = {}) {\n  return ejs.render(readSource('src/views/outreachApproved.ejs'), {",
+              'render helper signature'
+            );
+            source = replaceOnce(
+              source,
+              "      createdAt: new Date('2026-08-25T12:00:00.000Z'),\n      vacancy: {\n        id: 'vacancy-example-1',\n        title: 'Vacante de ejemplo',\n        role: 'Auxiliar',\n        city: 'Ciudad de ejemplo'\n      }\n    }],",
+              "      createdAt: new Date('2026-08-25T12:00:00.000Z'),\n      vacancy: {\n        id: 'vacancy-example-1',\n        title: 'Vacante de ejemplo',\n        role: 'Auxiliar',\n        city: 'Ciudad de ejemplo'\n      },\n      outreachDelivery: { whatsappWindowOpen: true },\n      ...candidateOverrides\n    }],",
+              'render helper candidate overrides'
+            );
+            source = replaceOnce(
+              source,
+              "test('ADMIN no recibe detalles técnicos de la plantilla en el HTML', () => {",
+              "test('la citación muestra la ventana abierta justo debajo del nombre', () => {\n  const html = renderInterviewOutreach('admin');\n  const nameIndex = html.indexOf('Persona Ejemplo');\n  const windowIndex = html.indexOf('Ventana 24 h abierta · se enviará mensaje libre');\n  const createdIndex = html.indexOf('Creado:');\n\n  assert.ok(nameIndex >= 0);\n  assert.ok(windowIndex > nameIndex);\n  assert.ok(createdIndex > windowIndex);\n  assert.match(html, /candidate-window-open/);\n});\n\ntest('la citación muestra plantilla cuando la ventana de 24 h está cerrada', () => {\n  const html = renderInterviewOutreach('admin', {\n    outreachDelivery: { whatsappWindowOpen: false }\n  });\n\n  assert.match(html, /Ventana 24 h cerrada · se usará plantilla/);\n  assert.match(html, /candidate-window-closed/);\n});\n\ntest('el indicador reutiliza la autoridad canónica de transporte y la evidencia inbound', () => {\n  const now = new Date('2026-08-27T17:00:00.000Z');\n  const open = decorateApprovedOutreachCandidateTransport({\n    id: 'candidate-example-open',\n    messages: [{ createdAt: new Date('2026-08-26T18:00:00.000Z') }]\n  }, now);\n  const closed = decorateApprovedOutreachCandidateTransport({\n    id: 'candidate-example-closed',\n    messages: [{ createdAt: new Date('2026-08-26T16:00:00.000Z') }]\n  }, now);\n\n  assert.equal(open.outreachDelivery.whatsappWindowOpen, true);\n  assert.equal(open.outreachDelivery.transport, 'FREE_TEXT');\n  assert.equal(closed.outreachDelivery.whatsappWindowOpen, false);\n  assert.equal(closed.outreachDelivery.transport, 'TEMPLATE');\n  assert.equal(Object.hasOwn(open, 'messages'), false);\n\n  const view = readSource('src/views/outreachApproved.ejs');\n  assert.match(view, /candidate\.outreachDelivery\?\.whatsappWindowOpen/);\n  assert.doesNotMatch(view, /Date\.now\(\)|24\s*\*\s*60\s*\*\s*60/);\n});\n\ntest('ADMIN no recibe detalles técnicos de la plantilla en el HTML', () => {",
+              'window indicator regression tests'
+            );
+            return source;
+          });
+          NODE
+      - name: Install dependencies
+        run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate
+      - name: Syntax checks
+        run: |
+          node --check src/routes/admin.js
+          node --check src/services/manualOutboundDeliveryService.js
+      - name: Targeted regression tests
+        run: node --test test/approvedRecruitmentUx.test.js test/manualOutboundDeliveryService.test.js
+      - name: Full test suite
+        run: npm test
+      - name: Commit validated change
+        shell: bash
+        run: |
+          rm .github/workflows/apply-1471-approved-window.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'feat(admin): mostrar ventana 24h por candidato (#1471)'
+          git push origin HEAD:feat/1471-approved-window-indicator
