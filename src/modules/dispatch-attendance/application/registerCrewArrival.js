@@ -269,7 +269,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
   }
 
   const selectedAssignmentIds = new Set(selectedMembers.map((member) => member.id));
-  const previouslyRecordedOutsideSelection = presenceValidated || targetedManualArrival
+  const previouslyRecordedOutsideSelection = presenceValidated
     ? members.filter((member) => (
         !selectedAssignmentIds.has(member.id)
         && Boolean(member.attendanceSession?.arrivalReportedAt)
@@ -392,10 +392,9 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
   const reviewPendingCount = results.filter((item) => item.pendingReview === true).length;
   const delegatedCount = results.filter((item) => item.isLeader === false && ['RECORDED', 'REPLAYED'].includes(item.status)).length;
   const processedCount = newlyRecordedCount + replayedCount + alreadyRecordedCount;
-  const notDetectedCount = Math.max(
-    0,
-    members.length - selectedMembers.length - previouslyRecordedOutsideSelection
-  );
+  const notDetectedCount = targetedManualArrival
+    ? 0
+    : Math.max(0, members.length - selectedMembers.length - previouslyRecordedOutsideSelection);
 
   return {
     applied: true,
