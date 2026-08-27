@@ -629,9 +629,7 @@
   function expectedAuxiliaryProofCount(context, markType) {
     if (!context?.isCrewLeader || !Array.isArray(context.members)) return 0;
     return context.members.filter((member) => (
-      !member.isLeader
-      && memberEligibleForMark(member, markType)
-      && memberStatus(context, member, markType) === 'PENDING'
+      !member.isLeader && memberStatus(context, member, markType) === 'PENDING'
     )).length;
   }
 
