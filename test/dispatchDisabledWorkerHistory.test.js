@@ -14,19 +14,69 @@ function functionBlock(content, startMarker, endMarker) {
   return content.slice(start, end);
 }
 
-test('desactivar auxiliar conserva filas de asignación y solo libera cobertura activa', () => {
+test('desactivar auxiliar libera solo compromisos no causados y conserva historia', () => {
   const route = source('src/routes/dispatchOpsExtras.js');
+  const policySource = functionBlock(route, 'function todayIsoDate', 'function normalizeDateParam');
+  const shouldRelease = new Function(
+    'DEFAULT_ABSENCE_GRACE_MINUTES',
+    `${policySource}; return shouldReleaseAssignmentOnWorkerDeactivation;`
+  )(15);
+  const now = new Date('2026-08-27T14:00:00.000Z'); // 09:00 en Bogotá.
+
+  const assignment = (serviceDate, startTime, extra = {}) => ({
+    serviceRequest: {
+      serviceDate: new Date(`${serviceDate}T00:00:00.000Z`),
+      startTime,
+      operationPoint: { absenceGraceMinutes: 15 }
+    },
+    attendanceSession: null,
+    ...extra
+  });
+
+  assert.equal(shouldRelease(assignment('2026-08-28', '08:00'), now), true, 'una asignación futura debe liberarse');
+  assert.equal(shouldRelease(assignment('2026-08-27', '09:30'), now), true, 'una asignación de hoy que aún no inicia debe liberarse');
+  assert.equal(shouldRelease(assignment('2026-08-27', '08:00'), now), false, 'una asignación cuyo margen de llegada ya pasó debe conservarse como historia');
+  assert.equal(shouldRelease(assignment('2026-08-26', '10:00'), now), false, 'una asignación anterior debe conservarse');
+  assert.equal(shouldRelease(assignment('2026-08-28', '08:00', { attendanceSession: { id: 'session-pseudonym' } }), now), false, 'una sesión de asistencia persistida nunca debe degradarse al desactivar');
+
   const deactivation = functionBlock(
     route,
     'async function cancelWorkerActiveAssignments',
     'export function dispatchOpsExtrasRouter'
   );
-
-  assert.match(deactivation, /dispatchAssignment\.findMany/);
+  assert.match(deactivation, /shouldReleaseAssignmentOnWorkerDeactivation/);
+  assert.match(deactivation, /attendanceSession:\s*\{\s*select:\s*\{\s*id:\s*true/);
   assert.match(deactivation, /dispatchAssignment\.update/);
-  assert.match(deactivation, /status:\s*a\.status === CONFIRMED_ASSIGNMENT_STATUS \? 'NO_CONFIRMO' : 'CANCELLED'/);
-  assert.match(deactivation, /notes:\s*'Auxiliar desactivado desde el modulo de personal\.'/);
   assert.doesNotMatch(deactivation, /dispatchAssignment\.delete/);
+});
+
+test('personal separa activos de desactivados y conserva acceso a historial', () => {
+  const route = source('src/routes/dispatchOpsExtras.js');
+  const personnelView = source('src/views/operacionesPersonal.ejs');
+  const personalRoute = functionBlock(route, "router.get('/personal'", "router.get('/personal/importar-excel'");
+
+  assert.match(route, /DISABLED_OPERATIONAL_STATUSES = \['DISABLED', 'INACTIVE'\]/);
+  assert.match(route, /function buildDispatchEligibilityFilter\(status\)/);
+  assert.match(route, /operationalStatus:\s*\{\s*in:\s*DISABLED_OPERATIONAL_STATUSES\s*\}/);
+  assert.match(personalRoute, /buildDispatchEligibilityFilter\(requestedStatus\)/);
+  assert.match(personalRoute, /status:\s*inactiveView \? 'DISABLED' : 'CONTRATADO'/);
+
+  assert.match(personnelView, /value="DISABLED"/);
+  assert.match(personnelView, /Inactivos \/ desactivados/);
+  assert.match(personnelView, />Estado<\/th>/);
+  assert.match(personnelView, /workerActive \? 'Desactivar' : 'Reactivar'/);
+  assert.match(personnelView, /\/personal\/<%= w\.id %>\/historial/);
+  assert.match(personnelView, /registros históricos/);
+});
+
+test('nuevas asignaciones solo aceptan auxiliares CONTRATADO también en el POST', () => {
+  const route = source('src/routes/dispatchOpsExtras.js');
+  const assignmentBoard = functionBlock(route, "router.get('/asignaciones'", "router.get('/solicitudes'");
+  const assignmentPost = functionBlock(route, "router.post('/asignaciones/assign'", "router.post('/asignaciones/descansos'");
+
+  assert.match(assignmentBoard, /baseWorkerWhere = \{ operationalStatus: 'CONTRATADO'/);
+  assert.match(assignmentPost, /dispatchWorker\.findFirst\(\{\s*where:\s*\{\s*id:\s*workerId,\s*operationalStatus:\s*'CONTRATADO'/);
+  assert.match(assignmentPost, /no está activo y no puede recibir nuevas asignaciones/);
 });
 
 test('historial consulta todas las asignaciones aunque el auxiliar esté desactivado', () => {
@@ -43,31 +93,24 @@ test('historial consulta todas las asignaciones aunque el auxiliar esté desacti
   assert.doesNotMatch(historyRoute, /status:\s*\{\s*in:\s*ACTIVE_ASSIGNMENT_STATUSES/);
 });
 
-test('personal activo conserva acceso al historial sin volver a listar desactivados', () => {
-  const historyView = source('src/views/operacionesPersonalHistorial.ejs');
-  const personnelView = source('src/views/operacionesPersonal.ejs');
-  const assignmentView = source('src/views/operacionesAsignacionesConfirmacion.ejs');
+test('nómina conserva auxiliares desactivados y sus sesiones causadas', () => {
+  const payroll = source('src/modules/dispatch-payroll/application/payrollReport.js');
+  const report = functionBlock(
+    payroll,
+    'export async function loadPayrollReport',
+    'export function buildPayrollExportRows'
+  );
 
-  assert.match(historyView, /workerIsActive = worker\.operationalStatus === 'CONTRATADO'/);
-  assert.match(historyView, /DISABLED: 'Desactivado'/);
-  assert.match(historyView, /No está disponible para nuevas asignaciones/);
-  assert.match(historyView, /registros históricos de asignación se conservan/);
-  assert.match(historyView, /incluso cuando el auxiliar ya está desactivado/);
-
-  assert.match(personnelView, /\/personal\/<%= w\.id %>\/historial/);
-  assert.match(personnelView, />Desactivar<\/button>/);
-  assert.doesNotMatch(personnelView, /value="DISABLED"|\bReactivar\b|>Estado<\/th>/);
-
-  assert.match(assignmentView, /selectedServiceRequest\.assignments\.forEach/);
-  assert.match(assignmentView, /NO_CONFIRMO:'No confirmó'/);
-  assert.match(assignmentView, /CANCELLED:'Cancelado'/);
-  assert.match(assignmentView, /if \(assignment\.notes\)/);
-  assert.match(assignmentView, /Nota: <%= assignment\.notes %>/);
+  assert.match(report, /dispatchAttendanceSession\.findMany/);
+  assert.match(report, /operationalStatus:\s*\{\s*not:\s*'ELIMINADO'\s*\}/);
+  assert.doesNotMatch(report, /operationalStatus:\s*'CONTRATADO'/);
+  assert.match(report, /decoratePayrollRows\(report, workers, periodRests/);
 });
 
-test('el flujo ejecutado mantiene dispatchOpsExtras como ruta montada de personal operativo', () => {
+test('el flujo ejecutado mantiene dispatchOpsExtras como autoridad de personal y asignaciones', () => {
   const server = source('src/server.js');
   assert.match(server, /dispatchOpsExtrasRouter\(prisma\)/);
   assert.doesNotMatch(server, /dispatchWorkerToggleAnySource/);
   assert.doesNotMatch(server, /dispatchWorkerExitReasons/);
+  assert.doesNotMatch(server, /dispatchAssignmentConfirmationsRouter/);
 });

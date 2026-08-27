@@ -34,7 +34,7 @@
     .filters-head { margin-bottom:14px; }
     .filters-head h2 { color:var(--navy); font-size:16px; margin-bottom:3px; }
     .filters-head p { color:var(--muted); font-size:13px; }
-    .filters-grid { display:grid; grid-template-columns:minmax(260px,1fr) auto; gap:12px; align-items:end; max-width:620px; }
+    .filters-grid { display:grid; grid-template-columns:minmax(240px,1fr) minmax(220px,.8fr) auto; gap:12px; align-items:end; max-width:850px; }
     .field { display:flex; flex-direction:column; gap:6px; min-width:0; }
     .field label { color:var(--muted); font-size:12px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; }
     select { width:100%; border:1px solid var(--border); border-radius:10px; padding:10px 12px; background:var(--surface-2); color:var(--text); font-size:14px; outline:none; }
@@ -46,7 +46,7 @@
     .bulk-bar { display:none; align-items:center; gap:10px; padding:10px 20px; background:#fff7ed; border-bottom:1px solid #fed7aa; flex-wrap:wrap; }
     .bulk-bar span { font-size:13px; font-weight:700; color:#92400e; }
     .table-wrap { max-width:100%; overflow-x:auto; }
-    table { width:100%; border-collapse:collapse; min-width:930px; }
+    table { width:100%; border-collapse:collapse; min-width:980px; }
     th,td { text-align:left; padding:11px 12px; border-bottom:1px solid #eaecef; vertical-align:middle; }
     th { background:var(--surface-2); color:var(--muted); font-size:11px; font-weight:900; text-transform:uppercase; letter-spacing:.06em; }
     td { color:var(--text); font-size:13px; }
@@ -54,12 +54,14 @@
     .check-col { width:40px; text-align:center!important; padding:10px 8px!important; }
     input[type=checkbox] { width:16px; height:16px; accent-color:var(--teal); cursor:pointer; }
     tr.selected-row { background:#f0fdfa; }
+    tr.row-inactive { background:#fafafa; }
     .muted { color:var(--muted); }
     .worker-name { color:var(--navy); font-weight:800; }
     .pill { display:inline-flex; align-items:center; border-radius:999px; padding:3px 9px; font-size:11px; font-weight:800; margin:2px 3px 2px 0; }
     .pill-green { color:var(--green); background:var(--green-light); }
     .pill-blue { color:var(--blue); background:var(--blue-light); }
     .pill-purple { color:var(--purple); background:var(--purple-light); }
+    .pill-red { color:var(--red); background:var(--red-light); }
     .pill-contract { color:#475569; background:#f8fafc; border:1px solid #dbe3ec; padding:2px 7px; }
     .row-actions { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
     .empty { padding:42px 20px; text-align:center; color:var(--muted); }
@@ -75,6 +77,7 @@
   </style>
 </head>
 <body>
+  <% const inactiveView = filters.status === 'DISABLED'; %>
   <nav class="navbar">
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
@@ -90,7 +93,7 @@
       <div>
         <div class="eyebrow">Equipo operativo</div>
         <h1><%= pageTitle %></h1>
-        <p class="subtitle">Equipo disponible para despacho. La disponibilidad territorial se administra únicamente por sucursal.</p>
+        <p class="subtitle"><%= inactiveView ? 'Auxiliares fuera del flujo de nuevas asignaciones. Su historial operativo y de asistencia se conserva.' : 'Equipo disponible para despacho. La disponibilidad territorial se administra únicamente por sucursal.' %></p>
       </div>
       <div class="hero-actions">
         <a class="btn btn-primary" href="/operaciones/admin-worker/nuevo">+ Crear auxiliar manual</a>
@@ -104,7 +107,7 @@
     <% if (message) { %><div class="alert"><%= message %></div><% } %>
 
     <section class="filters-card">
-      <div class="filters-head"><h2>Filtros de personal</h2><p>Consulta disponibilidad por sucursal. Las vacantes ya no determinan qué auxiliar puede despacharse.</p></div>
+      <div class="filters-head"><h2>Filtros de personal</h2><p>Consulta disponibilidad por sucursal y separa personal activo de desactivado.</p></div>
       <form method="get" action="/admin/operaciones/personal" class="filters-grid">
         <div class="field">
           <label for="operationalCityId">Sucursal</label>
@@ -113,24 +116,31 @@
             <% cities.forEach((city) => { %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %>
           </select>
         </div>
+        <div class="field">
+          <label for="status">Estado operativo</label>
+          <select id="status" name="status">
+            <option value="" <%= !inactiveView ? 'selected' : '' %>>Activos</option>
+            <option value="DISABLED" <%= inactiveView ? 'selected' : '' %>>Inactivos / desactivados</option>
+          </select>
+        </div>
         <button type="submit" class="btn btn-primary">Filtrar</button>
       </form>
     </section>
 
     <section class="panel">
-      <div class="panel-head"><div><h2>Listado de personal operativo</h2><p>Personas activas y las sucursales donde pueden ser asignadas.</p></div></div>
-      <div class="bulk-bar" id="bulk-bar"><span id="bulk-count">0 seleccionados</span><button type="button" class="btn btn-danger" id="btn-bulk-delete">Eliminar seleccionados</button><button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button></div>
+      <div class="panel-head"><div><h2><%= inactiveView ? 'Personal inactivo / desactivado' : 'Listado de personal operativo' %></h2><p><%= inactiveView ? 'No está disponible para nuevas solicitudes, pero conserva sus registros históricos.' : 'Personas activas y las sucursales donde pueden ser asignadas.' %></p></div></div>
+      <% if (!inactiveView) { %><div class="bulk-bar" id="bulk-bar"><span id="bulk-count">0 seleccionados</span><button type="button" class="btn btn-danger" id="btn-bulk-delete">Eliminar seleccionados</button><button type="button" class="btn btn-secondary" id="btn-bulk-cancel">Cancelar</button></div><% } %>
       <% if (!workers.length) { %>
-        <div class="empty"><strong>No hay personal contratado disponible.</strong>Solo se muestran auxiliares activos con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.</div>
+        <div class="empty"><strong><%= inactiveView ? 'No hay auxiliares desactivados.' : 'No hay personal contratado disponible.' %></strong><%= inactiveView ? 'Los auxiliares que se desactiven aparecerán aquí.' : 'Solo se muestran auxiliares activos con estado "Contratado". Puedes importar desde Excel o sincronizar candidatos contratados.' %></div>
       <% } else { %>
         <div class="table-wrap">
           <table id="workers-table">
-            <thead><tr><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><th>Nombre</th><th>Contrato</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Sucursales</th><th>Origen</th><th>Acciones</th></tr></thead>
+            <thead><tr><% if (!inactiveView) { %><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><% } %><th>Nombre</th><th>Contrato</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Sucursales</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               <% workers.forEach((w) => { %>
-                <% const sourceMap = { CANDIDATE:'Bot', MANUAL:'Manual', EXCEL_IMPORT:'Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; %>
-                <tr data-id="<%= w.id %>">
-                  <td class="check-col"><input type="checkbox" class="row-check" value="<%= w.id %>" /></td>
+                <% const sourceMap = { CANDIDATE:'Bot', MANUAL:'Manual', EXCEL_IMPORT:'Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; const workerActive = w.operationalStatus === 'CONTRATADO'; %>
+                <tr data-id="<%= w.id %>" class="<%= workerActive ? '' : 'row-inactive' %>">
+                  <% if (!inactiveView) { %><td class="check-col"><input type="checkbox" class="row-check" value="<%= w.id %>" /></td><% } %>
                   <td><span class="worker-name"><%= w.fullName %></span></td>
                   <td><span class="pill pill-contract"><%= w.contractType === 'CONTRATISTA' ? 'Contratista' : 'Directo' %></span></td>
                   <td><%= w.phone || '-' %></td>
@@ -138,7 +148,8 @@
                   <td><%= w.residenceCity || w.residenceLocality || '-' %></td>
                   <td><% if (w.cities.length) { %><% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %><% } else { %><span class="muted">Sin sucursal habilitada</span><% } %></td>
                   <td><span class="pill <%= sourcePillClass %>"><%= sourceLabel %></span></td>
-                  <td class="actions-cell"><div class="row-actions"><a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/historial">Historial</a><a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a><form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline"><button class="btn btn-danger-outline" type="submit">Desactivar</button></form><button type="button" class="btn btn-danger-outline btn-single-delete" data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button></div></td>
+                  <td><span class="pill <%= workerActive ? 'pill-green' : 'pill-red' %>"><%= workerActive ? 'Activo' : 'Desactivado' %></span></td>
+                  <td class="actions-cell"><div class="row-actions"><a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/historial">Historial</a><a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a><form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline"><button class="btn <%= workerActive ? 'btn-danger-outline' : 'btn-success' %>" type="submit"><%= workerActive ? 'Desactivar' : 'Reactivar' %></button></form><% if (!inactiveView) { %><button type="button" class="btn btn-danger-outline btn-single-delete" data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button><% } %></div></td>
                 </tr>
               <% }) %>
             </tbody>
@@ -154,7 +165,7 @@
   <script>
     const checkAll=document.getElementById('check-all'); const bulkBar=document.getElementById('bulk-bar'); const bulkCount=document.getElementById('bulk-count'); const bulkIdsInput=document.getElementById('bulk-ids-input');
     function getChecked(){return [...document.querySelectorAll('.row-check:checked')];}
-    function refreshBulkBar(){const checked=getChecked();bulkBar.style.display=checked.length?'flex':'none';bulkCount.textContent=checked.length+' seleccionado'+(checked.length===1?'':'s');const rows=document.querySelectorAll('.row-check');if(checkAll){checkAll.indeterminate=checked.length>0&&checked.length<rows.length;checkAll.checked=rows.length>0&&checked.length===rows.length;}}
+    function refreshBulkBar(){if(!bulkBar)return;const checked=getChecked();bulkBar.style.display=checked.length?'flex':'none';bulkCount.textContent=checked.length+' seleccionado'+(checked.length===1?'':'s');const rows=document.querySelectorAll('.row-check');if(checkAll){checkAll.indeterminate=checked.length>0&&checked.length<rows.length;checkAll.checked=rows.length>0&&checked.length===rows.length;}}
     function highlightRows(){document.querySelectorAll('.row-check').forEach((cb)=>cb.closest('tr').classList.toggle('selected-row',cb.checked));}
     checkAll?.addEventListener('change',()=>{document.querySelectorAll('.row-check').forEach((cb)=>{cb.checked=checkAll.checked;});highlightRows();refreshBulkBar();});
     document.querySelectorAll('.row-check').forEach((cb)=>cb.addEventListener('change',()=>{highlightRows();refreshBulkBar();}));
@@ -163,7 +174,7 @@
     document.querySelectorAll('.btn-single-delete').forEach((btn)=>btn.addEventListener('click',()=>{modalSingleMsg.textContent=`¿Eliminar a "${btn.dataset.name}" definitivamente del flujo?`;modalSingleForm.action=`/admin/operaciones/personal/${btn.dataset.id}/eliminar`;modalSingle.classList.add('open');}));
     document.getElementById('modal-single-cancel')?.addEventListener('click',()=>modalSingle.classList.remove('open')); modalSingle?.addEventListener('click',(e)=>{if(e.target===modalSingle)modalSingle.classList.remove('open');});
     const modalBulk=document.getElementById('modal-bulk'); const modalBulkMsg=document.getElementById('modal-bulk-msg');
-    document.getElementById('btn-bulk-delete')?.addEventListener('click',()=>{const checked=getChecked();if(!checked.length)return;bulkIdsInput.value=checked.map((cb)=>cb.value).join(',');modalBulkMsg.textContent=`¿Confirmas eliminar ${checked.length} auxiliar${checked.length===1?'':'es'} definitivamente del flujo?`;modalBulk.classList.add('open');});
+    document.getElementById('btn-bulk-delete')?.addEventListener('click',()=>{const checked=getChecked();if(!checked.length||!bulkIdsInput)return;bulkIdsInput.value=checked.map((cb)=>cb.value).join(',');modalBulkMsg.textContent=`¿Confirmas eliminar ${checked.length} auxiliar${checked.length===1?'':'es'} definitivamente del flujo?`;modalBulk.classList.add('open');});
     document.getElementById('modal-bulk-cancel')?.addEventListener('click',()=>modalBulk.classList.remove('open')); modalBulk?.addEventListener('click',(e)=>{if(e.target===modalBulk)modalBulk.classList.remove('open');});
   </script>
 </body>
