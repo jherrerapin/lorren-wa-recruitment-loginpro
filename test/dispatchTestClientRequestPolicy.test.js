@@ -173,6 +173,7 @@ test('contratos del repositorio conectan la marca y la autoridad server-side', (
   assert.match(bridgeCore, /isTestClient/);
   assert.match(opsExtras, /deleteDispatchServiceRequestWithPolicy/);
   assert.match(opsExtras, /source:\s*'INTERNAL'/);
+  assert.match(bridgeCore, /source:\s*'INTERNAL'/);
   assert.match(publicClient, /source:\s*'PUBLIC_LINK'/);
   assert.match(opsExtras, /res\.render\('operacionesAsignacionesConfirmacion'/);
   assert.match(publicClient, /deleteDispatchServiceRequestWithPolicy/);
