@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
-import { registerManualAttendance } from '../modules/dispatch-attendance/application/adminAttendance.js';
+import { resolveAttendanceFailureDecision } from '../modules/dispatch-attendance/application/adminAttendance.js';
 import { buildDispatchServiceDateWhere, dispatchServiceDateKey } from './dispatchDate.js';
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
@@ -37,8 +37,6 @@ const ALL_CONFIRMED_NOTIFICATION = 'ALL_ASSIGNMENTS_CONFIRMED';
 const ATTENDANCE_FAILURE_NOTIFICATION = 'ATTENDANCE_MARK_FAILURE_ALERT';
 const ATTENDANCE_FAILURE_ENTITY = 'DISPATCH_ATTENDANCE_MARK_FAILURE';
 const ATTENDANCE_FAILURE_ACTION = 'MARK_ATTEMPT_FAILED';
-const ATTENDANCE_FAILURE_DECISION_ENTITY = 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION';
-const ATTENDANCE_FAILURE_DECISION_ACTION = 'COORDINATOR_DECISION';
 const activeScheduleRuns = new Set();
 const activeNotificationClaims = new Set();
 const NOTIFICATION_ENTITY = 'DISPATCH_WHATSAPP_NOTIFICATION';
@@ -235,20 +233,6 @@ export async function sendDispatchAttendanceFailureAdminAlert({
   }
 }
 
-function attendanceFailureDecisionId(failureEventId) {
-  const digest = createHash('sha256').update(String(failureEventId || '')).digest('hex').slice(0, 48);
-  return `attendance_decision_${digest}`;
-}
-
-function attendanceManualField(markType) {
-  return ({
-    ARRIVAL: 'arrivalReportedAt',
-    BREAK_START: 'breakStartAt',
-    BREAK_END: 'breakEndAt',
-    DEPARTURE: 'departureReportedAt'
-  })[String(markType || '').toUpperCase()] || null;
-}
-
 export async function resolveDispatchAttendanceFailureCoordinatorDecision({
   scope = 'operational',
   failureEventId,
@@ -256,7 +240,7 @@ export async function resolveDispatchAttendanceFailureCoordinatorDecision({
   coordinatorPhone,
   decidedAt = new Date(),
   prismaClient = prisma,
-  registerManualAttendanceFn = registerManualAttendance
+  registerManualAttendanceFn
 } = {}) {
   if (scope !== 'operational') return { handled: false, reason: 'scope_not_operational' };
   const eventId = String(failureEventId || '').trim();
@@ -270,12 +254,7 @@ export async function resolveDispatchAttendanceFailureCoordinatorDecision({
   }
   const metadata = failureEvent.metadata && typeof failureEvent.metadata === 'object' ? failureEvent.metadata : {};
   const assignmentId = String(metadata.assignmentId || '').trim();
-  const markType = String(metadata.markType || '').trim().toUpperCase();
-  const manualField = attendanceManualField(markType);
-  const attemptedAt = new Date(metadata.occurredAt || failureEvent.createdAt || Number.NaN);
-  if (!assignmentId || !manualField || Number.isNaN(attemptedAt.getTime())) {
-    return { handled: false, reason: 'failure_context_invalid' };
-  }
+  if (!assignmentId) return { handled: false, reason: 'failure_context_invalid' };
   const assignment = await prismaClient.dispatchAssignment.findUnique({
     where: { id: assignmentId },
     select: { id: true, createdByUsername: true }
@@ -287,110 +266,28 @@ export async function resolveDispatchAttendanceFailureCoordinatorDecision({
     return { handled: false, reason: 'coordinator_unauthorized' };
   }
 
-  const decisionId = attendanceFailureDecisionId(eventId);
-  const existing = await prismaClient.devAuditEvent.findUnique({ where: { id: decisionId } });
-  const existingMetadata = existing?.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
-  if (['ACCEPTED', 'REJECTED'].includes(existingMetadata.status)) {
-    return {
-      handled: true,
-      duplicate: true,
-      status: existingMetadata.status,
-      assignmentId,
-      markType,
-      attemptedAt
-    };
-  }
-  if (existingMetadata.status === 'PENDING') {
-    return { handled: true, duplicate: true, inProgress: true, status: 'PENDING', assignmentId, markType, attemptedAt };
-  }
-
-  const pendingMetadata = {
-    failureEventId: eventId,
-    assignmentId,
-    markType,
-    attemptedAt: attemptedAt.toISOString(),
-    requestedDecision: normalizedDecision,
-    status: 'PENDING',
-    originalFailureCode: metadata.failureCode || null
-  };
-  if (existing) {
-    await prismaClient.devAuditEvent.update({
-      where: { id: decisionId },
-      data: { actorUserId: user.id, actorUsername: user.username, actorRole: 'coordinator', metadata: pendingMetadata, createdAt: decidedAt }
-    });
-  } else {
-    try {
-      await prismaClient.devAuditEvent.create({
-        data: {
-          id: decisionId,
-          entityType: ATTENDANCE_FAILURE_DECISION_ENTITY,
-          entityId: eventId,
-          entityLabel: `attendance-failure:${eventId}`,
-          action: ATTENDANCE_FAILURE_DECISION_ACTION,
-          actorUserId: user.id,
-          actorUsername: user.username,
-          actorRole: 'coordinator',
-          actorSource: 'dispatch-whatsapp',
-          metadata: pendingMetadata,
-          createdAt: decidedAt
-        }
-      });
-    } catch (error) {
-      if (error?.code !== 'P2002') throw error;
-      return { handled: true, duplicate: true, inProgress: true, status: 'PENDING', assignmentId, markType, attemptedAt };
-    }
-  }
-
-  if (normalizedDecision === 'REJECT') {
-    await prismaClient.devAuditEvent.update({
-      where: { id: decisionId },
-      data: { metadata: { ...pendingMetadata, status: 'REJECTED', resolvedAt: decidedAt.toISOString() } }
-    });
-    return { handled: true, duplicate: false, status: 'REJECTED', assignmentId, markType, attemptedAt };
-  }
-
   try {
-    const manualResult = await registerManualAttendanceFn(prismaClient, {
-      assignmentId,
-      [manualField]: attemptedAt.toISOString(),
-      reason: `Marcación aceptada por coordinación desde el intento fallido ${eventId}.`,
-      notes: metadata.failureCode ? `Error original: ${metadata.failureCode}` : null,
+    return await resolveAttendanceFailureDecision(prismaClient, {
+      failureEventId: eventId,
+      decision: normalizedDecision,
+      actorUserId: user.id,
       actorUsername: user.username,
-      actorRole: 'coordinator-whatsapp',
-      now: decidedAt
+      actorRole: 'coordinator',
+      actorSource: 'dispatch-whatsapp',
+      writerActorRole: 'coordinator-whatsapp',
+      decidedAt,
+      ...(typeof registerManualAttendanceFn === 'function' ? { registerManualAttendanceFn } : {})
     });
-    await prismaClient.devAuditEvent.update({
-      where: { id: decisionId },
-      data: {
-        metadata: {
-          ...pendingMetadata,
-          status: 'ACCEPTED',
-          resolvedAt: decidedAt.toISOString(),
-          attendanceSessionId: manualResult?.id || manualResult?.attendanceSession?.id || null
-        }
-      }
-    });
-    return {
-      handled: true,
-      duplicate: false,
-      status: 'ACCEPTED',
-      assignmentId,
-      markType,
-      attemptedAt,
-      attendanceSession: manualResult || null
-    };
   } catch (error) {
-    await prismaClient.devAuditEvent.update({
-      where: { id: decisionId },
-      data: {
-        metadata: {
-          ...pendingMetadata,
-          status: 'FAILED',
-          errorCode: String(error?.message || 'attendance_manual_failed').slice(0, 120),
-          resolvedAt: decidedAt.toISOString()
-        }
-      }
-    }).catch(() => {});
+    if (error?.message === 'attendance_failure_decision_not_found') {
+      return { handled: false, reason: 'failure_not_found' };
+    }
+    if (error?.message === 'attendance_failure_decision_context_invalid') {
+      return { handled: false, reason: 'failure_context_invalid' };
+    }
+    if (error?.message === 'attendance_failure_decision_assignment_not_found') {
+      return { handled: false, reason: 'assignment_missing' };
+    }
     throw error;
   }
 }

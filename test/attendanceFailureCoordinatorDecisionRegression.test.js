@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
+  loadAttendanceAdminBoard,
+  resolveAttendanceFailureDecision
+} from '../src/modules/dispatch-attendance/application/adminAttendance.js';
+import {
   buildDispatchAttendanceFailureDecisionPayload
 } from '../src/services/dispatchWhatsappCloudClient.js';
 import {
@@ -90,6 +94,84 @@ function decisionPrisma({ event = failureEvent() } = {}) {
   };
 }
 
+function attendanceWriter(writes) {
+  return async (_prisma, input) => {
+    writes.push(input);
+    return { id: 'attendance-session-test-1' };
+  };
+}
+
+function boardAssignment() {
+  return {
+    id: ASSIGNMENT_ID,
+    workerId: 'worker-test-1',
+    serviceRequestId: 'request-test-1',
+    status: 'CONFIRMED',
+    worker: {
+      id: 'worker-test-1',
+      fullName: 'Auxiliar Prueba',
+      documentType: 'CC',
+      documentNumber: 'TEST-0001',
+      phone: 'TEST-PHONE'
+    },
+    serviceRequest: {
+      id: 'request-test-1',
+      serviceDate: new Date('2026-08-28T00:00:00.000Z'),
+      startTime: '08:00',
+      endTime: '17:00',
+      clientName: 'Cliente de prueba',
+      operationPointName: 'Operación de prueba',
+      cityName: 'Bogotá',
+      address: 'Dirección de prueba',
+      operationPoint: {
+        id: 'operation-test-1',
+        name: 'Operación de prueba',
+        cityName: 'Bogotá',
+        address: 'Dirección de prueba',
+        attendanceEnabled: true,
+        attendanceLatitude: 4.7111,
+        attendanceLongitude: -74.0721,
+        geofenceRadiusMeters: 100,
+        maxLocationAccuracyMeters: 50,
+        absenceGraceMinutes: 15,
+        manualAttendanceAllowed: true
+      }
+    },
+    attendanceSession: null
+  };
+}
+
+function boardPrisma({ failure = failureEvent(), decisionEvent = null } = {}) {
+  const assignment = boardAssignment();
+  return {
+    dispatchAssignment: {
+      async findMany() { return [assignment]; },
+      async findUnique() { return assignment; }
+    },
+    dispatchAttendanceSession: {
+      async findUnique() { return null; },
+      async create({ data }) { return { id: 'session-created', ...data }; },
+      async update({ where, data }) { return { id: where.id, ...data }; }
+    },
+    dispatchAttendanceMark: {
+      async findFirst() { return null; },
+      async create({ data }) { return { id: 'mark-created', ...data }; },
+      async update({ where, data }) { return { id: where.id, ...data }; }
+    },
+    dispatchAttendanceReview: {
+      async create({ data }) { return { id: 'review-created', ...data }; }
+    },
+    devAuditEvent: {
+      async findMany({ where }) {
+        if (where?.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE') return [failure];
+        if (where?.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION') return decisionEvent ? [decisionEvent] : [];
+        return [];
+      }
+    },
+    async $transaction(callback) { return callback(this); }
+  };
+}
+
 test('la alerta usa dos botones cerrados para aceptar o rechazar el intento', () => {
   const payload = buildDispatchAttendanceFailureDecisionPayload({
     phone: COORDINATOR_PHONE,
@@ -131,13 +213,10 @@ test('fuera de geocerca muestra el punto GPS real del intento al coordinador', (
   assert.match(text, /Precisión reportada: 13 m\./);
 });
 
-test('aceptar registra una sola vez la entrada con la hora original del intento', async () => {
+test('aceptar por WhatsApp registra una sola vez la entrada con la hora original del intento', async () => {
   const store = decisionPrisma();
   const writes = [];
-  const registerManualAttendanceFn = async (_prisma, input) => {
-    writes.push(input);
-    return { id: 'attendance-session-test-1' };
-  };
+  const registerManualAttendanceFn = attendanceWriter(writes);
 
   const first = await resolveDispatchAttendanceFailureCoordinatorDecision({
     scope: 'operational',
@@ -174,9 +253,10 @@ test('aceptar registra una sola vez la entrada con la hora original del intento'
   const decision = [...store.events.values()].find((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION');
   assert.equal(decision.metadata.status, 'ACCEPTED');
   assert.equal(decision.metadata.attemptedAt, ATTEMPTED_AT.toISOString());
+  assert.equal(decision.actorSource, 'dispatch-whatsapp');
 });
 
-test('rechazar deja decisión auditada y no crea ninguna marcación', async () => {
+test('rechazar por WhatsApp deja decisión auditada y no crea ninguna marcación', async () => {
   const store = decisionPrisma();
   let writerCalled = false;
   const result = await resolveDispatchAttendanceFailureCoordinatorDecision({
@@ -221,18 +301,144 @@ test('un WhatsApp distinto al configurado no puede decidir la marcación', async
   assert.equal([...store.events.values()].some((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION'), false);
 });
 
-test('la decisión reutiliza la autoridad manual y no agrega reglas al webhook de entrada', () => {
+test('el dashboard acepta el intento con el actor autenticado y la misma hora original', async () => {
+  const store = decisionPrisma();
+  const writes = [];
+  const result = await resolveAttendanceFailureDecision(store.api, {
+    failureEventId: FAILURE_ID,
+    decision: 'ACCEPT',
+    actorUserId: 'dashboard-user-test-1',
+    actorUsername: 'coordinador-panel',
+    actorRole: 'admin',
+    actorSource: 'attendance-dashboard',
+    writerActorRole: 'attendance-dashboard',
+    decidedAt: new Date('2026-08-28T15:52:00.000Z'),
+    registerManualAttendanceFn: attendanceWriter(writes)
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.status, 'ACCEPTED');
+  assert.equal(result.duplicate, false);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].arrivalReportedAt, ATTEMPTED_AT.toISOString());
+  assert.equal(writes[0].actorUsername, 'coordinador-panel');
+  assert.equal(writes[0].actorRole, 'attendance-dashboard');
+  const decision = [...store.events.values()].find((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION');
+  assert.equal(decision.actorUsername, 'coordinador-panel');
+  assert.equal(decision.actorRole, 'admin');
+  assert.equal(decision.actorSource, 'attendance-dashboard');
+});
+
+test('dashboard y WhatsApp comparten una sola decisión terminal en ambos órdenes', async () => {
+  const dashboardFirst = decisionPrisma();
+  const dashboardWrites = [];
+  await resolveAttendanceFailureDecision(dashboardFirst.api, {
+    failureEventId: FAILURE_ID,
+    decision: 'ACCEPT',
+    actorUsername: 'coordinador-panel',
+    actorRole: 'admin',
+    actorSource: 'attendance-dashboard',
+    writerActorRole: 'attendance-dashboard',
+    decidedAt: new Date('2026-08-28T15:52:00.000Z'),
+    registerManualAttendanceFn: attendanceWriter(dashboardWrites)
+  });
+  const whatsappAfter = await resolveDispatchAttendanceFailureCoordinatorDecision({
+    failureEventId: FAILURE_ID,
+    decision: 'REJECT',
+    coordinatorPhone: COORDINATOR_PHONE,
+    decidedAt: new Date('2026-08-28T15:53:00.000Z'),
+    prismaClient: dashboardFirst.api,
+    registerManualAttendanceFn: attendanceWriter(dashboardWrites)
+  });
+  assert.equal(whatsappAfter.duplicate, true);
+  assert.equal(whatsappAfter.status, 'ACCEPTED');
+  assert.equal(dashboardWrites.length, 1);
+
+  const whatsappFirst = decisionPrisma();
+  const whatsappWrites = [];
+  await resolveDispatchAttendanceFailureCoordinatorDecision({
+    failureEventId: FAILURE_ID,
+    decision: 'ACCEPT',
+    coordinatorPhone: COORDINATOR_PHONE,
+    decidedAt: new Date('2026-08-28T15:54:00.000Z'),
+    prismaClient: whatsappFirst.api,
+    registerManualAttendanceFn: attendanceWriter(whatsappWrites)
+  });
+  const dashboardAfter = await resolveAttendanceFailureDecision(whatsappFirst.api, {
+    failureEventId: FAILURE_ID,
+    decision: 'REJECT',
+    actorUsername: 'coordinador-panel',
+    actorRole: 'admin',
+    actorSource: 'attendance-dashboard',
+    writerActorRole: 'attendance-dashboard',
+    decidedAt: new Date('2026-08-28T15:55:00.000Z'),
+    registerManualAttendanceFn: attendanceWriter(whatsappWrites)
+  });
+  assert.equal(dashboardAfter.duplicate, true);
+  assert.equal(dashboardAfter.status, 'ACCEPTED');
+  assert.equal(whatsappWrites.length, 1);
+});
+
+test('al recargar Asistencia el intento conserva la decisión terminal y su canal', async () => {
+  const decisionEvent = {
+    id: `attendance_decision_${'b'.repeat(48)}`,
+    entityType: 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION',
+    entityId: FAILURE_ID,
+    action: 'COORDINATOR_DECISION',
+    actorUsername: 'coordinador-panel',
+    actorRole: 'admin',
+    actorSource: 'attendance-dashboard',
+    createdAt: new Date('2026-08-28T15:52:00.000Z'),
+    metadata: {
+      failureEventId: FAILURE_ID,
+      assignmentId: ASSIGNMENT_ID,
+      markType: 'ARRIVAL',
+      attemptedAt: ATTEMPTED_AT.toISOString(),
+      requestedDecision: 'ACCEPT',
+      status: 'ACCEPTED',
+      resolvedAt: '2026-08-28T15:52:00.000Z'
+    }
+  };
+  const board = await loadAttendanceAdminBoard(boardPrisma({ decisionEvent }), {
+    from: '2026-08-28',
+    to: '2026-08-28',
+    now: new Date('2026-08-28T16:00:00.000Z')
+  });
+
+  assert.equal(board.rows.length, 1);
+  assert.equal(board.rows[0].failedMarkAttemptCount, 1);
+  const attempt = board.rows[0].failedMarkAttempts[0];
+  assert.equal(attempt.failureEventId, FAILURE_ID);
+  assert.equal(attempt.decisionStatus, 'ACCEPTED');
+  assert.equal(attempt.decisionActorUsername, 'coordinador-panel');
+  assert.equal(attempt.decisionActorSource, 'attendance-dashboard');
+  assert.match(attempt.decisionResolvedAtLabel, /28/);
+});
+
+test('la decisión vive en Asistencia, ambos canales delegan y webhook sigue sin reglas nuevas', () => {
+  const attendance = fs.readFileSync(new URL('../src/modules/dispatch-attendance/application/adminAttendance.js', import.meta.url), 'utf8');
   const alerts = fs.readFileSync(new URL('../src/services/dispatchWhatsappAdminAlerts.js', import.meta.url), 'utf8');
   const inbound = fs.readFileSync(new URL('../src/services/dispatchWhatsappWebhookService.js', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
+  const adminRoute = fs.readFileSync(new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url), 'utf8');
+  const view = fs.readFileSync(new URL('../src/views/operacionesAsistencia.ejs', import.meta.url), 'utf8');
   const portal = fs.readFileSync(new URL('../src/routes/workerPortal.js', import.meta.url), 'utf8');
 
-  assert.match(alerts, /import \{ registerManualAttendance \} from '\.\.\/modules\/dispatch-attendance\/application\/adminAttendance\.js'/);
-  assert.match(alerts, /registerManualAttendanceFn\(prismaClient/);
-  assert.doesNotMatch(alerts, /dispatchAttendanceMark\.create/);
+  assert.match(attendance, /export async function resolveAttendanceFailureDecision/);
+  assert.match(attendance, /registerManualAttendanceFn\(prisma/);
+  assert.match(attendance, /failureEventId:\s*event\.id/);
+  assert.match(attendance, /decisionStatus/);
+  assert.doesNotMatch(attendance, /dispatchAttendanceMark\.create\([^\n]*failure/i);
+  assert.match(alerts, /resolveAttendanceFailureDecision/);
+  assert.doesNotMatch(alerts, /registerManualAttendanceFn\(prismaClient/);
   assert.match(inbound, /dispatch_attendance_\(accept\|reject\)/);
   assert.match(inbound, /resolveDispatchAttendanceFailureCoordinatorDecision/);
   assert.doesNotMatch(route, /dispatch_attendance_accept|dispatch_attendance_reject|ATTENDANCE_MARK_FAILURE_DECISION/);
+  assert.match(adminRoute, /failures\/:failureEventId\/decision/);
+  assert.match(adminRoute, /resolveAttendanceFailureDecision/);
+  assert.match(view, /Aceptar marcación/);
+  assert.match(view, /name="decision" value="ACCEPT"/);
+  assert.match(view, /name="decision" value="REJECT"/);
   assert.match(portal, /sendDispatchAttendanceFailureAdminAlert/);
   assert.match(portal, /latitude:\s*finiteNumber\(req\.body\?\.latitude/);
   assert.match(portal, /longitude:\s*finiteNumber\(req\.body\?\.longitude/);
