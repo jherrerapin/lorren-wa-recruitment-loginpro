@@ -37,6 +37,7 @@ const ALL_CONFIRMED_NOTIFICATION = 'ALL_ASSIGNMENTS_CONFIRMED';
 const ATTENDANCE_FAILURE_NOTIFICATION = 'ATTENDANCE_MARK_FAILURE_ALERT';
 const ATTENDANCE_FAILURE_ENTITY = 'DISPATCH_ATTENDANCE_MARK_FAILURE';
 const ATTENDANCE_FAILURE_ACTION = 'MARK_ATTEMPT_FAILED';
+const ATTENDANCE_FAILURE_ALERT_THRESHOLD = 5;
 const activeScheduleRuns = new Set();
 const activeNotificationClaims = new Set();
 const NOTIFICATION_ENTITY = 'DISPATCH_WHATSAPP_NOTIFICATION';
@@ -127,8 +128,8 @@ function assignmentHasAttendanceMark(assignment, markType) {
   ));
 }
 
-async function latestAttendanceFailureForMark(prismaClient, assignmentId, markType) {
-  if (!assignmentId || !markType || typeof prismaClient?.devAuditEvent?.findMany !== 'function') return null;
+async function attendanceFailuresForMark(prismaClient, assignmentId, markType) {
+  if (!assignmentId || !markType || typeof prismaClient?.devAuditEvent?.findMany !== 'function') return [];
   const events = await prismaClient.devAuditEvent.findMany({
     where: {
       entityType: ATTENDANCE_FAILURE_ENTITY,
@@ -145,7 +146,11 @@ async function latestAttendanceFailureForMark(prismaClient, assignmentId, markTy
         && String(event?.entityId || '').trim() === assignmentId
         && attendanceFailureMarkType(metadata) === markType;
     })
-    .sort((left, right) => attendanceFailureMoment(right).getTime() - attendanceFailureMoment(left).getTime())[0] || null;
+    .sort((left, right) => attendanceFailureMoment(right).getTime() - attendanceFailureMoment(left).getTime());
+}
+
+async function latestAttendanceFailureForMark(prismaClient, assignmentId, markType) {
+  return (await attendanceFailuresForMark(prismaClient, assignmentId, markType))[0] || null;
 }
 
 function attendanceFailureLocation(input = {}) {
@@ -169,7 +174,7 @@ export function buildDispatchNoveltyAdminAlertText(assignment) {
   return `⚠️ Novedad reportada\n${name} (${phone}) reportó una novedad sobre su asignación del ${dateLabel(request.serviceDate)} en ${operation}.\nComunícate con el auxiliar para conocer qué ocurrió y gestionar lo necesario.`;
 }
 
-export function buildDispatchAttendanceFailureAdminAlertText({ failureEvent, assignment, failureContext = {} } = {}) {
+export function buildDispatchAttendanceFailureAdminAlertText({ failureEvent, assignment, failureContext = {}, failureAttemptCount = 1 } = {}) {
   const metadata = failureEvent?.metadata && typeof failureEvent.metadata === 'object' ? failureEvent.metadata : {};
   const workerName = String(assignment?.worker?.fullName || 'Un auxiliar').trim() || 'Un auxiliar';
   const operation = assignment?.serviceRequest?.operationPointName
@@ -178,9 +183,12 @@ export function buildDispatchAttendanceFailureAdminAlertText({ failureEvent, ass
   const markType = metadata.markType || failureContext.markType;
   const occurredAt = metadata.occurredAt || failureContext.occurredAt || failureEvent?.createdAt;
   const description = String(metadata.descriptionEs || 'La marcación no pudo completarse.').trim();
+  const normalizedAttemptCount = Math.max(1, Number(failureAttemptCount) || 1);
   const lines = [
     '⚠️ Marcación no completada',
-    `${workerName} tuvo un intento fallido al registrar ${attendanceMarkLabel(markType)} el ${dateTimeLabel(occurredAt)} en ${operation}.`,
+    normalizedAttemptCount >= ATTENDANCE_FAILURE_ALERT_THRESHOLD
+      ? `${workerName} acumuló ${normalizedAttemptCount} intentos fallidos al registrar ${attendanceMarkLabel(markType)}. El último fue el ${dateTimeLabel(occurredAt)} en ${operation}.`
+      : `${workerName} tuvo un intento fallido al registrar ${attendanceMarkLabel(markType)} el ${dateTimeLabel(occurredAt)} en ${operation}.`,
     `Motivo inicial: ${description}`
   ];
   if (metadata.failureCode === 'outside_operation_range') {
@@ -244,6 +252,15 @@ export async function sendDispatchAttendanceFailureAdminAlert({
   const markType = attendanceFailureMarkType(metadata);
   if (!assignmentId) return { sent: false, reason: 'assignment_missing' };
   if (!markType) return { sent: false, reason: 'mark_type_missing' };
+  const failures = await attendanceFailuresForMark(prismaClient, assignmentId, markType);
+  if (failures.length < ATTENDANCE_FAILURE_ALERT_THRESHOLD) {
+    return { sent: false, reason: 'failure_threshold_not_reached', failureCount: failures.length };
+  }
+  const latestFailure = failures[0] || failureEvent;
+  const latestMetadata = latestFailure?.metadata && typeof latestFailure.metadata === 'object' ? latestFailure.metadata : {};
+  const latestFailureContext = latestFailure.id === failureEvent.id
+    ? failureContext
+    : latestMetadata;
   const assignment = await prismaClient.dispatchAssignment.findUnique({
     where: { id: assignmentId },
     include: { worker: true, serviceRequest: true }
@@ -255,21 +272,32 @@ export async function sendDispatchAttendanceFailureAdminAlert({
   const claim = await claimDispatchWhatsappNotification(prismaClient, {
     notificationType: ATTENDANCE_FAILURE_NOTIFICATION,
     key,
-    eventAt: failureEvent.createdAt || now,
+    eventAt: latestFailure.createdAt || now,
     now
   });
   if (!claim.claimed) return { sent: false, duplicate: true, reason: claim.reason || 'already_notified' };
   try {
-    const text = buildDispatchAttendanceFailureAdminAlertText({ failureEvent, assignment, failureContext });
+    const text = buildDispatchAttendanceFailureAdminAlertText({
+      failureEvent: latestFailure,
+      assignment,
+      failureContext: latestFailureContext,
+      failureAttemptCount: failures.length
+    });
     const sent = await sendDecisionMessage({
       scope,
       phone: user.dispatchAlertPhone,
-      failureEventId: failureEvent.id,
+      failureEventId: latestFailure.id,
       text,
       axiosClient
     });
     await markDispatchWhatsappNotification(prismaClient, claim, { sent: true, now });
-    return { sent: true, userId: user.id, providerMessageId: sent?.providerMessageId || null };
+    return {
+      sent: true,
+      userId: user.id,
+      failureCount: failures.length,
+      failureEventId: latestFailure.id,
+      providerMessageId: sent?.providerMessageId || null
+    };
   } catch (error) {
     await markDispatchWhatsappNotification(prismaClient, claim, { sent: false, error, now }).catch(() => {});
     console.warn(`[dispatch-wa-cloud] Falló alerta de marcación al coordinador ${user.username}: ${error?.message || error}`);
