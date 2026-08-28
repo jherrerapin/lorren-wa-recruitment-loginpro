@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
+  loadAttendanceAdminBoard,
   resolveAttendanceFailureDecision
 } from '../src/modules/dispatch-attendance/application/adminAttendance.js';
 import {
@@ -97,6 +98,77 @@ function attendanceWriter(writes) {
   return async (_prisma, input) => {
     writes.push(input);
     return { id: 'attendance-session-test-1' };
+  };
+}
+
+function boardAssignment() {
+  return {
+    id: ASSIGNMENT_ID,
+    workerId: 'worker-test-1',
+    serviceRequestId: 'request-test-1',
+    status: 'CONFIRMED',
+    worker: {
+      id: 'worker-test-1',
+      fullName: 'Auxiliar Prueba',
+      documentType: 'CC',
+      documentNumber: 'TEST-0001',
+      phone: 'TEST-PHONE'
+    },
+    serviceRequest: {
+      id: 'request-test-1',
+      serviceDate: new Date('2026-08-28T00:00:00.000Z'),
+      startTime: '08:00',
+      endTime: '17:00',
+      clientName: 'Cliente de prueba',
+      operationPointName: 'Operación de prueba',
+      cityName: 'Bogotá',
+      address: 'Dirección de prueba',
+      operationPoint: {
+        id: 'operation-test-1',
+        name: 'Operación de prueba',
+        cityName: 'Bogotá',
+        address: 'Dirección de prueba',
+        attendanceEnabled: true,
+        attendanceLatitude: 4.7111,
+        attendanceLongitude: -74.0721,
+        geofenceRadiusMeters: 100,
+        maxLocationAccuracyMeters: 50,
+        absenceGraceMinutes: 15,
+        manualAttendanceAllowed: true
+      }
+    },
+    attendanceSession: null
+  };
+}
+
+function boardPrisma({ failure = failureEvent(), decisionEvent = null } = {}) {
+  const assignment = boardAssignment();
+  return {
+    dispatchAssignment: {
+      async findMany() { return [assignment]; },
+      async findUnique() { return assignment; }
+    },
+    dispatchAttendanceSession: {
+      async findUnique() { return null; },
+      async create({ data }) { return { id: 'session-created', ...data }; },
+      async update({ where, data }) { return { id: where.id, ...data }; }
+    },
+    dispatchAttendanceMark: {
+      async findFirst() { return null; },
+      async create({ data }) { return { id: 'mark-created', ...data }; },
+      async update({ where, data }) { return { id: where.id, ...data }; }
+    },
+    dispatchAttendanceReview: {
+      async create({ data }) { return { id: 'review-created', ...data }; }
+    },
+    devAuditEvent: {
+      async findMany({ where }) {
+        if (where?.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE') return [failure];
+        if (where?.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION') return decisionEvent ? [decisionEvent] : [];
+        return [];
+      }
+    },
+    async $transaction(callback) { return callback(this); }
   };
 }
 
@@ -305,6 +377,42 @@ test('dashboard y WhatsApp comparten una sola decisión terminal en ambos órden
   assert.equal(dashboardAfter.duplicate, true);
   assert.equal(dashboardAfter.status, 'ACCEPTED');
   assert.equal(whatsappWrites.length, 1);
+});
+
+test('al recargar Asistencia el intento conserva la decisión terminal y su canal', async () => {
+  const decisionEvent = {
+    id: `attendance_decision_${'b'.repeat(48)}`,
+    entityType: 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION',
+    entityId: FAILURE_ID,
+    action: 'COORDINATOR_DECISION',
+    actorUsername: 'coordinador-panel',
+    actorRole: 'admin',
+    actorSource: 'attendance-dashboard',
+    createdAt: new Date('2026-08-28T15:52:00.000Z'),
+    metadata: {
+      failureEventId: FAILURE_ID,
+      assignmentId: ASSIGNMENT_ID,
+      markType: 'ARRIVAL',
+      attemptedAt: ATTEMPTED_AT.toISOString(),
+      requestedDecision: 'ACCEPT',
+      status: 'ACCEPTED',
+      resolvedAt: '2026-08-28T15:52:00.000Z'
+    }
+  };
+  const board = await loadAttendanceAdminBoard(boardPrisma({ decisionEvent }), {
+    from: '2026-08-28',
+    to: '2026-08-28',
+    now: new Date('2026-08-28T16:00:00.000Z')
+  });
+
+  assert.equal(board.rows.length, 1);
+  assert.equal(board.rows[0].failedMarkAttemptCount, 1);
+  const attempt = board.rows[0].failedMarkAttempts[0];
+  assert.equal(attempt.failureEventId, FAILURE_ID);
+  assert.equal(attempt.decisionStatus, 'ACCEPTED');
+  assert.equal(attempt.decisionActorUsername, 'coordinador-panel');
+  assert.equal(attempt.decisionActorSource, 'attendance-dashboard');
+  assert.match(attempt.decisionResolvedAtLabel, /28/);
 });
 
 test('la decisión vive en Asistencia, ambos canales delegan y webhook sigue sin reglas nuevas', () => {
