@@ -70,7 +70,7 @@ test('online muestra el aviso desde la respuesta persistida antes de recargar', 
   assert.match(flow, /arrivalTimingNotice\?\.message\?\.\(payload\.expectedStartAt, payload\.arrivalReportedAt\)/);
   assert.match(flow, /const timingMessage = confirmedArrivalTimingMessage\(payload\)/);
   assert.match(flow, /setStatus\(timingMessage \|\| payload\.message \|\| 'Marcación registrada\.', 'ok'\)/);
-  assert.match(flow, /window\.setTimeout\(\(\) => window\.location\.reload\(\), timingMessage \? 4800 : 900\)/);
+  assert.match(flow, /window\.setTimeout\(\(\) => window\.location\.reload\(\), timingMessage \? 7800 : 900\)/);
   assert.doesNotMatch(flow, /lorren-arrival-time-notice-confirmed|lorren-arrival-time-notice-pending/);
 });
 
@@ -82,7 +82,7 @@ test('offline calcula el mismo aviso con el horario cacheado y la hora capturada
   assert.match(flow, /arrivalTimingNotice\?\.message\?\.\(expectedStartAt, record\.clientCapturedAt\)/);
   assert.match(flow, /const timingMessage = offlineArrivalTimingMessage\(record\)/);
   assert.match(flow, /Quedó guardada en este teléfono y se sincronizará automáticamente cuando vuelva la conexión\./);
-  assert.match(flow, /window\.setTimeout\(closeOfflineDialog, timingMessage \? 4800 : 1100\)/);
+  assert.match(flow, /window\.setTimeout\(closeOfflineDialog, timingMessage \? 7800 : 1100\)/);
   assert.doesNotMatch(flow, /sessionStorage/);
 });
 
