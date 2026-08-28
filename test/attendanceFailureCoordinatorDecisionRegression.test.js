@@ -391,6 +391,32 @@ test('si la marcación ya quedó registrada WhatsApp no crea ni reemplaza otra',
   assert.equal([...store.events.values()].some((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION'), false);
 });
 
+test('un fallo auditado después de una marcación válida no envía una alerta tardía', async () => {
+  const store = decisionPrisma({
+    attendanceSession: {
+      arrivalReportedAt: new Date('2026-08-28T15:46:00.000Z'),
+      departureReportedAt: null,
+      marks: [{ markType: 'ARRIVAL' }]
+    }
+  });
+  let sendCalled = false;
+  const result = await sendDispatchAttendanceFailureAdminAlert({
+    failureEvent: failureEvent(),
+    failureContext: failureEvent().metadata,
+    prismaClient: store.api,
+    sendDecisionMessage: async () => {
+      sendCalled = true;
+      return { providerMessageId: 'unexpected' };
+    }
+  });
+
+  assert.equal(result.sent, false);
+  assert.equal(result.duplicate, true);
+  assert.equal(result.reason, 'mark_already_recorded');
+  assert.equal(sendCalled, false);
+  assert.equal([...store.events.values()].some((item) => item.entityType === 'DISPATCH_WHATSAPP_NOTIFICATION'), false);
+});
+
 test('trece fallos de la misma marcación generan un solo aviso de WhatsApp', async () => {
   const store = decisionPrisma();
   const sends = [];
@@ -563,6 +589,7 @@ test('la decisión vive en Asistencia, ambos canales delegan y webhook sigue sin
   assert.match(alerts, /resolveAttendanceFailureDecision/);
   assert.match(alerts, /assignmentId, markType/);
   assert.match(alerts, /latestAttendanceFailureForMark/);
+  assert.match(alerts, /mark_already_recorded/);
   assert.doesNotMatch(alerts, /registerManualAttendanceFn\(prismaClient/);
   assert.match(inbound, /dispatch_attendance_\(accept\|reject\)/);
   assert.match(inbound, /resolveDispatchAttendanceFailureCoordinatorDecision/);
