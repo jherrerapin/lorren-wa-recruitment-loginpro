@@ -23,6 +23,7 @@ import {
   loadCrewAttendancePortalContexts
 } from '../modules/dispatch-attendance/application/crewAttendanceConfig.js';
 import { MAX_ATTENDANCE_EVIDENCE_BYTES } from '../services/attendanceEvidenceStorage.js';
+import { sendDispatchAttendanceFailureAdminAlert } from '../services/dispatchWhatsappAdminAlerts.js';
 import {
   ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
   WORKER_BIOMETRIC_ACTION,
@@ -190,6 +191,9 @@ export async function auditAttendanceMarkFailure(prisma, input = {}) {
   const sourceLabel = origin === 'SERVER_RESPONSE'
     ? 'Servidor de asistencia'
     : (input.sourceLabel === 'Aplicación Android' ? 'Aplicación Android' : 'Portal del auxiliar');
+  const latitude = finiteNumber(input.latitude, { min: -90, max: 90 });
+  const longitude = finiteNumber(input.longitude, { min: -180, max: 180 });
+  const accuracyMeters = finiteNumber(input.accuracyMeters, { min: 0, max: 100_000 });
   if (!assignmentId || !attemptId || !definition || Number.isNaN(occurredAt.getTime()) || Number.isNaN(recordedAt.getTime())) {
     throw new Error('attendance_mark_failure_input_invalid');
   }
@@ -215,7 +219,10 @@ export async function auditAttendanceMarkFailure(prisma, input = {}) {
         descriptionEs: definition.descriptionEs,
         sourceLabel,
         origin,
-        occurredAt: occurredAt.toISOString()
+        occurredAt: occurredAt.toISOString(),
+        ...(latitude !== null ? { latitude } : {}),
+        ...(longitude !== null ? { longitude } : {}),
+        ...(accuracyMeters !== null ? { accuracyMeters } : {})
       },
       createdAt: recordedAt
     }
@@ -257,7 +264,10 @@ function resolveFailureRequestContext(req, payload, now) {
     occurredAt: trusted.occurredAt || now,
     recordedAt: now,
     origin: 'SERVER_RESPONSE',
-    sourceLabel: trusted.sourceLabel
+    sourceLabel: trusted.sourceLabel,
+    latitude: finiteNumber(req.body?.latitude, { min: -90, max: 90 }),
+    longitude: finiteNumber(req.body?.longitude, { min: -180, max: 180 }),
+    accuracyMeters: finiteNumber(req.body?.accuracyMeters, { min: 0, max: 100_000 })
   };
 }
 
@@ -580,6 +590,24 @@ export function workerPortalRouter(prisma, options = {}) {
     || ((input) => auditCrewPhoneException(prisma, input));
   const auditMarkFailureFn = options.auditMarkFailureFn
     || ((input) => auditAttendanceMarkFailure(prisma, input));
+  const sendMarkFailureAdminAlertFn = options.sendMarkFailureAdminAlertFn
+    || ((input) => sendDispatchAttendanceFailureAdminAlert({
+      scope: 'operational',
+      prismaClient: prisma,
+      ...input
+    }));
+  const auditAndAlertMarkFailureFn = async (input) => {
+    const failureEvent = await auditMarkFailureFn(input);
+    await sendMarkFailureAdminAlertFn({
+      failureEvent,
+      failureContext: input
+    }).catch((error) => {
+      console.warn('[ATTENDANCE_MARK_FAILURE_ALERT_FAILED]', {
+        code: typeof error?.message === 'string' ? error.message : 'unknown'
+      });
+    });
+    return failureEvent;
+  };
   const loadBiometricAssignmentFn = options.loadBiometricAssignmentFn || (async (workerId, assignmentId) => (
     prisma.dispatchAssignment.findFirst({
       where: {
@@ -878,7 +906,7 @@ export function workerPortalRouter(prisma, options = {}) {
 
   const router = express.Router();
   router.use(installBiometricCspBridge);
-  router.use(createAttendanceMarkFailureResponseObserver({ auditFn: auditMarkFailureFn, nowFn }));
+  router.use(createAttendanceMarkFailureResponseObserver({ auditFn: auditAndAlertMarkFailureFn, nowFn }));
   router.use(coreRouter);
 
   router.post('/asignaciones/:assignmentId/intentos-fallidos', biometricJson, async (req, res) => {
@@ -926,7 +954,7 @@ export function workerPortalRouter(prisma, options = {}) {
       });
       if (!assignment) return strictError(res, 404, 'assignment_not_available', 'La asignación no corresponde a este auxiliar.');
 
-      await auditMarkFailureFn({
+      await auditAndAlertMarkFailureFn({
         assignmentId,
         markType,
         errorCode,
@@ -1351,6 +1379,7 @@ export function workerPortalRouter(prisma, options = {}) {
           captureMode: ONLINE_WEB_CAPTURE_MODE
         }, now);
         if (!locationInput) return;
+        applyVerifiedNativeLocationToBody(req, locationInput);
       }
       const location = await requireStrictAttendanceLocation(
         prisma,
