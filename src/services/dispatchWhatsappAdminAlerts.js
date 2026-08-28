@@ -268,7 +268,7 @@ export async function sendDispatchAttendanceFailureAdminAlert({
       text,
       axiosClient
     });
-    await markDispatchWhatsappNotification(prismaClient, claim, { sent: true, now });
+    await markDispatchWhatsappNotification(prismaClient, claim, { sent: true, now: new Date(now.getTime() + 1) });
     return { sent: true, userId: user.id, providerMessageId: sent?.providerMessageId || null };
   } catch (error) {
     await markDispatchWhatsappNotification(prismaClient, claim, { sent: false, error, now }).catch(() => {});
