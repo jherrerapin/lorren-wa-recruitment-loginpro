@@ -94,7 +94,7 @@ test('Sucursales y Usuarios muestran iconos PNG sin depender de emoji o SVG', ()
   assert.notEqual(branches, users);
 });
 
-test('cada desplegable conserva opciones y permisos de Operaciones y Nómina', () => {
+test('cada desplegable conserva opciones y permisos de Operaciones y Gestión de Tiempo', () => {
   const operations = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones', { canAccessDispatch: true, canAccessAttendance: true })));
   for (const href of ['/admin/operaciones/clientes', '/admin/operaciones/solicitudes', '/admin/operaciones/asignaciones', '/admin/operaciones/personal', '/admin/operaciones/portal-activaciones', '/admin/operaciones/asistencia', '/admin/operaciones/whatsapp']) {
     assert.ok(operations.includes(`href="${href}"`), `Falta ${href} en Operaciones`);
@@ -107,7 +107,9 @@ test('cada desplegable conserva opciones y permisos de Operaciones y Nómina', (
 
   const payroll = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/nomina', { canAccessDispatch: true, canAccessPayroll: true, canAccessTestWorkspace: true })));
   assert.match(payroll, /data-module-menu="payroll"/);
-  assert.match(payroll, /href="\/admin\/operaciones\/asistencia\/nomina">Nómina y tiempo trabajado<\/a>/);
+  assert.match(payroll, /data-module-menu="payroll"[\s\S]*<span>Gestión de Tiempo<\/span>/);
+  assert.match(payroll, /href="\/admin\/operaciones\/asistencia\/nomina">Gestión de Tiempo<\/a>/);
+  assert.doesNotMatch(payroll, />Nómina<|>Nómina y tiempo trabajado</);
   assert.match(payroll, /href="\/admin\/operaciones\/pruebas">Entorno de pruebas<\/a>/);
 });
 

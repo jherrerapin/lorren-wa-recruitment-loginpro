@@ -98,7 +98,7 @@ function operationsMenuItems(access) {
 
 function payrollMenuItems(access) {
   if (!access.payroll) return [];
-  return [menuLink(PAYROLL_PATH, 'Nómina y tiempo trabajado')];
+  return [menuLink(PAYROLL_PATH, 'Gestión de Tiempo')];
 }
 
 function moduleMenu({ key, label, icon, active, items = [], allowed = true }) {
@@ -160,7 +160,7 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
       items: operationsMenuItems(access),
       allowed: access.dispatch || access.testWorkspace
     }),
-    moduleMenu({ key: 'payroll', label: 'Nómina', icon: PAYROLL_ICON, active, items: payrollMenuItems(access), allowed: access.payroll })
+    moduleMenu({ key: 'payroll', label: 'Gestión de Tiempo', icon: PAYROLL_ICON, active, items: payrollMenuItems(access), allowed: access.payroll })
   ].filter(Boolean).join('\n    ');
   const branchesLink = standaloneBranchesLink(path);
   const usersLink = standaloneUsersLink(access, path);
