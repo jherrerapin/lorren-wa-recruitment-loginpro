@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
+import { registerManualAttendance } from '../modules/dispatch-attendance/application/adminAttendance.js';
 import { buildDispatchServiceDateWhere, dispatchServiceDateKey } from './dispatchDate.js';
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
@@ -11,7 +12,10 @@ import {
   ACTIVE_LINK_STATUSES,
   normalizeDispatchWhatsappPhone
 } from './dispatchWhatsappCloudConfig.js';
-import { sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
+import {
+  sendDispatchAttendanceFailureDecisionMessage,
+  sendDispatchWhatsappTextMessage
+} from './dispatchWhatsappCloudClient.js';
 
 export const DISPATCH_WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
 // Warn about 25 minutes early so normal worker jitter still leaves at least 20 minutes.
@@ -30,6 +34,11 @@ const AUTOMATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const NOTIFICATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const WINDOW_EXPIRY_NOTIFICATION = 'WINDOW_EXPIRY_REMINDER';
 const ALL_CONFIRMED_NOTIFICATION = 'ALL_ASSIGNMENTS_CONFIRMED';
+const ATTENDANCE_FAILURE_NOTIFICATION = 'ATTENDANCE_MARK_FAILURE_ALERT';
+const ATTENDANCE_FAILURE_ENTITY = 'DISPATCH_ATTENDANCE_MARK_FAILURE';
+const ATTENDANCE_FAILURE_ACTION = 'MARK_ATTEMPT_FAILED';
+const ATTENDANCE_FAILURE_DECISION_ENTITY = 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION';
+const ATTENDANCE_FAILURE_DECISION_ACTION = 'COORDINATOR_DECISION';
 const activeScheduleRuns = new Set();
 const activeNotificationClaims = new Set();
 const NOTIFICATION_ENTITY = 'DISPATCH_WHATSAPP_NOTIFICATION';
@@ -81,12 +90,70 @@ function dateLabel(value) {
     .format(new Date(Date.UTC(year, month - 1, day, 12, 0, 0)));
 }
 
+function dateTimeLabel(value) {
+  const date = value instanceof Date ? value : new Date(value || Number.NaN);
+  if (Number.isNaN(date.getTime())) return 'hora no disponible';
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: BOGOTA_TIME_ZONE,
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
+  }).format(date);
+}
+
+function attendanceMarkLabel(markType) {
+  return ({
+    ARRIVAL: 'la entrada',
+    BREAK_START: 'el inicio de almuerzo',
+    BREAK_END: 'el fin de almuerzo',
+    DEPARTURE: 'la salida'
+  })[String(markType || '').toUpperCase()] || 'una marcación';
+}
+
+function attendanceFailureLocation(input = {}) {
+  const latitude = Number(input.latitude);
+  const longitude = Number(input.longitude);
+  const accuracyMeters = Number(input.accuracyMeters);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) return null;
+  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
+  return {
+    latitude,
+    longitude,
+    accuracyMeters: Number.isFinite(accuracyMeters) && accuracyMeters >= 0 ? accuracyMeters : null
+  };
+}
+
 export function buildDispatchNoveltyAdminAlertText(assignment) {
   const request = assignment?.serviceRequest || {};
   const name = assignment?.worker?.fullName || 'Un auxiliar';
   const phone = normalizeDispatchWhatsappPhone(assignment?.worker?.phone) || 'sin número';
   const operation = request.operationPointName || request.serviceName || 'la operación asignada';
   return `⚠️ Novedad reportada\n${name} (${phone}) reportó una novedad sobre su asignación del ${dateLabel(request.serviceDate)} en ${operation}.\nComunícate con el auxiliar para conocer qué ocurrió y gestionar lo necesario.`;
+}
+
+export function buildDispatchAttendanceFailureAdminAlertText({ failureEvent, assignment, failureContext = {} } = {}) {
+  const metadata = failureEvent?.metadata && typeof failureEvent.metadata === 'object' ? failureEvent.metadata : {};
+  const workerName = String(assignment?.worker?.fullName || 'Un auxiliar').trim() || 'Un auxiliar';
+  const operation = assignment?.serviceRequest?.operationPointName
+    || assignment?.serviceRequest?.serviceName
+    || 'la operación asignada';
+  const markType = metadata.markType || failureContext.markType;
+  const occurredAt = metadata.occurredAt || failureContext.occurredAt || failureEvent?.createdAt;
+  const description = String(metadata.descriptionEs || 'La marcación no pudo completarse.').trim();
+  const lines = [
+    '⚠️ Marcación no completada',
+    `${workerName} intentó registrar ${attendanceMarkLabel(markType)} el ${dateTimeLabel(occurredAt)} en ${operation}.`,
+    `Motivo: ${description}`
+  ];
+  if (metadata.failureCode === 'outside_operation_range') {
+    const location = attendanceFailureLocation(failureContext);
+    if (location) {
+      lines.push(`Ubicación del intento: https://www.google.com/maps?q=${location.latitude},${location.longitude}`);
+      if (location.accuracyMeters !== null) lines.push(`Precisión reportada: ${Math.round(location.accuracyMeters)} m.`);
+    } else {
+      lines.push('Ubicación del intento: el dispositivo no entregó coordenadas válidas para mostrar en el mapa.');
+    }
+  }
+  lines.push('Decide si deseas registrar la marcación con la hora original del intento o rechazarla.');
+  return lines.join('\n');
 }
 
 export function buildDispatchWindowExpiryReminderText() {
@@ -116,6 +183,215 @@ export async function sendDispatchNoveltyAdminAlert({ scope = 'operational', lin
   } catch (error) {
     console.warn(`[dispatch-wa-cloud] No fue posible enviar alerta de novedad al administrador ${user.username}: ${error?.message || error}`);
     return { sent: false, reason: 'provider_error', error: String(error?.message || error).slice(0, 300) };
+  }
+}
+
+export async function sendDispatchAttendanceFailureAdminAlert({
+  scope = 'operational',
+  failureEvent,
+  failureContext = {},
+  prismaClient = prisma,
+  axiosClient,
+  sendDecisionMessage = sendDispatchAttendanceFailureDecisionMessage,
+  now = new Date()
+} = {}) {
+  if (scope !== 'operational') return { sent: false, reason: 'scope_not_operational' };
+  if (failureEvent?.entityType !== ATTENDANCE_FAILURE_ENTITY || failureEvent?.action !== ATTENDANCE_FAILURE_ACTION) {
+    return { sent: false, reason: 'failure_event_invalid' };
+  }
+  const metadata = failureEvent.metadata && typeof failureEvent.metadata === 'object' ? failureEvent.metadata : {};
+  const assignmentId = String(metadata.assignmentId || '').trim();
+  if (!assignmentId) return { sent: false, reason: 'assignment_missing' };
+  const assignment = await prismaClient.dispatchAssignment.findUnique({
+    where: { id: assignmentId },
+    include: { worker: true, serviceRequest: true }
+  });
+  if (!assignment) return { sent: false, reason: 'assignment_missing' };
+  const user = await alertUserByUsername(prismaClient, assignment.createdByUsername);
+  if (!user?.isActive || !user.dispatchAlertPhone) return { sent: false, reason: 'admin_alert_not_configured' };
+  const key = notificationKey(ATTENDANCE_FAILURE_NOTIFICATION, [scope, user.id, failureEvent.id]);
+  const claim = await claimDispatchWhatsappNotification(prismaClient, {
+    notificationType: ATTENDANCE_FAILURE_NOTIFICATION,
+    key,
+    eventAt: failureEvent.createdAt || now,
+    now
+  });
+  if (!claim.claimed) return { sent: false, duplicate: true, reason: claim.reason || 'already_notified' };
+  try {
+    const text = buildDispatchAttendanceFailureAdminAlertText({ failureEvent, assignment, failureContext });
+    const sent = await sendDecisionMessage({
+      scope,
+      phone: user.dispatchAlertPhone,
+      failureEventId: failureEvent.id,
+      text,
+      axiosClient
+    });
+    await markDispatchWhatsappNotification(prismaClient, claim, { sent: true, now });
+    return { sent: true, userId: user.id, providerMessageId: sent?.providerMessageId || null };
+  } catch (error) {
+    await markDispatchWhatsappNotification(prismaClient, claim, { sent: false, error, now }).catch(() => {});
+    console.warn(`[dispatch-wa-cloud] Falló alerta de marcación al coordinador ${user.username}: ${error?.message || error}`);
+    return { sent: false, reason: 'provider_error', error: String(error?.message || error).slice(0, 300) };
+  }
+}
+
+function attendanceFailureDecisionId(failureEventId) {
+  const digest = createHash('sha256').update(String(failureEventId || '')).digest('hex').slice(0, 48);
+  return `attendance_decision_${digest}`;
+}
+
+function attendanceManualField(markType) {
+  return ({
+    ARRIVAL: 'arrivalReportedAt',
+    BREAK_START: 'breakStartAt',
+    BREAK_END: 'breakEndAt',
+    DEPARTURE: 'departureReportedAt'
+  })[String(markType || '').toUpperCase()] || null;
+}
+
+export async function resolveDispatchAttendanceFailureCoordinatorDecision({
+  scope = 'operational',
+  failureEventId,
+  decision,
+  coordinatorPhone,
+  decidedAt = new Date(),
+  prismaClient = prisma,
+  registerManualAttendanceFn = registerManualAttendance
+} = {}) {
+  if (scope !== 'operational') return { handled: false, reason: 'scope_not_operational' };
+  const eventId = String(failureEventId || '').trim();
+  const normalizedDecision = String(decision || '').trim().toUpperCase();
+  if (!/^attendance_failure_[a-f0-9]{48}$/.test(eventId) || !['ACCEPT', 'REJECT'].includes(normalizedDecision)) {
+    return { handled: false, reason: 'decision_invalid' };
+  }
+  const failureEvent = await prismaClient.devAuditEvent.findUnique({ where: { id: eventId } });
+  if (failureEvent?.entityType !== ATTENDANCE_FAILURE_ENTITY || failureEvent?.action !== ATTENDANCE_FAILURE_ACTION) {
+    return { handled: false, reason: 'failure_not_found' };
+  }
+  const metadata = failureEvent.metadata && typeof failureEvent.metadata === 'object' ? failureEvent.metadata : {};
+  const assignmentId = String(metadata.assignmentId || '').trim();
+  const markType = String(metadata.markType || '').trim().toUpperCase();
+  const manualField = attendanceManualField(markType);
+  const attemptedAt = new Date(metadata.occurredAt || failureEvent.createdAt || Number.NaN);
+  if (!assignmentId || !manualField || Number.isNaN(attemptedAt.getTime())) {
+    return { handled: false, reason: 'failure_context_invalid' };
+  }
+  const assignment = await prismaClient.dispatchAssignment.findUnique({
+    where: { id: assignmentId },
+    select: { id: true, createdByUsername: true }
+  });
+  if (!assignment) return { handled: false, reason: 'assignment_missing' };
+  const user = await alertUserByUsername(prismaClient, assignment.createdByUsername);
+  const authorizedPhone = normalizeDispatchWhatsappPhone(user?.dispatchAlertPhone);
+  if (!user?.isActive || !authorizedPhone || authorizedPhone !== normalizeDispatchWhatsappPhone(coordinatorPhone)) {
+    return { handled: false, reason: 'coordinator_unauthorized' };
+  }
+
+  const decisionId = attendanceFailureDecisionId(eventId);
+  const existing = await prismaClient.devAuditEvent.findUnique({ where: { id: decisionId } });
+  const existingMetadata = existing?.metadata && typeof existing.metadata === 'object' ? existing.metadata : {};
+  if (['ACCEPTED', 'REJECTED'].includes(existingMetadata.status)) {
+    return {
+      handled: true,
+      duplicate: true,
+      status: existingMetadata.status,
+      assignmentId,
+      markType,
+      attemptedAt
+    };
+  }
+  if (existingMetadata.status === 'PENDING') {
+    return { handled: true, duplicate: true, inProgress: true, status: 'PENDING', assignmentId, markType, attemptedAt };
+  }
+
+  const pendingMetadata = {
+    failureEventId: eventId,
+    assignmentId,
+    markType,
+    attemptedAt: attemptedAt.toISOString(),
+    requestedDecision: normalizedDecision,
+    status: 'PENDING',
+    originalFailureCode: metadata.failureCode || null
+  };
+  if (existing) {
+    await prismaClient.devAuditEvent.update({
+      where: { id: decisionId },
+      data: { actorUserId: user.id, actorUsername: user.username, actorRole: 'coordinator', metadata: pendingMetadata, createdAt: decidedAt }
+    });
+  } else {
+    try {
+      await prismaClient.devAuditEvent.create({
+        data: {
+          id: decisionId,
+          entityType: ATTENDANCE_FAILURE_DECISION_ENTITY,
+          entityId: eventId,
+          entityLabel: `attendance-failure:${eventId}`,
+          action: ATTENDANCE_FAILURE_DECISION_ACTION,
+          actorUserId: user.id,
+          actorUsername: user.username,
+          actorRole: 'coordinator',
+          actorSource: 'dispatch-whatsapp',
+          metadata: pendingMetadata,
+          createdAt: decidedAt
+        }
+      });
+    } catch (error) {
+      if (error?.code !== 'P2002') throw error;
+      return { handled: true, duplicate: true, inProgress: true, status: 'PENDING', assignmentId, markType, attemptedAt };
+    }
+  }
+
+  if (normalizedDecision === 'REJECT') {
+    await prismaClient.devAuditEvent.update({
+      where: { id: decisionId },
+      data: { metadata: { ...pendingMetadata, status: 'REJECTED', resolvedAt: decidedAt.toISOString() } }
+    });
+    return { handled: true, duplicate: false, status: 'REJECTED', assignmentId, markType, attemptedAt };
+  }
+
+  try {
+    const manualResult = await registerManualAttendanceFn(prismaClient, {
+      assignmentId,
+      [manualField]: attemptedAt.toISOString(),
+      reason: `Marcación aceptada por coordinación desde el intento fallido ${eventId}.`,
+      notes: metadata.failureCode ? `Error original: ${metadata.failureCode}` : null,
+      actorUsername: user.username,
+      actorRole: 'coordinator-whatsapp',
+      now: decidedAt
+    });
+    await prismaClient.devAuditEvent.update({
+      where: { id: decisionId },
+      data: {
+        metadata: {
+          ...pendingMetadata,
+          status: 'ACCEPTED',
+          resolvedAt: decidedAt.toISOString(),
+          attendanceSessionId: manualResult?.id || manualResult?.attendanceSession?.id || null
+        }
+      }
+    });
+    return {
+      handled: true,
+      duplicate: false,
+      status: 'ACCEPTED',
+      assignmentId,
+      markType,
+      attemptedAt,
+      attendanceSession: manualResult || null
+    };
+  } catch (error) {
+    await prismaClient.devAuditEvent.update({
+      where: { id: decisionId },
+      data: {
+        metadata: {
+          ...pendingMetadata,
+          status: 'FAILED',
+          errorCode: String(error?.message || 'attendance_manual_failed').slice(0, 120),
+          resolvedAt: decidedAt.toISOString()
+        }
+      }
+    }).catch(() => {});
+    throw error;
   }
 }
 
