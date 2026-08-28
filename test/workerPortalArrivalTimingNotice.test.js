@@ -16,9 +16,11 @@ function noticeRuntime(source) {
 }
 
 function timingFormatter(runtime) {
-  const match = runtime.match(/(function arrivalTimingMessage\(expectedStartAt, arrivalReportedAt\) \{[\s\S]*?\n          \})\n\n          function showArrivalNotices/);
-  assert.ok(match?.[1], 'debe poder aislarse el formateador real del aviso');
-  return Function(`"use strict"; ${match[1]}; return arrivalTimingMessage;`)();
+  const start = runtime.indexOf('function arrivalTimingMessage(expectedStartAt, arrivalReportedAt)');
+  const end = runtime.indexOf('function showArrivalNotices', start);
+  assert.ok(start >= 0 && end > start, 'debe poder aislarse el formateador real del aviso');
+  const functionSource = runtime.slice(start, end).trim();
+  return Function(`"use strict"; ${functionSource}; return arrivalTimingMessage;`)();
 }
 
 test('el aviso de entrada usa el texto aprobado para minutos antes y después', async () => {
