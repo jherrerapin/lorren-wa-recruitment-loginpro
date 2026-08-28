@@ -97,6 +97,83 @@
       if (minutes > 1) return `Llegada tarde por ${minutes} minutos frente a la hora programada.`;
       return 'Llegada clasificada como tarde.';
     };
+    const friendlyFailurePhase = (phase) => ({
+      Registro: 'Marcación',
+      Asignación: 'Asignación',
+      Horario: 'Horario',
+      Secuencia: 'Orden de la jornada',
+      Sincronización: 'Registro sin conexión',
+      Ubicación: 'Ubicación',
+      Biometría: 'Validación facial',
+      Conexión: 'Conexión',
+      Bluetooth: 'Cuadrilla',
+      Cámara: 'Cámara'
+    })[String(phase || '')] || 'Marcación';
+    const friendlyFailureSource = (source) => ({
+      'Servidor de asistencia': 'Detectado por el sistema',
+      'Aplicación Android': 'Detectado en la app',
+      'Portal del auxiliar': 'Detectado en el portal'
+    })[String(source || '')] || 'Detectado por el sistema';
+    const friendlyFailureDescription = (attempt) => {
+      const phase = String(attempt?.phaseLabel || '');
+      const description = String(attempt?.description || '').toLocaleLowerCase('es-CO');
+      if (phase === 'Ubicación') {
+        if (description.includes('geocerca válida configurada')) return 'El punto de trabajo no tenía configurado el rango de ubicación para marcar.';
+        if (description.includes('fuera')) return 'La ubicación estaba fuera del rango permitido para marcar.';
+        if (description.includes('precisión')) return 'La ubicación no tenía suficiente precisión para marcar.';
+        if (description.includes('simulad')) return 'El teléfono detectó una ubicación simulada y no permitió marcar.';
+        if (description.includes('permiso')) return 'El teléfono no tenía autorizado el acceso a la ubicación.';
+        if (description.includes('20 segundos') || description.includes('agotó')) return 'No se pudo obtener la ubicación a tiempo.';
+        if (description.includes('venc') || description.includes('vigencia')) return 'La ubicación dejó de ser válida antes de terminar el registro.';
+        if (description.includes('dispositivo') || description.includes('teléfono') || description.includes('android')) return 'No se pudo validar la ubicación desde este teléfono.';
+        return 'No se pudo validar la ubicación para completar el registro.';
+      }
+      if (phase === 'Cámara') {
+        if (description.includes('abrirse')) return 'No se pudo abrir la cámara.';
+        if (description.includes('pausó')) return 'La cámara se pausó durante la validación.';
+        return 'La cámara no pudo obtener una imagen válida para continuar.';
+      }
+      if (phase === 'Biometría') {
+        if (description.includes('límite')) return 'Se alcanzó temporalmente el límite de intentos de validación facial.';
+        if (description.includes('venc')) return 'La validación facial venció antes de completar el registro.';
+        if (description.includes('disponible') || description.includes('listo')) return 'La validación facial no estaba disponible en ese momento.';
+        if (description.includes('tiempo') || description.includes('muestras') || description.includes('movimiento') || description.includes('capturas')) return 'La validación facial no se completó correctamente.';
+        return 'No se pudo confirmar la identidad con la validación facial.';
+      }
+      if (phase === 'Conexión') {
+        return description.includes('requería')
+          ? 'Se necesitaba conexión para completar el registro.'
+          : 'Se perdió la conexión durante el intento.';
+      }
+      if (phase === 'Bluetooth') return 'No se pudo confirmar la presencia de la cuadrilla para completar el registro.';
+      if (phase === 'Sincronización') {
+        return description.includes('plazo')
+          ? 'El registro guardado sin conexión no se sincronizó dentro del tiempo permitido.'
+          : 'El registro guardado sin conexión tenía una hora que no se pudo validar.';
+      }
+      if (phase === 'Secuencia') {
+        if (description.includes('salida sin una entrada')) return 'Primero debía registrarse la entrada.';
+        if (description.includes('iniciar el almuerzo sin una entrada')) return 'Primero debía registrarse la entrada antes del almuerzo.';
+        if (description.includes('salida mientras el almuerzo')) return 'Primero debía registrarse el regreso del almuerzo.';
+        if (description.includes('finalizar el almuerzo sin un inicio')) return 'Primero debía registrarse el inicio del almuerzo.';
+        if (description.includes('después de que la salida')) return 'La jornada ya tenía una salida registrada.';
+        if (description.includes('ya estaba registrado') || description.includes('ya estaba registrada')) return 'Ese registro ya estaba hecho.';
+        if (description.includes('anterior')) return 'La hora del registro no coincidía con el orden de la jornada.';
+        return 'El intento no coincidía con el orden de la jornada.';
+      }
+      if (phase === 'Horario') return 'La entrada se intentó antes de la hora permitida.';
+      if (phase === 'Asignación') {
+        return description.includes('deshabilitado')
+          ? 'La operación no estaba habilitada para marcar asistencia.'
+          : 'La asignación ya no estaba disponible para marcar.';
+      }
+      if (phase === 'Registro') {
+        return description.includes('temporal')
+          ? 'No se pudo completar el registro en ese momento.'
+          : 'Faltó información necesaria para completar el registro.';
+      }
+      return 'No se pudo completar el registro en ese intento.';
+    };
   %>
   <nav class="navbar"><a class="brand" href="/admin"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a><a href="/admin">Panel</a><a href="/admin/vacancies">Vacantes</a><a href="/admin/operaciones" class="nav-active">Operaciones / Despacho</a><span class="spacer"></span><form method="post" action="/logout"><button class="btn-logout">Cerrar sesión</button></form></nav>
   <main class="page attendance-page">
@@ -152,19 +229,19 @@
             <div class="attendance-body">
               <% if (failedMarkAttemptCount > 0) { %>
                 <details class="failure-audit">
-                  <summary>Intentos fallidos registrados: <%= failedMarkAttemptCount %> · Ver errores comprobados</summary>
+                  <summary>Intentos sin completar: <%= failedMarkAttemptCount %> · Ver detalles</summary>
                   <div class="failure-audit-list">
                     <% failedMarkAttempts.forEach((attempt) => { %>
                       <div class="failure-audit-item">
                         <strong><%= attempt.markLabel %> · <%= attempt.occurredAtLabel %></strong>
-                        <span><%= attempt.phaseLabel %> · <%= attempt.sourceLabel %></span>
-                        <p><%= attempt.description %></p>
+                        <span><%= friendlyFailurePhase(attempt.phaseLabel) %> · <%= friendlyFailureSource(attempt.sourceLabel) %></span>
+                        <p><%= friendlyFailureDescription(attempt) %></p>
                       </div>
                     <% }) %>
                   </div>
                 </details>
               <% } else { %>
-                <div class="failure-audit-zero">Intentos fallidos registrados: 0</div>
+                <div class="failure-audit-zero">Intentos sin completar: 0</div>
               <% } %>
               <div class="detail-grid">
                 <div><% if ((row.pointLatitude !== null && row.pointLongitude !== null) || hasAttendanceEvidence) { %><details data-map-details><summary class="btn">Ver ubicación y geocerca</summary><% if (row.pointLatitude !== null && row.pointLongitude !== null) { %><% if (hasArrivalLocation || hasDepartureLocation) { %><div class="map-switcher" role="group" aria-label="Marcación mostrada en el mapa"><% if (hasArrivalLocation) { %><button type="button" class="btn" data-map-mode="arrival">Entrada</button><% } %><% if (hasDepartureLocation) { %><button type="button" class="btn" data-map-mode="departure">Salida</button><% } %><% if (hasArrivalLocation && hasDepartureLocation) { %><button type="button" class="btn" data-map-mode="both">Ver ambas</button><% } %></div><% } %><div id="attendanceMap<%= index %>" class="attendance-map" data-point-lat="<%= row.pointLatitude %>" data-point-lng="<%= row.pointLongitude %>" data-arrival-lat="<%= hasArrivalLocation ? row.arrivalLatitude : '' %>" data-arrival-lng="<%= hasArrivalLocation ? row.arrivalLongitude : '' %>" data-departure-lat="<%= hasDepartureLocation ? row.departureLatitude : '' %>" data-departure-lng="<%= hasDepartureLocation ? row.departureLongitude : '' %>" data-radius="<%= row.geofenceRadiusMeters %>" data-default-map-mode="<%= hasArrivalLocation ? 'arrival' : (hasDepartureLocation ? 'departure' : 'operation') %>"></div><div class="map-legend"><span class="operation">Punto y geocerca</span><% if (hasArrivalLocation) { %><span class="arrival">Entrada reportada</span><% } %><% if (hasDepartureLocation) { %><span class="departure">Salida reportada</span><% } %></div><% } else { %><p class="map-empty-note">No hay coordenadas del punto operativo disponibles para esta jornada.</p><% } %><% if (hasAttendanceEvidence) { %><div class="evidence-row"><% if (row.arrivalEvidenceAvailable && row.arrivalMarkId) { %><a class="btn" href="/admin/operaciones/asistencia/evidence/<%= row.arrivalMarkId %>" target="_blank" rel="noopener">Ver fotografía de entrada</a><% } %><% if (row.departureEvidenceAvailable && row.departureMarkId) { %><a class="btn" href="/admin/operaciones/asistencia/evidence/<%= row.departureMarkId %>" target="_blank" rel="noopener">Ver fotografía de salida</a><% } %></div><% } %></details><% } %></div>

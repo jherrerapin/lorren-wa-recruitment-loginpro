@@ -280,7 +280,7 @@ test('el panel de asistencia proyecta solo la explicación española guardada en
   assert.equal(Object.hasOwn(board.rows[0].failedMarkAttempts[0], 'failureCode'), false);
 });
 
-test('el flujo cliente encola fallos conocidos y la vista no expone códigos técnicos', () => {
+test('el flujo cliente conserva la auditoría técnica y la vista la presenta en lenguaje sencillo', () => {
   const flowSource = fs.readFileSync(new URL('../src/public/worker-portal-biometric-flow.js', import.meta.url), 'utf8');
   const viewSource = fs.readFileSync(new URL('../src/views/operacionesAsistencia.ejs', import.meta.url), 'utf8');
 
@@ -292,7 +292,13 @@ test('el flujo cliente encola fallos conocidos y la vista no expone códigos té
   assert.match(flowSource, /body:\s*JSON\.stringify\(\{\s*markType:\s*record\.markType,\s*clientAttemptId:\s*record\.clientAttemptId,\s*errorCode:\s*record\.errorCode,\s*occurredAt:\s*record\.occurredAt/s);
   assert.doesNotMatch(flowSource, /description:\s*error/);
 
-  assert.match(viewSource, /Intentos fallidos registrados:/);
-  assert.match(viewSource, /attempt\.description/);
+  assert.match(viewSource, /Intentos sin completar:/);
+  assert.match(viewSource, /friendlyFailurePhase\(attempt\.phaseLabel\)/);
+  assert.match(viewSource, /friendlyFailureSource\(attempt\.sourceLabel\)/);
+  assert.match(viewSource, /friendlyFailureDescription\(attempt\)/);
+  assert.match(viewSource, /La ubicación estaba fuera del rango permitido para marcar\./);
+  assert.match(viewSource, /Detectado por el sistema/);
+  assert.doesNotMatch(viewSource, /<span><%= attempt\.phaseLabel %> · <%= attempt\.sourceLabel %><\/span>/);
+  assert.doesNotMatch(viewSource, /<p><%= attempt\.description %><\/p>/);
   assert.doesNotMatch(viewSource, /attempt\.failureCode/);
 });
