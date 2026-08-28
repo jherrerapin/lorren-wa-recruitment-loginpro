@@ -179,6 +179,12 @@ function arrivalPublicError(result) {
   })[firstFlag] || 'arrival_not_recorded';
 }
 
+function publicIsoDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return validDate(date) ? date.toISOString() : null;
+}
+
 function arrivalPublicResult(result) {
   if (!result?.recorded) {
     return { status: 409, payload: { ok: false, error: arrivalPublicError(result) } };
@@ -186,6 +192,8 @@ function arrivalPublicResult(result) {
   const validationStatus = result.validation?.validationStatus || 'REVIEW_REQUIRED';
   const punctualityStatus = result.validation?.reportedPunctuality || null;
   const riskFlags = Array.isArray(result.validation?.riskFlags) ? result.validation.riskFlags : [];
+  const expectedStartAt = publicIsoDate(result.attendanceSession?.expectedStartAt);
+  const arrivalReportedAt = publicIsoDate(result.attendanceSession?.arrivalReportedAt);
   let message = 'Llegada registrada y enviada para revisión.';
   if (riskFlags.includes('OFFLINE_WEB_CAPTURE')) {
     message = 'Llegada guardada sin conexión y sincronizada. Quedó pendiente de revisión.';
@@ -204,6 +212,8 @@ function arrivalPublicResult(result) {
       validationStatus,
       attendanceStatus: result.validation?.attendanceStatus || null,
       punctualityStatus,
+      expectedStartAt,
+      arrivalReportedAt,
       requiresReview: validationStatus === 'REVIEW_REQUIRED',
       message
     }
