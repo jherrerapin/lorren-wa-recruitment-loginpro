@@ -293,8 +293,15 @@ function ensureUsersProgrammingAccessScript(html, path) {
   return html.replace(/<\/body>/i, `  <script src="${USERS_PROGRAMMING_ACCESS_SCRIPT}" defer></script>\n</body>`);
 }
 
+function normalizePayrollPresentation(html) {
+  return html
+    .replace(/<title>\s*Nómina y tiempo trabajado\s*—\s*LoginPro<\/title>/gi, '<title>Gestión de Tiempo — LoginPro</title>')
+    .replace(/<title>\s*Personalizar Excel de nómina\s*—\s*LoginPro<\/title>/gi, '<title>Personalizar Excel · Gestión de Tiempo — LoginPro</title>')
+    .replace(/<h1>\s*Nómina y tiempo trabajado\s*<\/h1>/gi, '<h1>Gestión de Tiempo</h1>');
+}
+
 function normalizePayrollPaths(html) {
-  return html.split(LEGACY_PAYROLL_PATH).join(PAYROLL_PATH);
+  return normalizePayrollPresentation(html.split(LEGACY_PAYROLL_PATH).join(PAYROLL_PATH));
 }
 
 function isPayrollApiPath(path) {
