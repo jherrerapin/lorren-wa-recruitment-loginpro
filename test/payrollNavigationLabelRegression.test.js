@@ -50,13 +50,16 @@ test('Gestión de Tiempo usa una ruta pública canónica y normaliza enlaces her
 
   assert.equal(ADMIN_MODULE_PATHS.payroll, PAYROLL_PATH);
 
-  const representativeHtml = `<!DOCTYPE html><html><head><title>Gestión de Tiempo</title></head><body>
+  const representativeHtml = `<!DOCTYPE html><html><head><title>Nómina y tiempo trabajado — LoginPro</title></head><body>
     <nav class="navbar"><a href="${LEGACY_PAYROLL_PATH}">Gestión de Tiempo</a></nav>
-    <main><form action="${LEGACY_PAYROLL_PATH}/imports/preview" method="post"></form></main>
+    <main><h1>Nómina y tiempo trabajado</h1><form action="${LEGACY_PAYROLL_PATH}/imports/preview" method="post"></form></main>
   </body></html>`;
   const normalized = injectAdminModuleNavigation(representativeHtml, adminRequest());
   assert.match(normalized, new RegExp(PAYROLL_PATH.replaceAll('/', '\\/')));
   assert.doesNotMatch(normalized, new RegExp(LEGACY_PAYROLL_PATH.replaceAll('/', '\\/')));
+  assert.match(normalized, /<title>Gestión de Tiempo — LoginPro<\/title>/);
+  assert.match(normalized, /<h1>Gestión de Tiempo<\/h1>/);
+  assert.doesNotMatch(normalized, /Nómina y tiempo trabajado/);
 
   for (const rawView of [exportView, testWorkspaceView]) {
     const visibleHtml = injectAdminModuleNavigation(rawView, adminRequest());
@@ -85,10 +88,18 @@ test('el enlace viejo redirige permanentemente a Gestión de Tiempo sin crear ot
   });
 });
 
-test('los nombres visibles siguen siendo Gestión de Tiempo', async () => {
-  const navigation = await source('src/services/adminNavigation.js');
+test('los nombres visibles y el acceso conservan Gestión de Tiempo como presentación pública', async () => {
+  const [navigation, bridge] = await Promise.all([
+    source('src/services/adminNavigation.js'),
+    source('src/routes/dispatchBridge.js')
+  ]);
   assert.match(navigation, /menuLink\(PAYROLL_PATH, 'Gestión de Tiempo'\)/);
   assert.match(navigation, /key: 'payroll', label: 'Gestión de Tiempo'/);
+  assert.match(navigation, /<title>Gestión de Tiempo — LoginPro<\/title>/);
   assert.doesNotMatch(navigation, /menuLink\(PAYROLL_PATH, 'Nómina/);
   assert.doesNotMatch(navigation, /key: 'payroll', label: 'Nómina'/);
+
+  assert.match(bridge, /const PAYROLL_PATH = '\/admin\/operaciones\/asistencia\/gestion-tiempo'/);
+  assert.match(bridge, /const LEGACY_PAYROLL_PATH = '\/admin\/operaciones\/asistencia\/nomina'/);
+  assert.match(bridge, /path\.startsWith\(PAYROLL_PATH\) \|\| path\.startsWith\(LEGACY_PAYROLL_PATH\)/);
 });
