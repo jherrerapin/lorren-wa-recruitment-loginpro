@@ -10,7 +10,8 @@ import {
 } from '../src/services/dispatchWhatsappCloudClient.js';
 import {
   buildDispatchAttendanceFailureAdminAlertText,
-  resolveDispatchAttendanceFailureCoordinatorDecision
+  resolveDispatchAttendanceFailureCoordinatorDecision,
+  sendDispatchAttendanceFailureAdminAlert
 } from '../src/services/dispatchWhatsappAdminAlerts.js';
 
 const FAILURE_ID = `attendance_failure_${'a'.repeat(48)}`;
@@ -43,12 +44,37 @@ function failureEvent(overrides = {}) {
   };
 }
 
-function decisionPrisma({ event = failureEvent() } = {}) {
+function failureEventWithId(id, overrides = {}, createdAt = null) {
+  return {
+    ...failureEvent(overrides),
+    id,
+    createdAt: createdAt || new Date(overrides.occurredAt || ATTEMPTED_AT)
+  };
+}
+
+function matchesWhere(row, where = {}) {
+  if (where.id && row?.id !== where.id) return false;
+  if (where.entityType && row?.entityType !== where.entityType) return false;
+  if (where.action && row?.action !== where.action) return false;
+  if (typeof where.entityId === 'string' && row?.entityId !== where.entityId) return false;
+  if (where.entityId?.in && !where.entityId.in.includes(row?.entityId)) return false;
+  return true;
+}
+
+function decisionPrisma({ event = failureEvent(), extraEvents = [], attendanceSession = null } = {}) {
   const events = new Map([[event.id, structuredClone(event)]]);
+  extraEvents.forEach((item) => events.set(item.id, structuredClone(item)));
+  let generatedAuditId = 0;
   const assignment = {
     id: ASSIGNMENT_ID,
-    createdByUsername: 'coordinador-prueba'
+    createdByUsername: 'coordinador-prueba',
+    attendanceSession,
+    worker: { id: 'worker-test-1', fullName: 'Auxiliar Prueba' },
+    serviceRequest: { id: 'request-test-1', operationPointName: 'Operación Prueba' }
   };
+  const orderedEvents = () => [...events.values()].sort((left, right) => (
+    new Date(right?.createdAt || 0).getTime() - new Date(left?.createdAt || 0).getTime()
+  ));
   return {
     events,
     api: {
@@ -56,14 +82,21 @@ function decisionPrisma({ event = failureEvent() } = {}) {
         async findUnique({ where }) {
           return events.get(where.id) || null;
         },
+        async findMany({ where = {} }) {
+          return orderedEvents().filter((row) => matchesWhere(row, where));
+        },
+        async findFirst({ where = {} }) {
+          return orderedEvents().find((row) => matchesWhere(row, where)) || null;
+        },
         async create({ data }) {
-          if (events.has(data.id)) {
+          const id = data.id || `audit-test-${++generatedAuditId}`;
+          if (events.has(id)) {
             const error = new Error('duplicate');
             error.code = 'P2002';
             throw error;
           }
-          const row = { ...structuredClone(data), createdAt: data.createdAt || new Date() };
-          events.set(data.id, row);
+          const row = { ...structuredClone(data), id, createdAt: data.createdAt || new Date() };
+          events.set(id, row);
           return row;
         },
         async update({ where, data }) {
@@ -211,6 +244,7 @@ test('fuera de geocerca muestra el punto GPS real del intento al coordinador', (
   assert.match(text, /La ubicación estaba fuera del rango permitido para marcar\./);
   assert.match(text, /https:\/\/www\.google\.com\/maps\?q=4\.62001,-74\.10001/);
   assert.match(text, /Precisión reportada: 13 m\./);
+  assert.match(text, /Este aviso representa esa marcación, no cada intento/);
 });
 
 test('aceptar por WhatsApp registra una sola vez la entrada con la hora original del intento', async () => {
@@ -299,6 +333,91 @@ test('un WhatsApp distinto al configurado no puede decidir la marcación', async
   assert.equal(result.reason, 'coordinator_unauthorized');
   assert.equal(writerCalled, false);
   assert.equal([...store.events.values()].some((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION'), false);
+});
+
+test('un aviso antiguo de WhatsApp decide el último intento fallido de esa marcación', async () => {
+  const latestFailureId = `attendance_failure_${'c'.repeat(48)}`;
+  const latestAttemptedAt = new Date('2026-08-28T15:47:00.000Z');
+  const latest = failureEventWithId(latestFailureId, {
+    attemptId: 'attempt_test_latest',
+    occurredAt: latestAttemptedAt.toISOString(),
+    failureCode: 'client_location_timeout',
+    descriptionEs: 'El GPS agotó 20 segundos sin entregar una ubicación para la marcación.'
+  }, new Date('2026-08-28T15:47:01.000Z'));
+  const store = decisionPrisma({ extraEvents: [latest] });
+  const writes = [];
+
+  const result = await resolveDispatchAttendanceFailureCoordinatorDecision({
+    failureEventId: FAILURE_ID,
+    decision: 'ACCEPT',
+    coordinatorPhone: COORDINATOR_PHONE,
+    decidedAt: new Date('2026-08-28T15:50:00.000Z'),
+    prismaClient: store.api,
+    registerManualAttendanceFn: attendanceWriter(writes)
+  });
+
+  assert.equal(result.status, 'ACCEPTED');
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].arrivalReportedAt, latestAttemptedAt.toISOString());
+  const decision = [...store.events.values()].find((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION');
+  assert.equal(decision.entityId, latestFailureId);
+});
+
+test('si la marcación ya quedó registrada WhatsApp no crea ni reemplaza otra', async () => {
+  const store = decisionPrisma({
+    attendanceSession: {
+      arrivalReportedAt: new Date('2026-08-28T15:46:00.000Z'),
+      departureReportedAt: null,
+      marks: [{ markType: 'ARRIVAL' }]
+    }
+  });
+  let writerCalled = false;
+  const result = await resolveDispatchAttendanceFailureCoordinatorDecision({
+    failureEventId: FAILURE_ID,
+    decision: 'ACCEPT',
+    coordinatorPhone: COORDINATOR_PHONE,
+    prismaClient: store.api,
+    registerManualAttendanceFn: async () => {
+      writerCalled = true;
+      return { id: 'unexpected' };
+    }
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.duplicate, true);
+  assert.equal(result.alreadyRecorded, true);
+  assert.equal(result.status, 'ACCEPTED');
+  assert.equal(writerCalled, false);
+  assert.equal([...store.events.values()].some((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION'), false);
+});
+
+test('trece fallos de la misma marcación generan un solo aviso de WhatsApp', async () => {
+  const store = decisionPrisma();
+  const sends = [];
+  for (let index = 0; index < 13; index += 1) {
+    const event = failureEventWithId(
+      `attendance_failure_${index.toString(16).padStart(48, '0')}`,
+      {
+        attemptId: `attempt_test_${String(index).padStart(6, '0')}`,
+        occurredAt: new Date(ATTEMPTED_AT.getTime() + index * 60_000).toISOString()
+      },
+      new Date(ATTEMPTED_AT.getTime() + index * 60_000 + 1000)
+    );
+    store.events.set(event.id, structuredClone(event));
+    await sendDispatchAttendanceFailureAdminAlert({
+      failureEvent: event,
+      failureContext: event.metadata,
+      prismaClient: store.api,
+      now: event.createdAt,
+      sendDecisionMessage: async (input) => {
+        sends.push(input);
+        return { providerMessageId: `wa-test-${sends.length}` };
+      }
+    });
+  }
+
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].failureEventId, `attendance_failure_${'0'.repeat(48)}`);
 });
 
 test('el dashboard acepta el intento con el actor autenticado y la misma hora original', async () => {
@@ -415,6 +534,18 @@ test('al recargar Asistencia el intento conserva la decisión terminal y su cana
   assert.match(attempt.decisionResolvedAtLabel, /28/);
 });
 
+test('el dashboard deja botones solo en el último fallo vigente y ninguno si la marca ya existe', () => {
+  const view = fs.readFileSync(new URL('../src/views/operacionesAsistencia.ejs', import.meta.url), 'utf8');
+  assert.match(view, /latestFailureEventByMarkType/);
+  assert.match(view, /markAlreadyRecorded/);
+  assert.match(view, /!isLatestFailureAttempt/);
+  assert.match(view, /La marcación ya quedó registrada/);
+  assert.match(view, /Solo el último puede decidirse/);
+  assert.match(view, /Aceptar marcación/);
+  assert.match(view, /name="decision" value="ACCEPT"/);
+  assert.match(view, /name="decision" value="REJECT"/);
+});
+
 test('la decisión vive en Asistencia, ambos canales delegan y webhook sigue sin reglas nuevas', () => {
   const attendance = fs.readFileSync(new URL('../src/modules/dispatch-attendance/application/adminAttendance.js', import.meta.url), 'utf8');
   const alerts = fs.readFileSync(new URL('../src/services/dispatchWhatsappAdminAlerts.js', import.meta.url), 'utf8');
@@ -430,15 +561,16 @@ test('la decisión vive en Asistencia, ambos canales delegan y webhook sigue sin
   assert.match(attendance, /decisionStatus/);
   assert.doesNotMatch(attendance, /dispatchAttendanceMark\.create\([^\n]*failure/i);
   assert.match(alerts, /resolveAttendanceFailureDecision/);
+  assert.match(alerts, /assignmentId, markType/);
+  assert.match(alerts, /latestAttendanceFailureForMark/);
   assert.doesNotMatch(alerts, /registerManualAttendanceFn\(prismaClient/);
   assert.match(inbound, /dispatch_attendance_\(accept\|reject\)/);
   assert.match(inbound, /resolveDispatchAttendanceFailureCoordinatorDecision/);
   assert.doesNotMatch(route, /dispatch_attendance_accept|dispatch_attendance_reject|ATTENDANCE_MARK_FAILURE_DECISION/);
   assert.match(adminRoute, /failures\/:failureEventId\/decision/);
   assert.match(adminRoute, /resolveAttendanceFailureDecision/);
-  assert.match(view, /Aceptar marcación/);
-  assert.match(view, /name="decision" value="ACCEPT"/);
-  assert.match(view, /name="decision" value="REJECT"/);
+  assert.match(view, /latestFailureEventByMarkType/);
+  assert.match(view, /markAlreadyRecorded/);
   assert.match(portal, /sendDispatchAttendanceFailureAdminAlert/);
   assert.match(portal, /latitude:\s*finiteNumber\(req\.body\?\.latitude/);
   assert.match(portal, /longitude:\s*finiteNumber\(req\.body\?\.longitude/);
