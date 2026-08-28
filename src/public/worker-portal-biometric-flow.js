@@ -32,7 +32,38 @@
   if (!dialog || !resultBox || !submitButton) return;
 
   const MAX_AUTOMATIC_ATTEMPTS = 1;
-  const FLOW_RELEASE = '20260816-native-attendance-location-v6';
+  const FLOW_RELEASE = '20260828-attendance-failure-audit-v1';
+  const ATTENDANCE_FAILURE_QUEUE_KEY = 'lorren-attendance-failure-v1';
+  const ATTENDANCE_FAILURE_QUEUE_LIMIT = 40;
+  const CLIENT_FAILURE_CODES = Object.freeze({
+    location_permission_denied: 'client_location_permission_denied',
+    location_position_unavailable: 'client_location_position_unavailable',
+    location_timeout: 'client_location_timeout',
+    location_unsupported: 'client_location_unsupported',
+    native_location_unavailable: 'client_native_location_unavailable',
+    native_location_proof_failed: 'client_native_location_proof_failed',
+    native_location_credential_required: 'client_native_location_credential_required',
+    permissions_required: 'client_native_permissions_required',
+    mock_location_detected: 'client_mock_location_detected',
+    native_bridge_unavailable: 'client_native_bridge_unavailable',
+    native_bridge_invalid_response: 'client_native_bridge_invalid_response',
+    native_bridge_failed: 'client_native_bridge_failed',
+    camera_unavailable: 'client_camera_unavailable',
+    camera_stream_unavailable: 'client_camera_stream_unavailable',
+    camera_stream_muted: 'client_camera_stream_muted',
+    biometric_page_not_visible: 'client_biometric_page_not_visible',
+    biometric_runtime_preparing: 'client_biometric_runtime_preparing',
+    biometric_runtime_unavailable: 'client_biometric_runtime_unavailable',
+    biometric_detection_timeout: 'client_biometric_detection_timeout',
+    biometric_capture_timeout: 'client_biometric_capture_timeout',
+    biometric_baseline_timeout: 'client_biometric_baseline_timeout',
+    biometric_challenge_timeout: 'client_biometric_challenge_timeout',
+    biometric_final_timeout: 'client_biometric_final_timeout',
+    biometric_challenge_not_completed: 'client_biometric_challenge_not_completed',
+    biometric_descriptor_unavailable: 'client_biometric_descriptor_unavailable',
+    biometric_descriptor_inconsistent: 'client_biometric_descriptor_inconsistent',
+    network_request_failed: 'client_network_request_failed'
+  });
   const AUTOMATIC_RETRY_ERRORS = new Set([
     'camera_stream_unavailable',
     'camera_stream_muted',
@@ -77,6 +108,7 @@
   let rateLimitTimer = null;
   let rateLimitUntil = 0;
   let rateLimitContext = '';
+  let failureFlushPromise = null;
 
   function parseNativeBridgeResult(value) {
     if (typeof value !== 'string') return null;
@@ -141,6 +173,118 @@
   function newIdempotencyKey() {
     if (window.crypto?.randomUUID) return window.crypto.randomUUID();
     return `${String(state.markType || 'mark').toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+  }
+
+  function failureRecordKey(record) {
+    return [record?.assignmentId, record?.markType, record?.clientAttemptId, record?.errorCode].join(':');
+  }
+
+  function loadAttendanceFailureQueue() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(ATTENDANCE_FAILURE_QUEUE_KEY) || '[]');
+      return Array.isArray(parsed) ? parsed.filter((record) => (
+        record
+        && typeof record.assignmentId === 'string'
+        && typeof record.markType === 'string'
+        && typeof record.clientAttemptId === 'string'
+        && typeof record.errorCode === 'string'
+        && typeof record.occurredAt === 'string'
+      )).slice(-ATTENDANCE_FAILURE_QUEUE_LIMIT) : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  function saveAttendanceFailureQueue(records) {
+    try {
+      const next = Array.isArray(records) ? records.slice(-ATTENDANCE_FAILURE_QUEUE_LIMIT) : [];
+      if (next.length) window.localStorage.setItem(ATTENDANCE_FAILURE_QUEUE_KEY, JSON.stringify(next));
+      else window.localStorage.removeItem(ATTENDANCE_FAILURE_QUEUE_KEY);
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function queueAttendanceFailure(record) {
+    const queue = loadAttendanceFailureQueue();
+    const key = failureRecordKey(record);
+    if (!queue.some((item) => failureRecordKey(item) === key)) queue.push(record);
+    return saveAttendanceFailureQueue(queue);
+  }
+
+  function removeAttendanceFailure(record) {
+    const key = failureRecordKey(record);
+    const queue = loadAttendanceFailureQueue().filter((item) => failureRecordKey(item) !== key);
+    saveAttendanceFailureQueue(queue);
+  }
+
+  async function sendAttendanceFailure(record) {
+    const response = await fetch(
+      `/operaciones/portal/asignaciones/${encodeURIComponent(record.assignmentId)}/intentos-fallidos`,
+      {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'worker-portal'
+        },
+        body: JSON.stringify({
+          markType: record.markType,
+          clientAttemptId: record.clientAttemptId,
+          errorCode: record.errorCode,
+          occurredAt: record.occurredAt
+        })
+      }
+    );
+    if (response.ok) return 'sent';
+    if ([400, 404].includes(response.status)) return 'discard';
+    return 'retry';
+  }
+
+  async function flushAttendanceFailureQueue() {
+    if (!navigator.onLine) return false;
+    if (failureFlushPromise) return failureFlushPromise;
+    failureFlushPromise = (async () => {
+      while (navigator.onLine) {
+        const record = loadAttendanceFailureQueue()[0];
+        if (!record) return true;
+        let outcome = 'retry';
+        try {
+          outcome = await sendAttendanceFailure(record);
+        } catch (_error) {
+          outcome = 'retry';
+        }
+        if (outcome === 'retry') return false;
+        removeAttendanceFailure(record);
+      }
+      return false;
+    })().finally(() => {
+      failureFlushPromise = null;
+    });
+    return failureFlushPromise;
+  }
+
+  function reportAttendanceFailure(error, occurredAt = new Date()) {
+    const internalCode = String(error?.message || '');
+    const reportCode = CLIENT_FAILURE_CODES[internalCode];
+    if (!reportCode || !state.assignmentId || !state.markType || !state.idempotencyKey) return false;
+    const occurred = occurredAt instanceof Date ? occurredAt : new Date(occurredAt);
+    if (Number.isNaN(occurred.getTime())) return false;
+    const record = {
+      assignmentId: String(state.assignmentId),
+      markType: String(state.markType).toUpperCase(),
+      clientAttemptId: String(state.idempotencyKey),
+      errorCode: reportCode,
+      occurredAt: occurred.toISOString()
+    };
+    const queued = queueAttendanceFailure(record);
+    if (navigator.onLine) {
+      if (queued) flushAttendanceFailureQueue();
+      else sendAttendanceFailure(record).catch(() => {});
+    }
+    return true;
   }
 
   function showModal(target) {
@@ -253,6 +397,9 @@
       native_location_credential_required: 'El teléfono aún se está preparando. Conéctate y vuelve a intentar en unos segundos.',
       permissions_required: 'Autoriza los permisos de ubicación solicitados por Android.',
       native_bridge_unavailable: 'La app no pudo acceder a la ubicación segura de Android.',
+      native_bridge_invalid_response: 'La app recibió una respuesta inválida al solicitar la ubicación segura.',
+      native_bridge_failed: 'La app no pudo completar la solicitud de ubicación segura.',
+      network_request_failed: 'Se perdió la comunicación con el servidor durante este intento.',
       biometric_enrollment_required: 'Debes registrar nuevamente tu rostro antes de marcar.',
       portal_session_required: 'Tu sesión del portal venció.',
       assignment_not_available: 'La asignación ya no está disponible para marcar.',
@@ -380,16 +527,21 @@
   });
 
   async function portalBiometricRequest(path, body = {}) {
-    const response = await fetch(`/operaciones/portal/biometria/${path}`, {
-      method: 'POST',
-      credentials: 'same-origin',
-      cache: 'no-store',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'worker-portal'
-      },
-      body: JSON.stringify(body)
-    });
+    let response;
+    try {
+      response = await fetch(`/operaciones/portal/biometria/${path}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'worker-portal'
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (_error) {
+      throw new Error('network_request_failed');
+    }
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok) {
       const error = new Error(payload.error || 'biometric_request_failed');
@@ -525,6 +677,7 @@
     if (localRunToken !== runToken || !dialog.open) return;
     if (!result?.ok) {
       const error = new Error(result?.error || 'native_location_unavailable');
+      reportAttendanceFailure(error);
       locationStatus.textContent = publicErrorMessage(error);
       setStatus(publicErrorMessage(error), 'warning');
       updateSubmitState();
@@ -538,6 +691,8 @@
       return;
     }
     if (!navigator.geolocation) {
+      const error = new Error('location_unsupported');
+      reportAttendanceFailure(error);
       setStatus('Este navegador no permite obtener la ubicación.', 'danger');
       return;
     }
@@ -554,12 +709,16 @@
       };
       locationStatus.textContent = `Ubicación lista · precisión ${Math.round(position.coords.accuracy)} m`;
       maybeStartVerificationAfterLocation();
-    }, (error) => {
+    }, (geolocationError) => {
       if (localRunToken !== runToken || !dialog.open) return;
-      locationStatus.textContent = error?.code === 1
+      const internalCode = geolocationError?.code === 1
+        ? 'location_permission_denied'
+        : (geolocationError?.code === 3 ? 'location_timeout' : 'location_position_unavailable');
+      reportAttendanceFailure(new Error(internalCode));
+      locationStatus.textContent = geolocationError?.code === 1
         ? 'Permiso de ubicación rechazado.'
-        : 'No fue posible obtener la ubicación.';
-      setStatus('Activa la ubicación para continuar.', 'warning');
+        : (geolocationError?.code === 3 ? 'El GPS agotó el tiempo de espera.' : 'No fue posible obtener la ubicación.');
+      setStatus(geolocationError?.code === 1 ? 'Activa la ubicación para continuar.' : 'No fue posible obtener una ubicación válida.', 'warning');
     }, {
       enableHighAccuracy: true,
       timeout: 20_000,
@@ -582,6 +741,7 @@
     if (type === 'attendance_location_error') {
       clearLocation();
       const error = new Error(String(detail.code || 'native_location_unavailable'));
+      reportAttendanceFailure(error);
       locationStatus.textContent = publicErrorMessage(error);
       setStatus(publicErrorMessage(error), errorCode(error).includes('mock') ? 'danger' : 'warning');
       updateSubmitState();
@@ -603,6 +763,7 @@
     ) {
       clearLocation();
       const error = new Error(proof?.isMock === true ? 'mock_location_detected' : 'native_location_unavailable');
+      reportAttendanceFailure(error);
       locationStatus.textContent = publicErrorMessage(error);
       setStatus(publicErrorMessage(error), 'danger');
       updateSubmitState();
@@ -722,7 +883,8 @@
       retryBiometricButton.textContent = 'Intentar nuevamente';
     }
 
-    if (!biometricApi || !navigator.onLine) throw new Error('camera_unavailable');
+    if (!navigator.onLine) throw new Error('network_request_failed');
+    if (!biometricApi) throw new Error('camera_unavailable');
     const challenge = await requestBiometricChallenge();
     await biometricApi.prepare?.();
     const stream = await biometricApi.startCamera(cameraVideo);
@@ -805,6 +967,7 @@
         }
       }
 
+      reportAttendanceFailure(lastError);
       clearVerification();
       clearPhoto();
       const code = errorCode(lastError);
@@ -927,15 +1090,20 @@
     }
 
     try {
-      const response = await fetch(
-        `/operaciones/portal/asignaciones/${encodeURIComponent(state.assignmentId)}/${endpointFor(state.markType)}`,
-        {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'X-Requested-With': 'worker-portal' },
-          body: form
-        }
-      );
+      let response;
+      try {
+        response = await fetch(
+          `/operaciones/portal/asignaciones/${encodeURIComponent(state.assignmentId)}/${endpointFor(state.markType)}`,
+          {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'X-Requested-With': 'worker-portal' },
+            body: form
+          }
+        );
+      } catch (_error) {
+        throw new Error('network_request_failed');
+      }
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || !payload.ok) {
         const messages = {
@@ -964,6 +1132,7 @@
       stopCamera();
       window.setTimeout(() => window.location.reload(), 900);
     } catch (error) {
+      reportAttendanceFailure(error);
       const locationRejected = LOCATION_PREFLIGHT_ERRORS.has(error?.code);
       if (error?.code === 'biometric_verification_required') {
         clearVerification();
@@ -979,7 +1148,9 @@
           retryBiometricButton.textContent = 'Actualizar ubicación';
         }
       }
-      setStatus(error?.message || 'No fue posible registrar.', 'danger');
+      setStatus(error?.message === 'network_request_failed'
+        ? publicErrorMessage(error)
+        : (error?.message || 'No fue posible registrar.'), 'danger');
       submitButton.disabled = false;
       submitButton.textContent = `Registrar ${labelFor(state.markType)}`;
       updateSubmitState();
@@ -1115,16 +1286,20 @@
   document.addEventListener('resume', () => resumeOpenVerification('document-resumed'), { capture: true });
   window.addEventListener('pagehide', () => pauseOpenVerification('page-hidden'), { capture: true });
   window.addEventListener('pageshow', (event) => {
+    if (navigator.onLine) flushAttendanceFailureQueue();
     if (event.persisted || document.wasDiscarded) resumeOpenVerification('page-restored');
   }, { capture: true });
 
   window.addEventListener('online', () => {
     renderConnectivity();
+    flushAttendanceFailureQueue();
     loadBiometricStatus();
   });
   window.addEventListener('offline', enterOfflineMode);
 
   renderConnectivity();
-  if (navigator.onLine) loadBiometricStatus();
-  else closeEnrollmentDialog();
+  if (navigator.onLine) {
+    flushAttendanceFailureQueue();
+    loadBiometricStatus();
+  } else closeEnrollmentDialog();
 })();
