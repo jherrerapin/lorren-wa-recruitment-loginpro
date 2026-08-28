@@ -728,10 +728,28 @@ export function workerPortalRouter(prisma, options = {}) {
     return res.sendFile(WORKER_PORTAL_ICON_FILE);
   });
 
-  router.get('/activar', (_req, res) => {
+  router.get('/activar', async (req, res) => {
     const nonce = createNonce(nonceBytesFn);
     applyWorkerPortalSecurityHeaders(res, nonce);
-    return renderPortal(res, 'activation', nonce);
+    try {
+      const now = nowFn();
+      if (!validDate(now)) throw new Error('worker_portal_activation_now_invalid');
+      const portalSession = await resolveRequestSession(req, now);
+      if (portalSession) {
+        renewWorkerPortalPersistence(req, res, now);
+        return res.redirect(WORKER_PORTAL_HOME_PATH);
+      }
+      if (req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME]) clearWorkerPortalSessionCookie(res);
+      return renderPortal(res, 'activation', nonce);
+    } catch (error) {
+      const code = errorCode(error);
+      if (INVALID_SESSION_COOKIE_CODES.has(code)) {
+        clearWorkerPortalSessionCookie(res);
+        return renderPortal(res, 'activation', nonce);
+      }
+      console.error('[WORKER_PORTAL_ACTIVATION_ENTRY_ERROR]', { code });
+      return renderPortal(res, 'unavailable', nonce);
+    }
   });
   router.post('/activar', activationAttemptMiddleware, activationJsonParser, async (req, res) => {
     applyWorkerPortalSecurityHeaders(res);
