@@ -83,6 +83,8 @@
     .secondary-button { background: #edf1f4; color: #263645; }
     button:disabled { cursor: not-allowed; opacity: .55; }
     .empty-state { padding: 24px; border: 1px dashed #cfd7df; border-radius: 16px; text-align: center; background: #fff; }
+    .async-toast { position: fixed; right: 18px; bottom: max(18px, env(safe-area-inset-bottom)); width: min(360px, calc(100vw - 36px)); background: #172033; color: #fff; border-radius: 14px; padding: 11px 13px; box-shadow: 0 12px 36px rgba(23,33,43,.22); font-size: 13px; line-height: 1.35; z-index: 9999; opacity: 0; transform: translateY(8px); transition: opacity .18s, transform .18s; pointer-events: none; }
+    .async-toast.show { opacity: 1; transform: translateY(0); }
 
     dialog { width: min(calc(100% - 24px), 520px); max-height: calc(100vh - 28px); border: 0; border-radius: 20px; padding: 0; box-shadow: 0 24px 70px rgba(23, 33, 43, .28); }
     dialog::backdrop { background: rgba(12, 21, 29, .72); }
@@ -161,6 +163,7 @@
       #enrollment-dialog .consent { font-size: 17px; padding: 13px; }
       #mark-dialog .consent { font-size: 14px; padding: 10px 12px; }
       #mark-dialog .mark-status { font-size: 16px; }
+      .async-toast { right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); width: calc(100vw - 24px); }
     }
   </style>
 </head>
@@ -223,6 +226,7 @@
         <span class="connectivity-dot" aria-hidden="true"></span>
         <strong id="connectivity-title">Con conexión</strong>
       </section>
+      <div id="arrival-time-toast" class="async-toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
       <% if (portalAssignments.length) { %>
         <section class="portal-filter-summary" aria-label="Resumen de asignaciones">
@@ -259,7 +263,7 @@
 
         <section class="assignment-list" aria-label="Asignaciones activas">
           <% portalAssignments.forEach((assignment) => { %>
-            <article class="assignment-card <%= assignment.departureReported ? 'completed' : '' %>" data-assignment-card="<%= assignment.id %>" data-portal-status="<%= assignment.departureReported ? 'COMPLETED' : assignment.arrivalReported ? 'IN_PROGRESS' : 'PENDING' %>">
+            <article class="assignment-card <%= assignment.departureReported ? 'completed' : '' %>" data-assignment-card="<%= assignment.id %>" data-portal-status="<%= assignment.departureReported ? 'COMPLETED' : assignment.arrivalReported ? 'IN_PROGRESS' : 'PENDING' %>" data-expected-start-at="<%= assignment.expectedStartAt || '' %>" data-arrival-reported-at="<%= assignment.arrivalReportedAt || '' %>">
               <p class="assignment-date"><%= assignment.dateLabel %></p>
               <h2><%= assignment.clientName %></h2>
               <p class="assignment-time"><%= assignment.timeLabel %></p>
@@ -351,6 +355,162 @@
         </div>
       </dialog>
 
+      <script nonce="<%= nonce %>">
+        // arrival-time-notice:begin
+        (() => {
+          const STORAGE_KEY = 'lorren-arrival-time-notice-pending-v1';
+          const PENDING_MAX_AGE_MS = 96 * 60 * 60 * 1000;
+          const ATTEMPT_MATCH_WINDOW_MS = 30 * 60 * 1000;
+          const toast = document.getElementById('arrival-time-toast');
+          const markDialog = document.getElementById('mark-dialog');
+          let activeArrivalAssignmentId = null;
+          let toastTimer = null;
+
+          function loadPendingArrivals() {
+            try {
+              const parsed = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '[]');
+              return Array.isArray(parsed) ? parsed.filter((record) => (
+                record
+                && typeof record.assignmentId === 'string'
+                && Number.isFinite(Number(record.attemptedAt))
+              )) : [];
+            } catch (_error) {
+              return [];
+            }
+          }
+
+          function savePendingArrivals(records) {
+            try {
+              if (records.length) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+              else window.localStorage.removeItem(STORAGE_KEY);
+            } catch (_error) {
+              // El aviso no puede interferir con la marcación si el almacenamiento del navegador no está disponible.
+            }
+          }
+
+          function upsertPendingArrival(assignmentId, { submitted = false } = {}) {
+            const normalizedId = String(assignmentId || '').trim();
+            if (!normalizedId) return;
+            const now = Date.now();
+            const records = loadPendingArrivals().filter((record) => record.assignmentId !== normalizedId);
+            const previous = loadPendingArrivals().find((record) => record.assignmentId === normalizedId) || null;
+            records.push({
+              assignmentId: normalizedId,
+              attemptedAt: submitted ? Number(previous?.attemptedAt || now) : now,
+              submittedAt: submitted ? now : null
+            });
+            savePendingArrivals(records);
+          }
+
+          function removePendingArrival(assignmentId) {
+            const normalizedId = String(assignmentId || '').trim();
+            if (!normalizedId) return;
+            savePendingArrivals(loadPendingArrivals().filter((record) => record.assignmentId !== normalizedId));
+          }
+
+          function arrivalTimingMessage(expectedStartAt, arrivalReportedAt) {
+            const expectedMs = Date.parse(expectedStartAt);
+            const arrivalMs = Date.parse(arrivalReportedAt);
+            if (!Number.isFinite(expectedMs) || !Number.isFinite(arrivalMs)) return '';
+            const offsetMinutes = Math.trunc((arrivalMs - expectedMs) / 60_000);
+            if (offsetMinutes === 0) return '';
+            const minutes = Math.abs(offsetMinutes);
+            const unit = minutes === 1 ? 'minuto' : 'minutos';
+            const direction = offsetMinutes < 0 ? 'antes' : 'después';
+            return `Tu marcación de entrada quedó registrada. Llegaste ${minutes} ${unit} ${direction} de la hora programada.`;
+          }
+
+          function showArrivalNotices(messages) {
+            if (!toast || !messages.length) return;
+            const queue = [...messages];
+            const showNext = () => {
+              const message = queue.shift();
+              if (!message) return;
+              if (toastTimer) window.clearTimeout(toastTimer);
+              toast.textContent = message;
+              toast.classList.add('show');
+              toastTimer = window.setTimeout(() => {
+                toast.classList.remove('show');
+                toastTimer = window.setTimeout(showNext, 220);
+              }, 4800);
+            };
+            showNext();
+          }
+
+          function resolvePendingArrivalNotices() {
+            const now = Date.now();
+            const pending = loadPendingArrivals();
+            const remaining = [];
+            const messages = [];
+
+            pending.forEach((record) => {
+              if (now - Number(record.attemptedAt) > PENDING_MAX_AGE_MS) return;
+              const card = [...document.querySelectorAll('[data-assignment-card]')]
+                .find((candidate) => String(candidate.dataset.assignmentCard || '') === record.assignmentId);
+              if (!card) {
+                remaining.push(record);
+                return;
+              }
+
+              const arrivalReportedAt = String(card.dataset.arrivalReportedAt || '');
+              if (!arrivalReportedAt) {
+                remaining.push(record);
+                return;
+              }
+
+              const arrivalMs = Date.parse(arrivalReportedAt);
+              const referenceMs = Number(record.submittedAt || record.attemptedAt);
+              if (!Number.isFinite(arrivalMs) || !Number.isFinite(referenceMs)) return;
+              if (Math.abs(arrivalMs - referenceMs) > ATTEMPT_MATCH_WINDOW_MS) return;
+
+              const message = arrivalTimingMessage(
+                String(card.dataset.expectedStartAt || ''),
+                arrivalReportedAt
+              );
+              if (message) messages.push(message);
+            });
+
+            savePendingArrivals(remaining);
+            showArrivalNotices(messages);
+          }
+
+          function arrivalButtonFromEvent(event) {
+            if (!(event.target instanceof Element)) return null;
+            const button = event.target.closest('.mark-button[data-assignment-id][data-mark-type="ARRIVAL"]');
+            return button && !button.disabled ? button : null;
+          }
+
+          function rememberArrivalIntent(event) {
+            const button = arrivalButtonFromEvent(event);
+            if (!button) return;
+            activeArrivalAssignmentId = String(button.dataset.assignmentId || '').trim();
+            upsertPendingArrival(activeArrivalAssignmentId);
+          }
+
+          function clearCancelledArrivalIntent() {
+            if (!activeArrivalAssignmentId) return;
+            const card = [...document.querySelectorAll('[data-assignment-card]')]
+              .find((candidate) => String(candidate.dataset.assignmentCard || '') === activeArrivalAssignmentId);
+            if (!card?.dataset?.arrivalReportedAt) removePendingArrival(activeArrivalAssignmentId);
+            activeArrivalAssignmentId = null;
+          }
+
+          document.addEventListener('pointerdown', rememberArrivalIntent, true);
+          document.addEventListener('click', (event) => {
+            rememberArrivalIntent(event);
+            if (!(event.target instanceof Element)) return;
+            if (event.target.closest('#submit-mark') && activeArrivalAssignmentId) {
+              upsertPendingArrival(activeArrivalAssignmentId, { submitted: true });
+              return;
+            }
+            if (event.target.closest('#close-mark, #cancel-mark')) clearCancelledArrivalIntent();
+          }, true);
+          markDialog?.addEventListener('cancel', clearCancelledArrivalIntent, true);
+
+          resolvePendingArrivalNotices();
+        })();
+        // arrival-time-notice:end
+      </script>
       <script src="/public/worker-biometric.js?v=20260804-worker-portal-biometric-v8"></script>
     <% } else if (mode === 'unavailable') { %>
       <section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Portal temporalmente no disponible</h1><div class="status warning">Intenta nuevamente en unos minutos</div></section>
