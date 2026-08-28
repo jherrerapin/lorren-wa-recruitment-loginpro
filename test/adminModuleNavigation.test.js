@@ -105,12 +105,17 @@ test('cada desplegable conserva opciones y permisos de Operaciones y Gestión de
   assert.doesNotMatch(operationsWithoutAttendance, /href="\/admin\/operaciones\/asistencia"/);
   assert.doesNotMatch(operations, /data-module-menu="payroll"/);
 
-  const payroll = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/nomina', { canAccessDispatch: true, canAccessPayroll: true, canAccessTestWorkspace: true })));
+  const payroll = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/gestion-tiempo', { canAccessDispatch: true, canAccessPayroll: true, canAccessTestWorkspace: true })));
   assert.match(payroll, /data-module-menu="payroll"/);
   assert.match(payroll, /data-module-menu="payroll"[\s\S]*<span>Gestión de Tiempo<\/span>/);
-  assert.match(payroll, /href="\/admin\/operaciones\/asistencia\/nomina">Gestión de Tiempo<\/a>/);
+  assert.match(payroll, /href="\/admin\/operaciones\/asistencia\/gestion-tiempo">Gestión de Tiempo<\/a>/);
+  assert.doesNotMatch(payroll, /\/admin\/operaciones\/asistencia\/nomina/);
   assert.doesNotMatch(payroll, />Nómina<|>Nómina y tiempo trabajado</);
   assert.match(payroll, /href="\/admin\/operaciones\/pruebas">Entorno de pruebas<\/a>/);
+
+  const legacyRequest = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/nomina', { canAccessPayroll: true })));
+  assert.match(legacyRequest, /admin-module-menu is-active/);
+  assert.match(legacyRequest, /href="\/admin\/operaciones\/asistencia\/gestion-tiempo">Gestión de Tiempo<\/a>/);
 });
 
 test('el header elimina bloques duplicados y conserva acciones propias', () => {
@@ -246,9 +251,10 @@ test('dropdown responsive y header sticky de escritorio quedan declarados', asyn
   assert.match(desktop, /top:\s*0/);
 });
 
-test('inyeccion sigue siendo idempotente y evita APIs de Nomina', () => {
+test('inyeccion sigue siendo idempotente y evita APIs de Gestión de Tiempo', () => {
   const request = req('/admin', { canAccessDispatch: true, canAccessPayroll: true });
   const once = injectAdminModuleNavigation(baseHtml, request);
   assert.equal(injectAdminModuleNavigation(once, request), once);
+  assert.equal(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/gestion-tiempo/api/users/sample', { canAccessPayroll: true })), baseHtml);
   assert.equal(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/nomina/api/users/sample', { canAccessPayroll: true })), baseHtml);
 });

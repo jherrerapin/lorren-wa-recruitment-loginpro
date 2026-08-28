@@ -6,7 +6,8 @@ const BRANCHES_PATH = '/admin/locations';
 const USERS_PATH = '/admin/users';
 const OPERATIONS_PATH = '/admin/operaciones';
 const ATTENDANCE_PATH = '/admin/operaciones/asistencia';
-const PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
+const PAYROLL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';
+const LEGACY_PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const WORKER_PORTAL_ACTIVATION_PATH = '/admin/operaciones/portal-activaciones';
 const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
@@ -43,7 +44,7 @@ function escapeHtml(value) {
 
 function activeModule(path) {
   if (path.startsWith(USERS_PATH) || path.startsWith(BRANCHES_PATH)) return null;
-  if (path.startsWith(PAYROLL_PATH)) return 'payroll';
+  if (path.startsWith(PAYROLL_PATH) || path.startsWith(LEGACY_PAYROLL_PATH)) return 'payroll';
   if (path.startsWith(OPERATIONS_PATH)) return 'operations';
   return 'recruitment';
 }
@@ -292,18 +293,35 @@ function ensureUsersProgrammingAccessScript(html, path) {
   return html.replace(/<\/body>/i, `  <script src="${USERS_PROGRAMMING_ACCESS_SCRIPT}" defer></script>\n</body>`);
 }
 
+function normalizePayrollPresentation(html) {
+  return html
+    .replace(/<title>\s*Nómina y tiempo trabajado\s*—\s*LoginPro<\/title>/gi, '<title>Gestión de Tiempo — LoginPro</title>')
+    .replace(/<title>\s*Personalizar Excel de nómina\s*—\s*LoginPro<\/title>/gi, '<title>Personalizar Excel · Gestión de Tiempo — LoginPro</title>')
+    .replace(/<h1>\s*Nómina y tiempo trabajado\s*<\/h1>/gi, '<h1>Gestión de Tiempo</h1>');
+}
+
+function normalizePayrollPaths(html) {
+  return normalizePayrollPresentation(html.split(LEGACY_PAYROLL_PATH).join(PAYROLL_PATH));
+}
+
+function isPayrollApiPath(path) {
+  return path.startsWith(`${PAYROLL_PATH}/api/`) || path.startsWith(`${LEGACY_PAYROLL_PATH}/api/`);
+}
+
 export function injectAdminModuleNavigation(html, req = {}) {
   if (typeof html !== 'string') return html;
   const path = requestPath(req);
-  if (!path.startsWith('/admin') || path.startsWith('/admin/operaciones/asistencia/nomina/api/') || path.startsWith('/admin/operaciones/pruebas/api/')) return html;
-  if (html.includes('data-module-navigation="true"')) return html;
+  if (!path.startsWith('/admin') || isPayrollApiPath(path) || path.startsWith('/admin/operaciones/pruebas/api/')) return html;
+
+  const normalizedHtml = normalizePayrollPaths(html);
+  if (normalizedHtml.includes('data-module-navigation="true"')) return normalizedHtml;
 
   const navPattern = /<nav\b[^>]*class=["'][^"']*\bnavbar\b[^"']*["'][^>]*>[\s\S]*?<\/nav>/i;
-  const originalNav = html.match(navPattern)?.[0] || '';
-  if (!originalNav) return html;
+  const originalNav = normalizedHtml.match(navPattern)?.[0] || '';
+  if (!originalNav) return normalizedHtml;
 
   const moduleNavbar = buildAdminModuleNavbar(req, originalNav);
-  let output = ensureViewportMeta(html);
+  let output = ensureViewportMeta(normalizedHtml);
   output = ensureNavigationStylesheet(output);
   output = output.replace(navPattern, moduleNavbar);
   output = ensureAdminPageShell(output);
