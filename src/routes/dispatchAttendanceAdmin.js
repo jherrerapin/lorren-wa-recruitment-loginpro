@@ -1,9 +1,9 @@
 import express from 'express';
 import {
   loadAttendanceAdminBoard,
-  registerManualAttendance,
-  resolveAttendanceFailureDecision
+  registerManualAttendance
 } from '../modules/dispatch-attendance/application/adminAttendance.js';
+import { resolveCurrentAttendanceFailureDecision } from '../modules/dispatch-attendance/application/attendanceFailureDecisionPolicy.js';
 import {
   enrichAttendanceBoardWithWorkday,
   reviewAttendanceWorkdaySession
@@ -160,6 +160,12 @@ function publicErrorMessage(error) {
 }
 
 function failureDecisionSuccessMessage(result = {}) {
+  if (result.alreadyRecorded || result.status === 'RECORDED') {
+    return 'La marcación ya quedó registrada; este intento queda solo como historial y no requiere decisión.';
+  }
+  if (result.superseded || result.status === 'SUPERSEDED') {
+    return 'Este intento fue superado por uno posterior; solo el último intento vigente puede decidirse.';
+  }
   if (result.status === 'ACCEPTED') {
     return result.duplicate
       ? 'La marcación ya había sido aceptada; no se creó una segunda marca.'
@@ -383,7 +389,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
 
   router.post('/failures/:failureEventId/decision', formParser, async (req, res) => {
     try {
-      const result = await resolveAttendanceFailureDecision(prisma, {
+      const result = await resolveCurrentAttendanceFailureDecision(prisma, {
         failureEventId: req.params.failureEventId,
         decision: req.body.decision,
         actorUserId: normalizeString(req.session?.userId || req.userId),
