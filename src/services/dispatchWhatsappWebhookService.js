@@ -16,6 +16,7 @@ import { claimDispatchAssignmentConfirmation, claimDispatchAssignmentNovelty } f
 import { dispatchWhatsappProviderErrorMessage, sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
 import {
   recordDispatchWhatsappInboundWindow,
+  resolveDispatchAttendanceFailureCoordinatorDecision,
   sendDispatchAllConfirmedAdminAlert,
   sendDispatchNoveltyAdminAlert
 } from './dispatchWhatsappAdminAlerts.js';
@@ -53,6 +54,17 @@ function inboundText(message = {}) {
 function inboundPayload(message = {}) {
   return [message.button?.payload, message.interactive?.button_reply?.id, message.interactive?.list_reply?.id]
     .find((value) => typeof value === 'string' && value.trim()) || '';
+}
+
+function attendanceFailureDecisionFromInboundPayload(message = {}) {
+  const match = inboundPayload(message).trim().match(
+    /^dispatch_attendance_(accept|reject):(attendance_failure_[a-f0-9]{48})$/
+  );
+  if (!match) return null;
+  return {
+    decision: match[1] === 'accept' ? 'ACCEPT' : 'REJECT',
+    failureEventId: match[2]
+  };
 }
 
 function inboundContextMessageId(message = {}) {
@@ -178,6 +190,40 @@ async function findConfirmationTarget({ scope, action, message, receivedAt, pris
   });
 }
 
+async function sendAttendanceDecisionReply({
+  scope,
+  message,
+  result,
+  prismaClient,
+  axiosClient
+}) {
+  const phone = normalizeDispatchWhatsappPhone(message.from);
+  if (!phone) return false;
+  const text = result.duplicate
+    ? (result.status === 'ACCEPTED'
+        ? 'Esta marcación ya había sido aceptada y registrada.'
+        : result.status === 'REJECTED'
+          ? 'Este intento ya había sido rechazado.'
+          : 'Esta decisión ya se está procesando.')
+    : result.status === 'ACCEPTED'
+      ? '✅ Marcación aceptada. Se registró con la hora original del intento.'
+      : '❌ Intento rechazado. No se creó una marcación.';
+  const providerMessageId = await sendDispatchWhatsappTextMessage({ scope, phone, text, axiosClient });
+  await recordDispatchWhatsappMessageAudit({
+    prismaClient,
+    scope,
+    direction: 'OUTBOUND',
+    phone,
+    body: text,
+    messageType: 'TEXT',
+    providerMessageId,
+    dedupeKey: `attendance-decision:${String(message.id || '').trim()}`,
+    source: 'ATTENDANCE_FAILURE_DECISION',
+    occurredAt: new Date()
+  });
+  return true;
+}
+
 export async function processDispatchWhatsappInboundMessage({
   scope = 'operational', message = {}, prismaClient = prisma, axiosClient = axios
 } = {}) {
@@ -194,6 +240,75 @@ export async function processDispatchWhatsappInboundMessage({
     source: 'WEBHOOK_INBOUND',
     occurredAt: receivedAt
   });
+
+  const attendanceDecision = attendanceFailureDecisionFromInboundPayload(message);
+  if (attendanceDecision) {
+    let decisionResult;
+    try {
+      decisionResult = await resolveDispatchAttendanceFailureCoordinatorDecision({
+        scope,
+        failureEventId: attendanceDecision.failureEventId,
+        decision: attendanceDecision.decision,
+        coordinatorPhone: message.from,
+        decidedAt: receivedAt,
+        prismaClient
+      });
+    } catch (error) {
+      console.warn('[dispatch-wa-cloud] Falló decisión de marcación por WhatsApp.', {
+        code: String(error?.message || 'attendance_decision_failed').slice(0, 120)
+      });
+      const phone = normalizeDispatchWhatsappPhone(message.from);
+      if (phone) {
+        const text = 'No fue posible aplicar la decisión sobre esta marcación. Revísala en Asistencia operativa.';
+        try {
+          const providerMessageId = await sendDispatchWhatsappTextMessage({ scope, phone, text, axiosClient });
+          await recordDispatchWhatsappMessageAudit({
+            prismaClient,
+            scope,
+            direction: 'OUTBOUND',
+            phone,
+            body: text,
+            messageType: 'TEXT',
+            providerMessageId,
+            dedupeKey: `attendance-decision-error:${String(message.id || '').trim()}`,
+            source: 'ATTENDANCE_FAILURE_DECISION',
+            occurredAt: new Date()
+          });
+        } catch (_replyError) {
+          // La decisión fallida queda en auditoría; el aviso de error no debe duplicar la escritura.
+        }
+      }
+      return { handled: true, attendanceDecision: false, reason: 'attendance_decision_failed' };
+    }
+    if (!decisionResult?.handled) {
+      return { handled: false, reason: decisionResult?.reason || 'attendance_decision_not_handled' };
+    }
+    let replySent = false;
+    try {
+      replySent = await sendAttendanceDecisionReply({
+        scope,
+        message,
+        result: decisionResult,
+        prismaClient,
+        axiosClient
+      });
+    } catch (error) {
+      console.warn('[dispatch-wa-cloud] Decisión aplicada, pero falló confirmación al coordinador.', {
+        code: String(error?.message || 'attendance_decision_reply_failed').slice(0, 120)
+      });
+    }
+    setDispatchWhatsappRuntimeState(scope, {
+      lastInboundAt: new Date().toISOString(),
+      ...(replySent ? { lastError: null } : {})
+    });
+    return {
+      handled: true,
+      duplicate: Boolean(decisionResult.duplicate),
+      attendanceDecision: true,
+      decisionStatus: decisionResult.status,
+      replySent
+    };
+  }
 
   const buttonAction = assignmentActionFromInboundPayload(message);
   const inbound = inboundText(message);
