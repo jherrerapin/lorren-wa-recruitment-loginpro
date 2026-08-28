@@ -1137,7 +1137,7 @@
       setStatus(timingMessage || payload.message || 'Marcación registrada.', 'ok');
       clearVerification();
       stopCamera();
-      window.setTimeout(() => window.location.reload(), timingMessage ? 4800 : 900);
+      window.setTimeout(() => window.location.reload(), timingMessage ? 7800 : 900);
     } catch (error) {
       reportAttendanceFailure(error);
       const locationRejected = LOCATION_PREFLIGHT_ERRORS.has(error?.code);
