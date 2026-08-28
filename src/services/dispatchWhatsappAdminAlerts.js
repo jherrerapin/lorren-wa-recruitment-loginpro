@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
-import { resolveAttendanceFailureDecision } from '../modules/dispatch-attendance/application/adminAttendance.js';
+import {
+  attendanceFailureMarkAlreadyRecorded,
+  normalizeAttendanceFailureMarkType,
+  resolveCurrentAttendanceFailureDecision
+} from '../modules/dispatch-attendance/application/attendanceFailureDecisionPolicy.js';
 import { buildDispatchServiceDateWhere, dispatchServiceDateKey } from './dispatchDate.js';
 import {
   ACTIVE_DISPATCH_ASSIGNMENT_STATUSES,
@@ -106,48 +110,6 @@ function attendanceMarkLabel(markType) {
   })[String(markType || '').toUpperCase()] || 'una marcación';
 }
 
-function attendanceFailureMarkType(input = {}) {
-  return String(input?.markType || '').trim().toUpperCase();
-}
-
-function attendanceFailureMoment(event) {
-  const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
-  const date = new Date(metadata.occurredAt || event?.createdAt || Number.NaN);
-  return Number.isNaN(date.getTime()) ? new Date(0) : date;
-}
-
-function assignmentHasAttendanceMark(assignment, markType) {
-  const normalized = attendanceFailureMarkType({ markType });
-  const session = assignment?.attendanceSession || null;
-  if (!session || !normalized) return false;
-  if (normalized === 'ARRIVAL' && session.arrivalReportedAt) return true;
-  if (normalized === 'DEPARTURE' && session.departureReportedAt) return true;
-  return (Array.isArray(session.marks) ? session.marks : []).some((mark) => (
-    attendanceFailureMarkType(mark) === normalized
-  ));
-}
-
-async function latestAttendanceFailureForMark(prismaClient, assignmentId, markType) {
-  if (!assignmentId || !markType || typeof prismaClient?.devAuditEvent?.findMany !== 'function') return null;
-  const events = await prismaClient.devAuditEvent.findMany({
-    where: {
-      entityType: ATTENDANCE_FAILURE_ENTITY,
-      action: ATTENDANCE_FAILURE_ACTION,
-      entityId: assignmentId
-    },
-    orderBy: { createdAt: 'desc' }
-  });
-  return events
-    .filter((event) => {
-      const metadata = event?.metadata && typeof event.metadata === 'object' ? event.metadata : {};
-      return event?.entityType === ATTENDANCE_FAILURE_ENTITY
-        && event?.action === ATTENDANCE_FAILURE_ACTION
-        && String(event?.entityId || '').trim() === assignmentId
-        && attendanceFailureMarkType(metadata) === markType;
-    })
-    .sort((left, right) => attendanceFailureMoment(right).getTime() - attendanceFailureMoment(left).getTime())[0] || null;
-}
-
 function attendanceFailureLocation(input = {}) {
   const latitude = Number(input.latitude);
   const longitude = Number(input.longitude);
@@ -241,7 +203,7 @@ export async function sendDispatchAttendanceFailureAdminAlert({
   }
   const metadata = failureEvent.metadata && typeof failureEvent.metadata === 'object' ? failureEvent.metadata : {};
   const assignmentId = String(metadata.assignmentId || '').trim();
-  const markType = attendanceFailureMarkType(metadata);
+  const markType = normalizeAttendanceFailureMarkType(metadata.markType);
   if (!assignmentId) return { sent: false, reason: 'assignment_missing' };
   if (!markType) return { sent: false, reason: 'mark_type_missing' };
   const assignment = await prismaClient.dispatchAssignment.findUnique({
@@ -259,7 +221,7 @@ export async function sendDispatchAttendanceFailureAdminAlert({
     }
   });
   if (!assignment) return { sent: false, reason: 'assignment_missing' };
-  if (assignmentHasAttendanceMark(assignment, markType)) {
+  if (attendanceFailureMarkAlreadyRecorded(assignment, markType)) {
     return { sent: false, duplicate: true, reason: 'mark_already_recorded' };
   }
   const user = await alertUserByUsername(prismaClient, assignment.createdByUsername);
@@ -311,21 +273,11 @@ export async function resolveDispatchAttendanceFailureCoordinatorDecision({
   }
   const metadata = failureEvent.metadata && typeof failureEvent.metadata === 'object' ? failureEvent.metadata : {};
   const assignmentId = String(metadata.assignmentId || '').trim();
-  const markType = attendanceFailureMarkType(metadata);
+  const markType = normalizeAttendanceFailureMarkType(metadata.markType);
   if (!assignmentId || !markType) return { handled: false, reason: 'failure_context_invalid' };
   const assignment = await prismaClient.dispatchAssignment.findUnique({
     where: { id: assignmentId },
-    select: {
-      id: true,
-      createdByUsername: true,
-      attendanceSession: {
-        select: {
-          arrivalReportedAt: true,
-          departureReportedAt: true,
-          marks: { select: { markType: true } }
-        }
-      }
-    }
+    select: { id: true, createdByUsername: true }
   });
   if (!assignment) return { handled: false, reason: 'assignment_missing' };
   const user = await alertUserByUsername(prismaClient, assignment.createdByUsername);
@@ -333,23 +285,12 @@ export async function resolveDispatchAttendanceFailureCoordinatorDecision({
   if (!user?.isActive || !authorizedPhone || authorizedPhone !== normalizeDispatchWhatsappPhone(coordinatorPhone)) {
     return { handled: false, reason: 'coordinator_unauthorized' };
   }
-  if (assignmentHasAttendanceMark(assignment, markType)) {
-    return {
-      handled: true,
-      duplicate: true,
-      alreadyRecorded: true,
-      status: 'ACCEPTED',
-      assignmentId,
-      markType
-    };
-  }
 
-  const latestFailure = await latestAttendanceFailureForMark(prismaClient, assignmentId, markType);
-  const effectiveFailureEventId = latestFailure?.id || eventId;
   try {
-    return await resolveAttendanceFailureDecision(prismaClient, {
-      failureEventId: effectiveFailureEventId,
+    return await resolveCurrentAttendanceFailureDecision(prismaClient, {
+      failureEventId: eventId,
       decision: normalizedDecision,
+      followLatestFailure: true,
       actorUserId: user.id,
       actorUsername: user.username,
       actorRole: 'coordinator',
@@ -740,7 +681,7 @@ async function runAutomaticAssignmentSends({
       } catch (error) {
         failed += 1;
         await recordAssignmentSendAttempt(prismaClient, { userId: user.id, dateKey, targetDateKey, assignmentId: assignment.id, failed: true, errorCode: error?.code || 'provider_error', now });
-        console.warn(`[dispatch-wa-schedule] Falló envío automático. userId=${user.id} assignment=${assignment.id} code=${error?.code || 'unknown'}.`);
+        console.warn(`[dispatch-wa-schedule] Falló envío automático. userId=${user.id} assignment=${assignment.id} code=${error?.code || 'provider_error'}.`);
       }
     }
     return { eligible: eligibleAssignments.length, attempted: pending.length, sent, failed };
