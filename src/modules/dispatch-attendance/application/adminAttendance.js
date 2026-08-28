@@ -19,12 +19,21 @@ const VALID_REVIEW_ACTIONS = new Set(['VALIDATE', 'REJECT', 'REOPEN']);
 const DEFAULT_ABSENCE_GRACE_MINUTES = 15;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
+const ATTENDANCE_MARK_FAILURE_ENTITY_TYPE = 'DISPATCH_ATTENDANCE_MARK_FAILURE';
+const ATTENDANCE_MARK_FAILURE_ACTION = 'MARK_ATTEMPT_FAILED';
 const RISK_MARK_LABELS = Object.freeze({
   ARRIVAL: 'Llegada',
   BREAK_START: 'Inicio de almuerzo',
   BREAK_END: 'Fin de almuerzo',
   DEPARTURE: 'Salida'
 });
+const FAILURE_MARK_LABELS = Object.freeze({
+  ARRIVAL: 'Entrada',
+  BREAK_START: 'Inicio de almuerzo',
+  BREAK_END: 'Fin de almuerzo',
+  DEPARTURE: 'Salida'
+});
+const FAILURE_SOURCE_LABELS = new Set(['Portal del auxiliar', 'Aplicación Android', 'Servidor de asistencia']);
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -210,6 +219,61 @@ function riskGroupsForSession(session) {
   return groups;
 }
 
+function failureAttemptMoment(event) {
+  const value = event?.metadata?.occurredAt || event?.createdAt;
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function failureAttemptFromEvent(event) {
+  const metadata = event?.metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+  const description = normalizeString(metadata.descriptionEs);
+  const phaseLabel = normalizeString(metadata.phaseLabel);
+  const markType = normalizeString(metadata.markType)?.toUpperCase();
+  if (!description || !phaseLabel || !FAILURE_MARK_LABELS[markType]) return null;
+  const rawSourceLabel = normalizeString(metadata.sourceLabel);
+  const sourceLabel = FAILURE_SOURCE_LABELS.has(rawSourceLabel)
+    ? rawSourceLabel
+    : 'Portal del auxiliar';
+  const occurredAt = failureAttemptMoment(event);
+  return {
+    markType,
+    markLabel: FAILURE_MARK_LABELS[markType],
+    phaseLabel,
+    description,
+    sourceLabel,
+    occurredAtLabel: formatDateTime(occurredAt)
+  };
+}
+
+async function failureAttemptsByAssignment(prisma, assignmentIds) {
+  const result = new Map(assignmentIds.map((assignmentId) => [assignmentId, []]));
+  if (!assignmentIds.length || typeof prisma?.devAuditEvent?.findMany !== 'function') return result;
+  try {
+    const events = await prisma.devAuditEvent.findMany({
+      where: {
+        entityType: ATTENDANCE_MARK_FAILURE_ENTITY_TYPE,
+        action: ATTENDANCE_MARK_FAILURE_ACTION,
+        entityId: { in: assignmentIds }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    for (const event of events) {
+      const assignmentId = normalizeString(event?.entityId);
+      if (!assignmentId || !result.has(assignmentId)) continue;
+      const projected = failureAttemptFromEvent(event);
+      if (projected) result.get(assignmentId).push(projected);
+    }
+  } catch (error) {
+    console.warn('[ATTENDANCE_FAILURE_AUDIT_READ_FAILED]', {
+      code: typeof error?.message === 'string' ? error.message : 'unknown'
+    });
+  }
+  return result;
+}
+
 function latestByDate(items, fieldName) {
   if (!Array.isArray(items) || !items.length) return null;
   return [...items].sort((left, right) => {
@@ -343,7 +407,7 @@ function searchText(row) {
   ].filter(Boolean).join(' ').toLocaleLowerCase('es-CO');
 }
 
-function buildBoardRow(assignment, now) {
+function buildBoardRow(assignment, now, failedMarkAttempts = []) {
   const request = assignment.serviceRequest;
   const point = request?.operationPoint || null;
   const session = assignment.attendanceSession || null;
@@ -413,6 +477,8 @@ function buildBoardRow(assignment, now) {
     riskScore: Math.max(0, finiteNumber(session?.riskScore, finiteNumber(mark?.riskScore, 0))),
     riskFlags,
     riskGroups,
+    failedMarkAttemptCount: failedMarkAttempts.length,
+    failedMarkAttempts,
     accuracyMeters: finiteNumber(mark?.accuracyMeters, null),
     distanceToPointMeters: finiteNumber(mark?.distanceToPointMeters, null),
     insideGeofence: typeof mark?.insideGeofence === 'boolean' ? mark.insideGeofence : null,
@@ -506,9 +572,13 @@ export async function loadAttendanceAdminBoard(prisma, input = {}) {
     const serviceDateIso = dispatchServiceDateKey(assignment.serviceRequest?.serviceDate);
     return serviceDateIso && serviceDateIso >= range.from && serviceDateIso <= range.to;
   });
+  const failureAttempts = await failureAttemptsByAssignment(
+    prisma,
+    assignmentsInRange.map((assignment) => assignment.id)
+  );
 
   const allRows = assignmentsInRange
-    .map((assignment) => buildBoardRow(assignment, now))
+    .map((assignment) => buildBoardRow(assignment, now, failureAttempts.get(assignment.id) || []))
     .sort((left, right) => {
       const leftTime = new Date(left.expectedStartAt || `${left.serviceDateIso}T23:59:59.999Z`).getTime();
       const rightTime = new Date(right.expectedStartAt || `${right.serviceDateIso}T23:59:59.999Z`).getTime();
