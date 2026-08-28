@@ -359,10 +359,12 @@
         // arrival-time-notice:begin
         (() => {
           const STORAGE_KEY = 'lorren-arrival-time-notice-pending-v1';
+          const CONFIRMED_NOTICE_KEY = 'lorren-arrival-time-notice-confirmed-v1';
           const PENDING_MAX_AGE_MS = 96 * 60 * 60 * 1000;
           const ATTEMPT_MATCH_WINDOW_MS = 30 * 60 * 1000;
           const toast = document.getElementById('arrival-time-toast');
           const markDialog = document.getElementById('mark-dialog');
+          const nativeFetch = window.fetch.bind(window);
           let activeArrivalAssignmentId = null;
           let toastTimer = null;
 
@@ -419,6 +421,59 @@
             const direction = offsetMinutes < 0 ? 'antes' : 'después';
             return `Tu marcación de entrada quedó registrada. Llegaste ${minutes} ${unit} ${direction} de la hora programada.`;
           }
+
+          function confirmedArrivalMessage(payload) {
+            if (payload?.ok !== true || payload?.recorded !== true || payload?.markType !== 'ARRIVAL') return '';
+            return arrivalTimingMessage(payload.expectedStartAt, payload.arrivalReportedAt);
+          }
+
+          function saveConfirmedArrivalNotice(message) {
+            if (!message) return;
+            try {
+              window.sessionStorage.setItem(CONFIRMED_NOTICE_KEY, message);
+            } catch (_error) {
+              showArrivalNotices([message]);
+            }
+          }
+
+          function consumeConfirmedArrivalNotice() {
+            try {
+              const message = String(window.sessionStorage.getItem(CONFIRMED_NOTICE_KEY) || '');
+              window.sessionStorage.removeItem(CONFIRMED_NOTICE_KEY);
+              return message;
+            } catch (_error) {
+              return '';
+            }
+          }
+
+          function arrivalAssignmentIdFromRequest(input) {
+            const rawUrl = typeof input === 'string' ? input : input?.url;
+            if (!rawUrl) return '';
+            try {
+              const url = new URL(rawUrl, window.location.origin);
+              const match = url.pathname.match(/^\/operaciones\/portal\/asignaciones\/([^/]+)\/llegada$/);
+              return match ? decodeURIComponent(match[1]) : '';
+            } catch (_error) {
+              return '';
+            }
+          }
+
+          async function captureConfirmedArrivalNotice(response, assignmentId) {
+            if (!response?.ok || !assignmentId) return;
+            const payload = await response.clone().json().catch(() => ({}));
+            if (payload?.ok !== true || payload?.recorded !== true || payload?.markType !== 'ARRIVAL') return;
+            const message = confirmedArrivalMessage(payload);
+            if (!message && (!payload.expectedStartAt || !payload.arrivalReportedAt)) return;
+            removePendingArrival(assignmentId);
+            if (message) saveConfirmedArrivalNotice(message);
+          }
+
+          window.fetch = async (...args) => {
+            const assignmentId = arrivalAssignmentIdFromRequest(args[0]);
+            const response = await nativeFetch(...args);
+            if (assignmentId) await captureConfirmedArrivalNotice(response, assignmentId);
+            return response;
+          };
 
           function showArrivalNotices(messages) {
             if (!toast || !messages.length) return;
@@ -507,6 +562,8 @@
           }, true);
           markDialog?.addEventListener('cancel', clearCancelledArrivalIntent, true);
 
+          const confirmedNotice = consumeConfirmedArrivalNotice();
+          if (confirmedNotice) showArrivalNotices([confirmedNotice]);
           resolvePendingArrivalNotices();
         })();
         // arrival-time-notice:end
