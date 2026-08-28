@@ -493,7 +493,7 @@
         'ok'
       );
       submitButton.textContent = 'Guardada';
-      window.setTimeout(closeOfflineDialog, timingMessage ? 4800 : 1100);
+      window.setTimeout(closeOfflineDialog, timingMessage ? 7800 : 1100);
     } catch (error) {
       setStatus(error?.message === 'offline_mark_selfie_invalid'
         ? 'La captura fue demasiado grande. Intenta nuevamente.'
