@@ -6,6 +6,7 @@
   const offlineApi = window.LorrenWorkerPortalOffline;
   if (!offlineApi) return;
 
+  const arrivalTimingNotice = window.LorrenArrivalTimingNotice || null;
   const nativePresenceBridge = window.LorrenAndroidPresence || null;
   const connectivityBar = document.getElementById('portal-connectivity');
   const connectivityTitle = document.getElementById('connectivity-title');
@@ -291,6 +292,17 @@
     });
   }
 
+  function assignmentCard(targetAssignmentId) {
+    return [...document.querySelectorAll('[data-assignment-card]')]
+      .find((candidate) => String(candidate.dataset.assignmentCard || '') === String(targetAssignmentId)) || null;
+  }
+
+  function offlineArrivalTimingMessage(record) {
+    if (record?.markType !== 'ARRIVAL') return '';
+    const expectedStartAt = String(assignmentCard(record.assignmentId)?.dataset?.expectedStartAt || '');
+    return arrivalTimingNotice?.message?.(expectedStartAt, record.clientCapturedAt) || '';
+  }
+
   function createMarkButton(type, disabled = false) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -320,8 +332,7 @@
   }
 
   function renderStage(targetAssignmentId, stage) {
-    const card = [...document.querySelectorAll('[data-assignment-card]')]
-      .find((candidate) => String(candidate.dataset.assignmentCard || '') === String(targetAssignmentId));
+    const card = assignmentCard(targetAssignmentId);
     const grid = card?.querySelector('.action-grid');
     if (!card || !grid || stage <= baselineStage(card)) return;
     assignmentId = String(targetAssignmentId);
@@ -475,9 +486,14 @@
         selfie
       });
       renderStage(record.assignmentId, MARK_STAGE[record.markType]);
-      setStatus('Marcación guardada en este teléfono. Se enviará automáticamente cuando vuelva la conexión.', 'ok');
+      const timingMessage = offlineArrivalTimingMessage(record);
+      const syncMessage = 'Quedó guardada en este teléfono y se sincronizará automáticamente cuando vuelva la conexión.';
+      setStatus(
+        timingMessage ? `${timingMessage} ${syncMessage}` : `Marcación guardada en este teléfono. ${syncMessage}`,
+        'ok'
+      );
       submitButton.textContent = 'Guardada';
-      window.setTimeout(closeOfflineDialog, 1100);
+      window.setTimeout(closeOfflineDialog, timingMessage ? 4800 : 1100);
     } catch (error) {
       setStatus(error?.message === 'offline_mark_selfie_invalid'
         ? 'La captura fue demasiado grande. Intenta nuevamente.'
