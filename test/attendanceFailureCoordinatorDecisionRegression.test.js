@@ -1,10 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {
-  loadAttendanceAdminBoard,
-  resolveAttendanceFailureDecision
-} from '../src/modules/dispatch-attendance/application/adminAttendance.js';
+import { loadAttendanceAdminBoard } from '../src/modules/dispatch-attendance/application/adminAttendance.js';
+import { resolveCurrentAttendanceFailureDecision } from '../src/modules/dispatch-attendance/application/attendanceFailureDecisionPolicy.js';
 import {
   buildDispatchAttendanceFailureDecisionPayload
 } from '../src/services/dispatchWhatsappCloudClient.js';
@@ -363,7 +361,35 @@ test('un aviso antiguo de WhatsApp decide el último intento fallido de esa marc
   assert.equal(decision.entityId, latestFailureId);
 });
 
-test('si la marcación ya quedó registrada WhatsApp no crea ni reemplaza otra', async () => {
+test('un formulario viejo del dashboard no puede aceptar un intento superado', async () => {
+  const latestFailureId = `attendance_failure_${'d'.repeat(48)}`;
+  const latest = failureEventWithId(latestFailureId, {
+    attemptId: 'attempt_test_newer',
+    occurredAt: '2026-08-28T15:48:00.000Z'
+  }, new Date('2026-08-28T15:48:01.000Z'));
+  const store = decisionPrisma({ extraEvents: [latest] });
+  const writes = [];
+
+  const result = await resolveCurrentAttendanceFailureDecision(store.api, {
+    failureEventId: FAILURE_ID,
+    decision: 'ACCEPT',
+    actorUsername: 'coordinador-panel',
+    actorRole: 'admin',
+    actorSource: 'attendance-dashboard',
+    writerActorRole: 'attendance-dashboard',
+    registerManualAttendanceFn: attendanceWriter(writes)
+  });
+
+  assert.equal(result.handled, true);
+  assert.equal(result.duplicate, true);
+  assert.equal(result.superseded, true);
+  assert.equal(result.status, 'SUPERSEDED');
+  assert.equal(result.latestFailureEventId, latestFailureId);
+  assert.equal(writes.length, 0);
+  assert.equal([...store.events.values()].some((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION'), false);
+});
+
+test('si la marcación ya quedó registrada ninguna decisión vuelve a escribirla', async () => {
   const store = decisionPrisma({
     attendanceSession: {
       arrivalReportedAt: new Date('2026-08-28T15:46:00.000Z'),
@@ -371,23 +397,30 @@ test('si la marcación ya quedó registrada WhatsApp no crea ni reemplaza otra',
       marks: [{ markType: 'ARRIVAL' }]
     }
   });
-  let writerCalled = false;
-  const result = await resolveDispatchAttendanceFailureCoordinatorDecision({
+  const writes = [];
+
+  const dashboard = await resolveCurrentAttendanceFailureDecision(store.api, {
+    failureEventId: FAILURE_ID,
+    decision: 'ACCEPT',
+    actorUsername: 'coordinador-panel',
+    actorRole: 'admin',
+    actorSource: 'attendance-dashboard',
+    writerActorRole: 'attendance-dashboard',
+    registerManualAttendanceFn: attendanceWriter(writes)
+  });
+  assert.equal(dashboard.alreadyRecorded, true);
+  assert.equal(dashboard.status, 'RECORDED');
+
+  const whatsapp = await resolveDispatchAttendanceFailureCoordinatorDecision({
     failureEventId: FAILURE_ID,
     decision: 'ACCEPT',
     coordinatorPhone: COORDINATOR_PHONE,
     prismaClient: store.api,
-    registerManualAttendanceFn: async () => {
-      writerCalled = true;
-      return { id: 'unexpected' };
-    }
+    registerManualAttendanceFn: attendanceWriter(writes)
   });
-
-  assert.equal(result.handled, true);
-  assert.equal(result.duplicate, true);
-  assert.equal(result.alreadyRecorded, true);
-  assert.equal(result.status, 'ACCEPTED');
-  assert.equal(writerCalled, false);
+  assert.equal(whatsapp.alreadyRecorded, true);
+  assert.equal(whatsapp.status, 'RECORDED');
+  assert.equal(writes.length, 0);
   assert.equal([...store.events.values()].some((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION'), false);
 });
 
@@ -446,10 +479,10 @@ test('trece fallos de la misma marcación generan un solo aviso de WhatsApp', as
   assert.equal(sends[0].failureEventId, `attendance_failure_${'0'.repeat(48)}`);
 });
 
-test('el dashboard acepta el intento con el actor autenticado y la misma hora original', async () => {
+test('el dashboard acepta el último intento con el actor autenticado y la hora original', async () => {
   const store = decisionPrisma();
   const writes = [];
-  const result = await resolveAttendanceFailureDecision(store.api, {
+  const result = await resolveCurrentAttendanceFailureDecision(store.api, {
     failureEventId: FAILURE_ID,
     decision: 'ACCEPT',
     actorUserId: 'dashboard-user-test-1',
@@ -477,7 +510,7 @@ test('el dashboard acepta el intento con el actor autenticado y la misma hora or
 test('dashboard y WhatsApp comparten una sola decisión terminal en ambos órdenes', async () => {
   const dashboardFirst = decisionPrisma();
   const dashboardWrites = [];
-  await resolveAttendanceFailureDecision(dashboardFirst.api, {
+  await resolveCurrentAttendanceFailureDecision(dashboardFirst.api, {
     failureEventId: FAILURE_ID,
     decision: 'ACCEPT',
     actorUsername: 'coordinador-panel',
@@ -509,7 +542,7 @@ test('dashboard y WhatsApp comparten una sola decisión terminal en ambos órden
     prismaClient: whatsappFirst.api,
     registerManualAttendanceFn: attendanceWriter(whatsappWrites)
   });
-  const dashboardAfter = await resolveAttendanceFailureDecision(whatsappFirst.api, {
+  const dashboardAfter = await resolveCurrentAttendanceFailureDecision(whatsappFirst.api, {
     failureEventId: FAILURE_ID,
     decision: 'REJECT',
     actorUsername: 'coordinador-panel',
@@ -572,8 +605,9 @@ test('el dashboard deja botones solo en el último fallo vigente y ninguno si la
   assert.match(view, /name="decision" value="REJECT"/);
 });
 
-test('la decisión vive en Asistencia, ambos canales delegan y webhook sigue sin reglas nuevas', () => {
+test('la vigencia vive en Asistencia, ambos canales delegan y webhook sigue sin reglas nuevas', () => {
   const attendance = fs.readFileSync(new URL('../src/modules/dispatch-attendance/application/adminAttendance.js', import.meta.url), 'utf8');
+  const policy = fs.readFileSync(new URL('../src/modules/dispatch-attendance/application/attendanceFailureDecisionPolicy.js', import.meta.url), 'utf8');
   const alerts = fs.readFileSync(new URL('../src/services/dispatchWhatsappAdminAlerts.js', import.meta.url), 'utf8');
   const inbound = fs.readFileSync(new URL('../src/services/dispatchWhatsappWebhookService.js', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
@@ -583,19 +617,21 @@ test('la decisión vive en Asistencia, ambos canales delegan y webhook sigue sin
 
   assert.match(attendance, /export async function resolveAttendanceFailureDecision/);
   assert.match(attendance, /registerManualAttendanceFn\(prisma/);
-  assert.match(attendance, /failureEventId:\s*event\.id/);
-  assert.match(attendance, /decisionStatus/);
-  assert.doesNotMatch(attendance, /dispatchAttendanceMark\.create\([^\n]*failure/i);
-  assert.match(alerts, /resolveAttendanceFailureDecision/);
-  assert.match(alerts, /assignmentId, markType/);
-  assert.match(alerts, /latestAttendanceFailureForMark/);
+  assert.match(policy, /resolveAttendanceFailureDecision/);
+  assert.match(policy, /resolveCurrentAttendanceFailureDecision/);
+  assert.match(policy, /attendanceFailureMarkAlreadyRecorded/);
+  assert.match(policy, /status:\s*'SUPERSEDED'/);
+  assert.match(policy, /status:\s*'RECORDED'/);
+  assert.match(alerts, /resolveCurrentAttendanceFailureDecision/);
+  assert.match(alerts, /followLatestFailure:\s*true/);
   assert.match(alerts, /mark_already_recorded/);
   assert.doesNotMatch(alerts, /registerManualAttendanceFn\(prismaClient/);
   assert.match(inbound, /dispatch_attendance_\(accept\|reject\)/);
   assert.match(inbound, /resolveDispatchAttendanceFailureCoordinatorDecision/);
   assert.doesNotMatch(route, /dispatch_attendance_accept|dispatch_attendance_reject|ATTENDANCE_MARK_FAILURE_DECISION/);
   assert.match(adminRoute, /failures\/:failureEventId\/decision/);
-  assert.match(adminRoute, /resolveAttendanceFailureDecision/);
+  assert.match(adminRoute, /resolveCurrentAttendanceFailureDecision/);
+  assert.doesNotMatch(adminRoute, /resolveAttendanceFailureDecision\(prisma/);
   assert.match(view, /latestFailureEventByMarkType/);
   assert.match(view, /markAlreadyRecorded/);
   assert.match(portal, /sendDispatchAttendanceFailureAdminAlert/);
