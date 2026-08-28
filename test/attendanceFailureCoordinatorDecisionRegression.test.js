@@ -391,9 +391,11 @@ test('si la marcación ya quedó registrada WhatsApp no crea ni reemplaza otra',
   assert.equal([...store.events.values()].some((item) => item.entityType === 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION'), false);
 });
 
-test('trece fallos de la misma marcación generan un solo aviso de WhatsApp', async () => {
+test('WhatsApp espera cinco fallos y envía un solo aviso asociado al quinto intento', async () => {
   const store = decisionPrisma();
+  store.events.delete(FAILURE_ID);
   const sends = [];
+  const results = [];
   for (let index = 0; index < 13; index += 1) {
     const event = failureEventWithId(
       `attendance_failure_${index.toString(16).padStart(48, '0')}`,
@@ -404,7 +406,7 @@ test('trece fallos de la misma marcación generan un solo aviso de WhatsApp', as
       new Date(ATTEMPTED_AT.getTime() + index * 60_000 + 1000)
     );
     store.events.set(event.id, structuredClone(event));
-    await sendDispatchAttendanceFailureAdminAlert({
+    results.push(await sendDispatchAttendanceFailureAdminAlert({
       failureEvent: event,
       failureContext: event.metadata,
       prismaClient: store.api,
@@ -413,11 +415,22 @@ test('trece fallos de la misma marcación generan un solo aviso de WhatsApp', as
         sends.push(input);
         return { providerMessageId: `wa-test-${sends.length}` };
       }
-    });
+    }));
   }
 
+  assert.deepEqual(results.slice(0, 4).map((result) => result.reason), [
+    'failure_threshold_not_reached',
+    'failure_threshold_not_reached',
+    'failure_threshold_not_reached',
+    'failure_threshold_not_reached'
+  ]);
+  assert.deepEqual(results.slice(0, 4).map((result) => result.failureCount), [1, 2, 3, 4]);
+  assert.equal(results[4].sent, true);
+  assert.equal(results[4].failureCount, 5);
   assert.equal(sends.length, 1);
-  assert.equal(sends[0].failureEventId, `attendance_failure_${'0'.repeat(48)}`);
+  assert.equal(sends[0].failureEventId, `attendance_failure_${'4'.padStart(48, '0')}`);
+  assert.match(sends[0].text, /acumuló 5 intentos fallidos/);
+  assert.equal(results.slice(5).every((result) => result.sent === false), true);
 });
 
 test('el dashboard acepta el intento con el actor autenticado y la misma hora original', async () => {
@@ -563,6 +576,8 @@ test('la decisión vive en Asistencia, ambos canales delegan y webhook sigue sin
   assert.match(alerts, /resolveAttendanceFailureDecision/);
   assert.match(alerts, /assignmentId, markType/);
   assert.match(alerts, /latestAttendanceFailureForMark/);
+  assert.match(alerts, /ATTENDANCE_FAILURE_ALERT_THRESHOLD = 5/);
+  assert.match(alerts, /failure_threshold_not_reached/);
   assert.doesNotMatch(alerts, /registerManualAttendanceFn\(prismaClient/);
   assert.match(inbound, /dispatch_attendance_\(accept\|reject\)/);
   assert.match(inbound, /resolveDispatchAttendanceFailureCoordinatorDecision/);
