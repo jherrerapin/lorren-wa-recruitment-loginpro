@@ -4,6 +4,7 @@
   if (window.location.pathname !== '/operaciones/portal') return;
 
   const biometricApi = window.LorrenWorkerBiometric || null;
+  const arrivalTimingNotice = window.LorrenArrivalTimingNotice || null;
   const nativePresenceBridge = window.LorrenAndroidPresence || null;
   const connectivityBar = document.getElementById('portal-connectivity');
   const connectivityTitle = document.getElementById('connectivity-title');
@@ -159,6 +160,11 @@
     BREAK_END: 'fin de almuerzo',
     DEPARTURE: 'salida'
   })[type] || 'marcación';
+
+  function confirmedArrivalTimingMessage(payload) {
+    if (payload?.ok !== true || payload?.recorded !== true || payload?.markType !== 'ARRIVAL') return '';
+    return arrivalTimingNotice?.message?.(payload.expectedStartAt, payload.arrivalReportedAt) || '';
+  }
 
   function currentMarkButtons() {
     return [...document.querySelectorAll('.mark-button[data-mark-type]')];
@@ -1127,10 +1133,11 @@
         throw error;
       }
 
-      setStatus(payload.message || 'Marcación registrada.', 'ok');
+      const timingMessage = confirmedArrivalTimingMessage(payload);
+      setStatus(timingMessage || payload.message || 'Marcación registrada.', 'ok');
       clearVerification();
       stopCamera();
-      window.setTimeout(() => window.location.reload(), 900);
+      window.setTimeout(() => window.location.reload(), timingMessage ? 4800 : 900);
     } catch (error) {
       reportAttendanceFailure(error);
       const locationRejected = LOCATION_PREFLIGHT_ERRORS.has(error?.code);
