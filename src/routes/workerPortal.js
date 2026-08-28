@@ -48,6 +48,76 @@ const CREW_MARK_CHALLENGE_PREFIX = 'lorren-mark-v1';
 const CREW_PHONE_EXCEPTION_ENTITY_TYPE = 'DISPATCH_CREW_PHONE_EXCEPTION';
 const CREW_PHONE_EXCEPTION_ACTION = 'CREW_PHONE_EXCEPTION_DECLARED';
 const CREW_PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
+const ATTENDANCE_MARK_FAILURE_ENTITY_TYPE = 'DISPATCH_ATTENDANCE_MARK_FAILURE';
+const ATTENDANCE_MARK_FAILURE_ACTION = 'MARK_ATTEMPT_FAILED';
+const ATTENDANCE_MARK_FAILURE_MAX_CLIENT_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const ATTENDANCE_MARK_FAILURE_FUTURE_TOLERANCE_MS = 5 * 60 * 1000;
+const ATTENDANCE_MARK_FAILURE_CATALOG = Object.freeze({
+  mark_request_invalid: { phaseLabel: 'Registro', descriptionEs: 'El servidor rechazó el intento porque faltaban datos obligatorios de la marcación o alguno era inválido.' },
+  mark_temporarily_unavailable: { phaseLabel: 'Registro', descriptionEs: 'El servidor no pudo validar la marcación por un fallo temporal interno.' },
+  assignment_not_available: { phaseLabel: 'Asignación', descriptionEs: 'La asignación ya no estaba habilitada para marcar en el momento del intento.' },
+  attendance_not_enabled: { phaseLabel: 'Asignación', descriptionEs: 'La operación tenía deshabilitado el registro de asistencia cuando se intentó marcar.' },
+  arrival_window_not_open: { phaseLabel: 'Horario', descriptionEs: 'El intento de entrada se hizo antes de que abriera la ventana permitida para marcar.' },
+  arrival_already_registered: { phaseLabel: 'Secuencia', descriptionEs: 'La entrada ya estaba registrada cuando se intentó marcarla nuevamente.' },
+  departure_arrival_required: { phaseLabel: 'Secuencia', descriptionEs: 'Se intentó registrar la salida sin una entrada previa registrada.' },
+  departure_already_registered: { phaseLabel: 'Secuencia', descriptionEs: 'La salida ya estaba registrada cuando se intentó marcarla nuevamente.' },
+  departure_before_arrival: { phaseLabel: 'Secuencia', descriptionEs: 'La hora recibida para la salida era anterior a la entrada registrada.' },
+  departure_break_end_required: { phaseLabel: 'Secuencia', descriptionEs: 'Se intentó registrar la salida mientras el almuerzo seguía abierto.' },
+  break_arrival_required: { phaseLabel: 'Secuencia', descriptionEs: 'Se intentó iniciar el almuerzo sin una entrada previa registrada.' },
+  break_after_departure: { phaseLabel: 'Secuencia', descriptionEs: 'Se intentó registrar almuerzo después de que la salida ya estaba registrada.' },
+  break_before_arrival: { phaseLabel: 'Secuencia', descriptionEs: 'La hora recibida para el almuerzo era anterior a la entrada registrada.' },
+  break_already_started: { phaseLabel: 'Secuencia', descriptionEs: 'El inicio de almuerzo ya estaba registrado cuando se intentó marcarlo nuevamente.' },
+  break_start_required: { phaseLabel: 'Secuencia', descriptionEs: 'Se intentó finalizar el almuerzo sin un inicio de almuerzo registrado.' },
+  break_already_completed: { phaseLabel: 'Secuencia', descriptionEs: 'El fin de almuerzo ya estaba registrado cuando se intentó marcarlo nuevamente.' },
+  break_end_before_start: { phaseLabel: 'Secuencia', descriptionEs: 'La hora recibida para finalizar el almuerzo era anterior al inicio de almuerzo.' },
+  offline_capture_expired: { phaseLabel: 'Sincronización', descriptionEs: 'La marcación guardada sin conexión llegó al servidor después del plazo permitido para sincronizarla.' },
+  offline_capture_time_invalid: { phaseLabel: 'Sincronización', descriptionEs: 'La hora guardada por el dispositivo para la marcación sin conexión no fue válida.' },
+  operation_geofence_required: { phaseLabel: 'Ubicación', descriptionEs: 'La operación no tenía una geocerca válida configurada y el servidor no permitió completar la marcación.' },
+  location_accuracy_insufficient: { phaseLabel: 'Ubicación', descriptionEs: 'El servidor rechazó el intento porque la precisión reportada por el GPS no cumplía el mínimo requerido.' },
+  outside_operation_range: { phaseLabel: 'Ubicación', descriptionEs: 'El servidor calculó que la ubicación recibida estaba fuera de la geocerca permitida de la operación.' },
+  attendance_native_location_required: { phaseLabel: 'Ubicación', descriptionEs: 'La aplicación no entregó una ubicación nativa firmada válida para ese intento.' },
+  attendance_native_location_invalid: { phaseLabel: 'Ubicación', descriptionEs: 'El servidor recibió una prueba de ubicación nativa que no pudo validar para esa marcación.' },
+  attendance_native_location_identity_invalid: { phaseLabel: 'Ubicación', descriptionEs: 'La prueba de ubicación nativa no correspondía al dispositivo autorizado del auxiliar.' },
+  attendance_native_location_time_mismatch: { phaseLabel: 'Ubicación', descriptionEs: 'La prueba de ubicación nativa había perdido vigencia cuando el servidor intentó validarla.' },
+  attendance_mock_location_detected: { phaseLabel: 'Ubicación', descriptionEs: 'Android informó que la ubicación del dispositivo estaba siendo simulada en ese intento.' },
+  native_location_temporarily_unavailable: { phaseLabel: 'Ubicación', descriptionEs: 'El servidor no pudo validar temporalmente la prueba de ubicación segura enviada por Android.' },
+  biometric_verification_required: { phaseLabel: 'Biometría', descriptionEs: 'La validación facial necesaria para esa marcación había vencido, ya se había usado o no correspondía al intento.' },
+  online_biometric_required: { phaseLabel: 'Conexión', descriptionEs: 'La marcación requería validación facial en línea y no pudo continuar en esas condiciones.' },
+  biometric_enrollment_required: { phaseLabel: 'Biometría', descriptionEs: 'El auxiliar no tenía un registro facial vigente para continuar con la marcación.' },
+  biometric_verification_rejected: { phaseLabel: 'Biometría', descriptionEs: 'La comparación facial terminó y no confirmó la identidad requerida para completar la marcación.' },
+  attendance_biometric_antispoof_low: { phaseLabel: 'Biometría', descriptionEs: 'La validación facial no confirmó suficientemente que la captura proviniera de un rostro real.' },
+  attendance_biometric_liveness_low: { phaseLabel: 'Biometría', descriptionEs: 'La validación facial no confirmó suficiente presencia en vivo durante las muestras.' },
+  attendance_biometric_samples_inconsistent: { phaseLabel: 'Biometría', descriptionEs: 'Las muestras faciales del intento cambiaron demasiado entre sí y no pudieron validarse.' },
+  attendance_biometric_rate_limited: { phaseLabel: 'Biometría', descriptionEs: 'El sistema bloqueó temporalmente nuevos intentos faciales por varios fallos consecutivos.' },
+  biometric_temporarily_unavailable: { phaseLabel: 'Biometría', descriptionEs: 'El servicio de validación facial no estuvo disponible temporalmente durante el intento.' },
+  crew_group_not_available: { phaseLabel: 'Bluetooth', descriptionEs: 'La marcación grupal no pudo continuar porque la cuadrilla o el dispositivo Bluetooth no coincidían con la operación.' },
+  client_location_permission_denied: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'El sistema del teléfono o navegador rechazó el permiso de ubicación antes de poder continuar con la marcación.' },
+  client_location_position_unavailable: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'El teléfono informó que la ubicación no estaba disponible en ese intento y no entregó coordenadas para enviar al servidor.' },
+  client_location_timeout: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'El GPS agotó 20 segundos sin entregar una ubicación para la marcación.' },
+  client_location_unsupported: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'El navegador del dispositivo no ofrecía acceso a geolocalización cuando se intentó marcar.' },
+  client_native_location_unavailable: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'Android no pudo obtener una ubicación válida antes de enviar la marcación al servidor.' },
+  client_native_location_proof_failed: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'Android obtuvo la ubicación, pero no pudo generar la prueba segura necesaria para ese intento.' },
+  client_native_location_credential_required: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'El dispositivo todavía no tenía preparada la credencial necesaria para proteger la ubicación del intento.' },
+  client_native_permissions_required: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'Android indicó que faltaba autorizar el permiso de ubicación requerido para continuar.' },
+  client_mock_location_detected: { clientReportable: true, phaseLabel: 'Ubicación', descriptionEs: 'Android detectó una ubicación simulada antes de que la marcación pudiera enviarse.' },
+  client_camera_unavailable: { clientReportable: true, phaseLabel: 'Cámara', descriptionEs: 'La cámara frontal no pudo abrirse para iniciar la validación de identidad de la marcación.' },
+  client_camera_stream_unavailable: { clientReportable: true, phaseLabel: 'Cámara', descriptionEs: 'La cámara se abrió, pero no entregó una imagen utilizable para la validación del intento.' },
+  client_camera_stream_muted: { clientReportable: true, phaseLabel: 'Cámara', descriptionEs: 'El teléfono pausó la cámara mientras se realizaba la validación del intento.' },
+  client_biometric_runtime_unavailable: { clientReportable: true, phaseLabel: 'Biometría', descriptionEs: 'El motor de reconocimiento facial no pudo quedar listo en el dispositivo para ese intento.' },
+  client_biometric_detection_timeout: { clientReportable: true, phaseLabel: 'Biometría', descriptionEs: 'El análisis facial agotó el tiempo disponible sin detectar una condición válida para continuar.' },
+  client_biometric_capture_timeout: { clientReportable: true, phaseLabel: 'Biometría', descriptionEs: 'La cámara no consiguió una captura facial estable dentro del tiempo disponible para el intento.' },
+  client_biometric_baseline_timeout: { clientReportable: true, phaseLabel: 'Biometría', descriptionEs: 'No se obtuvieron las muestras frontales necesarias para iniciar la comprobación facial.' },
+  client_biometric_challenge_timeout: { clientReportable: true, phaseLabel: 'Biometría', descriptionEs: 'No se confirmó el movimiento facial solicitado dentro del tiempo disponible.' },
+  client_biometric_final_timeout: { clientReportable: true, phaseLabel: 'Biometría', descriptionEs: 'No se obtuvieron las muestras faciales finales después de completar el movimiento solicitado.' },
+  client_biometric_descriptor_unavailable: { clientReportable: true, phaseLabel: 'Biometría', descriptionEs: 'El dispositivo no pudo leer los rasgos faciales necesarios para comparar la identidad.' },
+  client_biometric_descriptor_inconsistent: { clientReportable: true, phaseLabel: 'Biometría', descriptionEs: 'Las capturas faciales obtenidas por el dispositivo no fueron suficientemente consistentes entre sí.' },
+  client_network_request_failed: { clientReportable: true, phaseLabel: 'Conexión', descriptionEs: 'El navegador reportó un fallo de red al intentar comunicarse con el servidor durante la marcación.' },
+  client_bluetooth_unsupported: { clientReportable: true, phaseLabel: 'Bluetooth', descriptionEs: 'El navegador del dispositivo no permitía usar Bluetooth para la comprobación de cuadrilla.' },
+  client_bluetooth_not_selected: { clientReportable: true, phaseLabel: 'Bluetooth', descriptionEs: 'No se seleccionó un dispositivo Bluetooth de la operación durante el intento de marcación.' },
+  client_bluetooth_wrong_operation: { clientReportable: true, phaseLabel: 'Bluetooth', descriptionEs: 'El dispositivo Bluetooth seleccionado pertenecía a una operación diferente a la asignada.' },
+  client_bluetooth_context_unavailable: { clientReportable: true, phaseLabel: 'Bluetooth', descriptionEs: 'El Portal no pudo obtener la configuración de cuadrilla necesaria para iniciar la comprobación Bluetooth.' },
+  client_bluetooth_read_failed: { clientReportable: true, phaseLabel: 'Bluetooth', descriptionEs: 'El navegador no pudo leer correctamente el dispositivo Bluetooth seleccionado durante el intento.' }
+});
 
 function markTypeFromPath(pathname = '') {
   if (pathname.endsWith('/llegada')) return 'ARRIVAL';
@@ -73,6 +143,142 @@ function normalizeBiometricMarkType(value) {
   const markType = normalizedString(value, 40)?.toUpperCase();
   if (!BIOMETRIC_MARK_TYPES.has(markType)) throw new Error('attendance_biometric_mark_type_invalid');
   return markType;
+}
+
+export function attendanceMarkFailureDefinition(value) {
+  const code = normalizedString(value, 100);
+  return code ? ATTENDANCE_MARK_FAILURE_CATALOG[code] || null : null;
+}
+
+function markFailureAuditId(input) {
+  const digest = createHash('sha256')
+    .update([
+      input.assignmentId,
+      input.markType,
+      input.attemptId,
+      input.errorCode,
+      input.origin
+    ].join(':'))
+    .digest('hex')
+    .slice(0, 48);
+  return `attendance_failure_${digest}`;
+}
+
+export async function auditAttendanceMarkFailure(prisma, input = {}) {
+  if (!prisma?.devAuditEvent || typeof prisma.devAuditEvent.upsert !== 'function') {
+    throw new Error('attendance_mark_failure_audit_unavailable');
+  }
+  const assignmentId = normalizedString(input.assignmentId, 160);
+  const attemptId = normalizedString(input.attemptId, 160);
+  const errorCode = normalizedString(input.errorCode, 100);
+  const definition = attendanceMarkFailureDefinition(errorCode);
+  let markType;
+  try {
+    markType = normalizeBiometricMarkType(input.markType);
+  } catch {
+    throw new Error('attendance_mark_failure_input_invalid');
+  }
+  const occurredAt = input.occurredAt instanceof Date ? new Date(input.occurredAt.getTime()) : new Date(input.occurredAt);
+  const recordedAt = input.recordedAt instanceof Date ? new Date(input.recordedAt.getTime()) : new Date();
+  const origin = input.origin === 'CLIENT_PREFLIGHT' ? 'CLIENT_PREFLIGHT' : 'SERVER_RESPONSE';
+  const sourceLabel = input.sourceLabel === 'Aplicación Android' ? 'Aplicación Android' : 'Portal del auxiliar';
+  if (!assignmentId || !attemptId || !definition || Number.isNaN(occurredAt.getTime()) || Number.isNaN(recordedAt.getTime())) {
+    throw new Error('attendance_mark_failure_input_invalid');
+  }
+  const id = markFailureAuditId({ assignmentId, markType, attemptId, errorCode, origin });
+  return prisma.devAuditEvent.upsert({
+    where: { id },
+    update: {},
+    create: {
+      id,
+      entityType: ATTENDANCE_MARK_FAILURE_ENTITY_TYPE,
+      entityId: assignmentId,
+      entityLabel: `assignment:${assignmentId}`,
+      action: ATTENDANCE_MARK_FAILURE_ACTION,
+      actorUsername: 'worker-portal',
+      actorRole: 'worker',
+      actorSource: origin === 'CLIENT_PREFLIGHT' ? 'worker-portal-client' : 'worker-portal-server',
+      metadata: {
+        assignmentId,
+        attemptId,
+        markType,
+        failureCode: errorCode,
+        phaseLabel: definition.phaseLabel,
+        descriptionEs: definition.descriptionEs,
+        sourceLabel,
+        origin,
+        occurredAt: occurredAt.toISOString()
+      },
+      createdAt: recordedAt
+    }
+  });
+}
+
+function resolveFailureRequestContext(req, payload, now) {
+  const errorCode = normalizedString(payload?.error, 100);
+  const definition = attendanceMarkFailureDefinition(errorCode);
+  if (!definition || definition.clientReportable === true) return null;
+  if (['portal_session_required', 'biometric_request_invalid'].includes(errorCode)) return null;
+
+  const path = String(req.path || '');
+  let assignmentId = null;
+  let markType = null;
+  const markMatch = path.match(/^\/asignaciones\/([^/]+)\/(llegada|inicio-almuerzo|fin-almuerzo|salida)$/);
+  if (markMatch) {
+    assignmentId = decodeURIComponent(markMatch[1]);
+    markType = markTypeFromPath(path);
+  } else if (path === '/biometria/desafio' || path === '/biometria/verificar') {
+    assignmentId = normalizedString(req.body?.assignmentId, 160);
+    markType = normalizedString(req.body?.markType, 40)?.toUpperCase();
+  } else {
+    return null;
+  }
+  if (!assignmentId || !BIOMETRIC_MARK_TYPES.has(markType)) return null;
+
+  const capturedAt = new Date(req.body?.clientCapturedAt);
+  const occurredAt = Number.isNaN(capturedAt.getTime()) ? now : capturedAt;
+  const attemptId = normalizedString(req.body?.idempotencyKey, 160)
+    || `server-${now.getTime()}-${String(req.ip || 'request').slice(0, 40)}`;
+  return {
+    assignmentId,
+    markType,
+    errorCode,
+    attemptId,
+    occurredAt,
+    recordedAt: now,
+    origin: 'SERVER_RESPONSE',
+    sourceLabel: isNativeAndroidRequest(req) ? 'Aplicación Android' : 'Portal del auxiliar'
+  };
+}
+
+export function createAttendanceMarkFailureResponseObserver({ auditFn, nowFn = () => new Date() } = {}) {
+  if (typeof auditFn !== 'function') throw new Error('attendance_mark_failure_observer_audit_required');
+  return function attendanceMarkFailureResponseObserver(req, res, next) {
+    const originalJson = res.json.bind(res);
+    res.json = (payload) => {
+      try {
+        if (Number(res.statusCode || 0) >= 400) {
+          const now = nowFn();
+          if (now instanceof Date && !Number.isNaN(now.getTime())) {
+            const context = resolveFailureRequestContext(req, payload, now);
+            if (context) {
+              Promise.resolve(auditFn(context)).catch((error) => {
+                console.warn('[ATTENDANCE_MARK_FAILURE_AUDIT_WRITE_FAILED]', {
+                  code: typeof error?.message === 'string' ? error.message : 'unknown'
+                });
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.warn('[ATTENDANCE_MARK_FAILURE_OBSERVER_FAILED]', {
+          code: typeof error?.message === 'string' ? error.message : 'unknown'
+        });
+      }
+      return originalJson(payload);
+    };
+    return next();
+  };
 }
 
 function resolveCrewPresenceMarkType(proofBundle) {
@@ -362,6 +568,8 @@ export function workerPortalRouter(prisma, options = {}) {
     || ((input) => registerCrewMarkForLeader(prisma, input));
   const auditCrewPhoneExceptionFn = options.auditCrewPhoneExceptionFn
     || ((input) => auditCrewPhoneException(prisma, input));
+  const auditMarkFailureFn = options.auditMarkFailureFn
+    || ((input) => auditAttendanceMarkFailure(prisma, input));
   const loadBiometricAssignmentFn = options.loadBiometricAssignmentFn || (async (workerId, assignmentId) => (
     prisma.dispatchAssignment.findFirst({
       where: {
@@ -646,7 +854,72 @@ export function workerPortalRouter(prisma, options = {}) {
 
   const router = express.Router();
   router.use(installBiometricCspBridge);
+  router.use(createAttendanceMarkFailureResponseObserver({ auditFn: auditMarkFailureFn, nowFn }));
   router.use(coreRouter);
+
+  router.post('/asignaciones/:assignmentId/intentos-fallidos', biometricJson, async (req, res) => {
+    applyWorkerPortalSecurityHeaders(res);
+    if (req.get?.('x-requested-with') !== WORKER_PORTAL_REQUEST_HEADER) {
+      return strictError(res, 400, 'mark_failure_report_invalid', 'Solicitud de reporte técnico inválida.');
+    }
+    try {
+      const now = nowFn();
+      if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new Error('attendance_mark_failure_now_invalid');
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+
+      const assignmentId = normalizedString(req.params.assignmentId, 160);
+      const errorCode = normalizedString(req.body?.errorCode, 100);
+      const clientAttemptId = normalizedString(req.body?.clientAttemptId, 160);
+      const definition = attendanceMarkFailureDefinition(errorCode);
+      let markType;
+      try {
+        markType = normalizeBiometricMarkType(req.body?.markType);
+      } catch {
+        return strictError(res, 400, 'mark_failure_report_invalid', 'El reporte técnico de la marcación no es válido.');
+      }
+      if (
+        !assignmentId
+        || !clientAttemptId
+        || !/^[A-Za-z0-9:_-]{8,160}$/.test(clientAttemptId)
+        || !definition?.clientReportable
+      ) {
+        return strictError(res, 400, 'mark_failure_report_invalid', 'El reporte técnico de la marcación no es válido.');
+      }
+
+      const occurredAt = new Date(req.body?.occurredAt);
+      if (
+        Number.isNaN(occurredAt.getTime())
+        || occurredAt.getTime() > now.getTime() + ATTENDANCE_MARK_FAILURE_FUTURE_TOLERANCE_MS
+        || occurredAt.getTime() < now.getTime() - ATTENDANCE_MARK_FAILURE_MAX_CLIENT_AGE_MS
+      ) {
+        return strictError(res, 400, 'mark_failure_report_invalid', 'La hora del reporte técnico no es válida.');
+      }
+
+      const assignment = await prisma.dispatchAssignment.findFirst({
+        where: { id: assignmentId, workerId: portalSession.workerId },
+        select: { id: true }
+      });
+      if (!assignment) return strictError(res, 404, 'assignment_not_available', 'La asignación no corresponde a este auxiliar.');
+
+      await auditMarkFailureFn({
+        assignmentId,
+        markType,
+        errorCode,
+        attemptId: clientAttemptId,
+        occurredAt,
+        recordedAt: now,
+        origin: 'CLIENT_PREFLIGHT',
+        sourceLabel: isNativeAndroidRequest(req) ? 'Aplicación Android' : 'Portal del auxiliar'
+      });
+      return res.status(202).json({ ok: true });
+    } catch (error) {
+      console.warn('[ATTENDANCE_MARK_FAILURE_CLIENT_REPORT_FAILED]', {
+        code: typeof error?.message === 'string' ? error.message : 'unknown'
+      });
+      return strictError(res, 503, 'mark_failure_report_unavailable', 'No fue posible guardar el reporte técnico en este momento.');
+    }
+  });
 
   router.post('/cuadrillas/proximidad/contexto', biometricJson, async (req, res) => {
     if (!requirePortalRequest(req, res)) return;
