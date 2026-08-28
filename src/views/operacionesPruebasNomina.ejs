@@ -15,7 +15,7 @@
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
     <a href="/admin/operaciones/pruebas" class="nav-active">Entorno de pruebas</a>
-    <% if (canOpenOperationalPayroll) { %><a href="/admin/operaciones/asistencia/nomina?includeTest=true">Nómina con pruebas</a><% } %>
+    <% if (canOpenOperationalPayroll) { %><a href="/admin/operaciones/asistencia/nomina?includeTest=true">Gestión de Tiempo con pruebas</a><% } %>
     <span class="spacer"></span>
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
@@ -24,12 +24,12 @@
     <section class="hero">
       <div>
         <div class="eyebrow"><%= role === 'dev' ? 'DEV · ACCESO TOTAL' : 'PERMISO DE PRUEBAS' %></div>
-        <h1>Entorno aislado de asistencia y nómina</h1>
+        <h1>Entorno aislado de asistencia y Gestión de Tiempo</h1>
         <p>Usa auxiliares, clientes y operaciones existentes como referencia, sin alterar sus registros operativos.</p>
       </div>
       <div class="actions">
         <% if (canUseTestWhatsapp) { %><a class="btn wa-link" href="/admin/operaciones/pruebas/whatsapp">WhatsApp de pruebas</a><% } %>
-        <% if (canOpenOperationalPayroll) { %><a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?includeTest=true">Abrir Nómina con pruebas</a><% } else { %><a class="btn payroll-link" href="#resultado-prueba">Ver cálculo aislado</a><% } %>
+        <% if (canOpenOperationalPayroll) { %><a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?includeTest=true">Abrir Gestión de Tiempo con pruebas</a><% } else { %><a class="btn payroll-link" href="#resultado-prueba">Ver cálculo aislado</a><% } %>
       </div>
     </section>
 
@@ -140,7 +140,7 @@
           <% const testReport = workspace.testReport; %>
           <section class="card" id="resultado-prueba">
             <div class="card-body">
-              <div class="section-title"><div><h2>Resultado aislado de nómina</h2><p class="compact-help">Solo incluye sesiones <code>DEV_TEST_MANUAL</code> de esta solicitud. No consulta ni modifica marcaciones operativas.</p></div><span class="test-badge">CÁLCULO DE PRUEBA</span></div>
+              <div class="section-title"><div><h2>Resultado aislado de Gestión de Tiempo</h2><p class="compact-help">Solo incluye sesiones <code>DEV_TEST_MANUAL</code> de esta solicitud. No consulta ni modifica marcaciones operativas.</p></div><span class="test-badge">CÁLCULO DE PRUEBA</span></div>
               <% if (!testReport || !testReport.rows.length) { %>
                 <div class="empty-test">Registra al menos una jornada completa para ver el cálculo.</div>
               <% } else { %>
@@ -180,7 +180,7 @@
     clientSelect?.addEventListener('change', syncEntityOptions); syncEntityOptions();
     if (dateInput && !dateInput.value) { try { dateInput.value = new Intl.DateTimeFormat('en-CA', { timeZone:'America/Bogota' }).format(new Date()); } catch { dateInput.value = new Date().toISOString().slice(0,10); } }
 
-    const currentProductionAssignmentTemplate = ['Hola *{{nombre}}*,','','Mañana: *{{fecha}}*','Llegar a: *{{operacion}}  - {{direccion}}*','Hora : *{{horaInicio}} por favor.*','','','*Confirmado?*'].join('\n');
+    const currentProductionAssignmentTemplate = ['Hola *{{nombre}}*','','Mañana: *{{fecha}}*','Llegar a: *{{operacion}}  - {{direccion}}*','Hora : *{{horaInicio}} por favor.*','','','*Confirmado?*'].join('\n');
     function renderAssignmentMessage(template, panel) {
       const values = { nombre:panel.dataset.recipientName||'',operacion:panel.dataset.operation||'',direccion:panel.dataset.address||'',fecha:panel.dataset.date||'',horaInicio:panel.dataset.start||'' };
       return String(template||'').replace(/\{\{\s*(nombre|operacion|direccion|fecha|horaInicio)\s*\}\}/g,(_match,key)=>values[key]||'');
