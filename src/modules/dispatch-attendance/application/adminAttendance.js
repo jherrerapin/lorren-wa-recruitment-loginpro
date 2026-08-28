@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { dispatchServiceDateKey } from '../../../services/dispatchDate.js';
 import { calculateDispatchWorkedTime } from '../domain/attendanceWorkdayPolicy.js';
 import {
@@ -21,6 +21,10 @@ const BOGOTA_TIME_ZONE = 'America/Bogota';
 const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
 const ATTENDANCE_MARK_FAILURE_ENTITY_TYPE = 'DISPATCH_ATTENDANCE_MARK_FAILURE';
 const ATTENDANCE_MARK_FAILURE_ACTION = 'MARK_ATTEMPT_FAILED';
+const ATTENDANCE_MARK_FAILURE_DECISION_ENTITY_TYPE = 'DISPATCH_ATTENDANCE_MARK_FAILURE_DECISION';
+const ATTENDANCE_MARK_FAILURE_DECISION_ACTION = 'COORDINATOR_DECISION';
+const TERMINAL_FAILURE_DECISION_STATUSES = new Set(['ACCEPTED', 'REJECTED']);
+const VALID_FAILURE_DECISIONS = new Set(['ACCEPT', 'REJECT']);
 const RISK_MARK_LABELS = Object.freeze({
   ARRIVAL: 'Llegada',
   BREAK_START: 'Inicio de almuerzo',
@@ -153,6 +157,12 @@ function formatDateTime(value) {
   }).format(value);
 }
 
+function optionalDateTimeLabel(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : formatDateTime(date);
+}
+
 function formatTime(value) {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) return 'Sin horario';
   return new Intl.DateTimeFormat('es-CO', {
@@ -226,7 +236,13 @@ function failureAttemptMoment(event) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function failureAttemptFromEvent(event) {
+function failureDecisionMetadata(event) {
+  return event?.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata)
+    ? event.metadata
+    : {};
+}
+
+function failureAttemptFromEvent(event, decisionEvent = null) {
   const metadata = event?.metadata;
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null;
   const description = normalizeString(metadata.descriptionEs);
@@ -238,13 +254,21 @@ function failureAttemptFromEvent(event) {
     ? rawSourceLabel
     : 'Portal del auxiliar';
   const occurredAt = failureAttemptMoment(event);
+  const decisionMetadata = failureDecisionMetadata(decisionEvent);
+  const decisionStatus = normalizeString(decisionMetadata.status)?.toUpperCase() || null;
   return {
+    failureEventId: event.id,
     markType,
     markLabel: FAILURE_MARK_LABELS[markType],
     phaseLabel,
     description,
     sourceLabel,
-    occurredAtLabel: formatDateTime(occurredAt)
+    occurredAtLabel: formatDateTime(occurredAt),
+    decisionStatus,
+    decisionActorUsername: normalizeString(decisionEvent?.actorUsername),
+    decisionActorRole: normalizeString(decisionEvent?.actorRole),
+    decisionActorSource: normalizeString(decisionEvent?.actorSource),
+    decisionResolvedAtLabel: optionalDateTimeLabel(decisionMetadata.resolvedAt || decisionEvent?.createdAt)
   };
 }
 
@@ -252,18 +276,47 @@ async function failureAttemptsByAssignment(prisma, assignmentIds) {
   const result = new Map(assignmentIds.map((assignmentId) => [assignmentId, []]));
   if (!assignmentIds.length || typeof prisma?.devAuditEvent?.findMany !== 'function') return result;
   try {
-    const events = await prisma.devAuditEvent.findMany({
+    const events = (await prisma.devAuditEvent.findMany({
       where: {
         entityType: ATTENDANCE_MARK_FAILURE_ENTITY_TYPE,
         action: ATTENDANCE_MARK_FAILURE_ACTION,
         entityId: { in: assignmentIds }
       },
       orderBy: { createdAt: 'desc' }
-    });
+    })).filter((event) => (
+      event?.entityType === ATTENDANCE_MARK_FAILURE_ENTITY_TYPE
+      && event?.action === ATTENDANCE_MARK_FAILURE_ACTION
+      && result.has(normalizeString(event?.entityId))
+    ));
+    const failureIds = [...new Set(events.map((event) => normalizeString(event?.id)).filter(Boolean))];
+    const decisionsByFailureId = new Map();
+    if (failureIds.length) {
+      try {
+        const decisionEvents = await prisma.devAuditEvent.findMany({
+          where: {
+            entityType: ATTENDANCE_MARK_FAILURE_DECISION_ENTITY_TYPE,
+            action: ATTENDANCE_MARK_FAILURE_DECISION_ACTION,
+            entityId: { in: failureIds }
+          },
+          orderBy: { createdAt: 'desc' }
+        });
+        for (const decisionEvent of decisionEvents) {
+          const failureId = normalizeString(decisionEvent?.entityId);
+          if (!failureId || !failureIds.includes(failureId) || decisionsByFailureId.has(failureId)) continue;
+          if (decisionEvent?.entityType !== ATTENDANCE_MARK_FAILURE_DECISION_ENTITY_TYPE
+            || decisionEvent?.action !== ATTENDANCE_MARK_FAILURE_DECISION_ACTION) continue;
+          decisionsByFailureId.set(failureId, decisionEvent);
+        }
+      } catch (error) {
+        console.warn('[ATTENDANCE_FAILURE_DECISION_AUDIT_READ_FAILED]', {
+          code: typeof error?.message === 'string' ? error.message : 'unknown'
+        });
+      }
+    }
     for (const event of events) {
       const assignmentId = normalizeString(event?.entityId);
       if (!assignmentId || !result.has(assignmentId)) continue;
-      const projected = failureAttemptFromEvent(event);
+      const projected = failureAttemptFromEvent(event, decisionsByFailureId.get(event.id) || null);
       if (projected) result.get(assignmentId).push(projected);
     }
   } catch (error) {
@@ -272,6 +325,179 @@ async function failureAttemptsByAssignment(prisma, assignmentIds) {
     });
   }
   return result;
+}
+
+function attendanceFailureDecisionId(failureEventId) {
+  const digest = createHash('sha256').update(String(failureEventId || '')).digest('hex').slice(0, 48);
+  return `attendance_decision_${digest}`;
+}
+
+function attendanceFailureManualField(markType) {
+  return ({
+    ARRIVAL: 'arrivalReportedAt',
+    BREAK_START: 'breakStartAt',
+    BREAK_END: 'breakEndAt',
+    DEPARTURE: 'departureReportedAt'
+  })[String(markType || '').toUpperCase()] || null;
+}
+
+function requireFailureDecisionPrisma(prisma) {
+  const audit = prisma?.devAuditEvent;
+  const assignment = prisma?.dispatchAssignment;
+  if (!audit || ['findUnique', 'create', 'update'].some((method) => typeof audit[method] !== 'function')) {
+    throw new Error('attendance_failure_decision_audit_contract_invalid');
+  }
+  if (!assignment || typeof assignment.findUnique !== 'function') {
+    throw new Error('attendance_failure_decision_assignment_contract_invalid');
+  }
+}
+
+export async function resolveAttendanceFailureDecision(prisma, input = {}) {
+  requireFailureDecisionPrisma(prisma);
+  const failureEventId = requireString(input.failureEventId, 'attendance_failure_decision_event_id', { maxLength: 120 });
+  const normalizedDecision = requireString(input.decision, 'attendance_failure_decision', { maxLength: 20 }).toUpperCase();
+  if (!/^attendance_failure_[a-f0-9]{48}$/.test(failureEventId) || !VALID_FAILURE_DECISIONS.has(normalizedDecision)) {
+    throw new Error('attendance_failure_decision_invalid');
+  }
+  const actorUsername = requireString(input.actorUsername, 'attendance_failure_decision_actor', { maxLength: 120 });
+  const actorUserId = normalizeString(input.actorUserId)?.slice(0, 120) || null;
+  const actorRole = normalizeString(input.actorRole)?.slice(0, 60) || null;
+  const actorSource = requireString(input.actorSource, 'attendance_failure_decision_source', { maxLength: 80 });
+  const writerActorRole = normalizeString(input.writerActorRole)?.slice(0, 60) || actorRole || 'coordinator';
+  const decidedAt = input.decidedAt instanceof Date ? new Date(input.decidedAt.getTime()) : new Date();
+  if (Number.isNaN(decidedAt.getTime())) throw new Error('attendance_failure_decision_time_invalid');
+  const registerManualAttendanceFn = typeof input.registerManualAttendanceFn === 'function'
+    ? input.registerManualAttendanceFn
+    : registerManualAttendance;
+
+  const failureEvent = await prisma.devAuditEvent.findUnique({ where: { id: failureEventId } });
+  if (failureEvent?.entityType !== ATTENDANCE_MARK_FAILURE_ENTITY_TYPE
+    || failureEvent?.action !== ATTENDANCE_MARK_FAILURE_ACTION) {
+    throw new Error('attendance_failure_decision_not_found');
+  }
+  const metadata = failureDecisionMetadata(failureEvent);
+  const assignmentId = normalizeString(metadata.assignmentId);
+  const markType = normalizeString(metadata.markType)?.toUpperCase();
+  const manualField = attendanceFailureManualField(markType);
+  const attemptedAt = new Date(metadata.occurredAt || failureEvent.createdAt || Number.NaN);
+  if (!assignmentId || !manualField || Number.isNaN(attemptedAt.getTime())) {
+    throw new Error('attendance_failure_decision_context_invalid');
+  }
+  const assignment = await prisma.dispatchAssignment.findUnique({
+    where: { id: assignmentId },
+    select: { id: true }
+  });
+  if (!assignment) throw new Error('attendance_failure_decision_assignment_not_found');
+
+  const decisionId = attendanceFailureDecisionId(failureEventId);
+  const existing = await prisma.devAuditEvent.findUnique({ where: { id: decisionId } });
+  const existingMetadata = failureDecisionMetadata(existing);
+  if (TERMINAL_FAILURE_DECISION_STATUSES.has(normalizeString(existingMetadata.status)?.toUpperCase())) {
+    return {
+      handled: true,
+      duplicate: true,
+      status: normalizeString(existingMetadata.status)?.toUpperCase(),
+      assignmentId,
+      markType,
+      attemptedAt
+    };
+  }
+  if (normalizeString(existingMetadata.status)?.toUpperCase() === 'PENDING') {
+    return { handled: true, duplicate: true, inProgress: true, status: 'PENDING', assignmentId, markType, attemptedAt };
+  }
+
+  const pendingMetadata = {
+    failureEventId,
+    assignmentId,
+    markType,
+    attemptedAt: attemptedAt.toISOString(),
+    requestedDecision: normalizedDecision,
+    status: 'PENDING',
+    originalFailureCode: metadata.failureCode || null
+  };
+  const actorData = {
+    actorUserId,
+    actorUsername,
+    actorRole,
+    actorSource,
+    metadata: pendingMetadata,
+    createdAt: decidedAt
+  };
+  if (existing) {
+    await prisma.devAuditEvent.update({
+      where: { id: decisionId },
+      data: actorData
+    });
+  } else {
+    try {
+      await prisma.devAuditEvent.create({
+        data: {
+          id: decisionId,
+          entityType: ATTENDANCE_MARK_FAILURE_DECISION_ENTITY_TYPE,
+          entityId: failureEventId,
+          entityLabel: `attendance-failure:${failureEventId}`,
+          action: ATTENDANCE_MARK_FAILURE_DECISION_ACTION,
+          ...actorData
+        }
+      });
+    } catch (error) {
+      if (error?.code !== 'P2002') throw error;
+      return { handled: true, duplicate: true, inProgress: true, status: 'PENDING', assignmentId, markType, attemptedAt };
+    }
+  }
+
+  if (normalizedDecision === 'REJECT') {
+    await prisma.devAuditEvent.update({
+      where: { id: decisionId },
+      data: { metadata: { ...pendingMetadata, status: 'REJECTED', resolvedAt: decidedAt.toISOString() } }
+    });
+    return { handled: true, duplicate: false, status: 'REJECTED', assignmentId, markType, attemptedAt };
+  }
+
+  try {
+    const manualResult = await registerManualAttendanceFn(prisma, {
+      assignmentId,
+      [manualField]: attemptedAt.toISOString(),
+      reason: 'Marcación aceptada por coordinación desde un intento fallido auditado.',
+      notes: metadata.failureCode ? `Error original: ${metadata.failureCode}` : null,
+      actorUsername,
+      actorRole: writerActorRole,
+      now: decidedAt
+    });
+    await prisma.devAuditEvent.update({
+      where: { id: decisionId },
+      data: {
+        metadata: {
+          ...pendingMetadata,
+          status: 'ACCEPTED',
+          resolvedAt: decidedAt.toISOString(),
+          attendanceSessionId: manualResult?.id || manualResult?.attendanceSession?.id || null
+        }
+      }
+    });
+    return {
+      handled: true,
+      duplicate: false,
+      status: 'ACCEPTED',
+      assignmentId,
+      markType,
+      attemptedAt,
+      attendanceSession: manualResult || null
+    };
+  } catch (error) {
+    await prisma.devAuditEvent.update({
+      where: { id: decisionId },
+      data: {
+        metadata: {
+          ...pendingMetadata,
+          status: 'FAILED',
+          errorCode: String(error?.message || 'attendance_manual_failed').slice(0, 120),
+          resolvedAt: decidedAt.toISOString()
+        }
+      }
+    }).catch(() => {});
+    throw error;
+  }
 }
 
 function latestByDate(items, fieldName) {
