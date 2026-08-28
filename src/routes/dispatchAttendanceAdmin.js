@@ -1,7 +1,8 @@
 import express from 'express';
 import {
   loadAttendanceAdminBoard,
-  registerManualAttendance
+  registerManualAttendance,
+  resolveAttendanceFailureDecision
 } from '../modules/dispatch-attendance/application/adminAttendance.js';
 import {
   enrichAttendanceBoardWithWorkday,
@@ -147,10 +148,30 @@ function publicErrorMessage(error) {
     attendance_work_break_start_required: 'Para registrar el fin del almuerzo primero debe existir su hora de inicio.',
     attendance_work_break_end_before_start: 'El fin del almuerzo no puede ser anterior a su inicio.',
     attendance_work_departure_before_arrival: 'La salida no puede ser anterior a la entrada.',
+    attendance_failure_decision_invalid: 'La decisión seleccionada no es válida.',
+    attendance_failure_decision_event_id_required: 'No fue posible identificar el intento fallido.',
+    attendance_failure_decision_not_found: 'El intento fallido ya no está disponible para decidir.',
+    attendance_failure_decision_context_invalid: 'El intento fallido no tiene información suficiente para aplicar una decisión.',
+    attendance_failure_decision_assignment_not_found: 'La asignación asociada al intento ya no existe.',
     service_start_time_required: 'La solicitud no tiene una hora de inicio válida.',
     service_start_time_invalid: 'La hora de inicio de la solicitud no es válida.'
   };
   return messages[code] || 'No fue posible completar la acción de asistencia.';
+}
+
+function failureDecisionSuccessMessage(result = {}) {
+  if (result.status === 'ACCEPTED') {
+    return result.duplicate
+      ? 'La marcación ya había sido aceptada; no se creó una segunda marca.'
+      : 'La marcación fue aceptada con la hora original del intento.';
+  }
+  if (result.status === 'REJECTED') {
+    return result.duplicate
+      ? 'El intento ya había sido rechazado; la decisión anterior se conserva.'
+      : 'El intento fue rechazado y la decisión quedó auditada.';
+  }
+  if (result.status === 'PENDING') return 'La decisión sobre este intento ya se está procesando.';
+  return 'La decisión sobre el intento quedó registrada.';
 }
 
 function crewConfigErrorStatus(error) {
@@ -357,6 +378,27 @@ export function dispatchAttendanceAdminRouter(prisma) {
         error: 'No fue posible cargar el panel de asistencia.',
         focusSessionId: null
       });
+    }
+  });
+
+  router.post('/failures/:failureEventId/decision', formParser, async (req, res) => {
+    try {
+      const result = await resolveAttendanceFailureDecision(prisma, {
+        failureEventId: req.params.failureEventId,
+        decision: req.body.decision,
+        actorUserId: normalizeString(req.session?.userId || req.userId),
+        ...actorFromRequest(req),
+        actorSource: 'attendance-dashboard',
+        writerActorRole: 'attendance-dashboard',
+        decidedAt: new Date()
+      });
+      return redirectToBoard(res, req.body, { success: failureDecisionSuccessMessage(result) });
+    } catch (error) {
+      console.warn('[ATTENDANCE_FAILURE_DECISION_FAILED]', {
+        code: error?.message,
+        failureEventId: req.params.failureEventId
+      });
+      return redirectToBoard(res, req.body, { error: publicErrorMessage(error) });
     }
   });
 
