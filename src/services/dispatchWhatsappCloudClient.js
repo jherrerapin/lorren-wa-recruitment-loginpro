@@ -71,6 +71,31 @@ export function buildDispatchAssignmentInteractivePayload({ assignment, phone })
   };
 }
 
+export function buildDispatchAttendanceFailureDecisionPayload({ phone, failureEventId, text }) {
+  const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
+  const eventId = String(failureEventId || '').trim();
+  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  if (!/^attendance_failure_[a-f0-9]{48}$/.test(eventId)) {
+    throw buildDispatchWhatsappError('No se pudo identificar el intento de marcación.', 400, 'dispatch_attendance_failure_id_invalid');
+  }
+  return {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to: normalizedPhone,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: parameterText(text, 'Se requiere una decisión sobre una marcación fallida.') },
+      action: {
+        buttons: [
+          { type: 'reply', reply: { id: `dispatch_attendance_accept:${eventId}`, title: 'ACEPTAR MARCACIÓN' } },
+          { type: 'reply', reply: { id: `dispatch_attendance_reject:${eventId}`, title: 'RECHAZAR' } }
+        ]
+      }
+    }
+  };
+}
+
 export function buildDispatchReportMenuPayload({ phone, name }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
   if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para responder por WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
@@ -301,6 +326,31 @@ export async function sendCloudAssignmentInteractive({ scope = 'operational', as
     throw buildDispatchWhatsappError('Meta aceptó la solicitud sin devolver un identificador de mensaje.', 502, 'dispatch_whatsapp_provider_message_missing');
   }
   return { config, providerMessageId };
+}
+
+export async function sendDispatchAttendanceFailureDecisionMessage({
+  scope = 'operational', phone, failureEventId, text, axiosClient = axios
+} = {}) {
+  const config = ensureDispatchWhatsappConfigured(scope);
+  try {
+    const response = await postGraph(
+      config,
+      buildDispatchAttendanceFailureDecisionPayload({ phone, failureEventId, text }),
+      axiosClient
+    );
+    const providerMessageId = providerMessageIdFromResponse(response);
+    if (!providerMessageId) {
+      throw buildDispatchWhatsappError('Meta aceptó la alerta sin devolver un identificador de mensaje.', 502, 'dispatch_whatsapp_provider_message_missing');
+    }
+    const now = new Date().toISOString();
+    setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
+    return { phone: normalizeDispatchWhatsappPhone(phone), providerMessageId, provider: 'META_CLOUD_API' };
+  } catch (error) {
+    const message = error?.code?.startsWith?.('dispatch_') ? error.message : dispatchWhatsappProviderErrorMessage(error);
+    setDispatchWhatsappRuntimeState(scope, { lastError: message });
+    if (error?.statusCode) throw error;
+    throw buildDispatchWhatsappError(message, 502, 'dispatch_whatsapp_provider_error');
+  }
 }
 
 export async function sendDispatchWhatsappReportMenu({ scope = 'operational', phone, name, axiosClient = axios } = {}) {
