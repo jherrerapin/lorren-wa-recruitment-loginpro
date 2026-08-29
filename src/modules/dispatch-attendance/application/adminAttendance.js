@@ -256,6 +256,11 @@ function failureAttemptFromEvent(event, decisionEvent = null) {
   const occurredAt = failureAttemptMoment(event);
   const decisionMetadata = failureDecisionMetadata(decisionEvent);
   const decisionStatus = normalizeString(decisionMetadata.status)?.toUpperCase() || null;
+  const failureCode = normalizeString(metadata.failureCode);
+  const exposeFailureGps = failureCode === 'outside_operation_range';
+  const latitude = exposeFailureGps ? numericCoordinate(metadata.latitude, -90, 90) : null;
+  const longitude = exposeFailureGps ? numericCoordinate(metadata.longitude, -180, 180) : null;
+  const accuracyMeters = exposeFailureGps ? finiteNumber(metadata.accuracyMeters, null) : null;
   return {
     failureEventId: event.id,
     markType,
@@ -264,6 +269,10 @@ function failureAttemptFromEvent(event, decisionEvent = null) {
     description,
     sourceLabel,
     occurredAtLabel: formatDateTime(occurredAt),
+    failureCode,
+    latitude,
+    longitude,
+    accuracyMeters: accuracyMeters !== null && accuracyMeters >= 0 ? accuracyMeters : null,
     decisionStatus,
     decisionActorUsername: normalizeString(decisionEvent?.actorUsername),
     decisionActorRole: normalizeString(decisionEvent?.actorRole),
