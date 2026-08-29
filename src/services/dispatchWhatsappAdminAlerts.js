@@ -360,6 +360,15 @@ export async function resolveDispatchAttendanceFailureCoordinatorDecision({
   }
 
   const latestFailure = await latestAttendanceFailureForMark(prismaClient, assignmentId, markType);
+  const latestMetadata = latestFailure?.metadata && typeof latestFailure.metadata === 'object' ? latestFailure.metadata : {};
+  if (
+    normalizedDecision === 'ACCEPT'
+    && latestFailure?.id
+    && latestFailure.id !== eventId
+    && latestMetadata.failureCode === 'outside_operation_range'
+  ) {
+    throw new Error('attendance_failure_decision_stale_gps_evidence');
+  }
   const effectiveFailureEventId = latestFailure?.id || eventId;
   try {
     return await resolveAttendanceFailureDecision(prismaClient, {
