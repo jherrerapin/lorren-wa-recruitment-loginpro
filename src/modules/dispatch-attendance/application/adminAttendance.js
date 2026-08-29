@@ -884,7 +884,7 @@ export async function reviewAttendanceSession(prisma, input = {}) {
   const notes = normalizeString(input.notes)?.slice(0, 1000) || null;
   const actorUsername = requireString(input.actorUsername, 'attendance_review_actor', { maxLength: 120 });
   const actorRole = normalizeString(input.actorRole)?.slice(0, 60) || null;
-  const now = input.now instanceof Date ? new Date(input.now.getTime()) : new Date();
+  const now = input.now instanceof Date ? input.now : new Date();
 
   return prisma.$transaction(async (tx) => {
     const session = await tx.dispatchAttendanceSession.findUnique({
