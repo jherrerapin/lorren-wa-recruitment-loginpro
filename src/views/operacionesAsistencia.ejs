@@ -46,6 +46,14 @@
     .failure-audit-item > strong { display: block; color: var(--navy); font-size: 11px; }
     .failure-audit-item > span { display: block; margin-top: 2px; color: #8b1f1f; font-size: 9px; font-weight: 850; }
     .failure-audit-item > p { margin: 4px 0 0; color: #3f4c56; font-size: 10px; line-height: 1.35; }
+    .failure-gps-evidence { margin-top: 7px; border: 1px solid #bfdbfe; border-radius: 9px; overflow: hidden; background: #eff6ff; }
+    .failure-gps-evidence > summary { cursor: pointer; padding: 7px 9px; color: #1e3a8a; font-size: 10px; font-weight: 900; list-style: none; }
+    .failure-gps-evidence > summary::-webkit-details-marker { display: none; }
+    .failure-gps-evidence[open] { padding-bottom: 8px; }
+    .failure-attempt-map { height: 220px; margin: 0 8px 7px; border: 1px solid #bfdbfe; border-radius: 8px; background: #e2e8f0; overflow: hidden; }
+    .failure-gps-meta { display: grid; gap: 3px; margin: 0 9px; color: #334155; font-size: 9px; }
+    .failure-gps-meta strong { color: #1e3a8a; font-size: 10px; }
+    .failure-gps-meta a { width: max-content; max-width: 100%; }
     .failure-decision-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
     .failure-decision-actions form { margin: 0; }
     .failure-decision-actions .btn { padding: 6px 9px; font-size: 10px; }
@@ -263,6 +271,9 @@
                       const failureMarkType = String(attempt.markType || '').toUpperCase();
                       const markAlreadyRecorded = persistedFailureMarkTypes.has(failureMarkType);
                       const isLatestFailureAttempt = latestFailureEventByMarkType.get(failureMarkType) === attempt.failureEventId;
+                      const hasFailureGps = attempt.failureCode === 'outside_operation_range'
+                        && typeof attempt.latitude === 'number'
+                        && typeof attempt.longitude === 'number';
                       const decisionContext = [
                         attempt.decisionActorSource ? friendlyFailureDecisionSource(attempt.decisionActorSource) : null,
                         attempt.decisionActorUsername || null,
@@ -273,6 +284,17 @@
                         <strong><%= attempt.markLabel %> · <%= attempt.occurredAtLabel %></strong>
                         <span><%= friendlyFailurePhase(attempt.phaseLabel) %> · <%= friendlyFailureSource(attempt.sourceLabel) %></span>
                         <p><%= friendlyFailureDescription(attempt) %></p>
+                        <% if (hasFailureGps) { %>
+                          <details class="failure-gps-evidence" data-failure-map-details>
+                            <summary>Ver ubicación GPS del intento</summary>
+                            <div class="failure-attempt-map" data-point-lat="<%= row.pointLatitude !== null ? row.pointLatitude : '' %>" data-point-lng="<%= row.pointLongitude !== null ? row.pointLongitude : '' %>" data-radius="<%= row.geofenceRadiusMeters %>" data-failure-lat="<%= attempt.latitude %>" data-failure-lng="<%= attempt.longitude %>"></div>
+                            <div class="failure-gps-meta">
+                              <strong>Punto real desde donde intentó marcar</strong>
+                              <span><%= attempt.latitude %>, <%= attempt.longitude %><% if (attempt.accuracyMeters !== null) { %> · precisión aproximada <%= Math.round(attempt.accuracyMeters) %> m<% } %></span>
+                              <a class="btn" href="https://www.google.com/maps?q=<%= attempt.latitude %>,<%= attempt.longitude %>" target="_blank" rel="noopener">Abrir punto en Google Maps</a>
+                            </div>
+                          </details>
+                        <% } %>
                         <% if (failureDecisionStatus === 'ACCEPTED') { %>
                           <div class="failure-decision-status accepted"><strong>Marcación aceptada</strong><% if (decisionContext) { %><small><%= decisionContext %></small><% } %></div>
                         <% } else if (failureDecisionStatus === 'REJECTED') { %>
@@ -333,12 +355,15 @@
         syncPenalty();
       });
       const mapStates = new WeakMap();
+      const failureMapStates = new WeakMap();
       function numberOrNull(value) { if (value === null || value === undefined || value === '') return null; const number = Number(value); return Number.isFinite(number) ? number : null; }
       function coordinate(container, prefix) { const latitude = numberOrNull(container.dataset[`${prefix}Lat`]); const longitude = numberOrNull(container.dataset[`${prefix}Lng`]); return latitude === null || longitude === null ? null : [latitude, longitude]; }
       function fitMap(state, bounds) { [0, 100, 350].forEach((delay) => window.setTimeout(() => { state.map.invalidateSize({ pan: false }); state.map.fitBounds(bounds, { padding: [24, 24], maxZoom: 18, animate: false }); }, delay)); }
       function renderMapMode(state, requestedMode) { const hasArrival = Boolean(state.arrival); const hasDeparture = Boolean(state.departure); let mode = requestedMode; if (mode === 'arrival' && !hasArrival) mode = hasDeparture ? 'departure' : 'operation'; if (mode === 'departure' && !hasDeparture) mode = hasArrival ? 'arrival' : 'operation'; if (mode === 'both' && (!hasArrival || !hasDeparture)) mode = hasArrival ? 'arrival' : (hasDeparture ? 'departure' : 'operation'); state.mode = mode; state.markLayers.clearLayers(); const bounds = L.latLngBounds([state.operation]); bounds.extend(state.geofence.getBounds()); if ((mode === 'arrival' || mode === 'both') && state.arrival) { L.circleMarker(state.arrival, { radius: 8, color: '#dc2626', fillColor: '#dc2626', fillOpacity: 1 }).bindTooltip('Entrada reportada').addTo(state.markLayers); bounds.extend(state.arrival); } if ((mode === 'departure' || mode === 'both') && state.departure) { L.circleMarker(state.departure, { radius: 8, color: '#d97706', fillColor: '#d97706', fillOpacity: 1 }).bindTooltip('Salida reportada').addTo(state.markLayers); bounds.extend(state.departure); } state.details.querySelectorAll('[data-map-mode]').forEach((button) => button.setAttribute('aria-pressed', button.dataset.mapMode === mode ? 'true' : 'false')); fitMap(state, bounds); }
       function initializeMap(details) { const container = details.querySelector('.attendance-map'); if (!container || !window.L) return null; const existing = mapStates.get(container); if (existing) return existing; const operation = coordinate(container, 'point'); if (!operation) return null; const radius = Math.max(1, numberOrNull(container.dataset.radius) || 100); const map = L.map(container, { scrollWheelZoom: false }); container.__lorrenAttendanceMap = map; L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map); L.circleMarker(operation, { radius: 8, color: '#2563eb', fillColor: '#2563eb', fillOpacity: 1 }).bindTooltip('Punto operativo').addTo(map); const geofence = L.circle(operation, { radius, color: '#2563eb', fillOpacity: .15 }).addTo(map); const markLayers = L.layerGroup().addTo(map); const state = { details, container, map, geofence, markLayers, operation, arrival: coordinate(container, 'arrival'), departure: coordinate(container, 'departure'), mode: container.dataset.defaultMapMode || 'operation' }; mapStates.set(container, state); details.querySelectorAll('[data-map-mode]').forEach((button) => button.addEventListener('click', () => renderMapMode(state, button.dataset.mapMode))); renderMapMode(state, state.mode); return state; }
+      function initializeFailureMap(details) { const container = details.querySelector('.failure-attempt-map'); if (!container || !window.L) return null; const existing = failureMapStates.get(container); if (existing) return existing; const failure = coordinate(container, 'failure'); if (!failure) return null; const map = L.map(container, { scrollWheelZoom: false }); container.__lorrenFailureMap = map; L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(map); const bounds = L.latLngBounds([failure]); L.circleMarker(failure, { radius: 9, color: '#dc2626', fillColor: '#dc2626', fillOpacity: 1 }).bindTooltip('Intento fuera de rango').addTo(map); const operation = coordinate(container, 'point'); if (operation) { const radius = Math.max(1, numberOrNull(container.dataset.radius) || 100); L.circleMarker(operation, { radius: 7, color: '#2563eb', fillColor: '#2563eb', fillOpacity: 1 }).bindTooltip('Punto operativo').addTo(map); const geofence = L.circle(operation, { radius, color: '#2563eb', fillOpacity: .15 }).addTo(map); bounds.extend(operation); bounds.extend(geofence.getBounds()); } const state = { details, container, map }; failureMapStates.set(container, state); fitMap(state, bounds); return state; }
       document.querySelectorAll('[data-map-details]').forEach((details) => details.addEventListener('toggle', () => { if (!details.open) return; const state = initializeMap(details); if (state) renderMapMode(state, state.mode); }));
+      document.querySelectorAll('[data-failure-map-details]').forEach((details) => details.addEventListener('toggle', () => { if (!details.open) return; const state = initializeFailureMap(details); if (state) fitMap(state, state.map.getBounds()); }));
     })();
   </script>
 </body>
