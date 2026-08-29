@@ -263,9 +263,28 @@ export async function sendDispatchAttendanceFailureAdminAlert({
     : latestMetadata;
   const assignment = await prismaClient.dispatchAssignment.findUnique({
     where: { id: assignmentId },
-    include: { worker: true, serviceRequest: true }
+    include: {
+      worker: true,
+      serviceRequest: true,
+      attendanceSession: {
+        select: {
+          arrivalReportedAt: true,
+          departureReportedAt: true,
+          marks: { select: { markType: true } }
+        }
+      }
+    }
   });
   if (!assignment) return { sent: false, reason: 'assignment_missing' };
+  if (assignmentHasAttendanceMark(assignment, markType)) {
+    return {
+      sent: false,
+      reason: 'mark_already_recorded',
+      failureCount: failures.length,
+      assignmentId,
+      markType
+    };
+  }
   const user = await alertUserByUsername(prismaClient, assignment.createdByUsername);
   if (!user?.isActive || !user.dispatchAlertPhone) return { sent: false, reason: 'admin_alert_not_configured' };
   const key = notificationKey(ATTENDANCE_FAILURE_NOTIFICATION, [scope, user.id, assignmentId, markType]);
