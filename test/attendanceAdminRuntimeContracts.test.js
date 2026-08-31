@@ -191,19 +191,18 @@ test('el tablero conserva las señales de riesgo como datos de auditoría aunque
   ]);
 });
 
-test('el mapa administrativo usa OSM primero y conserva IDECA como respaldo', () => {
-  const osmIndex = runtimeSource.indexOf("label: 'OpenStreetMap'");
-  const idecaIndex = runtimeSource.indexOf("label: 'Mapa oficial IDECA · UAECD'");
-  assert.ok(osmIndex >= 0);
-  assert.ok(idecaIndex > osmIndex);
-  assert.match(runtimeSource, /TILE_TIMEOUT_MS = 5_000/);
-  assert.match(runtimeSource, /tileerror/);
-  assert.match(runtimeSource, /activateProvider\(map, state, index \+ 1\)/);
+test('el runtime core legado queda como shim sin autoridad sobre teselas', () => {
+  assert.doesNotMatch(runtimeSource, /tileLayer|TileLayer|OSM_TILE_URL|IDECA_TILE_URL|tileerror|TILE_TIMEOUT_MS/);
+  assert.doesNotMatch(runtimeSource, /Fondo cartográfico activo|Los fondos cartográficos no respondieron/);
+  assert.match(runtimeSource, /LorrenAttendanceMaps/);
+  assert.match(runtimeSource, /\.attendance-map, \.failure-attempt-map/);
 });
 
-test('el mapa recalcula tamaño, centro y zoom al abrir tarjetas y geocerca', () => {
-  assert.match(runtimeSource, /map\.invalidateSize/);
-  assert.match(runtimeSource, /map\.setView/);
-  assert.match(runtimeSource, /\[data-map-details\], \[data-attendance-card\]/);
+test('el shim legado solo refresca viewport y cubre el mapa del intento fallido', () => {
+  assert.match(runtimeSource, /invalidateSize/);
+  assert.doesNotMatch(runtimeSource, /map\.setView|fitBounds/);
+  assert.match(runtimeSource, /\[data-failure-map-details\]/);
+  assert.match(runtimeSource, /\[data-map-details\]/);
+  assert.match(runtimeSource, /\[data-attendance-card\]/);
   assert.match(runtimeSource, /\[0, 80, 260, 700\]/);
 });
