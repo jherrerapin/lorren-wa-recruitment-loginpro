@@ -126,7 +126,7 @@
       if (!container || observedContainers.has(container) || typeof window.ResizeObserver !== 'function') return;
       observedContainers.add(container);
       const observer = new window.ResizeObserver((entries) => {
-        const visible = entries.some((entry) => entry.contentRect.width > 0 || entry.contentRect.height > 0);
+        const visible = entries.some((entry) => entry.contentRect.width > 0 && entry.contentRect.height > 0);
         if (visible) refreshMapViewport(map);
       });
       observer.observe(container);
