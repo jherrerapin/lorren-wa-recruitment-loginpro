@@ -1,6 +1,8 @@
 import {
+  addDispatchIsoDays,
   buildDispatchServiceDateWhere,
-  dispatchServiceDateKey
+  dispatchServiceDateKey,
+  todayIsoDateCO
 } from './dispatchDate.js';
 import { operationalAssignments, recalculateDispatchServiceRequestStatus } from './dispatchOperationalCoverage.js';
 
@@ -28,6 +30,25 @@ function cityKey(value) {
   if (normalized.includes('funza')) return 'funza';
   if (normalized.includes('mosquera')) return 'mosquera';
   return normalized;
+}
+
+export function buildAutoAssignmentHistoryWindow(referenceNow = new Date()) {
+  const today = todayIsoDateCO(referenceNow);
+  const [year, month, day] = today.split('-').map(Number);
+  const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  const daysSinceMonday = (weekday + 6) % 7;
+  const currentWeekStart = addDispatchIsoDays(today, -daysSinceMonday);
+  const previousWeekStart = addDispatchIsoDays(currentWeekStart, -7);
+  const nextWeekStart = addDispatchIsoDays(currentWeekStart, 7);
+
+  return {
+    startDate: previousWeekStart,
+    endDateExclusive: nextWeekStart,
+    serviceDate: {
+      gte: new Date(`${previousWeekStart}T00:00:00.000Z`),
+      lt: new Date(`${nextWeekStart}T00:00:00.000Z`)
+    }
+  };
 }
 
 function parseTimeMinutes(value) {
@@ -155,11 +176,15 @@ export async function autoAssignServiceRequest(prisma, serviceRequestId, options
     return { assignedCount: 0, reason: 'coverage_already_assigned' };
   }
 
+  const historyWindow = buildAutoAssignmentHistoryWindow(options.now || new Date());
   const historyAssignments = await prisma.dispatchAssignment.findMany({
     where: {
       status: CONFIRMED_ASSIGNMENT_STATUS,
       serviceRequestId: { not: request.id },
-      serviceRequest: { operationPointId: request.operationPointId },
+      serviceRequest: {
+        operationPointId: request.operationPointId,
+        serviceDate: historyWindow.serviceDate
+      },
       worker: { operationalStatus: 'CONTRATADO', isTestProfile: false }
     },
     select: {
