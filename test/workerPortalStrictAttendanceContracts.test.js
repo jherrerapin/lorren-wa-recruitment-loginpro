@@ -101,6 +101,6 @@ test('los cargadores conservan únicamente los componentes vigentes', () => {
   assert.match(biometricLoader, /worker-biometric-mobile\.js/);
   assert.match(biometricLoader, /worker-portal-biometric-flow\.js/);
   assert.doesNotMatch(biometricLoader, /worker-portal-hardening\.js/);
-  assert.match(adminLoader, /attendance-admin-runtime-core\.js/);
+  assert.doesNotMatch(adminLoader, /attendance-admin-runtime-core\.js/);
   assert.match(adminLoader, /attendance-admin-compact\.js/);
 });
