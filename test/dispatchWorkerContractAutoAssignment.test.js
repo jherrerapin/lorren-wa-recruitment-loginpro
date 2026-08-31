@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import {
+  autoAssignServiceRequest,
   filterAssignmentsForServiceDate,
   rankHistoricalWorkers,
   selectAutoAssignmentCandidates,
@@ -21,6 +22,43 @@ test('prioriza frecuencia confirmada, recencia y nombre de forma determinista', 
   assert.deepEqual(
     rankHistoricalWorkers(history).map((item) => item.workerId),
     ['w1', 'w3', 'w2']
+  );
+});
+
+test('consulta historial solo de la semana actual y la inmediatamente anterior', async () => {
+  const historyQueries = [];
+  const prisma = {
+    dispatchServiceRequest: {
+      findUnique: async () => ({
+        id: 'req-week-window',
+        operationPointId: 'operation-point-a',
+        requiredWorkers: 1,
+        assignments: [],
+        serviceDate: '2026-09-02T05:00:00.000Z'
+      })
+    },
+    dispatchAssignment: {
+      findMany: async (args) => {
+        historyQueries.push(args.where);
+        return [];
+      }
+    }
+  };
+
+  const result = await autoAssignServiceRequest(prisma, 'req-week-window', {
+    now: new Date('2026-08-31T23:30:00.000Z')
+  });
+
+  assert.equal(result.reason, 'no_confirmed_history');
+  assert.equal(historyQueries.length, 1);
+  assert.equal(historyQueries[0].serviceRequest.operationPointId, 'operation-point-a');
+  assert.equal(
+    historyQueries[0].serviceRequest.serviceDate.gte.toISOString(),
+    '2026-08-24T00:00:00.000Z'
+  );
+  assert.equal(
+    historyQueries[0].serviceRequest.serviceDate.lt.toISOString(),
+    '2026-09-07T00:00:00.000Z'
   );
 });
 
