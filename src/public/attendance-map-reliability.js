@@ -259,6 +259,7 @@
       });
       state.activeLayer = layer;
       state.activeProvider = providerName;
+      state.exhausted = false;
       let errors = 0;
       let failed = false;
       let loadTimeoutId = null;
@@ -273,10 +274,11 @@
           activateProvider(map, nextProvider);
           return;
         }
+        state.exhausted = true;
         setProviderMessage(map, 'Los proveedores de fondo no respondieron.');
         setTileWarning(
           map,
-          'No fue posible cargar el fondo cartográfico. El mapa sigue aceptando clics y las coordenadas siguen siendo válidas; puedes seleccionar el punto manualmente y volver a intentar el fondo más tarde.',
+          'No fue posible cargar el fondo cartográfico. Los marcadores, coordenadas y la geocerca siguen disponibles. Cierra y vuelve a abrir el mapa o recupera la conexión para reintentar.',
           true
         );
       };
@@ -291,6 +293,7 @@
       layer.on('tileload', () => {
         if (failed || state.activeLayer !== layer) return;
         errors = 0;
+        state.exhausted = false;
         if (loadTimeoutId !== null) {
           window.clearTimeout(loadTimeoutId);
           loadTimeoutId = null;
@@ -316,10 +319,25 @@
         order: providerOrderForMap(map, requestedUrl),
         attempted: new Set(),
         activeLayer: null,
-        activeProvider: null
+        activeProvider: null,
+        exhausted: false
       };
       baseLayerStates.set(map, state);
       return activateProvider(map, state.order[0]);
+    }
+
+    function retryManagedBaseLayer(map) {
+      const state = baseLayerStates.get(map);
+      if (!state?.exhausted || !state.order.length) return false;
+      if (state.activeLayer) map.removeLayer(state.activeLayer);
+      state.activeLayer = null;
+      state.activeProvider = null;
+      state.attempted.clear();
+      state.exhausted = false;
+      setProviderMessage(map, 'Reintentando fondo cartográfico…');
+      setTileWarning(map, '', false);
+      activateProvider(map, state.order[0]);
+      return true;
     }
 
     function isManagedTileUrl(url) {
@@ -650,14 +668,16 @@
     }
 
     function refreshMapsInside(element) {
-      element?.querySelectorAll?.('.attendance-map').forEach((container) => {
+      element?.querySelectorAll?.('.attendance-map, .failure-attempt-map').forEach((container) => {
         const map = container.__lorrenAttendanceMap;
-        if (map) refreshMapViewport(map);
+        if (!map) return;
+        retryManagedBaseLayer(map);
+        refreshMapViewport(map);
       });
     }
 
     function installDetailsRefresh() {
-      document.querySelectorAll('[data-map-details], details.attendance-config, [data-attendance-card]').forEach((details) => {
+      document.querySelectorAll('[data-map-details], [data-failure-map-details], details.attendance-config, [data-attendance-card]').forEach((details) => {
         if (details.dataset.attendanceReliableToggle === 'true') return;
         details.dataset.attendanceReliableToggle = 'true';
         details.addEventListener('toggle', () => {
@@ -669,9 +689,11 @@
     }
 
     function refreshAllMaps() {
-      document.querySelectorAll('.attendance-map').forEach((container) => {
+      document.querySelectorAll('.attendance-map, .failure-attempt-map').forEach((container) => {
         const map = container.__lorrenAttendanceMap;
-        if (map) refreshMapViewport(map);
+        if (!map) return;
+        retryManagedBaseLayer(map);
+        refreshMapViewport(map);
       });
     }
 
@@ -685,6 +707,7 @@
 
     window.LorrenAttendanceMaps = Object.freeze({ refreshAll: refreshAllMaps, refreshMapViewport });
     window.addEventListener('resize', refreshAllMaps, { passive: true });
+    window.addEventListener('online', refreshAllMaps, { passive: true });
     const fallbackCss = document.querySelector('link[data-lorren-leaflet-fallback="true"]');
     fallbackCss?.addEventListener('load', refreshAllMaps, { once: true });
 
