@@ -97,6 +97,18 @@ enum BookingStatus {
   CANCELLED
 }
 
+enum InterviewInvitationStatus {
+  PENDING
+  CONFIRMED
+  DECLINED
+}
+
+enum InterviewAttendanceStatus {
+  PENDING
+  ATTENDED
+  NO_SHOW
+}
+
 enum JobStatus {
   PENDING
   RUNNING
@@ -184,6 +196,8 @@ model Vacancy {
   campaigns              Campaign[]
   interviewSlots         InterviewSlot[]
   interviewBookings      InterviewBooking[]
+  interviewCandidateReviews InterviewCandidateReview[]
+  interviewComplementaryFields InterviewComplementaryField[]
   accessUsers            AppUser[]              @relation("AppUserVacancies")
   scopedAccessUsers      AppUser[]              @relation("AppUserScopeVacancy")
   dispatchWorkers        DispatchWorkerVacancy[]
@@ -245,6 +259,67 @@ model InterviewBooking {
   notes                String?
   createdAt             DateTime     @default(now())
   updatedAt             DateTime     @updatedAt
+}
+
+model InterviewCandidateReview {
+  id                        String                    @id @default(cuid())
+  candidateId               String
+  candidate                 Candidate                 @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  vacancyId                 String
+  vacancy                   Vacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  invitationStatusOverride  InterviewInvitationStatus?
+  invitationUpdatedByUserId String?
+  invitationUpdatedByLabel  String?
+  invitationUpdatedAt       DateTime?
+  attendanceStatus          InterviewAttendanceStatus @default(PENDING)
+  attendanceUpdatedByUserId String?
+  attendanceUpdatedByLabel  String?
+  attendanceUpdatedAt       DateTime?
+  rating                     Decimal?                  @db.Decimal(3, 2)
+  observationEnabled         Boolean                   @default(false)
+  observation                String?
+  reviewUpdatedByUserId      String?
+  reviewUpdatedByLabel       String?
+  reviewUpdatedAt            DateTime?
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
+
+  @@unique([candidateId, vacancyId])
+  @@index([vacancyId, attendanceStatus])
+  @@index([vacancyId, rating])
+}
+
+model InterviewComplementaryField {
+  id              String                       @id @default(cuid())
+  vacancyId       String
+  vacancy         Vacancy                      @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  label           String
+  normalizedLabel String
+  sortOrder       Int                          @default(0)
+  createdByUserId String?
+  createdByLabel  String?
+  createdAt       DateTime                     @default(now())
+  updatedAt       DateTime                     @updatedAt
+  values          InterviewComplementaryValue[]
+
+  @@unique([vacancyId, normalizedLabel])
+  @@index([vacancyId, sortOrder])
+}
+
+model InterviewComplementaryValue {
+  id              String                      @id @default(cuid())
+  candidateId     String
+  candidate       Candidate                   @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  fieldId         String
+  field           InterviewComplementaryField @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+  value           String?
+  updatedByUserId String?
+  updatedByLabel  String?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  @@unique([candidateId, fieldId])
+  @@index([candidateId])
 }
 
 model Candidate {
@@ -313,6 +388,8 @@ model Candidate {
   updatedAt              DateTime            @updatedAt
   messages               Message[]
   interviewBookings      InterviewBooking[]
+  interviewCandidateReviews InterviewCandidateReview[]
+  interviewComplementaryValues InterviewComplementaryValue[]
   adminEvents            CandidateAdminEvent[]
   attachmentAnalyses     AttachmentAnalysis[]
   dataConsentEvents      CandidateDataConsentEvent[]
