@@ -13,6 +13,7 @@ import {
   isOperationallyRegistered,
   normalizeCandidateStatusForUI
 } from '../src/services/candidateExport.js';
+import { getResidenceFieldConfig } from '../src/services/candidateData.js';
 
 const baseCandidate = {
   id: 'cand-1',
@@ -223,6 +224,36 @@ test('Excel por vacante pone fecha de registro primero y no exporta estado', () 
   assert.equal(headers.includes('Estado'), false);
   assert.doesNotMatch(exportSource, /const statusColors =/);
   assert.doesNotMatch(exportSource, /row\.getCell\('status'\)/);
+});
+
+test('Excel por vacante unifica teléfono/WhatsApp y usa una sola residencia según ciudad', () => {
+  const adminRouteSource = fs.readFileSync('src/routes/admin.js', 'utf8');
+  const exportStart = adminRouteSource.indexOf("router.get('/export'");
+  const exportEnd = adminRouteSource.indexOf("router.get('/outreach/approved'", exportStart);
+  const exportSource = adminRouteSource.slice(exportStart, exportEnd);
+  const columnsStart = exportSource.indexOf('sheet.columns = [');
+  const columnsEnd = exportSource.indexOf('];', columnsStart);
+  const columnsSource = exportSource.slice(columnsStart, columnsEnd);
+  const staticHeaders = [...columnsSource.matchAll(/header: '([^']+)'/g)].map((match) => match[1]);
+
+  assert.equal(staticHeaders[0], 'Fecha registro');
+  assert.equal(staticHeaders.filter((header) => header === 'Teléfono').length, 1);
+  assert.equal(staticHeaders.includes('WhatsApp'), false);
+  assert.equal(staticHeaders.includes('Estado'), false);
+  assert.equal(staticHeaders.includes('Barrio'), false);
+  assert.equal(staticHeaders.includes('Localidad'), false);
+  assert.match(columnsSource, /header: residenceConfig\.labelTitle, key: residenceConfig\.field/);
+  assert.match(exportSource, /const residenceConfig = getResidenceFieldConfig\(vacancy\);/);
+  assert.match(exportSource, /\[residenceConfig\.field\]: residenceValue/);
+  assert.match(exportSource, /row\.getCell\('phone'\)\.value = \{ text: normalizedCandidate\.phone, hyperlink: whatsappLink \}/);
+  assert.doesNotMatch(exportSource, /row\.getCell\('whatsappLink'\)/);
+
+  assert.deepEqual(getResidenceFieldConfig({ city: 'Bogotá' }), {
+    field: 'locality', label: 'localidad', labelTitle: 'Localidad', articleLabel: 'la localidad'
+  });
+  assert.deepEqual(getResidenceFieldConfig({ city: 'Ibagué' }), {
+    field: 'neighborhood', label: 'barrio', labelTitle: 'Barrio', articleLabel: 'el barrio'
+  });
 });
 
 test('ruta /admin/export acepta missing_cv_complete como scope válido', () => {
