@@ -430,7 +430,7 @@ export async function cancelWorkerRestAssignment(prisma, input = {}) {
         action: WORKER_REST_ACTION,
         actorUsername: normalizeString(input.actorUsername, 160),
         actorRole: normalizeString(input.actorRole, 80),
-        actorSource: 'dispatch-assignment-admin',
+        actorSource: 'payroll-admin',
         ipAddress: normalizeString(input.ipAddress, 120),
         userAgent: normalizeString(input.userAgent, 500),
         toValue: metadata,
@@ -602,7 +602,7 @@ function inferredAbsenceSession(assignment, now = new Date()) {
     expectedEndAt: dateValue(persisted?.expectedEndAt) || expected?.expectedEndAt || null,
     arrivalReportedAt: null,
     departureReportedAt: null,
-    marks: [],
+    marks: Array.isArray(persisted?.marks) ? persisted.marks : [],
     reviews: [],
     source: 'PAYROLL_INFERRED_ABSENCE',
     inferredFromAssignment: true,
@@ -657,6 +657,69 @@ function latestAttendanceMark(session, markType) {
     .map((mark) => ({ mark, moment: attendanceMarkMoment(mark) }))
     .filter((entry) => entry.moment)
     .sort((left, right) => right.moment.getTime() - left.moment.getTime())[0]?.mark || null;
+}
+
+function sessionNeedsIncompleteReview(session, now = new Date()) {
+  if (sessionHasCompletedWorkday(session)) return true;
+  const arrivalAt = dateValue(session?.arrivalReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'ARRIVAL'));
+  const departureAt = dateValue(session?.departureReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'DEPARTURE'));
+  if (!arrivalAt && !departureAt) return false;
+
+  const scheduledDateKey = sessionScheduledDateKey(session) || bogotaDateKey(arrivalAt || departureAt);
+  const today = todayBogotaKey(now);
+  if (scheduledDateKey && scheduledDateKey < today) return true;
+
+  const assignment = session?.assignment || null;
+  const graceMs = absenceGraceMinutes(assignment) * 60_000;
+  if (!arrivalAt) {
+    const expectedStartAt = dateValue(session?.expectedStartAt) || assignmentExpectedWindow(assignment)?.expectedStartAt || null;
+    return Boolean(expectedStartAt && now.getTime() > expectedStartAt.getTime() + graceMs);
+  }
+  if (!departureAt) {
+    const expectedEndAt = dateValue(session?.expectedEndAt) || assignmentExpectedWindow(assignment)?.expectedEndAt || null;
+    return Boolean(expectedEndAt && now.getTime() > expectedEndAt.getTime() + graceMs);
+  }
+  return true;
+}
+
+function managementTimeNoveltiesForSession(session) {
+  const arrivalAt = dateValue(session?.arrivalReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'ARRIVAL'));
+  const departureAt = dateValue(session?.departureReportedAt) || attendanceMarkMoment(latestAttendanceMark(session, 'DEPARTURE'));
+  const breakStartAt = attendanceMarkMoment(latestAttendanceMark(session, 'BREAK_START'));
+  const breakEndAt = attendanceMarkMoment(latestAttendanceMark(session, 'BREAK_END'));
+  const dateKey = bogotaDateKey(arrivalAt || dateValue(session?.expectedStartAt) || departureAt);
+  const sessionId = session?.id || null;
+  const novelties = [];
+
+  if (!arrivalAt) {
+    novelties.push({
+      code: 'MISSING_ARRIVAL',
+      message: 'No se registró la entrada de la jornada.',
+      dateKey,
+      sessionId,
+      blocking: true
+    });
+  } else if (!departureAt) {
+    novelties.push({
+      code: 'MISSING_DEPARTURE',
+      message: 'No se registró la salida de la jornada.',
+      dateKey,
+      sessionId,
+      blocking: true
+    });
+  }
+
+  if (breakStartAt && !breakEndAt) {
+    novelties.push({
+      code: 'INCOMPLETE_BREAK',
+      message: 'El almuerzo quedó abierto: se registró el inicio, pero no el fin.',
+      dateKey,
+      sessionId,
+      blocking: true
+    });
+  }
+
+  return novelties;
 }
 
 function payrollMarkTimeLabel(value, workdayKey) {
@@ -771,6 +834,18 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
   const sessionWorkerIds = new Set(relevantSessions.map((session) => sessionWorkerId(session)).filter(Boolean));
   const rowByWorker = new Map(report.rows.map((row) => [row.workerId, row]));
   const markingsByWorkerDate = payrollMarkingsByWorkerDate(filteredSessions);
+  const managementNoveltiesByWorker = new Map();
+  for (const session of relevantSessions) {
+    const workerId = sessionWorkerId(session);
+    if (!workerId) continue;
+    const current = managementNoveltiesByWorker.get(workerId) || [];
+    for (const novelty of managementTimeNoveltiesForSession(session)) {
+      if (!current.some((item) => item.code === novelty.code && item.dateKey === novelty.dateKey && item.sessionId === novelty.sessionId)) {
+        current.push(novelty);
+      }
+    }
+    managementNoveltiesByWorker.set(workerId, current);
+  }
   const search = filters.search.toLowerCase();
   const visibleRests = rests.filter((rest) => {
     const worker = workerById.get(rest.workerId);
@@ -805,6 +880,15 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
 
   for (const row of report.rows) {
     const worker = workerById.get(row.workerId);
+    if (worker) {
+      row.fullName = worker.fullName || row.fullName;
+      row.documentType = worker.documentType || row.documentType;
+      row.documentNumber = worker.documentNumber || row.documentNumber;
+      row.phone = worker.phone || row.phone;
+    }
+    row.novelties = managementNoveltiesByWorker.get(row.workerId) || [];
+    row.status = row.novelties.some((item) => item.blocking) ? 'CON_NOVEDADES' : 'CALCULADO';
+    row.exportable = !row.novelties.some((item) => item.blocking);
     row.restAssignments = visibleRests.filter((rest) => rest.workerId === row.workerId).sort((a, b) => a.restDate.localeCompare(b.restDate));
 
     const workedDateKeys = new Set(
@@ -947,7 +1031,12 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
             expectedStartAt: true,
             expectedEndAt: true,
             arrivalReportedAt: true,
-            departureReportedAt: true
+            departureReportedAt: true,
+            marks: {
+              where: { markType: { in: ['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE'] } },
+              orderBy: { serverReceivedAt: 'asc' },
+              select: { markType: true, serverReceivedAt: true, clientCapturedAt: true }
+            }
           }
         }
       },
@@ -962,6 +1051,13 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
           {
             arrivalReportedAt: { gte: calculationStart, lt: calculationEnd },
             departureReportedAt: { not: null }
+          },
+          {
+            expectedStartAt: { gte: calculationStart, lt: calculationEnd },
+            OR: [
+              { arrivalReportedAt: { not: null } },
+              { departureReportedAt: { not: null } }
+            ]
           },
           {
             attendanceStatus: 'ABSENT',
@@ -1010,7 +1106,9 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
 
   const matchedSessions = sessions.filter((session) => sessionMatchesFilters(session, filters));
   const persistedAbsences = matchedSessions.filter(sessionIsPersistedAbsence);
-  const filteredSessions = matchedSessions.filter((session) => !sessionIsPersistedAbsence(session));
+  const filteredSessions = matchedSessions
+    .filter((session) => !sessionIsPersistedAbsence(session))
+    .filter((session) => sessionNeedsIncompleteReview(session, now));
   const persistedAbsenceAssignmentIds = new Set(persistedAbsences.map((session) => session?.assignment?.id).filter(Boolean));
   const inferredAbsences = assignments
     .filter((assignment) => assignmentMatchesFilters(assignment, filters))
@@ -1018,6 +1116,7 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
     .map((assignment) => inferredAbsenceSession(assignment, now))
     .filter(Boolean);
   const absentSessions = [...persistedAbsences, ...inferredAbsences];
+  const reportSessions = [...filteredSessions, ...absentSessions];
   const clientIds = [...new Set(filteredSessions.map((session) => session.assignment?.serviceRequest?.operationPoint?.clientId).filter(Boolean))];
   const workerIds = [...new Set(filteredSessions.map((session) => session.assignment?.workerId).filter(Boolean))];
   const compensationRange = { from: calculationFrom, to: calculationTo };
@@ -1027,7 +1126,7 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
   ]);
 
   const report = calculatePayrollConceptReport({
-    sessions: filteredSessions,
+    sessions: reportSessions,
     policiesByClientId,
     compensationByWorkerDate,
     range: { from: period.from, to: period.to }
