@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   candidateHasCv,
+  candidateExportCounts,
   deriveCandidateStatusForUI,
   exportFilenameByScope,
   filterCandidatesByScope,
+  filterCandidatesForExport,
   formatDateForFilenameCO,
   isOperationallyCompleteWithoutCv,
   isOperationallyRegistered,
@@ -148,6 +150,62 @@ test('scope missing_cv_complete filtra candidatos completos sin HV', () => {
     filterCandidatesByScope(candidates, 'missing_cv_complete').map((c) => c.id),
     ['ok', 'ok-contacted']
   );
+});
+
+test('exportación no DEV excluye nuevos incompletos pero conserva completos con o sin HV', () => {
+  const vacancy = { city: 'TEST Ciudad' };
+  const completeWithCv = { ...baseCandidate, id: 'TEST-COMPLETE-CV', status: 'NUEVO', vacancy };
+  const completeWithoutCv = { ...baseCandidate, id: 'TEST-COMPLETE-NO-CV', status: 'NUEVO', cvData: null, vacancy };
+  const incompleteNew = { id: 'TEST-INCOMPLETE-NEW', status: 'NUEVO', fullName: null, vacancy };
+
+  assert.deepEqual(
+    filterCandidatesForExport([incompleteNew, completeWithCv, completeWithoutCv], 'all', { isDev: false, vacancy }).map((candidate) => candidate.id),
+    ['TEST-COMPLETE-CV', 'TEST-COMPLETE-NO-CV']
+  );
+  assert.deepEqual(
+    filterCandidatesForExport([incompleteNew, completeWithCv], 'all', { isDev: true, vacancy }).map((candidate) => candidate.id),
+    ['TEST-INCOMPLETE-NEW', 'TEST-COMPLETE-CV']
+  );
+});
+
+test('exportación no DEV no filtra solo por estado: aprobado o contratado incompleto tampoco se expone', () => {
+  const vacancy = { city: 'TEST Ciudad' };
+  const approvedIncomplete = { id: 'TEST-APPROVED-INCOMPLETE', status: 'APROBADO', fullName: 'TEST', vacancy };
+  const contractedIncomplete = { id: 'TEST-CONTRACTED-INCOMPLETE', status: 'CONTRATADO', fullName: 'TEST', vacancy };
+  const approvedComplete = { ...baseCandidate, id: 'TEST-APPROVED-COMPLETE', status: 'APROBADO', vacancy };
+  const contractedComplete = { ...baseCandidate, id: 'TEST-CONTRACTED-COMPLETE', status: 'CONTRATADO', vacancy };
+
+  assert.deepEqual(filterCandidatesForExport([approvedIncomplete, approvedComplete], 'approved', { vacancy }).map((candidate) => candidate.id), ['TEST-APPROVED-COMPLETE']);
+  assert.deepEqual(filterCandidatesForExport([contractedIncomplete, contractedComplete], 'contracted', { vacancy }).map((candidate) => candidate.id), ['TEST-CONTRACTED-COMPLETE']);
+});
+
+test('conteos de exportación usan exactamente la misma elegibilidad que el backend', () => {
+  const vacancy = { city: 'TEST Ciudad' };
+  const candidates = [
+    { ...baseCandidate, id: 'TEST-REGISTERED', status: 'REGISTRADO', vacancy },
+    { ...baseCandidate, id: 'TEST-MISSING-CV', status: 'REGISTRADO', cvData: null, vacancy },
+    { ...baseCandidate, id: 'TEST-APPROVED', status: 'APROBADO', vacancy },
+    { ...baseCandidate, id: 'TEST-CONTRACTED', status: 'CONTRATADO', vacancy },
+    { id: 'TEST-NEW-INCOMPLETE', status: 'NUEVO', vacancy }
+  ];
+
+  assert.deepEqual(candidateExportCounts(candidates, { isDev: false, vacancy }), {
+    registered: 3,
+    missingCvComplete: 1,
+    approved: 1,
+    contracted: 1,
+    all: 4
+  });
+});
+
+test('ruta y vista consumen la autoridad canónica de exportación y ocultan descargas vacías', () => {
+  const adminRouteSource = fs.readFileSync('src/routes/admin.js', 'utf8');
+  const listSource = fs.readFileSync('src/views/list.ejs', 'utf8');
+  assert.match(adminRouteSource, /filterCandidatesForExport\([\s\S]*\{ isDev: accessContext\.isDev, vacancy \}/);
+  assert.match(adminRouteSource, /candidateExportCounts\(candidatesWithFlags, \{ isDev, vacancy: v \}\)/);
+  assert.match(listSource, /v\.exportCounts\?\.approved/);
+  assert.match(listSource, /v\.exportCounts\?\.contracted/);
+  assert.match(listSource, /Descargar contratados/);
 });
 
 test('ruta /admin/export acepta missing_cv_complete como scope válido', () => {

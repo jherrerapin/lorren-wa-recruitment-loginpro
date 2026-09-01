@@ -21,7 +21,9 @@ import {
   candidateHasCv,
   deriveCandidateStatusForUI,
   exportFilenameByScopeAndVacancy,
+  candidateExportCounts,
   filterCandidatesByScope,
+  filterCandidatesForExport,
   isOperationallyCompleteWithoutCv,
   isOperationallyRegistered,
   normalizeCandidateStatusForUI
@@ -1464,6 +1466,7 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
     const completeWithoutCv = filterDashboardCandidates(completeWithoutCvBase);
     const approvedCandidates = filterDashboardCandidates(approvedCandidatesBase);
     const contractedCandidates = filterDashboardCandidates(contractedCandidatesBase);
+    const exportCounts = candidateExportCounts(candidatesWithFlags, { isDev, vacancy: v });
     const filteredBookingsToday = normalizeInterviewBookings(v.interviewBookings)
       .map(b => ({
         ...b,
@@ -1491,7 +1494,8 @@ async function buildDashboardData(prisma, dateStr, options = {}) {
       registeredComplete,
       completeWithoutCv,
       approvedCandidates,
-      contractedCandidates
+      contractedCandidates,
+      exportCounts
     };
 
     citiesMap.get(city).push(enriched);
@@ -1991,7 +1995,11 @@ export function adminRouter(prisma) {
         vacancy: { select: { city: true } }
       }
     });
-    const candidates = filterCandidatesByScope(allCandidates.map(normalizeCandidateSnapshot), scope);
+    const candidates = filterCandidatesForExport(
+      allCandidates.map(normalizeCandidateSnapshot),
+      scope,
+      { isDev: accessContext.isDev, vacancy }
+    );
 
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet('Candidatos');

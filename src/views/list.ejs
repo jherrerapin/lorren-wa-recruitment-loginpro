@@ -1593,12 +1593,12 @@
         </div>
 
         <div class="export-bar">
-          <a href="/admin/export?scope=registered&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar registrados</a>
-          <a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar pendientes HV</a>
-          <a href="/admin/export?scope=approved&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar aprobados</a>
-          <a href="/admin/export?scope=all&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar todos</a>
-          <a href="/admin/export?scope=contracted&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">Contratados</a>
-          <a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a>
+          <% if ((v.exportCounts?.registered || 0) > 0) { %><a href="/admin/export?scope=registered&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar registrados</a><% } %>
+          <% if ((v.exportCounts?.missingCvComplete || 0) > 0) { %><a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar pendientes HV</a><% } %>
+          <% if ((v.exportCounts?.approved || 0) > 0) { %><a href="/admin/export?scope=approved&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar aprobados</a><% } %>
+          <% if ((v.exportCounts?.all || 0) > 0) { %><a href="/admin/export?scope=all&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar todos</a><% } %>
+          <% if ((v.exportCounts?.contracted || 0) > 0) { %><a href="/admin/export?scope=contracted&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar contratados</a><% } %>
+          <% if ((v.exportCounts?.approved || 0) > 0) { %><a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a><% } %>
           <a href="/admin/vacancies" class="export-btn" style="margin-left:auto;">⚙️ Gestionar vacantes</a>
         </div>
       </div>
