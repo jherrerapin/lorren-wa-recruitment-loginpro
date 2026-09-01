@@ -208,6 +208,23 @@ test('ruta y vista consumen la autoridad canónica de exportación y ocultan des
   assert.match(listSource, /Descargar contratados/);
 });
 
+test('Excel por vacante pone fecha de registro primero y no exporta estado', () => {
+  const adminRouteSource = fs.readFileSync('src/routes/admin.js', 'utf8');
+  const exportStart = adminRouteSource.indexOf("router.get('/export'");
+  const exportEnd = adminRouteSource.indexOf("router.get('/outreach/approved'", exportStart);
+  const exportSource = adminRouteSource.slice(exportStart, exportEnd);
+  const columnsStart = exportSource.indexOf('sheet.columns = [');
+  const columnsEnd = exportSource.indexOf('];', columnsStart);
+  assert.notEqual(columnsStart, -1, 'debe existir la definición de columnas del Excel');
+  assert.notEqual(columnsEnd, -1, 'debe cerrar la definición de columnas del Excel');
+  const columnsSource = exportSource.slice(columnsStart, columnsEnd);
+  const headers = [...columnsSource.matchAll(/header: '([^']+)'/g)].map((match) => match[1]);
+  assert.equal(headers[0], 'Fecha registro');
+  assert.equal(headers.includes('Estado'), false);
+  assert.doesNotMatch(exportSource, /const statusColors =/);
+  assert.doesNotMatch(exportSource, /row\.getCell\('status'\)/);
+});
+
 test('ruta /admin/export acepta missing_cv_complete como scope válido', () => {
   const adminRouteSource = fs.readFileSync('src/routes/admin.js', 'utf8');
   assert.match(adminRouteSource, /const EXPORT_SCOPES = new Set\(\['registered', 'missing_cv_complete', 'approved', 'new', 'contacted', 'contracted', 'rejected', 'all'\]\)/);

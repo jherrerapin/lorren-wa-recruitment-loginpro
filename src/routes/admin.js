@@ -2005,20 +2005,19 @@ export function adminRouter(prisma) {
     const sheet = workbook.addWorksheet('Candidatos');
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
     sheet.columns = [
-      { header: 'Nombre', key: 'fullName', width: 28 },
-      { header: 'Teléfono', key: 'phone', width: 18 },
-      { header: 'WhatsApp', key: 'whatsappLink', width: 20 },
-      { header: 'Doc. Tipo', key: 'documentType', width: 12 },
-      { header: 'Doc. Número', key: 'documentNumber', width: 18 },
-      { header: 'Edad', key: 'age', width: 8 },
-      { header: 'Barrio', key: 'neighborhood', width: 20 },
-      { header: 'Localidad', key: 'locality', width: 18 },
-      { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
-      { header: 'Transporte', key: 'transportMode', width: 16 },
-      { header: 'Estado', key: 'status', width: 14 },
-      { header: 'Tiene HV', key: 'hasCV', width: 10 },
-      { header: 'Fecha registro', key: 'createdAt', width: 20 },
-    ];
+    { header: 'Fecha registro', key: 'createdAt', width: 20 },
+    { header: 'Nombre', key: 'fullName', width: 28 },
+    { header: 'Teléfono', key: 'phone', width: 18 },
+    { header: 'WhatsApp', key: 'whatsappLink', width: 20 },
+    { header: 'Doc. Tipo', key: 'documentType', width: 12 },
+    { header: 'Doc. Número', key: 'documentNumber', width: 18 },
+    { header: 'Edad', key: 'age', width: 8 },
+    { header: 'Barrio', key: 'neighborhood', width: 20 },
+    { header: 'Localidad', key: 'locality', width: 18 },
+    { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
+    { header: 'Transporte', key: 'transportMode', width: 16 },
+    { header: 'Tiene HV', key: 'hasCV', width: 10 },
+  ];
     for (const c of candidates) {
       const normalizedCandidate = normalizeCandidateSnapshot(c);
       const residenceConfig = getResidenceFieldConfig(normalizedCandidate.vacancy);
@@ -2051,15 +2050,6 @@ export function adminRouter(prisma) {
         right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
       };
     });
-    const statusColors = {
-      REGISTRADO: 'FFDCFCE7',
-      VALIDANDO: 'FFDBEAFE',
-      APROBADO: 'FFD1FAE5',
-      CONTACTADO: 'FFEDE9FE',
-      CONTRATADO: 'FFE0F2FE',
-      RECHAZADO: 'FFFEE2E2',
-      NUEVO: 'FFF3F4F6'
-    };
     sheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return;
       row.eachCell((cell) => {
@@ -2071,11 +2061,6 @@ export function adminRouter(prisma) {
           right: { style: 'thin', color: { argb: 'FFE5E7EB' } }
         };
       });
-      const statusCell = row.getCell('status');
-      const statusColor = statusColors[String(statusCell.value || '').toUpperCase()] || 'FFFFFFFF';
-      statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusColor } };
-      statusCell.font = { bold: true, color: { argb: 'FF1F2937' } };
-
       const hvCell = row.getCell('hasCV');
       hvCell.fill = {
         type: 'pattern',
