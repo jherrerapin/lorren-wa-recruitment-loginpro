@@ -45,65 +45,45 @@ jobs:
           columns_start = export_source.index('    sheet.columns = [')
           columns_end = export_source.index('    ];', columns_start) + len('    ];')
           columns = """    sheet.columns = [
-              { header: 'Fecha registro', key: 'createdAt', width: 20 },
-              { header: 'Nombre', key: 'fullName', width: 28 },
-              { header: 'Teléfono', key: 'phone', width: 20 },
-              { header: 'Doc. Tipo', key: 'documentType', width: 12 },
-              { header: 'Doc. Número', key: 'documentNumber', width: 18 },
-              { header: 'Edad', key: 'age', width: 8 },
-              { header: residenceConfig.labelTitle, key: residenceConfig.field, width: 20 },
-              { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
-              { header: 'Transporte', key: 'transportMode', width: 16 },
-              { header: 'Tiene HV', key: 'hasCV', width: 10 },
-            ];"""
+            { header: 'Fecha registro', key: 'createdAt', width: 20 },
+            { header: 'Nombre', key: 'fullName', width: 28 },
+            { header: 'Teléfono', key: 'phone', width: 20 },
+            { header: 'Doc. Tipo', key: 'documentType', width: 12 },
+            { header: 'Doc. Número', key: 'documentNumber', width: 18 },
+            { header: 'Edad', key: 'age', width: 8 },
+            { header: residenceConfig.labelTitle, key: residenceConfig.field, width: 20 },
+            { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
+            { header: 'Transporte', key: 'transportMode', width: 16 },
+            { header: 'Tiene HV', key: 'hasCV', width: 10 },
+          ];"""
           export_source = export_source[:columns_start] + columns + export_source[columns_end:]
 
-          old_loop = """    for (const c of candidates) {
-              const normalizedCandidate = normalizeCandidateSnapshot(c);
-              const residenceConfig = getResidenceFieldConfig(normalizedCandidate.vacancy);
-              const residenceValue = getCandidateResidenceValue(normalizedCandidate, normalizedCandidate.vacancy) || normalizedCandidate.zone || '';
-              const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
-              const row = sheet.addRow({
-                ...normalizedCandidate,
-                neighborhood: residenceConfig.field === 'neighborhood' ? residenceValue : '',
-                locality: residenceConfig.field === 'locality' ? residenceValue : (normalizedCandidate.locality || ''),
-                whatsappLink: whatsappLink ? 'Abrir WhatsApp' : 'Sin número',
-                hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
-                createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
-              });
-              if (whatsappLink) {
-                row.getCell('whatsappLink').value = { text: 'Abrir WhatsApp', hyperlink: whatsappLink };
-              }
-            }"""
+          loop_start = export_source.index('    for (const c of candidates) {', columns_start)
+          loop_end = export_source.index('    sheet.autoFilter = {', loop_start)
           new_loop = """    for (const c of candidates) {
-              const normalizedCandidate = normalizeCandidateSnapshot(c);
-              const residenceValue = getCandidateResidenceValue(normalizedCandidate, vacancy) || normalizedCandidate.zone || '';
-              const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
-              const row = sheet.addRow({
-                ...normalizedCandidate,
-                [residenceConfig.field]: residenceValue,
-                hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
-                createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
-              });
-              if (whatsappLink) {
-                row.getCell('phone').value = { text: normalizedCandidate.phone, hyperlink: whatsappLink };
-              }
-            }"""
-          if old_loop not in export_source:
-              raise SystemExit('expected candidate export loop not found')
-          export_source = export_source.replace(old_loop, new_loop, 1)
+            const normalizedCandidate = normalizeCandidateSnapshot(c);
+            const residenceValue = getCandidateResidenceValue(normalizedCandidate, vacancy) || normalizedCandidate.zone || '';
+            const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
+            const row = sheet.addRow({
+              ...normalizedCandidate,
+              [residenceConfig.field]: residenceValue,
+              hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
+              createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
+            });
+            if (whatsappLink) {
+              row.getCell('phone').value = { text: normalizedCandidate.phone, hyperlink: whatsappLink };
+            }
+          }
+"""
+          export_source = export_source[:loop_start] + new_loop + export_source[loop_end:]
 
-          old_link_style = """      ['whatsappLink'].forEach((key) => {
-                const linkCell = row.getCell(key);
-                linkCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
-              });"""
+          link_style_start = export_source.index("      ['whatsappLink'].forEach((key) => {")
+          link_style_end = export_source.index('      });', link_style_start) + len('      });')
           new_link_style = """      const phoneCell = row.getCell('phone');
-              if (phoneCell.value?.hyperlink) {
-                phoneCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
-              }"""
-          if old_link_style not in export_source:
-              raise SystemExit('expected WhatsApp link style block not found')
-          export_source = export_source.replace(old_link_style, new_link_style, 1)
+            if (phoneCell.value?.hyperlink) {
+              phoneCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
+            }"""
+          export_source = export_source[:link_style_start] + new_link_style + export_source[link_style_end:]
 
           admin = admin[:route_start] + export_source + admin[route_end:]
           admin_path.write_text(admin)
@@ -126,8 +106,10 @@ jobs:
             const columnsSource = exportSource.slice(columnsStart, columnsEnd);
             const staticHeaders = [...columnsSource.matchAll(/header: '([^']+)'/g)].map((match) => match[1]);
 
+            assert.equal(staticHeaders[0], 'Fecha registro');
             assert.equal(staticHeaders.filter((header) => header === 'Teléfono').length, 1);
             assert.equal(staticHeaders.includes('WhatsApp'), false);
+            assert.equal(staticHeaders.includes('Estado'), false);
             assert.equal(staticHeaders.includes('Barrio'), false);
             assert.equal(staticHeaders.includes('Localidad'), false);
             assert.match(columnsSource, /header: residenceConfig\.labelTitle, key: residenceConfig\.field/);
