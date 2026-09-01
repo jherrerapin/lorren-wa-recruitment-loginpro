@@ -129,7 +129,7 @@ export function filterCandidatesForExport(candidates, scope = 'all', options = {
   const scopedCandidates = filterCandidatesByScope(candidates, scope);
   if (options.isDev === true) return scopedCandidates;
   return scopedCandidates.filter((candidate) => (
-    isOperationallyCompleteForRecruiter(candidate, candidate?.vacancy)
+    isOperationallyCompleteForRecruiter(candidate, options.vacancy || candidate?.vacancy)
   ));
 }
 
