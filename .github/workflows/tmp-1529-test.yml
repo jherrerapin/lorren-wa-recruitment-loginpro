@@ -1,0 +1,21 @@
+name: Temporary 1529 focal test
+
+on:
+  push:
+    branches:
+      - fix/1529-recruiter-vacancy-exports
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node --test test/candidateExport.test.js
