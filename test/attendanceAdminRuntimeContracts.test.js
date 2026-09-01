@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import {
   filterAttendanceAdminHtml,
   filterAttendanceFeatureHtml
@@ -40,6 +41,42 @@ function attendanceBoardPrisma(assignment) {
   };
   prisma.$transaction = async (callback) => callback(prisma);
   return prisma;
+}
+
+function mapDouble() {
+  let zoom = Number.NaN;
+  const setViewCalls = [];
+  let invalidations = 0;
+  return {
+    getZoom() { return zoom; },
+    setView(center, nextZoom, options) {
+      zoom = nextZoom;
+      setViewCalls.push({ center: [...center], zoom: nextZoom, options });
+      return this;
+    },
+    invalidateSize() {
+      invalidations += 1;
+      return this;
+    },
+    setViewCalls,
+    invalidations() { return invalidations; }
+  };
+}
+
+function classList(...values) {
+  const names = new Set(values);
+  return { contains(value) { return names.has(value); } };
+}
+
+function detailsDouble(container) {
+  return {
+    open: true,
+    toggleHandler: null,
+    addEventListener(name, handler) {
+      if (name === 'toggle') this.toggleHandler = handler;
+    },
+    querySelectorAll() { return [container]; }
+  };
 }
 
 test('el runtime correctivo se carga solamente en el panel administrativo de asistencia', () => {
@@ -191,18 +228,78 @@ test('el tablero conserva las señales de riesgo como datos de auditoría aunque
   ]);
 });
 
-test('el runtime core legado queda como shim sin autoridad sobre teselas', () => {
+test('el core administrativo repara viewport sin recuperar autoridad sobre teselas', () => {
   assert.doesNotMatch(runtimeSource, /tileLayer|TileLayer|OSM_TILE_URL|IDECA_TILE_URL|tileerror|TILE_TIMEOUT_MS/);
   assert.doesNotMatch(runtimeSource, /Fondo cartográfico activo|Los fondos cartográficos no respondieron/);
   assert.match(runtimeSource, /LorrenAttendanceMaps/);
   assert.match(runtimeSource, /\.attendance-map, \.failure-attempt-map/);
+  assert.match(runtimeSource, /map\.setView/);
+  assert.doesNotMatch(runtimeSource, /fitBounds/);
 });
 
-test('el shim legado solo refresca viewport y cubre el mapa del intento fallido', () => {
-  assert.match(runtimeSource, /invalidateSize/);
-  assert.doesNotMatch(runtimeSource, /map\.setView|fitBounds/);
+test('el viewport obtiene una vista inicial ejecutable para marcación válida y fallida', () => {
+  const validMap = mapDouble();
+  const failureMap = mapDouble();
+  const validContainer = {
+    dataset: {
+      pointLat: '4.7000',
+      pointLng: '-74.1000',
+      arrivalLat: '4.7001',
+      arrivalLng: '-74.1001',
+      radius: '100',
+      defaultMapMode: 'arrival'
+    },
+    classList: classList('attendance-map'),
+    __lorrenAttendanceMap: validMap
+  };
+  const failureContainer = {
+    dataset: {
+      pointLat: '4.7000',
+      pointLng: '-74.1000',
+      failureLat: '4.7060',
+      failureLng: '-74.1060',
+      radius: '100'
+    },
+    classList: classList('failure-attempt-map'),
+    __lorrenFailureMap: failureMap
+  };
+  const details = [detailsDouble(validContainer), detailsDouble(failureContainer)];
+  const fakeDocument = {
+    readyState: 'complete',
+    querySelectorAll(selector) {
+      if (selector === '[data-map-details], [data-failure-map-details], [data-attendance-card]') return details;
+      if (selector === '.attendance-map, .failure-attempt-map') return [validContainer, failureContainer];
+      return [];
+    }
+  };
+  const fakeWindow = {
+    LorrenAttendanceMaps: { refreshAll() {} },
+    setTimeout(callback) { callback(); return 1; }
+  };
+
+  vm.runInNewContext(runtimeSource, {
+    window: fakeWindow,
+    document: fakeDocument,
+    Math,
+    Number,
+    String
+  });
+  details.forEach((detailsNode) => detailsNode.toggleHandler());
+
+  assert.equal(validMap.setViewCalls.length, 1);
+  assert.equal(validMap.setViewCalls[0].zoom, 18);
+  assert.equal(validMap.setViewCalls[0].options.animate, false);
+  assert.equal(failureMap.setViewCalls.length, 1);
+  assert.ok(failureMap.setViewCalls[0].zoom < 18);
+  assert.equal(failureMap.setViewCalls[0].options.animate, false);
+  assert.ok(validMap.invalidations() >= 1);
+  assert.ok(failureMap.invalidations() >= 1);
+});
+
+test('el reparador cubre ambos detalles y no vuelve a centrar un mapa ya inicializado', () => {
   assert.match(runtimeSource, /\[data-failure-map-details\]/);
   assert.match(runtimeSource, /\[data-map-details\]/);
   assert.match(runtimeSource, /\[data-attendance-card\]/);
   assert.match(runtimeSource, /\[0, 80, 260, 700\]/);
+  assert.match(runtimeSource, /!Number\.isFinite\(currentZoom\)/);
 });

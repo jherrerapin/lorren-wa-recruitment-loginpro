@@ -6,6 +6,10 @@ const loaderSource = fs.readFileSync(
   new URL('../src/public/attendance-admin-runtime.js', import.meta.url),
   'utf8'
 );
+const coreSource = fs.readFileSync(
+  new URL('../src/public/attendance-admin-runtime-core.js', import.meta.url),
+  'utf8'
+);
 const reliabilitySource = fs.readFileSync(
   new URL('../src/public/attendance-map-reliability.js', import.meta.url),
   'utf8'
@@ -15,8 +19,9 @@ const bridgeSource = fs.readFileSync(
   'utf8'
 );
 
-test('Asistencia ejecuta una sola autoridad cliente para teselas y fallback cartográfico', () => {
-  assert.doesNotMatch(loaderSource, /attendance-admin-runtime-core\.js/);
+test('Asistencia mantiene una sola autoridad cliente para teselas aunque reactive el reparador de viewport', () => {
+  assert.match(loaderSource, /attendance-admin-runtime-core\.js/);
+  assert.doesNotMatch(coreSource, /tileLayer|TileLayer|OSM_TILE_URL|IDECA_TILE_URL|tileerror|TILE_TIMEOUT_MS/);
   assert.match(
     bridgeSource,
     /ATTENDANCE_MAP_RELIABILITY_SCRIPT = '\/public\/attendance-map-reliability\.js'/
@@ -29,6 +34,17 @@ test('Asistencia ejecuta una sola autoridad cliente para teselas y fallback cart
   assert.match(reliabilitySource, /ResizeObserver/);
 });
 
+test('el viewport administrativo se inicializa aunque fitBounds diferido todavía no haya corrido', () => {
+  assert.match(coreSource, /function initialViewport\(container\)/);
+  assert.match(coreSource, /classList\?\.contains\('failure-attempt-map'\)/);
+  assert.match(coreSource, /dataset\?\.defaultMapMode/);
+  assert.match(coreSource, /haversineMeters\(operation, mark\)/);
+  assert.match(coreSource, /!Number\.isFinite\(currentZoom\)/);
+  assert.match(coreSource, /map\.setView\(viewport\.center, viewport\.zoom, \{ animate: false \}\)/);
+  assert.match(coreSource, /map\.invalidateSize\(\{ pan: false, debounceMoveend: true \}\)/);
+  assert.doesNotMatch(coreSource, /fitBounds/);
+});
+
 test('un mapa de intento fallido puede reintentar el fondo sin recargar toda la página', () => {
   assert.match(reliabilitySource, /function retryManagedBaseLayer\(map\)/);
   assert.match(reliabilitySource, /state\.exhausted = true/);
@@ -39,8 +55,9 @@ test('un mapa de intento fallido puede reintentar el fondo sin recargar toda la 
   assert.match(reliabilitySource, /Cierra y vuelve a abrir el mapa o recupera la conexión para reintentar/);
 });
 
-test('retirar la autoridad duplicada conserva los otros módulos administrativos', () => {
+test('reactivar el reparador de viewport conserva los demás módulos administrativos', () => {
   assert.match(loaderSource, /lorren-dialog\.js/);
+  assert.match(loaderSource, /attendance-admin-runtime-core\.js/);
   assert.match(loaderSource, /attendance-admin-compact\.js/);
   assert.match(loaderSource, /attendance-admin-manual-workday\.js/);
   assert.match(loaderSource, /attendance-admin-clear-marks\.js/);
