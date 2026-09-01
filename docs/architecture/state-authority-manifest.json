@@ -44,6 +44,11 @@
           "reason": "Conserva únicamente el candidato técnico del supervisor y sus timestamps de ventana; la resolución de revisiones delega la pausa y lastOutboundAt en CandidateStateService"
         },
         {
+          "path": "src/services/botAutomationPolicy.js",
+          "role": "boundary",
+          "reason": "Handoff de coordinación de entrevista: conserva la pausa y persiste timestamps del candidato mientras responde preguntas de citación sin reanudar el flujo"
+        },
+        {
           "path": "src/services/campaignAttribution.js",
           "role": "integration",
           "reason": "Atribución de campaña y vacante"
