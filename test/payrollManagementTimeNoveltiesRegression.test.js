@@ -169,6 +169,7 @@ test('muestra únicamente almuerzo abierto cuando hubo inicio sin fin', async ()
   });
   assert.deepEqual(visible.rows[0].novelties.map((novelty) => novelty.code), ['INCOMPLETE_BREAK']);
   assert.match(visible.rows[0].novelties[0].message, /inicio, pero no el fin/i);
+  assert.equal(visible.rows[0].exportable, false);
 });
 
 test('muestra falta de salida solo después de terminar la jornada', async () => {
@@ -187,6 +188,7 @@ test('muestra falta de salida solo después de terminar la jornada', async () =>
   });
   assert.deepEqual(afterEnd.rows[0].novelties.map((novelty) => novelty.code), ['MISSING_DEPARTURE']);
   assert.match(afterEnd.rows[0].novelties[0].message, /salida/i);
+  assert.equal(afterEnd.rows[0].exportable, false);
 });
 
 test('muestra falta de entrada cuando venció la tolerancia sin ninguna marcación', async () => {
@@ -196,6 +198,7 @@ test('muestra falta de entrada cuando venció la tolerancia sin ninguna marcaci�
   });
   assert.deepEqual(visible.rows[0].novelties.map((novelty) => novelty.code), ['MISSING_ARRIVAL']);
   assert.match(visible.rows[0].novelties[0].message, /entrada/i);
+  assert.equal(visible.rows[0].exportable, false);
 });
 
 test('si faltan salida y fin de almuerzo muestra ambas alertas operativas y ninguna técnica', async () => {
