@@ -4,7 +4,14 @@ on:
   pull_request:
     branches:
       - main
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
+    inputs:
+      full_suite:
+        description: Ejecutar también la suite completa y comparar deuda heredada
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -14,32 +21,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  state-authority:
-    name: Validate state authorities
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-
-      - name: Validate state authority manifest
-        run: node --test test/stateAuthorityManifest.test.js
-
-      - name: Upload state authority diagnostic
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: state-authority-observed
-          path: state-authority-observed.json
-          if-no-files-found: error
-          retention-days: 3
-
-  conversational-release-candidate:
-    name: Validate conversational release candidate
-    needs: state-authority
+  quick:
+    name: Quick PR validation
     runs-on: ubuntu-latest
     timeout-minutes: 12
 
@@ -65,54 +48,20 @@ jobs:
           node-version: "20"
           cache: npm
 
-      - name: Install locked dependencies
-        run: npm ci
+      - name: Validate state authority manifest
+        run: node --test test/stateAuthorityManifest.test.js
 
-      - name: Generate Prisma Client
-        run: npm run prisma:generate
-
-      - name: Run integral conversational release candidate
-        run: >-
-          node --test
-          test/conversationalReleaseCandidatePreConsent.test.js
-          test/preConsentDataEvidence.test.js
-          test/dataConsentRevocationStabilization.test.js
-          test/dataConsentHumanPauseReplay.test.js
-          test/conversationReplayConsentAttachmentEdges.test.js
-          test/conversationReplayRecovery.test.js
-          test/conversationReplayProductionEdges.test.js
-          test/conversationHarness.test.js
-
-  validate:
-    name: Validate application
-    needs: state-authority
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    env:
-      CI: "true"
-      NODE_ENV: test
-      TZ: UTC
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
-      SESSION_SECRET: ci-only-placeholder-not-for-production
-      OPENAI_ENABLED: "false"
-      FF_RESPONSES_EXTRACTOR: "false"
-      USE_CONVERSATION_ENGINE: "false"
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
+      - name: Upload state authority diagnostic
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          persist-credentials: false
-
-      - name: Set up Node.js 20
-        uses: actions/setup-node@v5
-        with:
-          node-version: "20"
-          cache: npm
+          name: state-authority-observed
+          path: state-authority-observed.json
+          if-no-files-found: error
+          retention-days: 3
 
       - name: Install locked dependencies
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Validate Prisma schema
         run: npx prisma validate
@@ -127,6 +76,21 @@ jobs:
           while IFS= read -r -d '' file; do
             node --check "$file"
           done < <(find src test -type f -name '*.js' -print0)
+
+      - name: Validate CI efficiency contract
+        run: node --test test/ciWorkflowEfficiency.test.js
+
+      - name: Run integral conversational release candidate
+        run: >-
+          node --test
+          test/conversationalReleaseCandidatePreConsent.test.js
+          test/preConsentDataEvidence.test.js
+          test/dataConsentRevocationStabilization.test.js
+          test/dataConsentHumanPauseReplay.test.js
+          test/conversationReplayConsentAttachmentEdges.test.js
+          test/conversationReplayRecovery.test.js
+          test/conversationReplayProductionEdges.test.js
+          test/conversationHarness.test.js
 
       - name: Validate transitional code and retired aliases
         run: node --test test/transitionalCodeInventory.test.js test/webhookReadinessAliasRemoval.test.js
@@ -152,8 +116,7 @@ jobs:
       - name: Run candidate progress authority regressions
         run: node --test test/candidateMultilineStateService.test.js test/candidateConversationStepStateService.test.js test/candidateNoInterestStateService.test.js test/candidateRequirementRejectionStateService.test.js test/candidateExplicitPauseStateService.test.js test/candidateConsentStepStateService.test.js test/candidateVacancyFirstGateStateService.test.js test/candidateSilentProfileCaptureStateService.test.js test/consentStateService.test.js test/dataConsentGateConsentStepAuthority.test.js test/webhookVacancyFirstGateAuthority.test.js test/webhookSilentProfileCaptureAuthority.test.js test/turnOrchestratorContracts.test.js test/conversationEngineNoInterestAuthority.test.js test/conversationEngineRequirementRejectionAuthority.test.js test/conversationEngineExplicitPauseAuthority.test.js test/conversationEngineStepAuthority.test.js test/conversationEngineGuardRails.test.js test/candidateProgressAuthority.test.js
 
-      # Complete the evidence set even when a blocking focal command fails.
-      # Each command still contributes its own failure to the final job result.
+      # Complete the focal evidence set even when a later blocking group fails.
       - name: Run contextual fallback regressions
         if: ${{ !cancelled() }}
         run: node --test test/contextualReply.test.js test/contextualReplyRobustness.test.js test/contextualReplyLogging.test.js test/hardeningP0.test.js test/p9CvOnlyPdfDocx.test.js test/replySimilarityPolicy.test.js test/responsePolicyRemoval.test.js
@@ -250,11 +213,42 @@ jobs:
         if: ${{ !cancelled() }}
         run: node --test test/conversationReplayProductionEdges.test.js
 
-      # The full suite still contains inherited legacy debt tracked in issue #386.
-      # Capture the current result first, then compare its exact failing identities
-      # against the pull request base instead of trusting a numeric ceiling.
+  full-validation:
+    name: Full validation and inherited debt comparison
+    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft == false) || (github.event_name == 'workflow_dispatch' && inputs.full_suite) }}
+    needs: quick
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
       - name: Capture current automated test debt
-        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set +e
@@ -263,39 +257,58 @@ jobs:
           set -e
           echo "$test_exit" > current-test-exit.txt
 
-      - name: Check out base for legacy failure identity baseline
-        if: ${{ !cancelled() }}
+      - name: Restore base failure baseline
+        id: baseline-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-baseline-results
+          key: ci-test-baseline-${{ github.event.pull_request.base.sha || github.sha }}
+
+      - name: Check out base for uncached legacy failure baseline
+        if: steps.baseline-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.base.sha || 'main' }}
+          ref: ${{ github.event.pull_request.base.sha || github.sha }}
           path: .ci-baseline
           persist-credentials: false
 
+      - name: Generate uncached base failure baseline
+        if: steps.baseline-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-baseline-results
+          (
+            cd .ci-baseline
+            npm ci --no-audit --no-fund
+            npm run prisma:generate
+            set +e
+            npm test > "$GITHUB_WORKSPACE/.ci-baseline-results/legacy-test-output.log" 2>&1
+            legacy_test_exit=$?
+            set -e
+            echo "$legacy_test_exit" > "$GITHUB_WORKSPACE/.ci-baseline-results/legacy-test-exit.txt"
+          )
+
+      - name: Save base failure baseline
+        if: steps.baseline-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-baseline-results
+          key: ci-test-baseline-${{ github.event.pull_request.base.sha || github.sha }}
+
       - name: Compare automated test failure identities
-        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
 
-          (
-            cd .ci-baseline
-            npm ci
-            npm run prisma:generate
-            set +e
-            npm test > "$GITHUB_WORKSPACE/legacy-test-output.log" 2>&1
-            legacy_test_exit=$?
-            set -e
-            echo "$legacy_test_exit" > "$GITHUB_WORKSPACE/legacy-test-exit.txt"
-          )
-
           test_exit=$(cat current-test-exit.txt)
-          legacy_test_exit=$(cat legacy-test-exit.txt)
+          legacy_test_exit=$(cat .ci-baseline-results/legacy-test-exit.txt)
           tests_count=$(awk '/^# tests [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
           pass_count=$(awk '/^# pass [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
           fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
           cancelled_count=$(awk '/^# cancelled [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
           skipped_count=$(awk '/^# skipped [0-9]+$/ { value = $3 } END { print value }' current-test-output.log)
-          legacy_fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' legacy-test-output.log)
+          legacy_fail_count=$(awk '/^# fail [0-9]+$/ { value = $3 } END { print value }' .ci-baseline-results/legacy-test-output.log)
 
           if ! [[ "$tests_count" =~ ^[0-9]+$ ]] || ! [[ "$fail_count" =~ ^[0-9]+$ ]]; then
             echo "::error::The current automated test command did not produce a valid TAP summary."
@@ -305,7 +318,7 @@ jobs:
 
           if ! [[ "$legacy_fail_count" =~ ^[0-9]+$ ]]; then
             echo "::error::The base-branch automated test command did not produce a valid TAP summary."
-            tail -n 120 legacy-test-output.log
+            tail -n 120 .ci-baseline-results/legacy-test-output.log
             exit 1
           fi
 
@@ -344,10 +357,11 @@ jobs:
                 emit_pending()
               }
             ' "$source_file" \
+              | sed -E 's#^/.*/test/#test/#' \
               | LC_ALL=C sort -u > "$target_file"
           }
 
-          extract_failure_identities legacy-test-output.log legacy_test_failures.txt
+          extract_failure_identities .ci-baseline-results/legacy-test-output.log legacy_test_failures.txt
           extract_failure_identities current-test-output.log current_test_failures.txt
           LC_ALL=C comm -23 current_test_failures.txt legacy_test_failures.txt > unexpected_failures.txt
 
