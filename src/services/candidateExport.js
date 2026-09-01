@@ -133,6 +133,16 @@ export function filterCandidatesForExport(candidates, scope = 'all', options = {
   ));
 }
 
+export function candidateExportCounts(candidates, options = {}) {
+  return {
+    registered: filterCandidatesForExport(candidates, 'registered', options).length,
+    missingCvComplete: filterCandidatesForExport(candidates, 'missing_cv_complete', options).length,
+    approved: filterCandidatesForExport(candidates, 'approved', options).length,
+    contracted: filterCandidatesForExport(candidates, 'contracted', options).length,
+    all: filterCandidatesForExport(candidates, 'all', options).length
+  };
+}
+
 export function formatDateForFilenameCO(date = new Date()) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Bogota',
