@@ -42,13 +42,14 @@ function safeReferer(value) {
 
 function cacheTtlMs(headers, nowMs) {
   const cacheControl = String(headers?.get?.('cache-control') || '');
+  if (/(?:^|,)\s*(?:no-store|no-cache)\b/i.test(cacheControl)) return 0;
   const maxAge = cacheControl.match(/(?:^|,)\s*max-age=(\d+)/i);
   if (maxAge) {
     const seconds = Number(maxAge[1]);
-    if (Number.isFinite(seconds) && seconds > 0) return seconds * 1000;
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
   }
   const expiresAt = Date.parse(String(headers?.get?.('expires') || ''));
-  if (Number.isFinite(expiresAt) && expiresAt > nowMs) return expiresAt - nowMs;
+  if (Number.isFinite(expiresAt)) return Math.max(0, expiresAt - nowMs);
   return TILE_FALLBACK_TTL_MS;
 }
 
@@ -104,7 +105,7 @@ async function fetchTileUpstream({ coordinates, referer, fetchImpl, nowMs }) {
     return {
       body,
       contentType,
-      cacheControl: `public, max-age=${Math.max(1, Math.floor(ttlMs / 1000))}`,
+      cacheControl: `public, max-age=${Math.max(0, Math.floor(ttlMs / 1000))}`,
       etag: String(response.headers?.get?.('etag') || '').trim() || null,
       lastModified: String(response.headers?.get?.('last-modified') || '').trim() || null,
       expiresAt: nowMs + ttlMs,
@@ -133,7 +134,7 @@ export async function loadAttendanceMapTile(input = {}, options = {}) {
       nowMs
     });
     pruneTileCache(nowMs);
-    tileCache.set(key, tile);
+    if (tile.expiresAt > nowMs) tileCache.set(key, tile);
     return tile;
   })().finally(() => {
     inFlightTiles.delete(key);
