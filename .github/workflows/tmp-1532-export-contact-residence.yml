@@ -1,0 +1,167 @@
+name: Temporary 1532 export contact residence
+
+on:
+  push:
+    branches:
+      - fix/1532-export-contact-residence
+    paths:
+      - .github/workflows/tmp-1532-export-contact-residence.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/1532-export-contact-residence
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Apply requested Excel contact and residence columns
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          admin_path = Path('src/routes/admin.js')
+          admin = admin_path.read_text()
+          route_start = admin.index("router.get('/export'")
+          route_end = admin.index("router.get('/outreach/approved'", route_start)
+          export_source = admin[route_start:route_end]
+
+          candidates_end = export_source.index('    const workbook = new ExcelJS.Workbook();')
+          if 'const residenceConfig = getResidenceFieldConfig(vacancy);' not in export_source[:candidates_end]:
+              export_source = (
+                  export_source[:candidates_end]
+                  + '    const residenceConfig = getResidenceFieldConfig(vacancy);\n\n'
+                  + export_source[candidates_end:]
+              )
+
+          columns_start = export_source.index('    sheet.columns = [')
+          columns_end = export_source.index('    ];', columns_start) + len('    ];')
+          columns = """    sheet.columns = [
+              { header: 'Fecha registro', key: 'createdAt', width: 20 },
+              { header: 'Nombre', key: 'fullName', width: 28 },
+              { header: 'Teléfono', key: 'phone', width: 20 },
+              { header: 'Doc. Tipo', key: 'documentType', width: 12 },
+              { header: 'Doc. Número', key: 'documentNumber', width: 18 },
+              { header: 'Edad', key: 'age', width: 8 },
+              { header: residenceConfig.labelTitle, key: residenceConfig.field, width: 20 },
+              { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
+              { header: 'Transporte', key: 'transportMode', width: 16 },
+              { header: 'Tiene HV', key: 'hasCV', width: 10 },
+            ];"""
+          export_source = export_source[:columns_start] + columns + export_source[columns_end:]
+
+          old_loop = """    for (const c of candidates) {
+              const normalizedCandidate = normalizeCandidateSnapshot(c);
+              const residenceConfig = getResidenceFieldConfig(normalizedCandidate.vacancy);
+              const residenceValue = getCandidateResidenceValue(normalizedCandidate, normalizedCandidate.vacancy) || normalizedCandidate.zone || '';
+              const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
+              const row = sheet.addRow({
+                ...normalizedCandidate,
+                neighborhood: residenceConfig.field === 'neighborhood' ? residenceValue : '',
+                locality: residenceConfig.field === 'locality' ? residenceValue : (normalizedCandidate.locality || ''),
+                whatsappLink: whatsappLink ? 'Abrir WhatsApp' : 'Sin número',
+                hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
+                createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
+              });
+              if (whatsappLink) {
+                row.getCell('whatsappLink').value = { text: 'Abrir WhatsApp', hyperlink: whatsappLink };
+              }
+            }"""
+          new_loop = """    for (const c of candidates) {
+              const normalizedCandidate = normalizeCandidateSnapshot(c);
+              const residenceValue = getCandidateResidenceValue(normalizedCandidate, vacancy) || normalizedCandidate.zone || '';
+              const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
+              const row = sheet.addRow({
+                ...normalizedCandidate,
+                [residenceConfig.field]: residenceValue,
+                hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
+                createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
+              });
+              if (whatsappLink) {
+                row.getCell('phone').value = { text: normalizedCandidate.phone, hyperlink: whatsappLink };
+              }
+            }"""
+          if old_loop not in export_source:
+              raise SystemExit('expected candidate export loop not found')
+          export_source = export_source.replace(old_loop, new_loop, 1)
+
+          old_link_style = """      ['whatsappLink'].forEach((key) => {
+                const linkCell = row.getCell(key);
+                linkCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
+              });"""
+          new_link_style = """      const phoneCell = row.getCell('phone');
+              if (phoneCell.value?.hyperlink) {
+                phoneCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
+              }"""
+          if old_link_style not in export_source:
+              raise SystemExit('expected WhatsApp link style block not found')
+          export_source = export_source.replace(old_link_style, new_link_style, 1)
+
+          admin = admin[:route_start] + export_source + admin[route_end:]
+          admin_path.write_text(admin)
+
+          test_path = Path('test/candidateExport.test.js')
+          tests = test_path.read_text()
+          import_marker = "} from '../src/services/candidateExport.js';\n"
+          residence_import = "import { getResidenceFieldConfig } from '../src/services/candidateData.js';\n"
+          if residence_import not in tests:
+              tests = tests.replace(import_marker, import_marker + residence_import, 1)
+
+          marker = "test('ruta /admin/export acepta missing_cv_complete como scope válido', () => {"
+          regression = r"""test('Excel por vacante unifica teléfono/WhatsApp y usa una sola residencia según ciudad', () => {
+            const adminRouteSource = fs.readFileSync('src/routes/admin.js', 'utf8');
+            const exportStart = adminRouteSource.indexOf("router.get('/export'");
+            const exportEnd = adminRouteSource.indexOf("router.get('/outreach/approved'", exportStart);
+            const exportSource = adminRouteSource.slice(exportStart, exportEnd);
+            const columnsStart = exportSource.indexOf('sheet.columns = [');
+            const columnsEnd = exportSource.indexOf('];', columnsStart);
+            const columnsSource = exportSource.slice(columnsStart, columnsEnd);
+            const staticHeaders = [...columnsSource.matchAll(/header: '([^']+)'/g)].map((match) => match[1]);
+
+            assert.equal(staticHeaders.filter((header) => header === 'Teléfono').length, 1);
+            assert.equal(staticHeaders.includes('WhatsApp'), false);
+            assert.equal(staticHeaders.includes('Barrio'), false);
+            assert.equal(staticHeaders.includes('Localidad'), false);
+            assert.match(columnsSource, /header: residenceConfig\.labelTitle, key: residenceConfig\.field/);
+            assert.match(exportSource, /const residenceConfig = getResidenceFieldConfig\(vacancy\);/);
+            assert.match(exportSource, /\[residenceConfig\.field\]: residenceValue/);
+            assert.match(exportSource, /row\.getCell\('phone'\)\.value = \{ text: normalizedCandidate\.phone, hyperlink: whatsappLink \}/);
+            assert.doesNotMatch(exportSource, /row\.getCell\('whatsappLink'\)/);
+
+            assert.deepEqual(getResidenceFieldConfig({ city: 'Bogotá' }), {
+              field: 'locality', label: 'localidad', labelTitle: 'Localidad', articleLabel: 'la localidad'
+            });
+            assert.deepEqual(getResidenceFieldConfig({ city: 'Ibagué' }), {
+              field: 'neighborhood', label: 'barrio', labelTitle: 'Barrio', articleLabel: 'el barrio'
+            });
+          });
+
+          """
+          if marker not in tests:
+              raise SystemExit('test insertion marker not found')
+          if 'Excel por vacante unifica teléfono/WhatsApp' not in tests:
+              tests = tests.replace(marker, regression + marker, 1)
+          test_path.write_text(tests)
+          PY
+      - run: node --test test/candidateExport.test.js
+      - run: node --check src/routes/admin.js
+      - name: Commit focused change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/admin.js test/candidateExport.test.js
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "fix(recruitment): simplify vacancy export contact columns"
+          git push origin HEAD:fix/1532-export-contact-residence
