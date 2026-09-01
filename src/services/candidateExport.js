@@ -83,8 +83,7 @@ export function deriveCandidateStatusForUI(candidate = {}) {
   return 'NUEVO';
 }
 
-export function isOperationallyRegistered(candidate) {
-  const uiStatus = normalizeCandidateStatusForUI(candidate.status);
+export function isOperationallyCompleteCandidate(candidate = {}) {
   return hasValue(candidate.fullName)
     && hasValue(candidate.documentType)
     && hasValue(candidate.documentNumber)
@@ -92,7 +91,12 @@ export function isOperationallyRegistered(candidate) {
     && candidate.age !== undefined
     && hasValue(getCandidateResidenceValue(candidate))
     && hasValue(candidate.medicalRestrictions)
-    && hasValue(candidate.transportMode)
+    && hasValue(candidate.transportMode);
+}
+
+export function isOperationallyRegistered(candidate) {
+  const uiStatus = normalizeCandidateStatusForUI(candidate.status);
+  return isOperationallyCompleteCandidate(candidate)
     && candidateHasCv(candidate)
     && uiStatus !== 'RECHAZADO'
     && uiStatus !== 'CONTACTADO';
@@ -100,28 +104,26 @@ export function isOperationallyRegistered(candidate) {
 
 export function isOperationallyCompleteWithoutCv(candidate) {
   const uiStatus = normalizeCandidateStatusForUI(candidate.status);
-  return hasValue(candidate.fullName)
-    && hasValue(candidate.documentType)
-    && hasValue(candidate.documentNumber)
-    && candidate.age !== null
-    && candidate.age !== undefined
-    && hasValue(getCandidateResidenceValue(candidate))
-    && hasValue(candidate.medicalRestrictions)
-    && hasValue(candidate.transportMode)
+  return isOperationallyCompleteCandidate(candidate)
     && !candidateHasCv(candidate)
     && uiStatus !== 'RECHAZADO';
 }
 
 export function filterCandidatesByScope(candidates, scope = 'all') {
   if (scope === 'inbox') return candidates.filter((c) => Boolean(c?.lastInboundAt));
-  if (scope === 'approved') return candidates.filter((c) => c?.status === 'APROBADO');
+  if (scope === 'approved') return candidates.filter((c) => isOperationallyCompleteCandidate(c) && normalizeCandidateStatusForUI(c.status) === 'APROBADO');
   if (scope === 'registered') return candidates.filter((c) => isOperationallyRegistered(c));
   if (scope === 'missing_cv_complete') return candidates.filter((c) => isOperationallyCompleteWithoutCv(c));
-  if (scope === 'new') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'NUEVO');
-  if (scope === 'contacted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTACTADO');
-  if (scope === 'contracted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTRATADO');
+  if (scope === 'new') return candidates.filter((c) => isOperationallyCompleteCandidate(c) && normalizeCandidateStatusForUI(c.status) === 'NUEVO');
+  if (scope === 'contacted') return candidates.filter((c) => isOperationallyCompleteCandidate(c) && normalizeCandidateStatusForUI(c.status) === 'CONTACTADO');
+  if (scope === 'contracted') return candidates.filter((c) => isOperationallyCompleteCandidate(c) && normalizeCandidateStatusForUI(c.status) === 'CONTRATADO');
   if (scope === 'rejected') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'RECHAZADO');
-  if (scope === 'all') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) !== 'RECHAZADO');
+  if (scope === 'all') {
+    return candidates.filter((c) => (
+      isOperationallyCompleteCandidate(c)
+      && normalizeCandidateStatusForUI(c.status) !== 'RECHAZADO'
+    ));
+  }
   return candidates;
 }
 
