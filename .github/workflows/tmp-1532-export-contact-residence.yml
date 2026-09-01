@@ -74,7 +74,7 @@ jobs:
               row.getCell('phone').value = { text: normalizedCandidate.phone, hyperlink: whatsappLink };
             }
           }
-"""
+          """
           export_source = export_source[:loop_start] + new_loop + export_source[loop_end:]
 
           link_style_start = export_source.index("      ['whatsappLink'].forEach((key) => {")
