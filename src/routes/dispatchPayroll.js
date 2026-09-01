@@ -265,19 +265,6 @@ function sumRows(rows, field) {
   return rows.reduce((sum, row) => sum + Number(row?.[field] || 0), 0);
 }
 
-function payrollDayShiftCount(row) {
-  return Math.max(0, Number(row?.workedDays || 0) - Number(row?.nightShiftCount || 0));
-}
-
-function withDayShiftCounts(report) {
-  const rows = (report?.rows || []).map((row) => ({ ...row, dayShiftCount: payrollDayShiftCount(row) }));
-  return {
-    ...report,
-    rows,
-    totals: { ...(report?.totals || {}), dayShiftCount: sumRows(rows, 'dayShiftCount') }
-  };
-}
-
 function payrollExcelRows(report) {
   return buildPayrollExportRows(report).map((sourceRow, index) => {
     const reportRow = report.rows[index] || {};
@@ -288,7 +275,7 @@ function payrollExcelRows(report) {
         row.DiasNoRemunerados = Number(reportRow.unremuneratedDays || 0);
         row.PermisosRemunerados = Number(reportRow.paidPermissionDays || 0);
         row.Incapacidades = Number(reportRow.incapacityDays || 0);
-        row.TurnosDiurnos = Number(reportRow.dayShiftCount ?? payrollDayShiftCount(reportRow));
+        row.TurnosDiurnos = Number(reportRow.dayShiftCount || 0);
         row.TurnosNocturnos = Number(reportRow.nightShiftCount || 0);
         row.Domingos = Number(reportRow.sundayCount || 0);
         row.Festivos = Number(reportRow.holidayCount || 0);
@@ -549,6 +536,7 @@ function neutralGeneralRowFromOvertime(row) {
     unremuneratedDays: 0,
     paidPermissionDays: 0,
     incapacityDays: 0,
+    dayShiftCount: 0,
     nightShiftCount: 0,
     sundayCount: 0,
     holidayCount: 0,
@@ -582,6 +570,7 @@ function recalculateCombinedTotals(report) {
     unremuneratedDays: sumRows(rows, 'unremuneratedDays'),
     paidPermissionDays: sumRows(rows, 'paidPermissionDays'),
     incapacityDays: sumRows(rows, 'incapacityDays'),
+    dayShiftCount: sumRows(rows, 'dayShiftCount'),
     nightShiftCount: sumRows(rows, 'nightShiftCount'),
     sundayCount: sumRows(rows, 'sundayCount'),
     holidayCount: sumRows(rows, 'holidayCount'),
@@ -726,6 +715,7 @@ export function applyPayrollWorkerSelection(report, requestedWorkerIds = []) {
     unremuneratedDays: sumRows(rows, 'unremuneratedDays'),
     paidPermissionDays: sumRows(rows, 'paidPermissionDays'),
     incapacityDays: sumRows(rows, 'incapacityDays'),
+    dayShiftCount: sumRows(rows, 'dayShiftCount'),
     nightShiftCount: sumRows(rows, 'nightShiftCount'),
     sundayCount: sumRows(rows, 'sundayCount'),
     holidayCount: sumRows(rows, 'holidayCount'),
@@ -762,7 +752,7 @@ async function reportForRequest(prisma, req, source) {
     ? { ...generalReport, period: { periodType: 'CUSTOM', from: generalReport.period.from, to: generalReport.period.to, anchor: generalReport.period.from, spanDays: generalReport.period.spanDays } }
     : await loadPayrollReport(prisma, overtimeInput, options);
   const report = combinePayrollPeriodReports(generalReport, overtimeReport);
-  return withDayShiftCounts(applyPayrollWorkerSelection(report, workerIds));
+  return applyPayrollWorkerSelection(report, workerIds);
 }
 
 function renderPayrollExcelCustomizer(res, req, report, options = {}) {
@@ -976,7 +966,7 @@ export function dispatchPayrollRouter(prisma) {
       }
 
       const exportReport = selectedWorkerIds.length
-        ? withDayShiftCounts(applyPayrollWorkerSelection(report, selectedWorkerIds))
+        ? applyPayrollWorkerSelection(report, selectedWorkerIds)
         : report;
       if ((report.rows || []).length && !(exportReport.rows || []).length) {
         return renderPayrollExcelCustomizer(res, req, report, {
