@@ -67,6 +67,7 @@ export const PAYROLL_EXCEL_COLUMN_GROUPS = Object.freeze([
       Object.freeze({ key: 'DiasNoRemunerados', label: 'Días no remunerados' }),
       Object.freeze({ key: 'PermisosRemunerados', label: 'Permisos remunerados' }),
       Object.freeze({ key: 'Incapacidades', label: 'Incapacidades' }),
+      Object.freeze({ key: 'TurnosDiurnos', label: 'Turnos diurnos' }),
       Object.freeze({ key: 'TurnosNocturnos', label: 'Turnos nocturnos' }),
       Object.freeze({ key: 'Domingos', label: 'Domingos' }),
       Object.freeze({ key: 'Festivos', label: 'Festivos' }),
@@ -122,6 +123,7 @@ const PAYROLL_EXCEL_COLUMN_WIDTHS = Object.freeze({
   DiasNoRemunerados: 19,
   PermisosRemunerados: 20,
   Incapacidades: 15,
+  TurnosDiurnos: 15,
   TurnosNocturnos: 17,
   Domingos: 12,
   Festivos: 12,
@@ -263,6 +265,19 @@ function sumRows(rows, field) {
   return rows.reduce((sum, row) => sum + Number(row?.[field] || 0), 0);
 }
 
+function payrollDayShiftCount(row) {
+  return Math.max(0, Number(row?.workedDays || 0) - Number(row?.nightShiftCount || 0));
+}
+
+function withDayShiftCounts(report) {
+  const rows = (report?.rows || []).map((row) => ({ ...row, dayShiftCount: payrollDayShiftCount(row) }));
+  return {
+    ...report,
+    rows,
+    totals: { ...(report?.totals || {}), dayShiftCount: sumRows(rows, 'dayShiftCount') }
+  };
+}
+
 function payrollExcelRows(report) {
   return buildPayrollExportRows(report).map((sourceRow, index) => {
     const reportRow = report.rows[index] || {};
@@ -273,6 +288,7 @@ function payrollExcelRows(report) {
         row.DiasNoRemunerados = Number(reportRow.unremuneratedDays || 0);
         row.PermisosRemunerados = Number(reportRow.paidPermissionDays || 0);
         row.Incapacidades = Number(reportRow.incapacityDays || 0);
+        row.TurnosDiurnos = Number(reportRow.dayShiftCount ?? payrollDayShiftCount(reportRow));
         row.TurnosNocturnos = Number(reportRow.nightShiftCount || 0);
         row.Domingos = Number(reportRow.sundayCount || 0);
         row.Festivos = Number(reportRow.holidayCount || 0);
@@ -354,7 +370,7 @@ export function buildPayrollExcelWorkbook(report, options = {}) {
   const wrapHeaders = new Set(['Nombre', 'Descansos']);
   const centeredHeaders = new Set([
     'TipoDocumento', 'FechaInicial', 'FechaFinal', 'DiasRemunerados', 'DiasNoRemunerados',
-    'PermisosRemunerados', 'Incapacidades', 'TurnosNocturnos', 'Domingos', 'Festivos'
+    'PermisosRemunerados', 'Incapacidades', 'TurnosDiurnos', 'TurnosNocturnos', 'Domingos', 'Festivos'
   ]);
 
   rows.forEach((sourceRow, rowIndex) => {
@@ -377,7 +393,7 @@ export function buildPayrollExcelWorkbook(report, options = {}) {
         wrapText: wrapHeaders.has(header)
       };
       if (isPayrollHourHeader(header)) cell.numFmt = '0.0';
-      if (['DiasRemunerados', 'DiasNoRemunerados', 'PermisosRemunerados', 'Incapacidades', 'TurnosNocturnos', 'Domingos', 'Festivos'].includes(header)) cell.numFmt = '0';
+      if (['DiasRemunerados', 'DiasNoRemunerados', 'PermisosRemunerados', 'Incapacidades', 'TurnosDiurnos', 'TurnosNocturnos', 'Domingos', 'Festivos'].includes(header)) cell.numFmt = '0';
     });
   });
 
@@ -746,7 +762,7 @@ async function reportForRequest(prisma, req, source) {
     ? { ...generalReport, period: { periodType: 'CUSTOM', from: generalReport.period.from, to: generalReport.period.to, anchor: generalReport.period.from, spanDays: generalReport.period.spanDays } }
     : await loadPayrollReport(prisma, overtimeInput, options);
   const report = combinePayrollPeriodReports(generalReport, overtimeReport);
-  return applyPayrollWorkerSelection(report, workerIds);
+  return withDayShiftCounts(applyPayrollWorkerSelection(report, workerIds));
 }
 
 function renderPayrollExcelCustomizer(res, req, report, options = {}) {
@@ -884,7 +900,7 @@ export function dispatchPayrollRouter(prisma) {
             workers: 0, totalMinutes: 0, ordinaryMinutes: 0, overtimeMinutes: 0,
             exportableWorkers: 0, workersWithNovelties: 0,
             remuneratedDays: 0, unremuneratedDays: 0, paidPermissionDays: 0, incapacityDays: 0,
-            nightShiftCount: 0, sundayCount: 0, holidayCount: 0,
+            dayShiftCount: 0, nightShiftCount: 0, sundayCount: 0, holidayCount: 0,
             conceptMinutes: {}, conceptHours: {}
           }
         },
@@ -960,7 +976,7 @@ export function dispatchPayrollRouter(prisma) {
       }
 
       const exportReport = selectedWorkerIds.length
-        ? applyPayrollWorkerSelection(report, selectedWorkerIds)
+        ? withDayShiftCounts(applyPayrollWorkerSelection(report, selectedWorkerIds))
         : report;
       if ((report.rows || []).length && !(exportReport.rows || []).length) {
         return renderPayrollExcelCustomizer(res, req, report, {
