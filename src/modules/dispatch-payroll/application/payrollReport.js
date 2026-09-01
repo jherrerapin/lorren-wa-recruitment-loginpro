@@ -7,6 +7,7 @@ import {
   bogotaDayStart,
   calculatePayrollConceptReport,
   colombianHolidayKeys,
+  isNightMinute,
   normalizePayrollPolicy,
   payrollWeekStartKey
 } from '../domain/payrollConceptEngine.js';
@@ -626,6 +627,11 @@ function sessionWorkerId(session) {
   return session?.assignment?.workerId || session?.assignment?.worker?.id || null;
 }
 
+function sessionClientId(session) {
+  const point = session?.assignment?.serviceRequest?.operationPoint || {};
+  return point.clientId || point.client?.id || null;
+}
+
 function sessionScheduledDateKey(session) {
   return bogotaDateKey(dateValue(session?.expectedStartAt) || dateValue(session?.arrivalReportedAt));
 }
@@ -642,9 +648,17 @@ function sessionHasCompletedWorkday(session) {
   return Boolean(arrivalAt && departureAt && departureAt > arrivalAt);
 }
 
-function sessionStartsAtNight(session) {
-  const minute = bogotaMinuteOfDay(session?.expectedStartAt);
-  return Number.isInteger(minute) && minute >= DEFAULT_PAYROLL_POLICY.nightStartMinute;
+function sessionPayrollPolicy(session, policiesByClientId) {
+  const clientId = sessionClientId(session);
+  const configured = clientId && policiesByClientId instanceof Map ? policiesByClientId.get(clientId) : null;
+  return normalizePayrollPolicy(configured || DEFAULT_PAYROLL_POLICY);
+}
+
+function sessionStartsAtNight(session, policiesByClientId) {
+  const startsAt = dateValue(session?.expectedStartAt) || dateValue(session?.arrivalReportedAt);
+  const minute = bogotaMinuteOfDay(startsAt);
+  if (!Number.isInteger(minute)) return false;
+  return isNightMinute(minute, sessionPayrollPolicy(session, policiesByClientId));
 }
 
 function attendanceMarkMoment(mark) {
@@ -818,6 +832,7 @@ function emptyPayrollRow(worker) {
     unremuneratedDays: 0,
     paidPermissionDays: 0,
     incapacityDays: 0,
+    dayShiftCount: 0,
     nightShiftCount: 0,
     sundayCount: 0,
     holidayCount: 0,
@@ -828,7 +843,7 @@ function emptyPayrollRow(worker) {
   };
 }
 
-function decoratePayrollRows(report, workers, rests, filters, filteredSessions, absentSessions, period) {
+function decoratePayrollRows(report, workers, rests, filters, filteredSessions, absentSessions, period, policiesByClientId) {
   const workerById = new Map(workers.map((worker) => [worker.id, worker]));
   const relevantSessions = [...filteredSessions, ...absentSessions];
   const sessionWorkerIds = new Set(relevantSessions.map((session) => sessionWorkerId(session)).filter(Boolean));
@@ -964,15 +979,21 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
     row.unremuneratedDays = unremuneratedDateKeys.size;
     row.paidPermissionDays = paidPermissionDateKeys.size;
     row.incapacityDays = incapacityDateKeys.size;
-    row.nightShiftCount = filteredSessions.filter((session) => {
-      if (
-        sessionWorkerId(session) !== row.workerId
-        || !sessionHasCompletedWorkday(session)
-        || !sessionStartsAtNight(session)
-      ) return false;
+
+    const completedSessionsInPeriod = filteredSessions.filter((session) => {
+      if (sessionWorkerId(session) !== row.workerId || !sessionHasCompletedWorkday(session)) return false;
       const dateKey = sessionScheduledDateKey(session);
       return Boolean(dateKey && dateKey >= period.from && dateKey <= period.to);
-    }).length;
+    });
+    let dayShiftCount = 0;
+    let nightShiftCount = 0;
+    for (const session of completedSessionsInPeriod) {
+      const dateKey = sessionScheduledDateKey(session);
+      if (sessionStartsAtNight(session, policiesByClientId)) nightShiftCount += 1;
+      else if (!isSundayDateKey(dateKey)) dayShiftCount += 1;
+    }
+    row.dayShiftCount = dayShiftCount;
+    row.nightShiftCount = nightShiftCount;
     row.sundayCount = sundayDateKeys.size;
     row.holidayCount = holidayDateKeys.size;
     row.daily = row.daily.map((day) => ({
@@ -993,6 +1014,7 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
   report.totals.unremuneratedDays = report.rows.reduce((sum, row) => sum + row.unremuneratedDays, 0);
   report.totals.paidPermissionDays = report.rows.reduce((sum, row) => sum + row.paidPermissionDays, 0);
   report.totals.incapacityDays = report.rows.reduce((sum, row) => sum + row.incapacityDays, 0);
+  report.totals.dayShiftCount = report.rows.reduce((sum, row) => sum + row.dayShiftCount, 0);
   report.totals.nightShiftCount = report.rows.reduce((sum, row) => sum + row.nightShiftCount, 0);
   report.totals.sundayCount = report.rows.reduce((sum, row) => sum + row.sundayCount, 0);
   report.totals.holidayCount = report.rows.reduce((sum, row) => sum + row.holidayCount, 0);
@@ -1132,7 +1154,7 @@ export async function loadPayrollReport(prisma, query = {}, options = {}) {
     compensationByWorkerDate,
     range: { from: period.from, to: period.to }
   });
-  decoratePayrollRows(report, workers, periodRests, filters, filteredSessions, absentSessions, period);
+  decoratePayrollRows(report, workers, periodRests, filters, filteredSessions, absentSessions, period, policiesByClientId);
 
   return {
     ...report,
