@@ -16,7 +16,7 @@ import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES } from '../../../services/dispatchO
 export const PAYROLL_POLICY_ENTITY_TYPE = 'DISPATCH_PAYROLL_POLICY';
 export const PAYROLL_POLICY_ACTION = 'PAYROLL_POLICY_UPDATED';
 export const PAYROLL_COMPENSATION_ENTITY_TYPE = 'DISPATCH_PAYROLL_COMPENSATION';
-export const PAYROLL_COMPENSATION_ACTION = 'PAYROLL_COMPENSATION_UPDATED';
+export const PAYROLL_COMPENSATION_ACTION = 'DISPATCH_PAYROLL_COMPENSATION_UPDATED';
 export const WORKER_REST_ENTITY_TYPE = 'DISPATCH_WORKER_REST_ASSIGNMENT';
 export const WORKER_REST_ACTION = 'WORKER_REST_ASSIGNMENT_UPDATED';
 export const WORKER_REST_STATUS = Object.freeze({
@@ -430,7 +430,7 @@ export async function cancelWorkerRestAssignment(prisma, input = {}) {
         action: WORKER_REST_ACTION,
         actorUsername: normalizeString(input.actorUsername, 160),
         actorRole: normalizeString(input.actorRole, 80),
-        actorSource: 'payroll-admin',
+        actorSource: 'dispatch-assignment-admin',
         ipAddress: normalizeString(input.ipAddress, 120),
         userAgent: normalizeString(input.userAgent, 500),
         toValue: metadata,
@@ -840,6 +840,7 @@ function decoratePayrollRows(report, workers, rests, filters, filteredSessions, 
     if (!workerId) continue;
     const current = managementNoveltiesByWorker.get(workerId) || [];
     for (const novelty of managementTimeNoveltiesForSession(session)) {
+      if (novelty.dateKey && (novelty.dateKey < period.from || novelty.dateKey > period.to)) continue;
       if (!current.some((item) => item.code === novelty.code && item.dateKey === novelty.dateKey && item.sessionId === novelty.sessionId)) {
         current.push(novelty);
       }
