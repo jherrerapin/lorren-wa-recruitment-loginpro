@@ -17,6 +17,7 @@ import {
 } from '../services/interviewOutreachManagement.js';
 
 const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
+const MANAGEMENT_SCRIPT = '<script src="/public/interview-outreach-management.js" defer data-interview-outreach-management></script>';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -39,6 +40,27 @@ function getRequestAccessContext(req = {}) {
     userAccessScope: req.userAccessScope || req.session?.userAccessScope,
     userAccessCity: req.userAccessCity || req.session?.userAccessCity,
     userAccessVacancyId: req.userAccessVacancyId || req.session?.userAccessVacancyId
+  });
+}
+
+function installManagementScriptInjection(router) {
+  router.use((req, res, next) => {
+    const shouldInject = req.method === 'GET'
+      && (req.path === '/' || /^\/candidates\/[^/]+$/.test(req.path));
+    if (!shouldInject) return next();
+
+    const originalSend = res.send.bind(res);
+    res.send = (body) => {
+      if (
+        typeof body === 'string'
+        && body.includes('</body>')
+        && !body.includes('data-interview-outreach-management')
+      ) {
+        return originalSend(body.replace('</body>', `${MANAGEMENT_SCRIPT}\n</body>`));
+      }
+      return originalSend(body);
+    };
+    return next();
   });
 }
 
@@ -203,6 +225,7 @@ async function runEvaluationTransaction(prisma, input) {
 
 export function interviewOutreachManagementRouter(prisma) {
   const router = express.Router();
+  installManagementScriptInjection(router);
 
   router.get('/interview-management/candidates/:candidateId', apiSessionAuth, async (req, res) => {
     const data = await requireCandidateManagementData(prisma, req, res);
