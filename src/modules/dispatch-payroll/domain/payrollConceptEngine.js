@@ -212,7 +212,7 @@ function sessionMinuteRecords(session, policy, novelties) {
   return minutes.map((timestamp) => ({ timestamp, session, workdayKey }));
 }
 
-function isNightMinute(minuteOfDay, policy) {
+export function isNightMinute(minuteOfDay, policy) {
   if (policy.nightStartMinute === policy.nightEndMinute) return true;
   if (policy.nightStartMinute > policy.nightEndMinute) {
     return minuteOfDay >= policy.nightStartMinute || minuteOfDay < policy.nightEndMinute;
