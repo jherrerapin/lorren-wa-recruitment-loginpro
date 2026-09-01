@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import './payrollDayShiftCountFocal.test.js';
 
 import {
   ADMIN_SESSION_DEFAULTS,
