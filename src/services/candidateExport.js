@@ -1,4 +1,4 @@
-import './vacancyDashboardSearchExpansion.js';
+import { isOperationallyCompleteForRecruiter } from './vacancyDashboardSearchExpansion.js';
 import { getCandidateResidenceValue } from './candidateData.js';
 
 function hasValue(value) {
@@ -123,6 +123,24 @@ export function filterCandidatesByScope(candidates, scope = 'all') {
   if (scope === 'rejected') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'RECHAZADO');
   if (scope === 'all') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) !== 'RECHAZADO');
   return candidates;
+}
+
+export function filterCandidatesForExport(candidates, scope = 'all', options = {}) {
+  const scopedCandidates = filterCandidatesByScope(candidates, scope);
+  if (options.isDev === true) return scopedCandidates;
+  return scopedCandidates.filter((candidate) => (
+    isOperationallyCompleteForRecruiter(candidate, options.vacancy || candidate?.vacancy)
+  ));
+}
+
+export function candidateExportCounts(candidates, options = {}) {
+  return {
+    registered: filterCandidatesForExport(candidates, 'registered', options).length,
+    missingCvComplete: filterCandidatesForExport(candidates, 'missing_cv_complete', options).length,
+    approved: filterCandidatesForExport(candidates, 'approved', options).length,
+    contracted: filterCandidatesForExport(candidates, 'contracted', options).length,
+    all: filterCandidatesForExport(candidates, 'all', options).length
+  };
 }
 
 export function formatDateForFilenameCO(date = new Date()) {
