@@ -30,23 +30,13 @@ jobs:
 
           admin_path = Path('src/routes/admin.js')
           admin = admin_path.read_text()
+          route_start = admin.index("router.get('/export'")
+          route_end = admin.index("router.get('/outreach/approved'", route_start)
+          export_source = admin[route_start:route_end]
 
-          old_columns = """    sheet.columns = [
-              { header: 'Nombre', key: 'fullName', width: 28 },
-              { header: 'Teléfono', key: 'phone', width: 18 },
-              { header: 'WhatsApp', key: 'whatsappLink', width: 20 },
-              { header: 'Doc. Tipo', key: 'documentType', width: 12 },
-              { header: 'Doc. Número', key: 'documentNumber', width: 18 },
-              { header: 'Edad', key: 'age', width: 8 },
-              { header: 'Barrio', key: 'neighborhood', width: 20 },
-              { header: 'Localidad', key: 'locality', width: 18 },
-              { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
-              { header: 'Transporte', key: 'transportMode', width: 16 },
-              { header: 'Estado', key: 'status', width: 14 },
-              { header: 'Tiene HV', key: 'hasCV', width: 10 },
-              { header: 'Fecha registro', key: 'createdAt', width: 20 },
-            ];"""
-          new_columns = """    sheet.columns = [
+          columns_start = export_source.index('    sheet.columns = [')
+          columns_end = export_source.index('    ];', columns_start) + len('    ];')
+          columns = """    sheet.columns = [
               { header: 'Fecha registro', key: 'createdAt', width: 20 },
               { header: 'Nombre', key: 'fullName', width: 28 },
               { header: 'Teléfono', key: 'phone', width: 18 },
@@ -60,33 +50,17 @@ jobs:
               { header: 'Transporte', key: 'transportMode', width: 16 },
               { header: 'Tiene HV', key: 'hasCV', width: 10 },
             ];"""
-          if old_columns not in admin:
-              raise SystemExit('expected Excel columns block not found')
-          admin = admin.replace(old_columns, new_columns, 1)
+          export_source = export_source[:columns_start] + columns + export_source[columns_end:]
 
-          old_status = """    const statusColors = {
-              REGISTRADO: 'FFDCFCE7',
-              VALIDANDO: 'FFDBEAFE',
-              APROBADO: 'FFD1FAE5',
-              CONTACTADO: 'FFEDE9FE',
-              CONTRATADO: 'FFE0F2FE',
-              RECHAZADO: 'FFFEE2E2',
-              NUEVO: 'FFF3F4F6'
-            };
-          """
-          if old_status not in admin:
-              raise SystemExit('expected status colors block not found')
-          admin = admin.replace(old_status, '', 1)
+          status_colors_start = export_source.index('    const statusColors = {')
+          status_colors_end = export_source.index('    sheet.eachRow(', status_colors_start)
+          export_source = export_source[:status_colors_start] + export_source[status_colors_end:]
 
-          old_status_cell = """      const statusCell = row.getCell('status');
-              const statusColor = statusColors[String(statusCell.value || '').toUpperCase()] || 'FFFFFFFF';
-              statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusColor } };
-              statusCell.font = { bold: true, color: { argb: 'FF1F2937' } };
+          status_cell_start = export_source.index("      const statusCell = row.getCell('status');")
+          status_cell_end = export_source.index("      const hvCell = row.getCell('hasCV');", status_cell_start)
+          export_source = export_source[:status_cell_start] + export_source[status_cell_end:]
 
-          """
-          if old_status_cell not in admin:
-              raise SystemExit('expected status cell formatting block not found')
-          admin = admin.replace(old_status_cell, '', 1)
+          admin = admin[:route_start] + export_source + admin[route_end:]
           admin_path.write_text(admin)
 
           test_path = Path('test/candidateExport.test.js')
