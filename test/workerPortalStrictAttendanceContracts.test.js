@@ -11,6 +11,7 @@ const biometricFlow = fs.readFileSync('src/public/worker-portal-biometric-flow.j
 const compactAdmin = fs.readFileSync('src/public/attendance-admin-compact.js', 'utf8');
 const biometricLoader = fs.readFileSync('src/public/worker-biometric.js', 'utf8');
 const adminLoader = fs.readFileSync('src/public/attendance-admin-runtime.js', 'utf8');
+const adminRuntimeCore = fs.readFileSync('src/public/attendance-admin-runtime-core.js', 'utf8');
 
 
 test('la geocerca se compone explícitamente antes de la persistencia del núcleo', () => {
@@ -96,11 +97,13 @@ test('las vistas ya no dependen de JavaScript para retirar textos redundantes de
 });
 
 
-test('los cargadores conservan únicamente los componentes vigentes', () => {
+test('los cargadores conservan únicamente componentes vigentes y el core administrativo no recupera autoridad de teselas', () => {
   assert.match(biometricLoader, /worker-biometric-core\.js/);
   assert.match(biometricLoader, /worker-biometric-mobile\.js/);
   assert.match(biometricLoader, /worker-portal-biometric-flow\.js/);
   assert.doesNotMatch(biometricLoader, /worker-portal-hardening\.js/);
-  assert.doesNotMatch(adminLoader, /attendance-admin-runtime-core\.js/);
+  assert.match(adminLoader, /attendance-admin-runtime-core\.js/);
   assert.match(adminLoader, /attendance-admin-compact\.js/);
+  assert.match(adminRuntimeCore, /map\.setView/);
+  assert.doesNotMatch(adminRuntimeCore, /tileLayer|TileLayer|OSM_TILE_URL|IDECA_TILE_URL|tileerror/);
 });
