@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import express from 'express';
+import ExcelJS from 'exceljs';
 import {
   applyPayrollWorkerSelection,
   buildPayrollExcelWorkbook,
+  dispatchPayrollRouter,
   normalizePayrollExcelColumns
 } from '../src/routes/dispatchPayroll.js';
 import { PAYROLL_CONCEPT_CODES } from '../src/modules/dispatch-payroll/domain/payrollConceptEngine.js';
@@ -57,7 +60,32 @@ function headerColumn(sheet, header) {
   return index + 1;
 }
 
-test('Nómina conserva un solo acceso Excel y la ruta abre el personalizador', async () => {
+function emptyPayrollPrisma() {
+  return {
+    dispatchAttendanceSession: { async findMany() { return []; } },
+    dispatchAssignment: { async findMany() { return []; } },
+    dispatchClient: { async findMany() { return []; } },
+    dispatchWorker: { async findMany() { return []; } },
+    devAuditEvent: { async findMany() { return []; } }
+  };
+}
+
+async function withServer(app, run) {
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve, reject) => {
+    server.once('listening', resolve);
+    server.once('error', reject);
+  });
+  const address = server.address();
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    await run(origin);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+test('Nómina conserva un solo acceso Excel y separa personalizador GET de descarga POST', async () => {
   const [view, exportView, route] = await Promise.all([
     readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/views/operacionesNominaExport.ejs', import.meta.url), 'utf8'),
@@ -67,11 +95,48 @@ test('Nómina conserva un solo acceso Excel y la ruta abre el personalizador', a
   assert.doesNotMatch(view, /\/export\.csv/);
   assert.match(view, /\/export\.xlsx/);
   assert.match(route, /router\.get\('\/export\.csv'/);
-  assert.match(route, /renderPayrollExcelCustomizer/);
+  assert.match(route, /router\.get\('\/export\.xlsx'/);
+  assert.match(route, /router\.post\('\/export\.xlsx', formParser/);
+  assert.doesNotMatch(route, /req\.query\?\.download/);
+  assert.match(exportView, /<form method="post" action="\/admin\/operaciones\/asistencia\/gestion-tiempo\/export\.xlsx"/);
   assert.match(exportView, /name="exportWorkerId"/);
   assert.match(exportView, /name="columns"/);
-  assert.match(exportView, /name="download" value="1"/);
+  assert.doesNotMatch(exportView, /name="download"/);
   assert.doesNotMatch(exportView, /\b(?:alert|confirm|prompt)\s*\(/);
+});
+
+test('la descarga POST conserva columnas repetidas del formulario hasta el XLSX', async () => {
+  const app = express();
+  app.use((req, _res, next) => {
+    req.userRole = 'dev';
+    next();
+  });
+  app.use('/admin/operaciones/asistencia/gestion-tiempo', dispatchPayrollRouter(emptyPayrollPrisma()));
+
+  await withServer(app, async (origin) => {
+    const body = new URLSearchParams();
+    body.append('periodType', 'CUSTOM');
+    body.append('from', '2026-08-01');
+    body.append('to', '2026-08-01');
+    body.append('columns', 'Nombre');
+    body.append('columns', 'HEDO');
+
+    const response = await fetch(`${origin}/admin/operaciones/asistencia/gestion-tiempo/export.xlsx`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: body.toString()
+    });
+
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') || '', /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/);
+    assert.match(response.headers.get('content-disposition') || '', /attachment; filename="nomina-2026-08-01-2026-08-01\.xlsx"/);
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
+    const sheet = workbook.getWorksheet('Nómina');
+    assert.ok(sheet);
+    assert.deepEqual(sheet.getRow(4).values.slice(1), ['Nombre', 'HEDO']);
+  });
 });
 
 test('el Excel de Nómina conserva datos y aplica formato profesional sin exponer Estado ni Novedades', async () => {
