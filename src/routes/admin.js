@@ -2007,31 +2007,31 @@ export function adminRouter(prisma) {
     const sheet = workbook.addWorksheet('Candidatos');
     sheet.views = [{ state: 'frozen', ySplit: 1 }];
     sheet.columns = [
-  { header: 'Fecha registro', key: 'createdAt', width: 20 },
-  { header: 'Nombre', key: 'fullName', width: 28 },
-  { header: 'Teléfono', key: 'phone', width: 20 },
-  { header: 'Doc. Tipo', key: 'documentType', width: 12 },
-  { header: 'Doc. Número', key: 'documentNumber', width: 18 },
-  { header: 'Edad', key: 'age', width: 8 },
-  { header: residenceConfig.labelTitle, key: residenceConfig.field, width: 20 },
-  { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
-  { header: 'Transporte', key: 'transportMode', width: 16 },
-  { header: 'Tiene HV', key: 'hasCV', width: 10 },
-];
+      { header: 'Fecha registro', key: 'createdAt', width: 20 },
+      { header: 'Nombre', key: 'fullName', width: 28 },
+      { header: 'Teléfono', key: 'phone', width: 20 },
+      { header: 'Doc. Tipo', key: 'documentType', width: 12 },
+      { header: 'Doc. Número', key: 'documentNumber', width: 18 },
+      { header: 'Edad', key: 'age', width: 8 },
+      { header: residenceConfig.labelTitle, key: residenceConfig.field, width: 20 },
+      { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
+      { header: 'Transporte', key: 'transportMode', width: 16 },
+      { header: 'Tiene HV', key: 'hasCV', width: 10 },
+    ];
     for (const c of candidates) {
-  const normalizedCandidate = normalizeCandidateSnapshot(c);
-  const residenceValue = getCandidateResidenceValue(normalizedCandidate, vacancy) || normalizedCandidate.zone || '';
-  const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
-  const row = sheet.addRow({
-    ...normalizedCandidate,
-    [residenceConfig.field]: residenceValue,
-    hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
-    createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
-  });
-  if (whatsappLink) {
-    row.getCell('phone').value = { text: normalizedCandidate.phone, hyperlink: whatsappLink };
-  }
-}
+      const normalizedCandidate = normalizeCandidateSnapshot(c);
+      const residenceValue = getCandidateResidenceValue(normalizedCandidate, vacancy) || normalizedCandidate.zone || '';
+      const whatsappLink = buildWhatsAppLink(normalizedCandidate.phone);
+      const row = sheet.addRow({
+        ...normalizedCandidate,
+        [residenceConfig.field]: residenceValue,
+        hasCV: candidateHasCv(normalizedCandidate) ? 'Sí' : 'No',
+        createdAt: formatDateTimeCO(normalizedCandidate.createdAt)
+      });
+      if (whatsappLink) {
+        row.getCell('phone').value = { text: normalizedCandidate.phone, hyperlink: whatsappLink };
+      }
+    }
     sheet.autoFilter = {
       from: { row: 1, column: 1 },
       to: { row: 1, column: sheet.columns.length }
@@ -2067,9 +2067,9 @@ export function adminRouter(prisma) {
       hvCell.font = { bold: true, color: { argb: hvCell.value === 'Sí' ? 'FF166534' : 'FF991B1B' } };
 
       const phoneCell = row.getCell('phone');
-  if (phoneCell.value?.hyperlink) {
-    phoneCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
-  }
+      if (phoneCell.value?.hyperlink) {
+        phoneCell.font = { color: { argb: 'FF1D4ED8' }, underline: true };
+      }
     });
     const filename = exportFilenameByScopeAndVacancy(scope, vacancy);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
