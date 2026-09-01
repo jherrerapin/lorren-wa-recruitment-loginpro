@@ -71,9 +71,12 @@ jobs:
             const exportStart = adminRouteSource.indexOf("router.get('/export'");
             const exportEnd = adminRouteSource.indexOf("router.get('/outreach/approved'", exportStart);
             const exportSource = adminRouteSource.slice(exportStart, exportEnd);
-            const columnsMatch = exportSource.match(/sheet\.columns = \[([\s\S]*?)\n    \];/);
-            assert.ok(columnsMatch, 'debe existir la definición de columnas del Excel');
-            const headers = [...columnsMatch[1].matchAll(/header: '([^']+)'/g)].map((match) => match[1]);
+            const columnsStart = exportSource.indexOf('sheet.columns = [');
+            const columnsEnd = exportSource.indexOf('];', columnsStart);
+            assert.notEqual(columnsStart, -1, 'debe existir la definición de columnas del Excel');
+            assert.notEqual(columnsEnd, -1, 'debe cerrar la definición de columnas del Excel');
+            const columnsSource = exportSource.slice(columnsStart, columnsEnd);
+            const headers = [...columnsSource.matchAll(/header: '([^']+)'/g)].map((match) => match[1]);
             assert.equal(headers[0], 'Fecha registro');
             assert.equal(headers.includes('Estado'), false);
             assert.doesNotMatch(exportSource, /const statusColors =/);
