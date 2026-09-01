@@ -74,7 +74,7 @@ import {
 export const INTERVIEW_COORDINATION_HANDOFF_MODE = 'interview_coordination_handoff';
 export const DEFAULT_INTERVIEW_TEMPLATE_NAME = 'citacion_entrevista_loginpro';
 export const DEFAULT_INTERVIEW_TEMPLATE_LANGUAGE = 'es_CO';
-export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\n\nTe esperamos el {{3}} a las {{4}} en {{5}}.\n\nSi tienes alguna duda sobre esta citación, por favor escríbenos al WhatsApp {{6}}.\n\nTe agradecemos confirmar tu asistencia con el equipo de coordinación.';
+export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\n\nTe esperamos el {{3}} a las {{4}} en {{5}}.\n\nSi tienes alguna duda sobre esta citación, por favor escríbenos al WhatsApp {{6}} y pregunta por {{7}}.\n\nTe agradecemos confirmar tu asistencia con el equipo de coordinación.';
 const MANUAL_OUTBOUND_BLOCKING_MODES = new Set(['manual_outbound_sending', 'manual_outbound_delivery_unknown']);
 
 function sessionAuth(req, res, next) {
@@ -1088,10 +1088,12 @@ export function buildApprovedInterviewTemplateDelivery(candidate = {}, config = 
   const vacancy = normalizeString(candidate?.vacancy?.title) || normalizeString(candidate?.vacancy?.role);
   const address = normalizeString(config.interviewAddress);
   const coordinatorPhone = normalizeString(coordinatorContact.displayPhone);
+  const coordinatorName = normalizeString(coordinatorContact.displayName);
   if (!fullName) throw new TypeError('interview_outreach_candidate_name_required');
   if (!vacancy) throw new TypeError('interview_outreach_vacancy_required');
   if (!address) throw new TypeError('interview_outreach_address_required');
   if (!coordinatorPhone) throw new TypeError('interview_outreach_coordinator_phone_required');
+  if (!coordinatorName) throw new TypeError('interview_outreach_coordinator_name_required');
 
   const parameters = [
     fullName,
@@ -1099,7 +1101,8 @@ export function buildApprovedInterviewTemplateDelivery(candidate = {}, config = 
     formatInterviewOutreachDate(config.interviewDate),
     formatInterviewOutreachTime(config.interviewTime),
     address,
-    coordinatorPhone
+    coordinatorPhone,
+    coordinatorName
   ];
   let body = INTERVIEW_OUTREACH_TEMPLATE_REFERENCE;
   parameters.forEach((value, index) => {
@@ -1174,7 +1177,8 @@ async function loadCurrentOutreachCoordinator(prisma, req) {
   return {
     available: Boolean(user),
     apiPhone: phone?.apiPhone || null,
-    displayPhone: phone?.displayPhone || null
+    displayPhone: phone?.displayPhone || null,
+    displayName: normalizeString(user?.displayName) || normalizeString(user?.username) || null
   };
 }
 
@@ -2147,6 +2151,8 @@ export function adminRouter(prisma) {
       preparedError = 'Selecciona candidatos de una sola vacante por ronda para compartir la misma fecha, hora y dirección.';
     } else if (!coordinatorContact.apiPhone) {
       preparedError = 'Tu usuario no tiene un número móvil colombiano válido configurado para coordinación.';
+    } else if (!coordinatorContact.displayName) {
+      preparedError = 'No fue posible resolver el nombre del coordinador desde el usuario autenticado.';
     } else if (configError) {
       preparedError = configError;
     } else {
