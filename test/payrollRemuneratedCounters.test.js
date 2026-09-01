@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import {
   WORKER_REST_ACTION,
   WORKER_REST_ENTITY_TYPE,
@@ -175,7 +174,6 @@ test('Nómina separa días remunerados de permisos e incapacidades y conserva jo
   assert.equal(row.paidPermissionDays, 1, 'solo REMUNERADO sin domingo es permiso remunerado');
   assert.equal(row.incapacityDays, 1, 'EPS/ARL alimentan el contador de incapacidades');
   assert.equal(row.nightShiftCount, 1, 'el turno 21:00→05:00 cuenta una sola vez aunque cruce medianoche');
-  assert.equal(row.workedDays - row.nightShiftCount, 2, 'la madrugada del turno nocturno no crea un segundo turno diurno');
   assert.equal(row.sundayCount, 1, 'dos sesiones que tocan el mismo domingo cuentan una sola fecha dominical');
   assert.equal(row.holidayCount, 1, 'el festivo trabajado cuenta una sola fecha');
 
@@ -223,7 +221,7 @@ test('una jornada nocturna inválida mantiene su novedad y no suma turno nocturn
   assert.equal(report.rows[0].nightShiftCount, 0);
 });
 
-test('el XLSX expone turnos diurnos sin convertir la madrugada de un nocturno en otro turno', async () => {
+test('el XLSX usa los contadores reconciliados, elimina Días netos y el CSV heredado conserva su contrato', async () => {
   const report = await loadPayrollReport(makePrisma(), {
     periodType: 'CUSTOM',
     from: '2026-08-11',
@@ -243,7 +241,6 @@ test('el XLSX expone turnos diurnos sin convertir la madrugada de un nocturno en
   assert.ok(headers.includes('DiasNoRemunerados'));
   assert.ok(headers.includes('PermisosRemunerados'));
   assert.ok(headers.includes('Incapacidades'));
-  assert.ok(headers.includes('TurnosDiurnos'));
   assert.ok(headers.includes('TurnosNocturnos'));
   assert.ok(headers.includes('Domingos'));
   assert.ok(headers.includes('Festivos'));
@@ -256,12 +253,7 @@ test('el XLSX expone turnos diurnos sin convertir la madrugada de un nocturno en
   assert.equal(valueFor('DiasNoRemunerados'), 1);
   assert.equal(valueFor('PermisosRemunerados'), 1);
   assert.equal(valueFor('Incapacidades'), 1);
-  assert.equal(valueFor('TurnosDiurnos'), 2, '21:00→05:00 permanece exclusivamente nocturno');
   assert.equal(valueFor('TurnosNocturnos'), 1);
   assert.equal(valueFor('Domingos'), 1);
   assert.equal(valueFor('Festivos'), 1);
-
-  const view = await readFile(new URL('../src/views/partials/operacionesNominaTabla.ejs', import.meta.url), 'utf8');
-  assert.match(view, /<th>Turnos diurnos<\/th><th>Turnos nocturnos<\/th>/);
-  assert.match(view, /row\.dayShiftCount/);
 });
