@@ -7,6 +7,7 @@ import {
   exportFilenameByScope,
   filterCandidatesByScope,
   formatDateForFilenameCO,
+  isOperationallyCompleteCandidate,
   isOperationallyCompleteWithoutCv,
   isOperationallyRegistered,
   normalizeCandidateStatusForUI
@@ -55,13 +56,22 @@ test('deriveCandidateStatusForUI refleja reglas operativas reales', () => {
   assert.equal(deriveCandidateStatusForUI({ ...baseCandidate, status: 'CONTRATADO', cvData: null }), 'CONTRATADO');
 });
 
+test('perfil operativo completo no depende de tener HV', () => {
+  assert.equal(isOperationallyCompleteCandidate(baseCandidate), true);
+  assert.equal(isOperationallyCompleteCandidate({ ...baseCandidate, cvData: null }), true);
+  assert.equal(isOperationallyCompleteCandidate({ ...baseCandidate, fullName: '' }), false);
+  assert.equal(isOperationallyCompleteCandidate({ ...baseCandidate, documentNumber: null }), false);
+  assert.equal(isOperationallyCompleteCandidate({ ...baseCandidate, transportMode: '' }), false);
+});
+
 test('scope registered incluye estados legacy cuando cumplen criterio operativo', () => {
   const candidates = [
     { ...baseCandidate, id: 'reg', status: 'REGISTRADO' },
     { ...baseCandidate, id: 'legacy-validando', status: 'VALIDANDO' },
     { ...baseCandidate, id: 'legacy-aprobado', status: 'APROBADO' },
     { ...baseCandidate, id: 'contacted', status: 'CONTACTADO' },
-    { ...baseCandidate, id: 'new-incomplete', status: 'NUEVO', cvData: null },
+    { ...baseCandidate, id: 'new-complete-no-cv', status: 'NUEVO', cvData: null },
+    { ...baseCandidate, id: 'new-chat-only', status: 'NUEVO', fullName: '', documentType: null, documentNumber: null, age: null, neighborhood: null, medicalRestrictions: null, transportMode: null, cvData: null },
     { ...baseCandidate, id: 'rejected', status: 'RECHAZADO' }
   ];
 
@@ -69,28 +79,43 @@ test('scope registered incluye estados legacy cuando cumplen criterio operativo'
     filterCandidatesByScope(candidates, 'registered').map((c) => c.id),
     ['reg', 'legacy-validando', 'legacy-aprobado']
   );
-  assert.deepEqual(filterCandidatesByScope(candidates, 'new').map((c) => c.id), ['new-incomplete']);
+  assert.deepEqual(filterCandidatesByScope(candidates, 'new').map((c) => c.id), ['new-complete-no-cv']);
   assert.deepEqual(filterCandidatesByScope(candidates, 'contacted').map((c) => c.id), ['contacted']);
   assert.deepEqual(filterCandidatesByScope([...candidates, { ...baseCandidate, id: 'contracted', status: 'CONTRATADO' }], 'contracted').map((c) => c.id), ['contracted']);
   assert.deepEqual(filterCandidatesByScope(candidates, 'rejected').map((c) => c.id), ['rejected']);
 });
 
-test('scope all excluye rechazados y el apartado rejected conserva esos registros', () => {
+test('scope all significa todos los perfiles exportables y excluye chats nuevos incompletos', () => {
   const candidates = [
-    { ...baseCandidate, id: 'active-registered', status: 'REGISTRADO' },
-    { ...baseCandidate, id: 'active-approved', status: 'APROBADO' },
+    { ...baseCandidate, id: 'registered-with-cv', status: 'REGISTRADO' },
+    { ...baseCandidate, id: 'registered-without-cv', status: 'NUEVO', cvData: null },
+    { ...baseCandidate, id: 'approved-complete', status: 'APROBADO' },
+    { ...baseCandidate, id: 'contracted-complete', status: 'CONTRATADO', cvData: null },
+    { ...baseCandidate, id: 'new-chat-only', status: 'NUEVO', fullName: '', documentType: null, documentNumber: null, age: null, neighborhood: null, medicalRestrictions: null, transportMode: null, cvData: null },
     { ...baseCandidate, id: 'rejected-history', status: 'RECHAZADO' }
   ];
 
   assert.deepEqual(
     filterCandidatesByScope(candidates, 'all').map((candidate) => candidate.id),
-    ['active-registered', 'active-approved']
+    ['registered-with-cv', 'registered-without-cv', 'approved-complete', 'contracted-complete']
   );
   assert.deepEqual(
     filterCandidatesByScope(candidates, 'rejected').map((candidate) => candidate.id),
     ['rejected-history']
   );
-  assert.equal(candidates.length, 3, 'el filtrado no elimina ni muta el registro rechazado');
+  assert.equal(candidates.length, 6, 'el filtrado no elimina ni muta los registros fuente');
+});
+
+test('scopes aprobados y contratados tampoco exportan perfiles operativamente incompletos', () => {
+  const candidates = [
+    { ...baseCandidate, id: 'approved-ok', status: 'APROBADO' },
+    { ...baseCandidate, id: 'approved-incomplete', status: 'APROBADO', documentNumber: null },
+    { ...baseCandidate, id: 'contracted-ok', status: 'CONTRATADO', cvData: null },
+    { ...baseCandidate, id: 'contracted-incomplete', status: 'CONTRATADO', fullName: '' }
+  ];
+
+  assert.deepEqual(filterCandidatesByScope(candidates, 'approved').map((candidate) => candidate.id), ['approved-ok']);
+  assert.deepEqual(filterCandidatesByScope(candidates, 'contracted').map((candidate) => candidate.id), ['contracted-ok']);
 });
 
 test('nombre de archivo de exportación usa scopes operativos', () => {
