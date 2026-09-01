@@ -14,6 +14,7 @@
   const TILE_LOAD_TIMEOUT_MS = 4_500;
   const OSM_TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
   const IDECA_TILE_URL = 'https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/Mapa_Referencia/mapa_base_3857/MapServer/tile/{z}/{y}/{x}';
+  const SAME_ORIGIN_TILE_URL = '/admin/operaciones/asistencia/map-tiles/{z}/{x}/{y}.png';
   const BOGOTA_BOUNDS = Object.freeze({ south: 4.45, north: 4.86, west: -74.32, east: -73.90 });
 
   function requestFrame(callback) {
@@ -203,6 +204,11 @@
         label: 'OpenStreetMap',
         url: OSM_TILE_URL,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+      },
+      relay: {
+        label: 'OpenStreetMap vía Lórren',
+        url: SAME_ORIGIN_TILE_URL,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
       }
     });
 
@@ -240,9 +246,9 @@
     }
 
     function providerOrderForMap(map, requestedUrl) {
-      if (isBogotaMap(map)) return ['osm', 'ideca'];
-      if (String(requestedUrl || '').includes('serviciosgis.catastrobogota.gov.co')) return ['osm', 'ideca'];
-      return ['osm'];
+      if (isBogotaMap(map)) return ['osm', 'ideca', 'relay'];
+      if (String(requestedUrl || '').includes('serviciosgis.catastrobogota.gov.co')) return ['osm', 'ideca', 'relay'];
+      return ['osm', 'relay'];
     }
 
     function activateProvider(map, providerName) {
@@ -344,8 +350,10 @@
       const value = String(url || '');
       return value === OSM_TILE_URL
         || value === IDECA_TILE_URL
+        || value === SAME_ORIGIN_TILE_URL
         || value.includes('tile.openstreetmap.org')
-        || value.includes('Mapa_Referencia/mapa_base_3857/MapServer/tile');
+        || value.includes('Mapa_Referencia/mapa_base_3857/MapServer/tile')
+        || value.includes('/admin/operaciones/asistencia/map-tiles/');
     }
 
     leaflet.tileLayer = function reliableAttendanceTileLayer(url, options = {}) {

@@ -16,6 +16,7 @@ import {
 } from '../modules/dispatch-attendance/application/crewAttendanceConfig.js';
 import { loadAttendanceBillingCounters } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
 import { resolveIncompleteDispatchBreakPenaltyEndAt } from '../modules/dispatch-attendance/domain/attendanceWorkdayPolicy.js';
+import { loadAttendanceMapTile } from '../services/attendanceMapTileRelay.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
 import { dispatchPayrollRouter } from './dispatchPayroll.js';
 
@@ -292,6 +293,29 @@ export function dispatchAttendanceAdminRouter(prisma) {
     return res.redirect(308, legacyPayrollRedirectTarget(req));
   });
   router.use(PAYROLL_CANONICAL_ROUTE, dispatchPayrollRouter(prisma));
+
+  router.get('/map-tiles/:z/:x/:y.png', async (req, res) => {
+    try {
+      const tile = await loadAttendanceMapTile(req.params, {
+        referer: req.get?.('referer')
+      });
+      res.set('Content-Type', tile.contentType);
+      res.set('Cache-Control', tile.cacheControl);
+      res.set('X-Content-Type-Options', 'nosniff');
+      res.set('X-Lorren-Map-Tile-Cache', tile.cacheStatus);
+      if (tile.etag) res.set('ETag', tile.etag);
+      if (tile.lastModified) res.set('Last-Modified', tile.lastModified);
+      return res.status(200).send(tile.body);
+    } catch (error) {
+      const code = typeof error?.message === 'string' ? error.message : 'attendance_map_tile_failed';
+      if (code === 'attendance_map_tile_coordinates_invalid') {
+        return res.status(400).send('Tesela inválida');
+      }
+      console.warn('[ATTENDANCE_MAP_TILE_RELAY_FAILED]', { code });
+      res.set('Cache-Control', 'no-store');
+      return res.status(502).send('Fondo cartográfico no disponible');
+    }
+  });
 
   router.get('/billing-counter', async (_req, res) => {
     applyNoStore(res);
