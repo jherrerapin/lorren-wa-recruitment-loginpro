@@ -119,6 +119,48 @@
         }
       ]
     },
+    "interviewCandidateReview": {
+      "tableName": "InterviewCandidateReview",
+      "domain": "interviews",
+      "migrationStage": "canonical",
+      "targetAuthority": "InterviewOutreachManagementService",
+      "risk": "high",
+      "writers": [
+        {
+          "path": "src/services/interviewOutreachManagement.js",
+          "role": "canonical",
+          "reason": "Única autoridad para confirmación manual, asistencia real, calificación, observación y trazabilidad de la entrevista citada"
+        }
+      ]
+    },
+    "interviewComplementaryField": {
+      "tableName": "InterviewComplementaryField",
+      "domain": "interviews",
+      "migrationStage": "canonical",
+      "targetAuthority": "InterviewOutreachManagementService",
+      "risk": "medium",
+      "writers": [
+        {
+          "path": "src/services/interviewOutreachManagement.js",
+          "role": "canonical",
+          "reason": "Única autoridad para definir etiquetas complementarias reutilizables dentro de una vacante"
+        }
+      ]
+    },
+    "interviewComplementaryValue": {
+      "tableName": "InterviewComplementaryValue",
+      "domain": "interviews",
+      "migrationStage": "canonical",
+      "targetAuthority": "InterviewOutreachManagementService",
+      "risk": "medium",
+      "writers": [
+        {
+          "path": "src/services/interviewOutreachManagement.js",
+          "role": "canonical",
+          "reason": "Única autoridad para persistir valores complementarios individuales por candidato"
+        }
+      ]
+    },
     "message": {
       "tableName": "Message",
       "domain": "conversation",
