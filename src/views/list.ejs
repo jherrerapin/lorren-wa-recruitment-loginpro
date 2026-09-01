@@ -597,7 +597,6 @@
   function candidateWhatsappHref(candidate) {
     return '/admin/candidates/' + candidate.id + '/open-whatsapp?returnTo=' + encodeURIComponent(currentAdminReturnPath);
   }
-
   function candidateDetailHref(candidate) {
     return '/admin/candidates/' + candidate.id + '?returnTo=' + encodeURIComponent(currentAdminReturnPath);
   }
@@ -1107,6 +1106,11 @@
           candidateMatchesVacancyFilters(candidate, currentVacancyFilters, v)
           && candidateMatchesVacancySearch(candidate, currentVacancySearch)
         ));
+        const hasRegisteredExport = v.registeredNoBooking.length > 0 || v.registeredComplete.length > 0;
+        const hasPendingHvExport = v.completeWithoutCv.length > 0;
+        const hasApprovedExport = v.approvedCandidates.length > 0;
+        const hasContractedExport = v.contractedCandidates.length > 0;
+        const hasAnyCandidateExport = hasRegisteredExport || hasPendingHvExport || hasApprovedExport || hasContractedExport;
         const vacancyFiltersActive = vacancyFilterFields.some((field) => currentVacancyFilters[field]);
         const vacancySearchActive = Boolean(currentVacancySearch.text);
         const clearVacancyFilterParams = new URLSearchParams();
@@ -1400,13 +1404,13 @@
                         </div>
                       <% } %>
                       <div class="candidate-doc"><%= c.documentType && c.documentNumber ? c.documentType + ' ' + c.documentNumber : '—' %><% if (c.age) { %>&nbsp;&middot;&nbsp;<%= c.age %> años<% } %></div>
-                    <% const candidateMeta = candidateOperationalMeta(c, { residenceContext: v }); %>
-                    <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
-                    <% const registeredCompleteNote = candidateObservationSnippet(c); %>
-                    <% if (registeredCompleteNote) { %><div class="candidate-note">Observaciones: <%= registeredCompleteNote %></div><% } %>
-                    <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
-                    <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
-                  </div>
+                      <% const candidateMeta = candidateOperationalMeta(c, { residenceContext: v }); %>
+                      <% if (candidateMeta) { %><div class="candidate-extra"><%= candidateMeta %></div><% } %>
+                      <% const registeredCompleteNote = candidateObservationSnippet(c); %>
+                      <% if (registeredCompleteNote) { %><div class="candidate-note">Observaciones: <%= registeredCompleteNote %></div><% } %>
+                      <div class="candidate-dev-meta">Fecha de registro: <%= formatDateTimeCO(c.createdAt) %></div>
+                      <% if (role === 'dev') { %><div class="candidate-dev-meta"><%= candidateLastMessageLabel(c) %></div><% } %>
+                    </div>
                     <div class="candidate-phone"><a href="<%= candidateWhatsappHref(c) %>" <%= role === 'dev' ? '' : 'target="_blank" rel="noopener"' %>>📱 <%= formatCandidatePhone(c.phone) %></a></div>
                     <span class="badge <%= stBadge.cls %>"><%= stBadge.label %></span>
                     <span class="cv-pill <%= c.hasCv ? 'cv-yes' : 'cv-no' %>"><%= c.hasCv ? '✓ HV' : 'Sin HV' %></span>
@@ -1593,12 +1597,12 @@
         </div>
 
         <div class="export-bar">
-          <a href="/admin/export?scope=registered&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar registrados</a>
-          <a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar pendientes HV</a>
-          <a href="/admin/export?scope=approved&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar aprobados</a>
-          <a href="/admin/export?scope=all&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar todos</a>
-          <a href="/admin/export?scope=contracted&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">Contratados</a>
-          <a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a>
+          <% if (hasRegisteredExport) { %><a href="/admin/export?scope=registered&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar registrados</a><% } %>
+          <% if (hasPendingHvExport) { %><a href="/admin/export?scope=missing_cv_complete&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar pendientes HV</a><% } %>
+          <% if (hasApprovedExport) { %><a href="/admin/export?scope=approved&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar aprobados</a><% } %>
+          <% if (hasAnyCandidateExport) { %><a href="/admin/export?scope=all&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar todos</a><% } %>
+          <% if (hasContractedExport) { %><a href="/admin/export?scope=contracted&vacancyId=<%= encodeURIComponent(v.id) %>" class="export-btn">↓ Descargar contratados</a><% } %>
+          <% if (hasApprovedExport) { %><a href="/admin/outreach/approved" class="export-btn">↗ Mensajes a aprobados</a><% } %>
           <a href="/admin/vacancies" class="export-btn" style="margin-left:auto;">⚙️ Gestionar vacantes</a>
         </div>
       </div>
@@ -1758,6 +1762,5 @@
 
 </body>
 </html>
-
 
 
