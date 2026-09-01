@@ -53,7 +53,7 @@ function handoffCandidate(messages = []) {
   };
 }
 
-test('la plantilla Meta incluye seis variables y dos Quick Replies estables por defecto', () => {
+test('la plantilla Meta incluye siete variables y dos Quick Replies estables por defecto', () => {
   assert.equal(INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD, DASHBOARD_CONFIRM_PAYLOAD);
   assert.equal(INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD, DASHBOARD_DECLINE_PAYLOAD);
 
@@ -66,13 +66,14 @@ test('la plantilla Meta incluye seis variables y dos Quick Replies estables por 
       '27 de agosto de 2026',
       '8:00 a. m.',
       'Dirección Prueba',
-      '+57 300 765 4321'
+      '+57 300 765 4321',
+      'Usuario Prueba'
     ]
   });
 
   assert.equal(payload.type, 'template');
   assert.equal(payload.template.components[0].type, 'body');
-  assert.equal(payload.template.components[0].parameters.length, 6);
+  assert.equal(payload.template.components[0].parameters.length, 7);
   assert.deepEqual(payload.template.components.slice(1), [
     {
       type: 'button',
@@ -303,12 +304,16 @@ test('Monitor excluye candidatos transferidos a coordinación humana', async () 
   assert.deepEqual(result, [visible]);
 });
 
-test('la configuración usa teléfono colombiano persistido y construye las seis variables', () => {
-  const coordinator = normalizeCoordinatorContactPhone('3007654321');
-  assert.deepEqual(coordinator, {
+test('la configuración usa teléfono persistido, coordinador autenticado y construye siete variables', () => {
+  const phone = normalizeCoordinatorContactPhone('3007654321');
+  assert.deepEqual(phone, {
     apiPhone: '573007654321',
     displayPhone: '+57 300 765 4321'
   });
+  const coordinator = {
+    ...phone,
+    displayName: 'Usuario Prueba'
+  };
 
   const delivery = buildApprovedInterviewTemplateDelivery({
     fullName: 'Persona Prueba',
@@ -319,11 +324,26 @@ test('la configuración usa teléfono colombiano persistido y construye las seis
     interviewAddress: 'Dirección Prueba'
   }, coordinator);
 
-  assert.equal(delivery.parameters.length, 6);
+  assert.equal(delivery.parameters.length, 7);
   assert.equal(delivery.parameters[0], 'Persona Prueba');
   assert.equal(delivery.parameters[1], 'Vacante Prueba');
   assert.equal(delivery.parameters[4], 'Dirección Prueba');
   assert.equal(delivery.parameters[5], '+57 300 765 4321');
+  assert.equal(delivery.parameters[6], 'Usuario Prueba');
+  assert.match(delivery.body, /WhatsApp \+57 300 765 4321 y pregunta por Usuario Prueba/);
+  assert.doesNotMatch(delivery.body, /\{\{[1-7]\}\}/);
+});
+
+test('el builder rechaza una plantilla de siete variables sin nombre de coordinador', () => {
+  const phone = normalizeCoordinatorContactPhone('3007654321');
+  assert.throws(() => buildApprovedInterviewTemplateDelivery({
+    fullName: 'Persona Prueba',
+    vacancy: { title: 'Vacante Prueba' }
+  }, {
+    interviewDate: '2026-08-27',
+    interviewTime: '08:00',
+    interviewAddress: 'Dirección Prueba'
+  }, phone), /interview_outreach_coordinator_name_required/);
 });
 
 test('el dashboard muestra la respuesta individual de todos los citados sin crear agenda automática', () => {
@@ -403,6 +423,7 @@ test('el flujo de outreach no crea bookings ni activa schedulingEnabled', () => 
   assert.match(postRoute, /deliverManualOutboundText/);
   assert.match(postRoute, /sendTemplateMessage/);
   assert.match(postRoute, /finalizeApprovedInterviewOutreachHandoff/);
+  assert.match(postRoute, /coordinatorContact\.displayName/);
   assert.doesNotMatch(postRoute, /interviewBooking\.(?:create|createMany|update|upsert)/);
   assert.doesNotMatch(postRoute, /schedulingEnabled\s*:/);
 });
