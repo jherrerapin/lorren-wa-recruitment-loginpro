@@ -83,8 +83,7 @@ function session(overrides = {}) {
     reviews: [],
     source: 'SYSTEM'
   };
-  value.assignment = assignment(value);
-  value.assignment.attendanceSession = value;
+  value.assignment = assignment();
   return value;
 }
 
