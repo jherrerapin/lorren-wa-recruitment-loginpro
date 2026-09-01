@@ -215,7 +215,7 @@ jobs:
 
   full-validation:
     name: Full validation and inherited debt comparison
-    if: ${{ (github.event_name == 'pull_request' && github.event.pull_request.draft == false) || (github.event_name == 'workflow_dispatch' && inputs.full_suite) }}
+    if: ${{ always() && ((github.event_name == 'pull_request' && github.event.pull_request.draft == false) || (github.event_name == 'workflow_dispatch' && inputs.full_suite)) }}
     needs: quick
     runs-on: ubuntu-latest
     timeout-minutes: 12
