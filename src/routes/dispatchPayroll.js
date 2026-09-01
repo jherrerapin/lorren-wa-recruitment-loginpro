@@ -752,6 +752,7 @@ async function reportForRequest(prisma, req, source) {
 function renderPayrollExcelCustomizer(res, req, report, options = {}) {
   const selectedColumns = options.selectedColumns ?? PAYROLL_EXCEL_COLUMNS.map((column) => column.key);
   const selectedWorkerIds = options.selectedWorkerIds ?? (report.rows || []).map((row) => row.workerId);
+  const exportSource = options.exportSource ?? req.query ?? {};
   return res.render('operacionesNominaExport', {
     pageTitle: 'Personalizar Excel de nómina',
     role: roleFromRequest(req),
@@ -759,7 +760,7 @@ function renderPayrollExcelCustomizer(res, req, report, options = {}) {
     payrollExcelColumnGroups: PAYROLL_EXCEL_COLUMN_GROUPS,
     selectedColumns: new Set(selectedColumns),
     selectedWorkerIds: new Set(selectedWorkerIds),
-    exportParams: [...safeQuery(req.query || {}).entries()],
+    exportParams: [...safeQuery(exportSource).entries()],
     error: options.error || null
   });
 }
@@ -929,23 +930,32 @@ export function dispatchPayrollRouter(prisma) {
   router.get('/export.xlsx', async (req, res) => {
     try {
       const report = await reportForRequest(prisma, req, req.query || {});
-      const downloadRequested = normalizeString(req.query?.download, 10) === '1';
-      if (!downloadRequested) return renderPayrollExcelCustomizer(res, req, report);
+      return renderPayrollExcelCustomizer(res, req, report);
+    } catch (error) {
+      return redirectToPayroll(res, sanitizedPayrollInput(req, req.query), { error: publicError(error) });
+    }
+  });
 
-      const selectedColumns = normalizePayrollExcelColumns(req.query?.columns);
-      const selectedWorkerIds = normalizeWorkerIds(req.query?.exportWorkerId);
+  router.post('/export.xlsx', formParser, async (req, res) => {
+    const source = req.body || {};
+    try {
+      const report = await reportForRequest(prisma, req, source);
+      const selectedColumns = normalizePayrollExcelColumns(source.columns);
+      const selectedWorkerIds = normalizeWorkerIds(source.exportWorkerId);
       if (!selectedColumns.length) {
         return renderPayrollExcelCustomizer(res, req, report, {
           error: publicError(new Error('payroll_export_columns_required')),
           selectedColumns,
-          selectedWorkerIds
+          selectedWorkerIds,
+          exportSource: source
         });
       }
       if ((report.rows || []).length && !selectedWorkerIds.length) {
         return renderPayrollExcelCustomizer(res, req, report, {
           error: publicError(new Error('payroll_export_workers_required')),
           selectedColumns,
-          selectedWorkerIds
+          selectedWorkerIds,
+          exportSource: source
         });
       }
 
@@ -956,7 +966,8 @@ export function dispatchPayrollRouter(prisma) {
         return renderPayrollExcelCustomizer(res, req, report, {
           error: publicError(new Error('payroll_export_workers_required')),
           selectedColumns,
-          selectedWorkerIds
+          selectedWorkerIds,
+          exportSource: source
         });
       }
 
@@ -966,7 +977,7 @@ export function dispatchPayrollRouter(prisma) {
       res.set('Content-Disposition', `attachment; filename="${reportFilename(exportReport, 'xlsx')}"`);
       return res.send(Buffer.from(buffer));
     } catch (error) {
-      return redirectToPayroll(res, sanitizedPayrollInput(req, req.query), { error: publicError(error) });
+      return redirectToPayroll(res, sanitizedPayrollInput(req, source), { error: publicError(error) });
     }
   });
 

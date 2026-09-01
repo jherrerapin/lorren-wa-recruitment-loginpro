@@ -23,8 +23,7 @@
   <% if(error){ %><div class="export-error" id="server-export-error"><%= error %></div><% } %>
   <div class="export-error" id="client-export-error" hidden></div>
 
-  <form method="get" action="/admin/operaciones/asistencia/nomina/export.xlsx" id="payroll-export-form">
-    <input type="hidden" name="download" value="1"/>
+  <form method="post" action="/admin/operaciones/asistencia/gestion-tiempo/export.xlsx" id="payroll-export-form">
     <% for(const [key,value] of exportParams){ %><input type="hidden" name="<%= key %>" value="<%= value %>"/><% } %>
 
     <div class="export-layout">
