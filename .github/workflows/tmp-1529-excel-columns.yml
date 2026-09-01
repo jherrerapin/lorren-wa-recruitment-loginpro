@@ -1,0 +1,129 @@
+name: Temporary 1529 excel columns
+
+on:
+  push:
+    branches:
+      - fix/1529-recruiter-vacancy-exports
+    paths:
+      - .github/workflows/tmp-1529-excel-columns.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/1529-recruiter-vacancy-exports
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Apply Excel column change and regression
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          admin_path = Path('src/routes/admin.js')
+          admin = admin_path.read_text()
+
+          old_columns = """    sheet.columns = [
+              { header: 'Nombre', key: 'fullName', width: 28 },
+              { header: 'Teléfono', key: 'phone', width: 18 },
+              { header: 'WhatsApp', key: 'whatsappLink', width: 20 },
+              { header: 'Doc. Tipo', key: 'documentType', width: 12 },
+              { header: 'Doc. Número', key: 'documentNumber', width: 18 },
+              { header: 'Edad', key: 'age', width: 8 },
+              { header: 'Barrio', key: 'neighborhood', width: 20 },
+              { header: 'Localidad', key: 'locality', width: 18 },
+              { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
+              { header: 'Transporte', key: 'transportMode', width: 16 },
+              { header: 'Estado', key: 'status', width: 14 },
+              { header: 'Tiene HV', key: 'hasCV', width: 10 },
+              { header: 'Fecha registro', key: 'createdAt', width: 20 },
+            ];"""
+          new_columns = """    sheet.columns = [
+              { header: 'Fecha registro', key: 'createdAt', width: 20 },
+              { header: 'Nombre', key: 'fullName', width: 28 },
+              { header: 'Teléfono', key: 'phone', width: 18 },
+              { header: 'WhatsApp', key: 'whatsappLink', width: 20 },
+              { header: 'Doc. Tipo', key: 'documentType', width: 12 },
+              { header: 'Doc. Número', key: 'documentNumber', width: 18 },
+              { header: 'Edad', key: 'age', width: 8 },
+              { header: 'Barrio', key: 'neighborhood', width: 20 },
+              { header: 'Localidad', key: 'locality', width: 18 },
+              { header: 'Restricciones', key: 'medicalRestrictions', width: 20 },
+              { header: 'Transporte', key: 'transportMode', width: 16 },
+              { header: 'Tiene HV', key: 'hasCV', width: 10 },
+            ];"""
+          if old_columns not in admin:
+              raise SystemExit('expected Excel columns block not found')
+          admin = admin.replace(old_columns, new_columns, 1)
+
+          old_status = """    const statusColors = {
+              REGISTRADO: 'FFDCFCE7',
+              VALIDANDO: 'FFDBEAFE',
+              APROBADO: 'FFD1FAE5',
+              CONTACTADO: 'FFEDE9FE',
+              CONTRATADO: 'FFE0F2FE',
+              RECHAZADO: 'FFFEE2E2',
+              NUEVO: 'FFF3F4F6'
+            };
+          """
+          if old_status not in admin:
+              raise SystemExit('expected status colors block not found')
+          admin = admin.replace(old_status, '', 1)
+
+          old_status_cell = """      const statusCell = row.getCell('status');
+              const statusColor = statusColors[String(statusCell.value || '').toUpperCase()] || 'FFFFFFFF';
+              statusCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: statusColor } };
+              statusCell.font = { bold: true, color: { argb: 'FF1F2937' } };
+
+          """
+          if old_status_cell not in admin:
+              raise SystemExit('expected status cell formatting block not found')
+          admin = admin.replace(old_status_cell, '', 1)
+          admin_path.write_text(admin)
+
+          test_path = Path('test/candidateExport.test.js')
+          tests = test_path.read_text()
+          marker = "test('ruta /admin/export acepta missing_cv_complete como scope válido', () => {"
+          regression = r"""test('Excel por vacante pone fecha de registro primero y no exporta estado', () => {
+            const adminRouteSource = fs.readFileSync('src/routes/admin.js', 'utf8');
+            const exportStart = adminRouteSource.indexOf("router.get('/export'");
+            const exportEnd = adminRouteSource.indexOf("router.get('/outreach/approved'", exportStart);
+            const exportSource = adminRouteSource.slice(exportStart, exportEnd);
+            const columnsMatch = exportSource.match(/sheet\.columns = \[([\s\S]*?)\n    \];/);
+            assert.ok(columnsMatch, 'debe existir la definición de columnas del Excel');
+            const headers = [...columnsMatch[1].matchAll(/header: '([^']+)'/g)].map((match) => match[1]);
+            assert.equal(headers[0], 'Fecha registro');
+            assert.equal(headers.includes('Estado'), false);
+            assert.doesNotMatch(exportSource, /const statusColors =/);
+            assert.doesNotMatch(exportSource, /row\.getCell\('status'\)/);
+          });
+
+          """
+          if marker not in tests:
+              raise SystemExit('test insertion marker not found')
+          if "Excel por vacante pone fecha de registro primero" not in tests:
+              tests = tests.replace(marker, regression + marker, 1)
+          test_path.write_text(tests)
+          PY
+      - run: node --test test/candidateExport.test.js
+      - run: node --check src/routes/admin.js
+      - name: Commit focused change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/admin.js test/candidateExport.test.js
+          git diff --cached --check
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "fix(recruitment): reorder vacancy export columns"
+          git push origin HEAD:fix/1529-recruiter-vacancy-exports
