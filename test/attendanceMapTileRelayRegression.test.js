@@ -108,6 +108,26 @@ test('el relay identifica Lórren, conserva referer y reutiliza la tesela cachea
   assert.deepEqual([...first.body], [137, 80, 78, 71]);
 });
 
+test('el relay respeta no-store y no reutiliza esa respuesta', async () => {
+  clearAttendanceMapTileRelayCacheForTests();
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    return imageResponse({ responseHeaders: { 'cache-control': 'no-store' } });
+  };
+  const first = await loadAttendanceMapTile(
+    { z: 3, x: 2, y: 2 },
+    { fetchImpl, nowMs: 30_000 }
+  );
+  const second = await loadAttendanceMapTile(
+    { z: 3, x: 2, y: 2 },
+    { fetchImpl, nowMs: 31_000 }
+  );
+  assert.equal(first.cacheControl, 'public, max-age=0');
+  assert.equal(second.cacheControl, 'public, max-age=0');
+  assert.equal(calls, 2);
+});
+
 test('el relay rechaza respuestas que no sean imágenes', async () => {
   clearAttendanceMapTileRelayCacheForTests();
   await assert.rejects(
