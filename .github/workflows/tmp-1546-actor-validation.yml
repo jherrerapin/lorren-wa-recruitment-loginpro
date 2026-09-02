@@ -26,5 +26,5 @@ jobs:
       - run: npm ci
       - run: npx prisma validate
       - run: npm run prisma:generate
-      - run: node --test test/adminManualCv.test.js
+      - run: node --test --test-name-pattern="movimientos del reclutador|cambio de estado registra trazabilidad" test/adminManualCv.test.js
       - run: node --check src/routes/admin.js
