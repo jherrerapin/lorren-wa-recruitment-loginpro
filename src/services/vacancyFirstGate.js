@@ -144,15 +144,15 @@ function buildNeedRoleForCityReply(city = null, roleHint = null, inboundText = '
   const normalized = normalizeResolverText(inboundText);
   const asksCompany = /\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized);
   const companyAnswer = asksCompany
-    ? 'El proceso de selección lo gestiona LoginPro Service. Para decirte la empresa u operación exacta necesito identificar primero la vacante.'
+    ? 'El proceso de selección lo gestiona LoginPro Service. Para decirte la empresa u operación exacta necesito ubicar primero el proceso correcto.'
     : '';
   const hasRoleHint = Boolean(String(roleHint || '').trim());
   if (hasRoleHint) {
-    return [companyAnswer, 'Ya tengo la ciudad y el cargo de interés. ¿Para qué operación o vacante viste la convocatoria?']
+    return [companyAnswer, 'Ya tengo la ciudad y el cargo. Para ubicar la convocatoria correcta, ¿recuerdas la operación o el anuncio por el que nos contactaste?']
       .filter(Boolean)
       .join(' ');
   }
-  return [companyAnswer || 'Gracias por contarme desde dónde escribes.', '¿Para qué vacante o cargo estás interesado?']
+  return [companyAnswer || 'Gracias por contarme desde dónde escribes.', 'Para ubicar bien tu proceso, ¿recuerdas qué cargo viste en el anuncio por el que nos contactaste?']
     .filter(Boolean)
     .join(' ');
 }
@@ -902,7 +902,7 @@ export async function resolveVacancyFirstGate({
     reason: 'VACANCY_NOT_RESOLVED',
     replyKind: 'ASK_CITY_AND_ROLE',
     candidateUpdates: { currentStep: GREETING_SENT },
-    reply: 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante?',
+    reply: 'Hola, gracias por comunicarte con LoginPro. Para ubicar el proceso correcto, cuéntame desde qué ciudad nos escribes y qué cargo viste en el anuncio.',
     resolution
   }, { recentMessages, inboundText, city: resolution?.city, currentStep });
 }
