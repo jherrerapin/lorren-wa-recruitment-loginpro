@@ -155,7 +155,7 @@ test('la configuración usa actor y teléfono persistidos y construye solo las t
   assert.match(delivery.body, /Coordinación Prueba/);
   assert.match(delivery.body, /proceso es gratuito/i);
   assert.match(delivery.body, /No somos una bolsa de empleo/i);
-  assert.match(delivery.body, /nunca te pediremos dinero para postularte, asistir o continuar/i);
+  assert.match(delivery.body, /Nunca te pediremos dinero para asistir o continuar y no somos una bolsa de empleo\./i);
   assert.doesNotMatch(delivery.body, /LoginPro Service/i);
   assert.doesNotMatch(delivery.body, /Te esperamos|Dirección Prueba|8:00|27 de agosto/);
 });
