@@ -29,7 +29,6 @@
     .field input, .field select {
       border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: inherit; background: #fff;
     }
-    .field input[readonly] { background: #f8fafc; color: #475569; }
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px;
@@ -99,8 +98,11 @@
     <% if (preparedError) { %>
       <div class="alert alert-error"><%= preparedError %></div>
     <% } %>
+    <% if (!coordinatorContact?.name) { %>
+      <div class="alert alert-warning">Tu usuario no tiene un nombre configurado para identificar al coordinador. Configura el perfil antes de enviar citaciones.</div>
+    <% } %>
     <% if (!coordinatorContact?.apiPhone) { %>
-      <div class="alert alert-warning">Tu usuario no tiene un número móvil colombiano válido configurado para coordinación. Configúralo antes de enviar citaciones.</div>
+      <div class="alert alert-warning">Tu usuario no tiene un número móvil colombiano válido configurado para coordinación. Configúralo en el perfil antes de enviar citaciones.</div>
     <% } %>
 
     <div class="card">
@@ -141,7 +143,7 @@
         <div class="template-actions" aria-label="Acción requerida de la plantilla">
           <span class="template-action">Contactar a coordinador</span>
         </div>
-        <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener un botón URL dinámico <strong>Contactar a coordinador</strong> con base <code>https://wa.me/{{1}}</code>. Lórren suministra como variable del botón el número del usuario que gestiona esta ronda, sin exponer un campo manual para editarlo.</p>
+        <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener un botón URL dinámico <strong>Contactar a coordinador</strong> con base <code>https://wa.me/{{1}}</code>. Lórren suministra como variable del botón el número del usuario que gestiona esta ronda; el nombre y el teléfono se toman automáticamente del usuario autenticado y no se diligencian en este módulo.</p>
       </div>
     <% } %>
 
@@ -151,8 +153,8 @@
         <input type="hidden" name="city" value="<%= outreachFilters.city %>" />
         <input type="hidden" name="vacancyId" value="<%= outreachFilters.vacancyId %>" />
 
-        <div class="config-grid">
-          <% if (role === 'dev') { %>
+        <% if (role === 'dev') { %>
+          <div class="config-grid">
             <div class="field">
               <label for="templateName">Nombre de plantilla</label>
               <input id="templateName" name="templateName" value="<%= outreachConfig.templateName %>" required autocomplete="off" />
@@ -161,18 +163,10 @@
               <label for="templateLanguage">Idioma Meta</label>
               <input id="templateLanguage" name="templateLanguage" value="<%= outreachConfig.templateLanguage %>" required autocomplete="off" />
             </div>
-          <% } %>
-          <div class="field">
-            <label for="coordinatorName">Gestionante / coordinador</label>
-            <input id="coordinatorName" value="<%= coordinatorContact?.name || 'Usuario actual' %>" readonly />
-            <span class="hint">Se toma automáticamente del usuario que está ejecutando la citación.</span>
           </div>
-          <div class="field">
-            <label for="coordinatorPhone">WhatsApp de coordinación</label>
-            <input id="coordinatorPhone" value="<%= coordinatorContact?.displayPhone || 'Sin número configurado' %>" readonly />
-            <span class="hint">El botón “Contactar a coordinador” abrirá este WhatsApp.</span>
-          </div>
-        </div>
+        <% } %>
+
+        <p class="hint" style="margin-top:<%= role === 'dev' ? '12px' : '0' %>;">El gestionante y su WhatsApp se toman automáticamente del usuario que realiza este envío. No debes diligenciar esos datos aquí.</p>
 
         <div class="separator"></div>
 
@@ -210,7 +204,7 @@
             </tbody>
           </table>
           <div class="toolbar">
-            <button type="submit" class="btn btn-primary" <%= coordinatorContact?.apiPhone ? '' : 'disabled' %>><%= role === 'dev' ? 'Enviar citaciones por Meta' : 'Enviar citaciones' %></button>
+            <button type="submit" class="btn btn-primary" <%= coordinatorContact?.name && coordinatorContact?.apiPhone ? '' : 'disabled' %>><%= role === 'dev' ? 'Enviar citaciones por Meta' : 'Enviar citaciones' %></button>
             <span class="hint"><%= role === 'dev' ? 'Solo los envíos aceptados por Meta pasarán a Contactados.' : 'Solo los envíos realizados correctamente pasarán a Contactados.' %></span>
           </div>
         <% } %>

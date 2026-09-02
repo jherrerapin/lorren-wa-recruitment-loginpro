@@ -177,7 +177,7 @@ test('Outreach aprobado encadena Sucursal -> Vacante en el navegador', () => {
   assert.match(view, /citySelect\.addEventListener\('change', syncVacanciesToCity\)/);
 });
 
-test('ADMIN ve al coordinador pero no recibe detalles técnicos ni agenda previa', () => {
+test('ADMIN no diligencia ni visualiza nombre o teléfono del gestionante en el módulo', () => {
   const html = renderInterviewOutreach('admin');
 
   assert.doesNotMatch(html, /Plantilla oficial de Meta/);
@@ -193,16 +193,15 @@ test('ADMIN ve al coordinador pero no recibe detalles técnicos ni agenda previa
   assert.doesNotMatch(html, /citacion_entrevista_loginpro|es_CO/);
   assert.doesNotMatch(html, /interviewDate|interviewTime|interviewAddress/);
   assert.doesNotMatch(html, /Fecha de entrevista|Hora de entrevista|Dirección de citación/);
-
-  assert.match(html, /<label for="coordinatorName">Gestionante \/ coordinador<\/label>/);
-  assert.match(html, /Coordinación Ejemplo/);
-  assert.match(html, /<label for="coordinatorPhone">WhatsApp de coordinación<\/label>/);
-  assert.match(html, /\+57 300 000 0000/);
+  assert.doesNotMatch(html, /id="coordinatorName"|id="coordinatorPhone"/);
+  assert.doesNotMatch(html, /Coordinación Ejemplo|\+57 300 000 0000/);
+  assert.match(html, /El gestionante y su WhatsApp se toman automáticamente del usuario que realiza este envío/);
   assert.match(html, />Enviar citaciones<\/button>/);
 });
 
-test('backend conserva solo la configuración canónica de plantilla cuando ADMIN no envía campos técnicos', () => {
+test('backend conserva solo la configuración canónica y toma coordinador desde AppUser autenticado', () => {
   const config = normalizeInterviewOutreachConfig({});
+  const adminSource = readSource('src/routes/admin.js');
 
   assert.deepEqual(config, {
     templateName: 'citacion_entrevista_loginpro',
@@ -211,9 +210,14 @@ test('backend conserva solo la configuración canónica de plantilla cuando ADMI
   assert.equal(Object.hasOwn(config, 'interviewDate'), false);
   assert.equal(Object.hasOwn(config, 'interviewTime'), false);
   assert.equal(Object.hasOwn(config, 'interviewAddress'), false);
+  assert.match(adminSource, /req\.userId \|\| req\.session\?\.userId/);
+  assert.match(adminSource, /displayName:\s*true, recoveryPhone:\s*true, dispatchAlertPhone:\s*true/);
+  assert.match(adminSource, /const dispatchPhone = normalizeCoordinatorContactPhone\(user\?\.dispatchAlertPhone\)/);
+  assert.match(adminSource, /const recoveryPhone = normalizeCoordinatorContactPhone\(user\?\.recoveryPhone\)/);
+  assert.doesNotMatch(adminSource, /req\.body\.(?:coordinatorName|coordinatorPhone)/);
 });
 
-test('DEV documenta tres variables y el CTA dinámico al coordinador', () => {
+test('DEV documenta tres variables y el CTA dinámico al coordinador sin campos manuales', () => {
   const html = renderInterviewOutreach('dev');
 
   assert.match(html, /Plantilla oficial de Meta/);
@@ -223,6 +227,7 @@ test('DEV documenta tres variables y el CTA dinámico al coordinador', () => {
   assert.match(html, /Contactar a coordinador/);
   assert.match(html, /https:\/\/wa\.me\/\{\{1\}\}/);
   assert.doesNotMatch(html, /Quick Reply|Confirmo asistencia|No puedo asistir/);
+  assert.doesNotMatch(html, /id="coordinatorName"|id="coordinatorPhone"/);
   assert.match(html, /id="templateName" name="templateName" value="citacion_entrevista_loginpro"/);
   assert.match(html, /id="templateLanguage" name="templateLanguage" value="es_CO"/);
 });
