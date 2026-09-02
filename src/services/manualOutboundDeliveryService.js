@@ -440,6 +440,7 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
       const candidateResult = await finalizeManualOutboundDelivery(tx, {
         candidateId,
         expected: preparation.claimed,
+        previous: preparation.previous,
         sentAt
       });
 
