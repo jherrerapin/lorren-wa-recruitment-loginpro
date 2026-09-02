@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildInboundResumeUpdate, describeResumeBehavior, shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';
+import { EXPLICIT_ADMIN_PAUSE_MODE, buildInboundResumeUpdate, describeResumeBehavior, shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';
 
 test('si botPaused=true se bloquea automatización', () => {
   assert.equal(shouldBlockAutomation({ botPaused: true }), true);
@@ -36,6 +36,19 @@ test('pausa manual se puede reanudar con el siguiente inbound del candidato', ()
   assert.equal(update.botPaused, false);
   assert.equal(update.botResumeMode, 'resumed_by_candidate_inbound');
   assert.equal(update.reminderState, 'CANCELLED');
+});
+
+test('pausa explícita de DEV solo se levanta con reactivación administrativa', () => {
+  const candidate = {
+    botPaused: true,
+    botPausedBy: 'dev',
+    botPauseReason: 'Pausa manual desde admin',
+    botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE
+  };
+
+  assert.equal(shouldResumeAutomationOnInbound(candidate), false);
+  assert.equal(shouldBlockAutomation(candidate, { direction: 'INBOUND' }), true);
+  assert.equal(shouldBlockAutomation(candidate, { direction: 'OUTBOUND' }), true);
 });
 
 test('pausa no manual sigue bloqueando automatizacion en inbound', () => {

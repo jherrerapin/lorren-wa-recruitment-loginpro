@@ -1,6 +1,6 @@
 import { CandidateStatus, ConversationStep, ReminderState } from '@prisma/client';
 import { buildManualWhatsAppOpenCandidateUpdate } from './adminOutboundPolicy.js';
-import { buildInboundResumeUpdate } from './botAutomationPolicy.js';
+import { buildInboundResumeUpdate, EXPLICIT_ADMIN_PAUSE_MODE } from './botAutomationPolicy.js';
 import { hasMaterialProfileData, isSilentProfileCaptureMode } from './silentProfileCapture.js';
 
 export const MANUAL_OUTBOUND_SENDING_MODE = 'manual_outbound_sending';
@@ -198,7 +198,7 @@ export async function pauseCandidateAutomationFromAdmin(client, input = {}) {
       botPausedAt: now,
       botPausedBy: actor,
       botPauseReason: reason,
-      botResumeMode: 'manual_resume_dashboard',
+      botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE,
       reminderScheduledFor: null,
       reminderState: 'CANCELLED'
     }

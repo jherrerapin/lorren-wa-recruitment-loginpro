@@ -9,7 +9,10 @@ import {
 } from './conversationMessageRepository.js';
 import { extractMessages, sendTextMessage } from './whatsapp.js';
 
+export const EXPLICIT_ADMIN_PAUSE_MODE = 'manual_pause_until_admin_resume';
+
 const NON_AUTO_RESUMABLE_MODES = new Set([
+  EXPLICIT_ADMIN_PAUSE_MODE,
   'manual_outbound_sending',
   'manual_outbound_delivery_unknown'
 ]);
