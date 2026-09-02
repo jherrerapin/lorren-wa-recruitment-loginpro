@@ -13,6 +13,8 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://validation:validation@localhost:5432/lorren_validation
     steps:
       - uses: actions/checkout@v4
         with:
