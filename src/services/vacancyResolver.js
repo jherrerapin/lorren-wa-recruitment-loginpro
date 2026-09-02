@@ -190,6 +190,60 @@ export function detectOperationZoneEvidence(text = '') {
     .map((entry) => entry.key);
 }
 
+function escapeLocationPattern(value = '') {
+  return normalizeResolverText(value)
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s+');
+}
+
+function locationSegments(text = '', location = '') {
+  const normalizedLocation = normalizeResolverText(location);
+  if (!normalizedLocation) return [];
+  return String(text || '')
+    .split(/[\n,;.!?]+/)
+    .map((segment) => normalizeResolverText(segment))
+    .filter((segment) => segment && ` ${segment} `.includes(` ${normalizedLocation} `));
+}
+
+export function classifyLocationMention(text = '', location = '') {
+  const locationPattern = escapeLocationPattern(location);
+  if (!locationPattern) return 'unspecified';
+  const segments = locationSegments(text, location);
+  if (!segments.length) return 'unspecified';
+
+  const vacancyTerms = '(?:vacante|vacantes|oferta|ofertas|convocatoria|convocatorias|empleo|empleos|trabajo|trabajos|cargo|cargos|puesto|puestos|operacion|proceso)';
+  const targetPatterns = [
+    new RegExp(`\\b${vacancyTerms}\\b.{0,80}\\b(?:en|para|de)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
+    new RegExp(`\\b(?:quiero|busco|deseo|necesito|me\\s+interesa)\\b.{0,60}\\b(?:trabajar|empleo|vacante|vacantes|cargo|puesto)\\b.{0,60}\\b(?:en|para)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
+    new RegExp(`\\b${vacancyTerms}\\b.{0,40}\\b(?:queda|esta|es|seria|será)\\b.{0,20}\\b(?:en|para)?\\s*${locationPattern}\\b`)
+  ];
+  const residencePatterns = [
+    new RegExp(`\\b(?:vivo|resido|radico|estoy\\s+radicad[oa]|soy)\\s+(?:en|de)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
+    new RegExp(`\\b(?:te\\s+escribo|les\\s+escribo|escribo|te\\s+hablo|les\\s+hablo|hablo)\\s+desde\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
+    new RegExp(`\\bdesde\\s+(?:el\\s+)?municipio\\s+de\\s+${locationPattern}\\b`),
+    new RegExp(`\\b(?:mi\\s+)?(?:ciudad|municipio|lugar)\\s+de\\s+residencia\\s+(?:es|queda)?\\s*(?:en\\s+)?${locationPattern}\\b`),
+    new RegExp(`\\b(?:mi\\s+)?residencia\\s+(?:es|queda)\\s+(?:en\\s+)?${locationPattern}\\b`)
+  ];
+
+  let lastExplicit = 'unspecified';
+  for (const segment of segments) {
+    if (targetPatterns.some((pattern) => pattern.test(segment))) lastExplicit = 'vacancy_target';
+    else if (residencePatterns.some((pattern) => pattern.test(segment))) lastExplicit = 'residence';
+  }
+  return lastExplicit;
+}
+
+function detectVacancyOperationZoneEvidence(text = '') {
+  return detectOperationZoneEvidence(text)
+    .filter((zone) => classifyLocationMention(text, zone) !== 'residence');
+}
+
+function detectResidenceLocation(text = '', detectedCity = null) {
+  if (detectedCity && classifyLocationMention(text, detectedCity) === 'residence') return detectedCity;
+  return detectOperationZoneEvidence(text)
+    .find((zone) => classifyLocationMention(text, zone) === 'residence') || null;
+}
+
 function cityMatchesVacancy(vacancy, requestedCity = '') {
   const normalizedRequestedCity = normalizeResolverText(requestedCity);
   const normalizedVacancyCity = normalizeResolverText(canonicalVacancyCity(vacancy));
@@ -503,12 +557,13 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   const trustedMatch = pickTrustedVacancy(options, allVacancies);
   if (trustedMatch) {
     if (!trustedMatch.found) {
-      return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'trusted_vacancy_not_found', source: 'metadata_config', fallback: false };
+      return { resolved: false, vacancy: null, city: null, residenceLocation: null, roleHint: null, reason: 'trusted_vacancy_not_found', source: 'metadata_config', fallback: false };
     }
     return {
       resolved: true,
       vacancy: trustedMatch.vacancy,
       city: canonicalVacancyCity(trustedMatch.vacancy),
+      residenceLocation: null,
       roleHint: null,
       reason: isVacancyOpen(trustedMatch.vacancy) ? 'matched_trusted_active_vacancy' : 'matched_trusted_inactive_vacancy',
       source: 'metadata_config',
@@ -517,16 +572,20 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   }
 
   const normalizedText = normalizeResolverText(text);
-  if (!normalizedText) return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'empty_input', source: 'text_inference_fallback', fallback: true };
+  if (!normalizedText) return { resolved: false, vacancy: null, city: null, residenceLocation: null, roleHint: null, reason: 'empty_input', source: 'text_inference_fallback', fallback: true };
   const activeVacancies = options.activeVacancies || options.vacancies || allVacancies.filter(isVacancyOpen);
-  if (!allVacancies.length) return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'no_vacancies_configured', source: 'text_inference_fallback', fallback: true };
+  if (!allVacancies.length) return { resolved: false, vacancy: null, city: null, residenceLocation: null, roleHint: null, reason: 'no_vacancies_configured', source: 'text_inference_fallback', fallback: true };
 
   const detectedCity = detectCityFromText(text, buildCityNames(allVacancies));
-  const city = detectedCity || options.cityHint || null;
-  const operationZones = detectOperationZoneEvidence(text);
+  const detectedCityMeaning = detectedCity ? classifyLocationMention(text, detectedCity) : 'unspecified';
+  const residenceLocation = detectResidenceLocation(text, detectedCity);
+  const city = detectedCityMeaning === 'residence'
+    ? null
+    : (detectedCity || options.cityHint || null);
+  const operationZones = detectVacancyOperationZoneEvidence(text);
   const localRoleHint = detectRoleHintFromText(text, { city });
   const roleHint = mergeRoleHints(options.roleHint, localRoleHint, city);
-  if (!city && !roleHint) return { resolved: false, vacancy: null, city: null, roleHint: null, reason: 'missing_city_and_role', source: 'text_inference_fallback', fallback: true };
+  if (!city && !roleHint) return { resolved: false, vacancy: null, city: null, residenceLocation, roleHint: null, reason: 'missing_city_and_role', source: 'text_inference_fallback', fallback: true };
 
   const matchingCityVacancies = city ? activeVacancies.filter((vacancy) => cityMatchesVacancy(vacancy, city)) : activeVacancies;
   const inactiveVacancies = allVacancies.filter((vacancy) => !isVacancyOpen(vacancy));
@@ -539,30 +598,30 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   const inactiveContext = { text, city, roleHint, operationZones, threshold, inactiveHasRoleEvidence };
 
   if (city && !matchingCityVacancies.length) {
-    if (canUseInactiveMatch(inactiveMatch, inactiveContext)) return { resolved: true, vacancy: inactiveMatch.best.vacancy, city, roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
-    return { resolved: false, vacancy: null, city, roleHint, reason: 'city_without_active_vacancies', source: 'text_inference_fallback', fallback: true };
+    if (canUseInactiveMatch(inactiveMatch, inactiveContext)) return { resolved: true, vacancy: inactiveMatch.best.vacancy, city, residenceLocation, roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
+    return { resolved: false, vacancy: null, city, residenceLocation, roleHint, reason: 'city_without_active_vacancies', source: 'text_inference_fallback', fallback: true };
   }
 
   if (!activeVacancies.length) {
-    if (canUseInactiveMatch(inactiveMatch, inactiveContext)) return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
-    return { resolved: false, vacancy: null, city, roleHint, reason: 'no_active_vacancies', source: 'text_inference_fallback', fallback: true };
+    if (canUseInactiveMatch(inactiveMatch, inactiveContext)) return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), residenceLocation, roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
+    return { resolved: false, vacancy: null, city, residenceLocation, roleHint, reason: 'no_active_vacancies', source: 'text_inference_fallback', fallback: true };
   }
 
-  if (city && !roleHint && matchingCityVacancies.length) return { resolved: false, vacancy: null, city, roleHint, reason: 'city_with_active_vacancies', source: 'text_inference_fallback', fallback: true };
+  if (city && !roleHint && matchingCityVacancies.length) return { resolved: false, vacancy: null, city, residenceLocation, roleHint, reason: 'city_with_active_vacancies', source: 'text_inference_fallback', fallback: true };
 
   const activeMatch = pickBestVacancyMatch(matchingCityVacancies, { text, city, roleHint, operationZones });
   const { best, runnerUp, margin } = activeMatch;
   const effectiveThreshold = roleHint ? threshold : 6;
   const activeHasRoleEvidence = hasEnoughRoleEvidence({ best }, roleHint);
   if (shouldPreferSpecificInactiveMatch(activeMatch, inactiveMatch, inactiveContext)) {
-    return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
+    return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), residenceLocation, roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
   }
   if (!best || best.score < effectiveThreshold || !activeHasRoleEvidence) {
     if (canUseInactiveMatch(inactiveMatch, inactiveContext) && (!best || !activeHasRoleEvidence)) {
-      return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
+      return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), residenceLocation, roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
     }
-    return { resolved: false, vacancy: null, city, roleHint, reason: 'low_confidence_match', source: 'text_inference_fallback', fallback: true };
+    return { resolved: false, vacancy: null, city, residenceLocation, roleHint, reason: 'low_confidence_match', source: 'text_inference_fallback', fallback: true };
   }
-  if (runnerUp && margin < 0.75) return { resolved: false, vacancy: null, city, roleHint, reason: 'ambiguous_match', source: 'text_inference_fallback', fallback: true };
-  return { resolved: true, vacancy: best.vacancy, city: city || canonicalVacancyCity(best.vacancy), roleHint, reason: 'matched_active_vacancy', source: 'text_inference_fallback', fallback: true };
+  if (runnerUp && margin < 0.75) return { resolved: false, vacancy: null, city, residenceLocation, roleHint, reason: 'ambiguous_match', source: 'text_inference_fallback', fallback: true };
+  return { resolved: true, vacancy: best.vacancy, city: city || canonicalVacancyCity(best.vacancy), residenceLocation, roleHint, reason: 'matched_active_vacancy', source: 'text_inference_fallback', fallback: true };
 }
