@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  CAMPAIGN_VACANCY_CONFIRMATION_MODE,
   buildVacancyQuestionReply,
   evaluateConsentBoundary,
   isConsentAcceptance,
@@ -14,6 +15,7 @@ import {
   getCandidateReadiness
 } from '../src/services/readinessGuard.js';
 import {
+  attributeCandidateCampaignFromMessage,
   extractMetaAttributionFields,
   resolveCampaignForReferral
 } from '../src/services/campaignAttribution.js';
@@ -205,16 +207,17 @@ test('si declara no tener experiencia no exige tiempo ni descripción', () => {
   assert.deepEqual(readiness.missingFields, []);
 });
 
-test('atribución prioriza coincidencia exacta y conserva identificadores Meta', () => {
+test('CTWA prioriza source_id exacto del anuncio y conserva identificadores Meta', () => {
   const campaigns = [
-    { id: 'campaign-1', code: '120000001', name: 'Neiva líder', notes: null },
+    { id: 'campaign-1', code: 'ad-55', name: 'Neiva líder', notes: null },
     { id: 'campaign-2', code: 'NEIVA-AUXILIAR', name: 'Neiva auxiliar', notes: null }
   ];
   const message = {
     referral: {
+      source_id: 'ad-55',
+      source_type: 'ad',
       campaign_id: '120000001',
       campaign_name: 'Campaña Neiva',
-      ad_id: 'ad-55',
       ctwa_clid: 'clid-99'
     }
   };
@@ -222,7 +225,7 @@ test('atribución prioriza coincidencia exacta y conserva identificadores Meta',
   const resolution = resolveCampaignForReferral(campaigns, message);
   assert.equal(resolution.campaign.id, 'campaign-1');
   assert.equal(resolution.reason, 'exact_campaign_match');
-  assert.equal(resolution.matchMode, 'objective_id_exact');
+  assert.equal(resolution.matchMode, 'meta_source_ad_id_exact');
   assert.deepEqual(extractMetaAttributionFields(message), {
     metaCtwaClid: 'clid-99',
     metaAdId: 'ad-55',
@@ -231,13 +234,15 @@ test('atribución prioriza coincidencia exacta y conserva identificadores Meta',
   });
 });
 
-test('un identificador objetivo gana sobre una coincidencia textual más larga', () => {
+test('source_id exacto gana sobre una coincidencia textual más larga', () => {
   const campaigns = [
-    { id: 'campaign-objective', code: '120000001', name: 'Campaña correcta', notes: null },
+    { id: 'campaign-objective', code: 'ad-objective', name: 'Campaña correcta', notes: null },
     { id: 'campaign-text', code: 'LIDER-OPERACION-NEIVA-JULIO-2026', name: 'Líder Operación Neiva Julio 2026', notes: null }
   ];
   const message = {
     referral: {
+      source_id: 'ad-objective',
+      source_type: 'ad',
       campaign_id: '120000001',
       ad_name: 'LIDER-OPERACION-NEIVA-JULIO-2026'
     }
@@ -245,7 +250,7 @@ test('un identificador objetivo gana sobre una coincidencia textual más larga',
 
   const resolution = resolveCampaignForReferral(campaigns, message);
   assert.equal(resolution.campaign.id, 'campaign-objective');
-  assert.equal(resolution.matchMode, 'objective_id_exact');
+  assert.equal(resolution.matchMode, 'meta_source_ad_id_exact');
 });
 
 test('un ad_id desconocido no degrada a una campaña de nombre parecido', () => {
@@ -302,4 +307,105 @@ test('atribución no elige arbitrariamente cuando dos campañas empatan', () => 
   assert.equal(resolution.campaign, null);
   assert.equal(resolution.reason, 'ambiguous_campaign_match');
   assert.equal(resolution.matches.length, 2);
+});
+
+function createCampaignAttributionPrisma({ candidate, campaigns }) {
+  const updates = [];
+  return {
+    updates,
+    prisma: {
+      candidate: {
+        async findUnique() {
+          return { ...candidate };
+        },
+        async update(args) {
+          updates.push(args);
+          return { id: args.where.id, ...args.data };
+        }
+      },
+      campaign: {
+        async findMany() {
+          return campaigns;
+        }
+      }
+    }
+  };
+}
+
+test('un nuevo click CTWA exacto reatribuye un candidato histórico al proceso consultado ahora', async () => {
+  const previous = {
+    id: 'candidate-returning-ctwa',
+    campaignId: 'campaign-old',
+    vacancyId: 'vac-old',
+    sourceType: 'META_ADS',
+    campaignCodeRaw: 'old-ad',
+    botResumeMode: null,
+    metaCtwaClid: 'clid-old',
+    metaAdId: 'ad-old',
+    metaCampaignId: null,
+    metaCampaignName: null
+  };
+  const target = {
+    id: 'campaign-siberia',
+    code: 'ad-siberia',
+    name: 'Anuncio Siberia',
+    notes: null,
+    sourceType: 'META_ADS',
+    vacancyId: 'vac-siberia'
+  };
+  const { prisma, updates } = createCampaignAttributionPrisma({ candidate: previous, campaigns: [target] });
+
+  const result = await attributeCandidateCampaignFromMessage(prisma, previous.id, {
+    referral: {
+      source_id: target.code,
+      source_type: 'ad',
+      ctwa_clid: 'clid-siberia',
+      headline: 'Convocatoria operativa'
+    }
+  });
+
+  assert.equal(result.attributed, true);
+  assert.equal(result.reattributed, true);
+  assert.equal(result.reason, 'reattributed_referral_campaign_and_vacancy');
+  assert.equal(result.campaignId, target.id);
+  assert.equal(result.vacancyId, target.vacancyId);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].data.campaignId, target.id);
+  assert.equal(updates[0].data.vacancyId, target.vacancyId);
+  assert.equal(updates[0].data.metaAdId, target.code);
+  assert.equal(updates[0].data.botResumeMode, CAMPAIGN_VACANCY_CONFIRMATION_MODE);
+});
+
+test('un anuncio exacto sin vacante no rompe una asociación histórica válida', async () => {
+  const previous = {
+    id: 'candidate-protected-ctwa',
+    campaignId: 'campaign-old',
+    vacancyId: 'vac-old',
+    sourceType: 'META_ADS',
+    campaignCodeRaw: 'old-ad',
+    botResumeMode: null,
+    metaCtwaClid: 'clid-old',
+    metaAdId: 'ad-old',
+    metaCampaignId: null,
+    metaCampaignName: null
+  };
+  const target = {
+    id: 'campaign-unclassified',
+    code: 'ad-unclassified',
+    name: 'Anuncio sin clasificar',
+    notes: null,
+    sourceType: 'META_ADS',
+    vacancyId: null
+  };
+  const { prisma, updates } = createCampaignAttributionPrisma({ candidate: previous, campaigns: [target] });
+
+  const result = await attributeCandidateCampaignFromMessage(prisma, previous.id, {
+    referral: { source_id: target.code, source_type: 'ad' }
+  });
+
+  assert.equal(result.attributed, false);
+  assert.equal(result.reason, 'exact_ad_without_vacancy_existing_attribution_preserved');
+  assert.equal(result.campaignId, previous.campaignId);
+  assert.equal(result.vacancyId, previous.vacancyId);
+  assert.equal(updates.length, 0);
 });
