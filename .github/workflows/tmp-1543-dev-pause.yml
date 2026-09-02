@@ -1,0 +1,129 @@
+name: Temporary 1543 DEV pause
+
+on:
+  push:
+    branches:
+      - fix/1543-dev-manual-pause-lock
+    paths:
+      - .github/workflows/tmp-1543-dev-pause.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/1543-dev-manual-pause-lock
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Apply explicit DEV pause contract
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          policy_path = Path('src/services/botAutomationPolicy.js')
+          policy = policy_path.read_text()
+          marker = "const NON_AUTO_RESUMABLE_MODES = new Set([\n"
+          assert marker in policy
+          policy = policy.replace(marker, "export const EXPLICIT_ADMIN_PAUSE_MODE = 'manual_pause_until_admin_resume';\n\nconst NON_AUTO_RESUMABLE_MODES = new Set([\n  EXPLICIT_ADMIN_PAUSE_MODE,\n", 1)
+          policy_path.write_text(policy)
+
+          state_path = Path('src/services/candidateStateService.js')
+          state = state_path.read_text()
+          old_import = "import { buildInboundResumeUpdate } from './botAutomationPolicy.js';"
+          new_import = "import { buildInboundResumeUpdate, EXPLICIT_ADMIN_PAUSE_MODE } from './botAutomationPolicy.js';"
+          assert old_import in state
+          state = state.replace(old_import, new_import, 1)
+          start = state.index('export async function pauseCandidateAutomationFromAdmin')
+          end = state.index('export async function resumeCandidateAutomationFromAdmin', start)
+          pause_block = state[start:end]
+          old_mode = "botResumeMode: 'manual_resume_dashboard'"
+          assert old_mode in pause_block
+          pause_block = pause_block.replace(old_mode, 'botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE', 1)
+          state = state[:start] + pause_block + state[end:]
+          state_path.write_text(state)
+
+          admin_test_path = Path('test/adminBotPause.test.js')
+          admin_test = admin_test_path.read_text()
+          old_import = "import { buildInboundResumeUpdate, describeResumeBehavior, shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';"
+          new_import = "import { EXPLICIT_ADMIN_PAUSE_MODE, buildInboundResumeUpdate, describeResumeBehavior, shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';"
+          assert old_import in admin_test
+          admin_test = admin_test.replace(old_import, new_import, 1)
+          anchor = "test('pausa no manual sigue bloqueando automatizacion en inbound', () => {"
+          assert anchor in admin_test
+          regression = """test('pausa explícita de DEV solo se levanta con reactivación administrativa', () => {
+            const candidate = {
+              botPaused: true,
+              botPausedBy: 'dev',
+              botPauseReason: 'Pausa manual desde admin',
+              botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE
+            };
+
+            assert.equal(shouldResumeAutomationOnInbound(candidate), false);
+            assert.equal(shouldBlockAutomation(candidate, { direction: 'INBOUND' }), true);
+            assert.equal(shouldBlockAutomation(candidate, { direction: 'OUTBOUND' }), true);
+          });
+
+          """
+          admin_test = admin_test.replace(anchor, regression + anchor, 1)
+          admin_test_path.write_text(admin_test)
+
+          state_test_path = Path('test/candidateAdminPauseStateService.test.js')
+          state_test = state_test_path.read_text()
+          import_anchor = "} from '../src/services/candidateStateService.js';\n"
+          assert import_anchor in state_test
+          state_test = state_test.replace(import_anchor, import_anchor + "import { EXPLICIT_ADMIN_PAUSE_MODE } from '../src/services/botAutomationPolicy.js';\n", 1)
+          state_test = state_test.replace("botPauseReason: 'Pausa manual desde admin',\n  botResumeMode: 'manual_resume_dashboard',", "botPauseReason: 'Pausa manual desde admin',\n  botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE,", 1)
+          state_test = state_test.replace("botPauseReason: 'Pausa manual desde admin',\n  botResumeMode: 'manual_resume_dashboard'", "botPauseReason: 'Pausa manual desde admin',\n  botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE", 1)
+          expected = "assert.equal(result.candidate.botResumeMode, 'manual_resume_dashboard');"
+          assert state_test.count(expected) >= 2
+          state_test = state_test.replace(expected, "assert.equal(result.candidate.botResumeMode, EXPLICIT_ADMIN_PAUSE_MODE);", 1)
+          state_test_path.write_text(state_test)
+
+          doc_path = Path('lorren_comportamiento_completo.md')
+          doc = doc_path.read_text()
+          old = """El bot solo puede retomar cuando:
+
+- llega un nuevo mensaje del candidato y la política permite la reanudación;
+- o el reclutador lo reactiva explícitamente.
+
+Nunca debe responder encima del mensaje humano antes de una nueva entrada del candidato.
+
+Todas las fuentes manuales deben clasificarse mediante una política canónica única.
+"""
+          new = """El bot solo puede retomar cuando:
+
+- llega un nuevo mensaje del candidato y la política permite la reanudación;
+- o el reclutador lo reactiva explícitamente.
+
+Una pausa explícita ejecutada por DEV mediante **Pausar bot** es distinta de una intervención humana ordinaria: no puede levantarse por mensajes posteriores del candidato. Mientras esa pausa siga activa, solo una acción explícita de **Reactivar bot** desde DEV puede devolver el control a la automatización.
+
+Nunca debe responder encima del mensaje humano antes de una nueva entrada del candidato.
+
+Todas las fuentes manuales deben clasificarse mediante una política canónica única.
+"""
+          assert old in doc
+          doc_path.write_text(doc.replace(old, new, 1))
+          PY
+      - name: Run focal regressions
+        run: node --test test/adminBotPause.test.js test/candidateAdminPauseStateService.test.js
+      - name: Check syntax
+        run: |
+          node --check src/services/botAutomationPolicy.js
+          node --check src/services/candidateStateService.js
+          node --check test/adminBotPause.test.js
+          node --check test/candidateAdminPauseStateService.test.js
+      - name: Commit focused change
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/services/botAutomationPolicy.js src/services/candidateStateService.js test/adminBotPause.test.js test/candidateAdminPauseStateService.test.js lorren_comportamiento_completo.md
+          git commit -m 'fix(dev): keep explicit bot pause until manual resume'
+          git push origin HEAD:fix/1543-dev-manual-pause-lock
