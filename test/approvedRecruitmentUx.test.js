@@ -38,7 +38,6 @@ function renderInterviewOutreach(role = 'admin') {
     vacancyOptions: [{
       id: 'vacancy-example-1',
       city: 'Ciudad de ejemplo',
-      address: 'Sede de ejemplo',
       label: 'Ciudad de ejemplo · Vacante de ejemplo'
     }],
     outreachFilters: {
@@ -47,16 +46,14 @@ function renderInterviewOutreach(role = 'admin') {
     },
     outreachConfig: {
       templateName: 'citacion_entrevista_loginpro',
-      templateLanguage: 'es_CO',
-      interviewDate: '2026-08-28',
-      interviewTime: '09:00',
-      interviewAddress: 'Sede de ejemplo'
+      templateLanguage: 'es_CO'
     },
     coordinatorContact: {
+      name: 'Coordinación Ejemplo',
       apiPhone: '573000000000',
       displayPhone: '+57 300 000 0000'
     },
-    templateReference: 'Hola {{1}}. Mensaje técnico de ejemplo.',
+    templateReference: 'Hola {{1}}. Tu proceso para {{2}} será coordinado por {{3}}.',
     preparedRecipients: [],
     preparedSuccess: null,
     preparedError: null
@@ -180,7 +177,7 @@ test('Outreach aprobado encadena Sucursal -> Vacante en el navegador', () => {
   assert.match(view, /citySelect\.addEventListener\('change', syncVacanciesToCity\)/);
 });
 
-test('ADMIN no recibe detalles técnicos de la plantilla en el HTML', () => {
+test('ADMIN ve al coordinador pero no recibe detalles técnicos ni agenda previa', () => {
   const html = renderInterviewOutreach('admin');
 
   assert.doesNotMatch(html, /Plantilla oficial de Meta/);
@@ -190,38 +187,42 @@ test('ADMIN no recibe detalles técnicos de la plantilla en el HTML', () => {
   assert.doesNotMatch(html, /payloads/);
   assert.doesNotMatch(html, /InterviewBooking/);
   assert.doesNotMatch(html, /API oficial/);
-  assert.doesNotMatch(html, /variable 5|variable 6/);
   assert.doesNotMatch(html, /Enviar citaciones por Meta/);
-  assert.doesNotMatch(html, /Citaciones confirmadas por Meta/);
+  assert.doesNotMatch(html, /Citaciones aceptadas por Meta/);
   assert.doesNotMatch(html, /name="templateName"|name="templateLanguage"/);
   assert.doesNotMatch(html, /citacion_entrevista_loginpro|es_CO/);
+  assert.doesNotMatch(html, /interviewDate|interviewTime|interviewAddress/);
+  assert.doesNotMatch(html, /Fecha de entrevista|Hora de entrevista|Dirección de citación/);
 
-  assert.match(html, /<label for="interviewDate">Fecha de entrevista<\/label>/);
-  assert.match(html, /<label for="interviewTime">Hora de entrevista<\/label>/);
-  assert.match(html, /<label for="interviewAddress">Dirección de citación<\/label>/);
+  assert.match(html, /<label for="coordinatorName">Gestionante \/ coordinador<\/label>/);
+  assert.match(html, /Coordinación Ejemplo/);
   assert.match(html, /<label for="coordinatorPhone">WhatsApp de coordinación<\/label>/);
+  assert.match(html, /\+57 300 000 0000/);
   assert.match(html, />Enviar citaciones<\/button>/);
 });
 
-test('backend conserva la plantilla canónica cuando ADMIN no envía campos técnicos', () => {
-  const config = normalizeInterviewOutreachConfig({
-    interviewDate: '2026-08-28',
-    interviewTime: '09:00',
-    interviewAddress: 'Sede de ejemplo'
-  });
+test('backend conserva solo la configuración canónica de plantilla cuando ADMIN no envía campos técnicos', () => {
+  const config = normalizeInterviewOutreachConfig({});
 
-  assert.equal(config.templateName, 'citacion_entrevista_loginpro');
-  assert.equal(config.templateLanguage, 'es_CO');
+  assert.deepEqual(config, {
+    templateName: 'citacion_entrevista_loginpro',
+    templateLanguage: 'es_CO'
+  });
+  assert.equal(Object.hasOwn(config, 'interviewDate'), false);
+  assert.equal(Object.hasOwn(config, 'interviewTime'), false);
+  assert.equal(Object.hasOwn(config, 'interviewAddress'), false);
 });
 
-test('DEV conserva controles y documentación técnica de la plantilla', () => {
+test('DEV documenta tres variables y el CTA dinámico al coordinador', () => {
   const html = renderInterviewOutreach('dev');
 
   assert.match(html, /Plantilla oficial de Meta/);
   assert.match(html, /Nombre de plantilla/);
   assert.match(html, /Idioma Meta/);
-  assert.match(html, /Quick Reply/);
-  assert.match(html, /payloads estables/);
+  assert.match(html, /tres variables/);
+  assert.match(html, /Contactar a coordinador/);
+  assert.match(html, /https:\/\/wa\.me\/\{\{1\}\}/);
+  assert.doesNotMatch(html, /Quick Reply|Confirmo asistencia|No puedo asistir/);
   assert.match(html, /id="templateName" name="templateName" value="citacion_entrevista_loginpro"/);
   assert.match(html, /id="templateLanguage" name="templateLanguage" value="es_CO"/);
 });
