@@ -1,0 +1,28 @@
+name: Temporary 1546 actor validation
+
+on:
+  push:
+    branches:
+      - fix/1546-candidate-admin-actor-name
+    paths:
+      - .github/workflows/tmp-1546-actor-validation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/1546-candidate-admin-actor-name
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npm run prisma:generate
+      - run: node --test test/adminManualCv.test.js
+      - run: node --check src/routes/admin.js
