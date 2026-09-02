@@ -28,73 +28,71 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise SystemExit(f'{label} not found')
+              return text.replace(old, new, 1)
+
           admin_path = Path('src/routes/admin.js')
           admin = admin_path.read_text()
-          old_template = "export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\\n\\nPara continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} usando el botón de abajo.\\n\\nRecuerda: este proceso es gratuito. Nunca te pediremos dinero para asistir o continuar y no somos una bolsa de empleo.';"
-          new_template = "export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\\n\\nPara continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} al WhatsApp {{4}}.\\n\\nRecuerda: este proceso es gratuito. Nunca te pediremos dinero para asistir o continuar y no somos una bolsa de empleo.';"
-          if old_template not in admin:
-              raise SystemExit('expected interview template reference not found')
-          admin = admin.replace(old_template, new_template, 1)
-
-          old_delivery = """  const coordinatorName = normalizeString(coordinatorContact.name);
-          const coordinatorPhone = normalizeString(coordinatorContact.apiPhone);
-          if (!fullName) throw new TypeError('interview_outreach_candidate_name_required');
-          if (!vacancy) throw new TypeError('interview_outreach_vacancy_required');
-          if (!coordinatorName) throw new TypeError('interview_outreach_coordinator_name_required');
-          if (!coordinatorPhone) throw new TypeError('interview_outreach_coordinator_phone_required');
-
-          const parameters = [fullName, vacancy, coordinatorName];
-          let body = INTERVIEW_OUTREACH_TEMPLATE_REFERENCE;
-          parameters.forEach((value, index) => {
-            body = body.replaceAll(`{{${index + 1}}}`, value);
-          });
-
-          return { parameters, body, coordinatorPhone };"""
-          new_delivery = """  const coordinatorName = normalizeString(coordinatorContact.name);
-          const coordinatorPhone = normalizeString(coordinatorContact.apiPhone);
-          const coordinatorDisplayPhone = normalizeString(coordinatorContact.displayPhone);
-          if (!fullName) throw new TypeError('interview_outreach_candidate_name_required');
-          if (!vacancy) throw new TypeError('interview_outreach_vacancy_required');
-          if (!coordinatorName) throw new TypeError('interview_outreach_coordinator_name_required');
-          if (!coordinatorPhone || !coordinatorDisplayPhone) throw new TypeError('interview_outreach_coordinator_phone_required');
-
-          const parameters = [fullName, vacancy, coordinatorName, coordinatorDisplayPhone];
-          let body = INTERVIEW_OUTREACH_TEMPLATE_REFERENCE;
-          parameters.forEach((value, index) => {
-            body = body.replaceAll(`{{${index + 1}}}`, value);
-          });
-
-          return { parameters, body, coordinatorPhone, coordinatorDisplayPhone };"""
-          if old_delivery not in admin:
-              raise SystemExit('expected interview delivery block not found')
-          admin = admin.replace(old_delivery, new_delivery, 1)
-
-          old_send = """              bodyParameters: invitation.parameters,
-                        urlButtonParameters: [invitation.coordinatorPhone]"""
-          new_send = """              bodyParameters: invitation.parameters,
-                        quickReplyPayloads: ['No deseo continuar']"""
-          if old_send not in admin:
-              raise SystemExit('expected URL button delivery block not found')
-          admin = admin.replace(old_send, new_send, 1)
+          admin = replace_once(
+              admin,
+              "Para continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} usando el botón de abajo.",
+              "Para continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} al WhatsApp {{4}}.",
+              'template body'
+          )
+          admin = replace_once(
+              admin,
+              "  const coordinatorPhone = normalizeString(coordinatorContact.apiPhone);",
+              "  const coordinatorPhone = normalizeString(coordinatorContact.apiPhone);\n  const coordinatorDisplayPhone = normalizeString(coordinatorContact.displayPhone);",
+              'coordinator phone declaration'
+          )
+          admin = replace_once(
+              admin,
+              "  if (!coordinatorPhone) throw new TypeError('interview_outreach_coordinator_phone_required');",
+              "  if (!coordinatorPhone || !coordinatorDisplayPhone) throw new TypeError('interview_outreach_coordinator_phone_required');",
+              'coordinator phone validation'
+          )
+          admin = replace_once(
+              admin,
+              "  const parameters = [fullName, vacancy, coordinatorName];",
+              "  const parameters = [fullName, vacancy, coordinatorName, coordinatorDisplayPhone];",
+              'body parameters'
+          )
+          admin = replace_once(
+              admin,
+              "  return { parameters, body, coordinatorPhone };",
+              "  return { parameters, body, coordinatorPhone, coordinatorDisplayPhone };",
+              'delivery return'
+          )
+          admin = replace_once(
+              admin,
+              "              urlButtonParameters: [invitation.coordinatorPhone]",
+              "              quickReplyPayloads: ['No deseo continuar']",
+              'template button delivery'
+          )
           admin_path.write_text(admin)
 
           view_path = Path('src/views/outreachApproved.ejs')
           view = view_path.read_text()
-          old_help = "El texto real lo gobierna la plantilla aprobada en Meta. El cuerpo debe conservar tres variables, en este orden: candidato, vacante y coordinador. El botón URL es independiente de esas variables."
-          new_help = "El texto real lo gobierna la plantilla aprobada en Meta. El cuerpo debe conservar cuatro variables, en este orden: candidato, vacante, coordinador y WhatsApp del coordinador."
-          if old_help not in view:
-              raise SystemExit('expected template help not found')
-          view = view.replace(old_help, new_help, 1)
-          old_action = '<span class="template-action">Contactar a coordinador</span>'
-          new_action = '<span class="template-action">No deseo continuar</span>'
-          if old_action not in view:
-              raise SystemExit('expected template action not found')
-          view = view.replace(old_action, new_action, 1)
-          old_hint = 'La plantilla aprobada en Meta debe tener un botón URL dinámico <strong>Contactar a coordinador</strong> con base <code>https://wa.me/{{1}}</code>. Lórren suministra como variable del botón el número del usuario que gestiona esta ronda; el nombre y el teléfono se toman automáticamente del usuario autenticado y no se diligencian en este módulo.'
-          new_hint = 'La plantilla aprobada en Meta debe tener un único botón de respuesta rápida <strong>No deseo continuar</strong>. El nombre y el WhatsApp que aparecen en el cuerpo se toman automáticamente del usuario autenticado que realiza el envío y no se diligencian en este módulo.'
-          if old_hint not in view:
-              raise SystemExit('expected template URL hint not found')
-          view = view.replace(old_hint, new_hint, 1)
+          view = replace_once(
+              view,
+              "El texto real lo gobierna la plantilla aprobada en Meta. El cuerpo debe conservar tres variables, en este orden: candidato, vacante y coordinador. El botón URL es independiente de esas variables.",
+              "El texto real lo gobierna la plantilla aprobada en Meta. El cuerpo debe conservar cuatro variables, en este orden: candidato, vacante, coordinador y WhatsApp del coordinador.",
+              'view variable help'
+          )
+          view = replace_once(
+              view,
+              '<span class="template-action">Contactar a coordinador</span>',
+              '<span class="template-action">No deseo continuar</span>',
+              'view action'
+          )
+          view = replace_once(
+              view,
+              'La plantilla aprobada en Meta debe tener un botón URL dinámico <strong>Contactar a coordinador</strong> con base <code>https://wa.me/{{1}}</code>. Lórren suministra como variable del botón el número del usuario que gestiona esta ronda; el nombre y el teléfono se toman automáticamente del usuario autenticado y no se diligencian en este módulo.',
+              'La plantilla aprobada en Meta debe tener un único botón de respuesta rápida <strong>No deseo continuar</strong>. El nombre y el WhatsApp que aparecen en el cuerpo se toman automáticamente del usuario autenticado que realiza el envío y no se diligencian en este módulo.',
+              'view button help'
+          )
           view_path.write_text(view)
 
           whatsapp_path = Path('src/services/whatsapp.js')
@@ -112,58 +110,36 @@ jobs:
           }
 
           """
-          if marker not in whatsapp:
-              raise SystemExit('extractMessages marker not found')
           if 'normalizeTemplateQuickReplyMessage' not in whatsapp:
+              if marker not in whatsapp:
+                  raise SystemExit('extractMessages marker not found')
               whatsapp = whatsapp.replace(marker, normalizer + marker, 1)
-          old_extract = "  return (change?.value?.messages || []).map(attachAdContextToMessage);"
-          new_extract = "  return (change?.value?.messages || []).map(normalizeTemplateQuickReplyMessage).map(attachAdContextToMessage);"
-          if old_extract not in whatsapp:
-              raise SystemExit('expected extractMessages mapping not found')
-          whatsapp = whatsapp.replace(old_extract, new_extract, 1)
+          whatsapp = replace_once(
+              whatsapp,
+              "  return (change?.value?.messages || []).map(attachAdContextToMessage);",
+              "  return (change?.value?.messages || []).map(normalizeTemplateQuickReplyMessage).map(attachAdContextToMessage);",
+              'extractMessages mapping'
+          )
           whatsapp_path.write_text(whatsapp)
 
           test_path = Path('test/approvedOutreachContactedTransition.test.js')
           tests = test_path.read_text()
-          tests = tests.replace(
+          tests = replace_once(
+              tests,
               "import { buildWhatsAppTemplatePayload } from '../src/services/whatsapp.js';",
               "import { buildWhatsAppTemplatePayload, extractMessages } from '../src/services/whatsapp.js';",
-              1
+              'whatsapp test import'
           )
-          tests = tests.replace(
+          tests = replace_once(
+              tests,
               "import { shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';",
               "import { shouldBlockAutomation, shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';",
-              1
+              'automation policy test import'
           )
-          old_first = """test('la plantilla Meta usa tres variables de cuerpo y un CTA URL dinámico sin Quick Replies', () => {
-            const payload = buildWhatsAppTemplatePayload('573001234567', {
-              name: 'citacion_entrevista_loginpro',
-              languageCode: 'es_CO',
-              bodyParameters: [
-                'Persona Prueba',
-                'Vacante Prueba',
-                'Coordinación Prueba'
-              ],
-              urlButtonParameters: ['573007654321']
-            });
 
-            assert.equal(payload.type, 'template');
-            assert.equal(payload.template.components[0].type, 'body');
-            assert.deepEqual(
-              payload.template.components[0].parameters.map((parameter) => parameter.text),
-              ['Persona Prueba', 'Vacante Prueba', 'Coordinación Prueba']
-            );
-            assert.deepEqual(payload.template.components.slice(1), [
-              {
-                type: 'button',
-                sub_type: 'url',
-                index: '0',
-                parameters: [{ type: 'text', text: '573007654321' }]
-              }
-            ]);
-            assert.doesNotMatch(JSON.stringify(payload), /quick_reply|INTERVIEW_ATTEND_(?:YES|NO)/);
-          });"""
-          new_first = """test('la plantilla Meta usa cuatro variables y un único Quick Reply sin CTA URL', () => {
+          first_start = tests.index("test('la plantilla Meta usa tres variables de cuerpo y un CTA URL dinámico sin Quick Replies'")
+          first_end = tests.index("test('sin configuración explícita", first_start)
+          first_test = """test('la plantilla Meta usa cuatro variables y un único Quick Reply sin CTA URL', () => {
             const payload = buildWhatsAppTemplatePayload('573001234567', {
               name: 'citacion_entrevista_loginpro',
               languageCode: 'es_CO',
@@ -190,64 +166,10 @@ jobs:
                 parameters: [{ type: 'payload', payload: 'No deseo continuar' }]
               }
             ]);
-            assert.doesNotMatch(JSON.stringify(payload), /sub_type\\\":\\\"url|wa\\.me|INTERVIEW_ATTEND_(?:YES|NO)/);
-          });"""
-          if old_first not in tests:
-              raise SystemExit('expected first outreach payload test not found')
-          tests = tests.replace(old_first, new_first, 1)
+            assert.doesNotMatch(JSON.stringify(payload), /\"sub_type\":\"url\"|wa\.me|INTERVIEW_ATTEND_(?:YES|NO)/);
+          });
 
-          tests = tests.replace(
-              "test('la configuración usa actor y teléfono persistidos y construye solo las tres variables del cuerpo', () => {",
-              "test('la configuración usa el mismo actor para nombre y WhatsApp y construye cuatro variables', () => {",
-              1
-          )
-          old_parameters = """  assert.deepEqual(delivery.parameters, [
-            'Persona Prueba',
-            'Vacante Prueba',
-            'Coordinación Prueba'
-          ]);
-          assert.equal(delivery.coordinatorPhone, '573007654321');
-          assert.match(delivery.body, /Coordinación Prueba/);"""
-          new_parameters = """  assert.deepEqual(delivery.parameters, [
-            'Persona Prueba',
-            'Vacante Prueba',
-            'Coordinación Prueba',
-            '+57 300 765 4321'
-          ]);
-          assert.equal(delivery.coordinatorPhone, '573007654321');
-          assert.equal(delivery.coordinatorDisplayPhone, '+57 300 765 4321');
-          assert.match(delivery.body, /Coordinación Prueba al WhatsApp \\+57 300 765 4321/);"""
-          if old_parameters not in tests:
-              raise SystemExit('expected delivery parameter assertion not found')
-          tests = tests.replace(old_parameters, new_parameters, 1)
-
-          old_view_asserts = """  assert.match(view, /Contactar a coordinador/);
-            assert.match(view, /https:\\/\\/wa\\.me\\/\\{\\{1\\}\\}/);"""
-          new_view_asserts = """  assert.match(view, /No deseo continuar/);
-            assert.match(view, /cuatro variables/);
-            assert.doesNotMatch(view, /https:\\/\\/wa\\.me|Contactar a coordinador/);"""
-          if old_view_asserts not in tests:
-              raise SystemExit('expected view assertions not found')
-          tests = tests.replace(old_view_asserts, new_view_asserts, 1)
-          tests = tests.replace(
-              "  assert.doesNotMatch(view, /Confirmo asistencia|No puedo asistir|Quick Reply/);",
-              "  assert.doesNotMatch(view, /Confirmo asistencia|No puedo asistir/);",
-              1
-          )
-          tests = tests.replace(
-              "test('el flujo de outreach usa CTA del coordinador, conserva el handoff y no crea bookings', () => {",
-              "test('el flujo de outreach usa Quick Reply, conserva el handoff y no crea bookings', () => {",
-              1
-          )
-          old_route = "  assert.match(postRoute, /urlButtonParameters:\\s*\\[invitation\\.coordinatorPhone\\]/);"
-          new_route = """  assert.match(postRoute, /quickReplyPayloads:\\s*\\['No deseo continuar'\\]/);
-            assert.doesNotMatch(postRoute, /urlButtonParameters|wa\\.me/);"""
-          if old_route not in tests:
-              raise SystemExit('expected route CTA assertion not found')
-          tests = tests.replace(old_route, new_route, 1)
-
-          insertion_marker = "test('sin configuración explícita la plantilla no agrega botones de asistencia por defecto', () => {"
-          callback_test = """test('callback Quick Reply se normaliza como texto y el handoff sigue bloqueando automatización', () => {
+          test('callback Quick Reply se normaliza como texto y el handoff sigue bloqueando automatización', () => {
             const [message] = extractMessages({
               entry: [{
                 changes: [{
@@ -274,15 +196,87 @@ jobs:
           });
 
           """
-          if insertion_marker not in tests:
-              raise SystemExit('callback test insertion marker not found')
-          if 'callback Quick Reply se normaliza como texto' not in tests:
-              tests = tests.replace(insertion_marker, callback_test + insertion_marker, 1)
+          tests = tests[:first_start] + first_test + tests[first_end:]
+
+          delivery_start = tests.index("test('la configuración usa actor y teléfono persistidos y construye solo las tres variables del cuerpo'")
+          delivery_end = tests.index("test('el dashboard ya no deriva", delivery_start)
+          delivery_test = """test('la configuración usa el mismo actor para nombre y WhatsApp y construye cuatro variables', () => {
+            const phone = normalizeCoordinatorContactPhone('3007654321');
+            assert.deepEqual(phone, {
+              apiPhone: '573007654321',
+              displayPhone: '+57 300 765 4321'
+            });
+
+            const delivery = buildApprovedInterviewTemplateDelivery({
+              fullName: 'Persona Prueba',
+              vacancy: { title: 'Vacante Prueba' }
+            }, {}, {
+              ...phone,
+              name: 'Coordinación Prueba'
+            });
+
+            assert.deepEqual(delivery.parameters, [
+              'Persona Prueba',
+              'Vacante Prueba',
+              'Coordinación Prueba',
+              '+57 300 765 4321'
+            ]);
+            assert.equal(delivery.coordinatorPhone, '573007654321');
+            assert.equal(delivery.coordinatorDisplayPhone, '+57 300 765 4321');
+            assert.match(delivery.body, /Coordinación Prueba al WhatsApp \+57 300 765 4321/);
+            assert.match(delivery.body, /proceso es gratuito/i);
+            assert.match(delivery.body, /No somos una bolsa de empleo/i);
+            assert.match(delivery.body, /Nunca te pediremos dinero para asistir o continuar y no somos una bolsa de empleo\./i);
+            assert.doesNotMatch(delivery.body, /LoginPro Service/i);
+            assert.doesNotMatch(delivery.body, /Te esperamos|Dirección Prueba|8:00|27 de agosto/);
+          });
+
+          """
+          tests = tests[:delivery_start] + delivery_test + tests[delivery_end:]
+
+          view_start = tests.index("test('la vista deriva al coordinador y elimina fecha, hora, lugar y campos manuales'")
+          view_end = tests.index("test('el flujo de outreach usa CTA del coordinador", view_start)
+          view_test = """test('la vista deriva al coordinador y muestra el contrato de cuatro variables y Quick Reply', () => {
+            const view = readFileSync(new URL('../src/views/outreachApproved.ejs', import.meta.url), 'utf8');
+            assert.match(view, /No deseo continuar/);
+            assert.match(view, /cuatro variables/);
+            assert.doesNotMatch(view, /https:\/\/wa\.me|Contactar a coordinador/);
+            assert.doesNotMatch(view, /id=\"coordinatorName\"|id=\"coordinatorPhone\"|Gestionante \/ coordinador|WhatsApp de coordinación/);
+            assert.doesNotMatch(view, /id=\"interviewDate\"|name=\"interviewDate\"/);
+            assert.doesNotMatch(view, /id=\"interviewTime\"|name=\"interviewTime\"/);
+            assert.doesNotMatch(view, /id=\"interviewAddress\"|name=\"interviewAddress\"/);
+            assert.doesNotMatch(view, /Confirmo asistencia|No puedo asistir/);
+            assert.doesNotMatch(view, /window\.(?:alert|confirm|prompt)\s*\(/);
+          });
+
+          """
+          tests = tests[:view_start] + view_test + tests[view_end:]
+
+          route_start = tests.index("test('el flujo de outreach usa CTA del coordinador")
+          route_test = """test('el flujo de outreach usa Quick Reply, conserva el handoff y no crea bookings', () => {
+            const source = readFileSync(new URL('../src/routes/admin.js', import.meta.url), 'utf8');
+            const postStart = source.indexOf("router.post('/outreach/approved/prepare'");
+            const nextRoute = source.indexOf("router.get('/bot-knowledge'", postStart);
+            assert.ok(postStart >= 0 && nextRoute > postStart);
+            const postRoute = source.slice(postStart, nextRoute);
+
+            assert.match(postRoute, /deliverManualOutboundText/);
+            assert.match(postRoute, /sendTemplateMessage/);
+            assert.match(postRoute, /quickReplyPayloads:\s*\['No deseo continuar'\]/);
+            assert.doesNotMatch(postRoute, /urlButtonParameters|wa\.me/);
+            assert.match(postRoute, /finalizeApprovedInterviewOutreachHandoff/);
+            assert.doesNotMatch(postRoute, /interviewBooking\.(?:create|createMany|update|upsert)/);
+            assert.doesNotMatch(postRoute, /schedulingEnabled\s*:/);
+            assert.doesNotMatch(postRoute, /selectedVacancyIds/);
+          });
+          """
+          tests = tests[:route_start] + route_test
           test_path.write_text(tests)
           PY
       - run: node --test test/approvedOutreachContactedTransition.test.js test/approvedRecruitmentUx.test.js test/interviewCoordinationHandoffReply.test.js
       - run: node --check src/routes/admin.js
       - run: node --check src/services/whatsapp.js
+      - run: node --check test/approvedOutreachContactedTransition.test.js
       - name: Commit focused change
         run: |
           git config user.name "github-actions[bot]"
