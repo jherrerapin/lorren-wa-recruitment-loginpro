@@ -58,20 +58,19 @@ jobs:
           admin_test = admin_test.replace(old_import, new_import, 1)
           anchor = "test('pausa no manual sigue bloqueando automatizacion en inbound', () => {"
           assert anchor in admin_test
-          regression = """test('pausa explícita de DEV solo se levanta con reactivación administrativa', () => {
-            const candidate = {
-              botPaused: true,
-              botPausedBy: 'dev',
-              botPauseReason: 'Pausa manual desde admin',
-              botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE
-            };
-
-            assert.equal(shouldResumeAutomationOnInbound(candidate), false);
-            assert.equal(shouldBlockAutomation(candidate, { direction: 'INBOUND' }), true);
-            assert.equal(shouldBlockAutomation(candidate, { direction: 'OUTBOUND' }), true);
-          });
-
-          """
+          regression = (
+            "test('pausa explícita de DEV solo se levanta con reactivación administrativa', () => {\n"
+            "  const candidate = {\n"
+            "    botPaused: true,\n"
+            "    botPausedBy: 'dev',\n"
+            "    botPauseReason: 'Pausa manual desde admin',\n"
+            "    botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE\n"
+            "  };\n\n"
+            "  assert.equal(shouldResumeAutomationOnInbound(candidate), false);\n"
+            "  assert.equal(shouldBlockAutomation(candidate, { direction: 'INBOUND' }), true);\n"
+            "  assert.equal(shouldBlockAutomation(candidate, { direction: 'OUTBOUND' }), true);\n"
+            "});\n\n"
+          )
           admin_test = admin_test.replace(anchor, regression + anchor, 1)
           admin_test_path.write_text(admin_test)
 
@@ -89,26 +88,21 @@ jobs:
 
           doc_path = Path('lorren_comportamiento_completo.md')
           doc = doc_path.read_text()
-          old = """El bot solo puede retomar cuando:
-
-- llega un nuevo mensaje del candidato y la política permite la reanudación;
-- o el reclutador lo reactiva explícitamente.
-
-Nunca debe responder encima del mensaje humano antes de una nueva entrada del candidato.
-
-Todas las fuentes manuales deben clasificarse mediante una política canónica única.
-"""
-          new = """El bot solo puede retomar cuando:
-
-- llega un nuevo mensaje del candidato y la política permite la reanudación;
-- o el reclutador lo reactiva explícitamente.
-
-Una pausa explícita ejecutada por DEV mediante **Pausar bot** es distinta de una intervención humana ordinaria: no puede levantarse por mensajes posteriores del candidato. Mientras esa pausa siga activa, solo una acción explícita de **Reactivar bot** desde DEV puede devolver el control a la automatización.
-
-Nunca debe responder encima del mensaje humano antes de una nueva entrada del candidato.
-
-Todas las fuentes manuales deben clasificarse mediante una política canónica única.
-"""
+          old = (
+            "El bot solo puede retomar cuando:\n\n"
+            "- llega un nuevo mensaje del candidato y la política permite la reanudación;\n"
+            "- o el reclutador lo reactiva explícitamente.\n\n"
+            "Nunca debe responder encima del mensaje humano antes de una nueva entrada del candidato.\n\n"
+            "Todas las fuentes manuales deben clasificarse mediante una política canónica única.\n"
+          )
+          new = (
+            "El bot solo puede retomar cuando:\n\n"
+            "- llega un nuevo mensaje del candidato y la política permite la reanudación;\n"
+            "- o el reclutador lo reactiva explícitamente.\n\n"
+            "Una pausa explícita ejecutada por DEV mediante **Pausar bot** es distinta de una intervención humana ordinaria: no puede levantarse por mensajes posteriores del candidato. Mientras esa pausa siga activa, solo una acción explícita de **Reactivar bot** desde DEV puede devolver el control a la automatización.\n\n"
+            "Nunca debe responder encima del mensaje humano antes de una nueva entrada del candidato.\n\n"
+            "Todas las fuentes manuales deben clasificarse mediante una política canónica única.\n"
+          )
           assert old in doc
           doc_path.write_text(doc.replace(old, new, 1))
           PY
