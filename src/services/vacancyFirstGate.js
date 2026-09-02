@@ -873,6 +873,17 @@ export async function resolveVacancyFirstGate({
     }, { recentMessages, inboundText, city: resolution.city, currentStep });
   }
 
+  if (resolution.reason === 'missing_city_and_role' && resolution.residenceLocation) {
+    return preventRepeatDecision({
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'RESIDENCE_CAPTURED_VACANCY_NEEDED',
+      replyKind: 'ASK_VACANCY_ROLE',
+      candidateUpdates: { currentStep: GREETING_SENT },
+      reply: buildNeedRoleForCityReply(resolution.residenceLocation, null, inboundText),
+      resolution
+    }, { recentMessages, inboundText, city: null, currentStep });
+  }
+
   if (['city_with_active_vacancies', 'ambiguous_match', 'low_confidence_match'].includes(resolution.reason) && resolution.city) {
     const alternativeDecision = await buildAlternativeDecision({ prisma, resolution, vacancyHints, inboundText, recentMessages });
     if (alternativeDecision) return alternativeDecision;
