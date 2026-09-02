@@ -633,6 +633,16 @@
           <input type="hidden" name="action" value="reminder" />
           <button type="submit">Enviar recordatorio</button>
         </form>
+        <% if (Array.isArray(shareableUserContacts) && shareableUserContacts.length) { %>
+          <div style="width:100%;font-size:12px;color:#475569;margin-top:6px;">Enviar contacto de usuario:</div>
+          <% for (const contact of shareableUserContacts) { %>
+            <form method="post" action="/admin/candidates/<%= candidate.id %>/outbound" class="status-form" style="flex-wrap: wrap;">
+              <input type="hidden" name="action" value="share_user_contact" />
+              <input type="hidden" name="contactUserId" value="<%= contact.id %>" />
+              <button type="submit" <%= outboundWindow && !outboundWindow.isOpen ? 'disabled title="Ventana de 24h cerrada"' : '' %>>Enviar <%= contact.label %> · <%= contact.displayPhone %></button>
+            </form>
+          <% } %>
+        <% } %>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/outbound" class="status-form" style="flex-wrap: wrap;">
           <input type="hidden" name="action" value="free_text" />
           <input type="text" name="customBody" placeholder="Mensaje libre" style="min-width: 320px;padding: 8px 10px;border: 1px solid #ddd;border-radius: 4px;" required />
@@ -774,9 +784,13 @@
       <div class="messages-list">
         <% for (const m of sorted) { %>
           <% const isBot = m.direction === 'OUTBOUND'; %>
+          <% const messageSource = String(m.rawPayload?.source || ''); %>
+          <% const outboundSender = messageSource === 'admin_interview_template'
+            ? 'Citación de entrevista'
+            : (messageSource === 'admin_share_user_contact' ? 'Contacto enviado por DEV' : 'Bot'); %>
 	          <div class="msg <%= isBot ? 'msg-bot' : 'msg-candidato' %>">
 	            <div class="msg-header">
-	              <strong><%= isBot ? 'Bot' : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
+	              <strong><%= isBot ? outboundSender : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
 	            </div>
 	            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
               <% if (m.rawPayload && m.rawPayload.debugTrace) { %>

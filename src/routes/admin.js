@@ -169,6 +169,19 @@ export function normalizeCoordinatorContactPhone(value) {
   };
 }
 
+export function buildDevShareableUserContact(user = {}) {
+  const role = String(user?.role || '').trim().toUpperCase();
+  if (!user?.id || user?.isActive === false || role === 'DEV') return null;
+  const phone = normalizeCoordinatorContactPhone(user?.dispatchAlertPhone)
+    || normalizeCoordinatorContactPhone(user?.recoveryPhone);
+  if (!phone) return null;
+  return {
+    id: String(user.id),
+    label: appUserLabel(user),
+    displayPhone: phone.displayPhone
+  };
+}
+
 export function isInterviewCoordinationHandoffCandidate(candidate = {}) {
   return String(candidate?.botResumeMode || '').trim() === INTERVIEW_COORDINATION_HANDOFF_MODE;
 }
@@ -2292,6 +2305,13 @@ export function adminRouter(prisma) {
     const outboundWindow = req.userRole === 'dev'
       ? await getOutboundWindowStatus(prisma, candidate.id)
       : null;
+    const shareableUserContacts = req.userRole === 'dev'
+      ? (await prisma.appUser.findMany({
+        where: { isActive: true, role: { not: 'DEV' } },
+        select: { id: true, username: true, displayName: true, email: true, role: true, isActive: true, dispatchAlertPhone: true, recoveryPhone: true },
+        orderBy: { username: 'asc' }
+      })).map(buildDevShareableUserContact).filter(Boolean)
+      : [];
     const adminEvents = req.userRole === 'dev' && typeof prisma?.candidateAdminEvent?.findMany === 'function'
       ? await prisma.candidateAdminEvent.findMany({
         where: { candidateId: candidate.id },
@@ -2370,6 +2390,7 @@ export function adminRouter(prisma) {
       adminEvents,
       lastBotFlowIssue,
       returnToPath,
+      shareableUserContacts,
       outboundWindow, cvSuccess, cvError,
       outboundSuccess, outboundError, botPauseSuccess, botPauseError,
       botKnowledgeSuccess, botKnowledgeError,
@@ -3289,7 +3310,22 @@ export function adminRouter(prisma) {
     };
 
     let body;
-    if (action === 'free_text') {
+    let contactToShare = null;
+    if (action === 'share_user_contact') {
+      const contactUserId = normalizeString(req.body.contactUserId);
+      if (!contactUserId) {
+        return res.redirect(`/admin/candidates/${id}?outboundError=` + encodeURIComponent('Selecciona un usuario válido.'));
+      }
+      const contactUser = await prisma.appUser.findFirst({
+        where: { id: contactUserId, isActive: true, role: { not: 'DEV' } },
+        select: { id: true, username: true, displayName: true, email: true, role: true, isActive: true, dispatchAlertPhone: true, recoveryPhone: true }
+      });
+      contactToShare = buildDevShareableUserContact(contactUser);
+      if (!contactToShare) {
+        return res.redirect(`/admin/candidates/${id}?outboundError=` + encodeURIComponent('El usuario no está disponible o no tiene un WhatsApp válido.'));
+      }
+      body = `Puedes comunicarte con ${contactToShare.label} al WhatsApp ${contactToShare.displayPhone}.`;
+    } else if (action === 'free_text') {
       if (!customBody.trim()) return res.redirect(`/admin/candidates/${id}?outboundError=El mensaje no puede estar vacío.`);
       body = customBody;
     } else if (action === 'request_missing_data') {
@@ -3304,9 +3340,10 @@ export function adminRouter(prisma) {
 
     try {
       await sendAdminOutboundMessage(prisma, candidate, body, {
-        source: 'admin_outbound',
+        source: action === 'share_user_contact' ? 'admin_share_user_contact' : 'admin_outbound',
         action: action || 'free_text',
-        preserveExactBody: action === 'free_text'
+        sharedAppUserId: contactToShare?.id || null,
+        preserveExactBody: action === 'free_text' || action === 'share_user_contact'
       });
       res.redirect(`/admin/candidates/${id}?outboundSuccess=` + encodeURIComponent('Mensaje enviado correctamente.'));
     } catch (err) {
