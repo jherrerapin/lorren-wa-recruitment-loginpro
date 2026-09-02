@@ -439,6 +439,8 @@ model CandidateAdminEvent {
   id          String    @id @default(cuid())
   candidateId String
   candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  actorUserId String?
+  actorUser   AppUser?  @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   actorRole   String
   eventType   String
   eventLabel  String
@@ -448,6 +450,7 @@ model CandidateAdminEvent {
   createdAt   DateTime  @default(now())
 
   @@index([candidateId, createdAt])
+  @@index([actorUserId])
 }
 
 model AttachmentAnalysis {
@@ -549,6 +552,7 @@ model AppUser {
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
   vacancies           Vacancy[]       @relation("AppUserVacancies")
+  candidateAdminEvents CandidateAdminEvent[]
 
   @@index([role])
   @@index([isActive])
