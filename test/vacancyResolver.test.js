@@ -36,15 +36,16 @@ test('detectRoleHintFromText ignora prompt previo del bot y conserva cargo del c
   assert.equal(roleHint, 'auxiliar bodega');
 });
 
-test('resolveVacancyFromText no autoasigna vacante cuando solo detecta ciudad', async () => {
+test('resolveVacancyFromText conserva una ciudad declarada como residencia sin usarla como filtro de vacante', async () => {
   const resolution = await resolveVacancyFromText(null, 'Buenas noches te escribo desde Ibague para vacante de trabajo', {
     activeVacancies: [activeIbagueVacancy],
     allVacancies: [activeIbagueVacancy]
   });
 
   assert.equal(resolution.resolved, false);
-  assert.equal(resolution.city, 'Ibague');
-  assert.equal(resolution.reason, 'city_with_active_vacancies');
+  assert.equal(resolution.city, null);
+  assert.equal(resolution.residenceLocation, 'Ibague');
+  assert.equal(resolution.reason, 'missing_city_and_role');
 });
 
 test('resolveVacancyFromText no cruza a otra ciudad aunque el cargo coincida', async () => {
@@ -75,6 +76,13 @@ const activeBogotaBodegaVacancy = {
   acceptingApplications: true
 };
 
+const activeSiberiaBodegaVacancy = {
+  ...activeBogotaBodegaVacancy,
+  id: 'vac-sib-bodega-active',
+  title: 'Auxiliar de Bodega Siberia',
+  operationAddress: 'Parque industrial Siberia'
+};
+
 const inactiveSiberiaBodegaVacancy = {
   id: 'vac-sib-bodega',
   title: 'Auxiliar de Bodega Siberia',
@@ -96,6 +104,72 @@ const inactiveIbagueCoordinatorVacancy = {
   isActive: true,
   acceptingApplications: false
 };
+
+test('residencia en Soacha no se convierte en ciudad objetivo y permite resolver la vacante de Siberia', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Soy de Soacha y me interesa auxiliar de bodega', {
+    activeVacancies: [activeSiberiaBodegaVacancy],
+    allVacancies: [activeSiberiaBodegaVacancy]
+  });
+
+  assert.equal(resolution.resolved, true);
+  assert.equal(resolution.vacancy.id, 'vac-sib-bodega-active');
+  assert.equal(resolution.city, 'Bogota');
+  assert.equal(resolution.residenceLocation, 'Soacha');
+  assert.equal(resolution.reason, 'matched_active_vacancy');
+});
+
+for (const residence of ['Madrid', 'Funza', 'Mosquera']) {
+  test(`residencia en ${residence} no se usa como zona objetivo de la vacante de Siberia`, async () => {
+    const resolution = await resolveVacancyFromText(null, `Soy de ${residence} y me interesa auxiliar de bodega`, {
+      activeVacancies: [activeSiberiaBodegaVacancy],
+      allVacancies: [activeSiberiaBodegaVacancy]
+    });
+
+    assert.equal(resolution.resolved, true);
+    assert.equal(resolution.vacancy.id, 'vac-sib-bodega-active');
+    assert.equal(resolution.city, 'Bogota');
+    assert.equal(resolution.reason, 'matched_active_vacancy');
+  });
+}
+
+test('residencia distinta y zona explícita de vacante pueden coexistir sin perder Siberia', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Vivo en Medellín y vi la vacante de auxiliar de bodega en Siberia', {
+    activeVacancies: [activeSiberiaBodegaVacancy],
+    allVacancies: [activeSiberiaBodegaVacancy]
+  });
+
+  assert.equal(resolution.resolved, true);
+  assert.equal(resolution.vacancy.id, 'vac-sib-bodega-active');
+  assert.equal(resolution.city, 'Bogota');
+  assert.equal(resolution.residenceLocation, 'Medellin');
+});
+
+test('una búsqueda explícita de vacantes en otra ciudad mantiene el filtro territorial estricto', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Busco vacantes de auxiliar de bodega en Medellín', {
+    activeVacancies: [activeSiberiaBodegaVacancy],
+    allVacancies: [activeSiberiaBodegaVacancy]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.vacancy, null);
+  assert.equal(resolution.city, 'Medellin');
+  assert.equal(resolution.residenceLocation, null);
+  assert.equal(resolution.reason, 'city_without_active_vacancies');
+});
+
+test('metadato confiable de publicidad conserva precedencia aunque el candidato declare otra residencia', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Soy de Mosquera y quiero información', {
+    trustedVacancyId: 'vac-sib-bodega-active',
+    activeVacancies: [activeSiberiaBodegaVacancy],
+    allVacancies: [activeSiberiaBodegaVacancy]
+  });
+
+  assert.equal(resolution.resolved, true);
+  assert.equal(resolution.vacancy.id, 'vac-sib-bodega-active');
+  assert.equal(resolution.city, 'Bogota');
+  assert.equal(resolution.reason, 'matched_trusted_active_vacancy');
+  assert.equal(resolution.source, 'metadata_config');
+});
 
 test('resolveVacancyFromText prioriza vacante activa de la ciudad sobre inactiva de zona aliada', async () => {
   const resolution = await resolveVacancyFromText(null, 'Estoy en Bogota y me interesa auxiliar de bodega', {
@@ -233,15 +307,6 @@ test('resolveVacancy nunca asigna vacante de otra ciudad aunque el cargo coincid
 });
 
 test('resolveVacancy marca requiresRelocation para vacantes en Siberia que implican desplazamiento', () => {
-  const activeSiberiaBodegaVacancy = {
-    ...activeBogotaBodegaVacancy,
-    id: 'vac-sib-bodega-active',
-    title: 'Auxiliar de Bodega Siberia',
-    operationAddress: 'Parque industrial Siberia',
-    isActive: true,
-    acceptingApplications: true
-  };
-
   const resolution = resolveVacancy('Bogota', 'Quiero postularme como auxiliar de bodega en Siberia', [activeSiberiaBodegaVacancy]);
 
   assert.equal(resolution.vacancy.id, 'vac-sib-bodega-active');
