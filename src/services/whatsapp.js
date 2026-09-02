@@ -169,11 +169,22 @@ export function isRecruitmentWhatsappPayload(payload = {}, expectedPhoneNumberId
   return received === expected;
 }
 
+export function normalizeTemplateQuickReplyMessage(message = {}) {
+  if (message?.type !== 'button') return message;
+  const body = String(message?.button?.text || message?.button?.payload || '').trim();
+  if (!body) return message;
+  return {
+    ...message,
+    type: 'text',
+    text: { body }
+  };
+}
+
 export function extractMessages(payload) {
   if (!isRecruitmentWhatsappPayload(payload)) return [];
   const entry = payload?.entry?.[0];
   const change = entry?.changes?.[0];
-  return (change?.value?.messages || []).map(attachAdContextToMessage);
+  return (change?.value?.messages || []).map(normalizeTemplateQuickReplyMessage).map(attachAdContextToMessage);
 }
 
 export function extractContacts(payload) {
