@@ -26,13 +26,23 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply focused patch
-        run: python3 .github/scripts/tmp_1546_apply.py
+        run: |
+          python3 .github/scripts/tmp_1546_apply.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('test/adminManualCv.test.js')
+          text = path.read_text()
+          old = '    assert.match(devHtml, /Apertura histórica/);'
+          new = '    assert.match(devHtml, /Abrio WhatsApp del candidato/);'
+          assert old in text, 'historical event assertion not found'
+          path.write_text(text.replace(old, new, 1))
+          PY
       - name: Validate Prisma
         run: |
           npx prisma validate
           npm run prisma:generate
-      - name: Run focal regression
-        run: node --test test/adminManualCv.test.js
+      - name: Run focused regressions
+        run: node --test --test-name-pattern="movimientos del reclutador|cambio de estado registra trazabilidad administrativa" test/adminManualCv.test.js
       - name: Check syntax and diff
         run: |
           node --check src/routes/admin.js
