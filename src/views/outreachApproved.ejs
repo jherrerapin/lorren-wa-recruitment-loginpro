@@ -26,11 +26,10 @@
     .config-grid .field { flex: 1 1 220px; }
     .field { display: flex; flex-direction: column; gap: 6px; min-width: 220px; }
     .field label { font-size: 12px; font-weight: 700; color: #6b7280; text-transform: uppercase; }
-    .field input, .field select, .field textarea {
+    .field input, .field select {
       border: 1px solid #d1d5db; border-radius: 8px; padding: 10px 12px; font-size: 14px; font-family: inherit; background: #fff;
     }
     .field input[readonly] { background: #f8fafc; color: #475569; }
-    .field textarea { min-height: 90px; resize: vertical; }
     .btn {
       display: inline-flex; align-items: center; justify-content: center; gap: 6px;
       border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px;
@@ -42,8 +41,8 @@
     .btn:hover:not(:disabled) { background: #f8fafc; }
     .hint { font-size: 13px; color: #6b7280; line-height: 1.5; }
     .template-reference { white-space: pre-wrap; border: 1px solid #dbeafe; background: #f8fbff; padding: 14px; border-radius: 10px; font-size: 14px; line-height: 1.55; margin-top: 12px; }
-    .quick-replies { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-    .quick-reply { border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 999px; padding: 7px 11px; font-size: 12px; font-weight: 700; }
+    .template-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .template-action { border: 1px solid #86efac; background: #f0fdf4; color: #166534; border-radius: 999px; padding: 7px 11px; font-size: 12px; font-weight: 700; }
     .candidate-table { width: 100%; border-collapse: collapse; margin-top: 16px; }
     .candidate-table th, .candidate-table td { padding: 10px 12px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
     .candidate-table th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; background: #f8fafc; }
@@ -86,16 +85,16 @@
       <div>
         <h1>Citaciones a entrevista</h1>
         <% if (role === 'dev') { %>
-          <p>Envía a candidatos aprobados una plantilla oficial de Meta. Cuando Meta acepte el envío, el candidato pasa a Contactado y queda en coordinación humana. Su respuesta de asistencia alimenta el bloque “Confirmados a entrevista” de la vacante sin crear una agenda automática.</p>
+          <p>Envía a candidatos aprobados una plantilla oficial de Meta que los deriva al coordinador que está gestionando la ronda. Cuando Meta acepte el envío, el candidato pasa a Contactado y queda en coordinación humana; esta citación no crea agenda ni confirma asistencia automáticamente.</p>
         <% } else { %>
-          <p>Envía citaciones a candidatos aprobados. Cuando el envío se confirme, el candidato pasa a Contactado y queda en coordinación humana. Su respuesta de asistencia alimenta el bloque “Confirmados a entrevista” de la vacante.</p>
+          <p>Envía citaciones a candidatos aprobados para que contacten directamente al coordinador que gestiona la ronda. Cuando el envío sea aceptado, el candidato pasa a Contactado y queda en coordinación humana.</p>
         <% } %>
       </div>
       <a href="/admin" class="btn">Volver al panel</a>
     </div>
 
     <% if (preparedSuccess) { %>
-      <div class="alert alert-success"><%= role === 'dev' ? preparedSuccess : 'Las citaciones confirmadas se enviaron correctamente y los candidatos quedaron en coordinación humana.' %></div>
+      <div class="alert alert-success"><%= role === 'dev' ? preparedSuccess : 'Las citaciones se enviaron correctamente y los candidatos quedaron en coordinación humana.' %></div>
     <% } %>
     <% if (preparedError) { %>
       <div class="alert alert-error"><%= preparedError %></div>
@@ -124,7 +123,6 @@
               <option
                 value="<%= vacancy.id %>"
                 data-city="<%= vacancy.city || '' %>"
-                data-address="<%= vacancy.address || '' %>"
                 <%= outreachFilters.vacancyId === vacancy.id ? 'selected' : '' %>
               ><%= vacancy.label %></option>
             <% } %>
@@ -138,13 +136,12 @@
     <% if (role === 'dev') { %>
       <div class="card">
         <h2>Plantilla oficial de Meta</h2>
-        <p class="hint">El texto real lo gobierna la plantilla aprobada en Meta. Si corriges el texto en Meta creando otra versión aprobada, cambia aquí el nombre o idioma correspondiente. El orden de las seis variables debe mantenerse.</p>
+        <p class="hint">El texto real lo gobierna la plantilla aprobada en Meta. El cuerpo debe conservar tres variables, en este orden: candidato, vacante y coordinador. El botón URL es independiente de esas variables.</p>
         <div class="template-reference"><%= templateReference %></div>
-        <div class="quick-replies" aria-label="Botones requeridos de la plantilla">
-          <span class="quick-reply">Confirmo asistencia</span>
-          <span class="quick-reply">No puedo asistir</span>
+        <div class="template-actions" aria-label="Acción requerida de la plantilla">
+          <span class="template-action">Contactar a coordinador</span>
         </div>
-        <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener esos dos botones <strong>Quick Reply</strong>, en ese orden. Lórren envía payloads estables para registrar la respuesta; cambiar este texto en el panel no modifica la plantilla aprobada en Meta.</p>
+        <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener un botón URL dinámico <strong>Contactar a coordinador</strong> con base <code>https://wa.me/{{1}}</code>. Lórren suministra como variable del botón el número del usuario que gestiona esta ronda, sin exponer un campo manual para editarlo.</p>
       </div>
     <% } %>
 
@@ -166,25 +163,14 @@
             </div>
           <% } %>
           <div class="field">
-            <label for="interviewDate">Fecha de entrevista</label>
-            <input type="date" id="interviewDate" name="interviewDate" value="<%= outreachConfig.interviewDate %>" required />
-          </div>
-          <div class="field">
-            <label for="interviewTime">Hora de entrevista</label>
-            <input type="time" id="interviewTime" name="interviewTime" value="<%= outreachConfig.interviewTime %>" required />
-          </div>
-        </div>
-
-        <div class="config-grid" style="margin-top:12px;">
-          <div class="field" style="flex: 2 1 420px;">
-            <label for="interviewAddress">Dirección de citación</label>
-            <textarea id="interviewAddress" name="interviewAddress" required><%= outreachConfig.interviewAddress %></textarea>
-            <span class="hint">Puedes corregirla para esta ronda sin alterar la dirección guardada de la vacante.</span>
+            <label for="coordinatorName">Gestionante / coordinador</label>
+            <input id="coordinatorName" value="<%= coordinatorContact?.name || 'Usuario actual' %>" readonly />
+            <span class="hint">Se toma automáticamente del usuario que está ejecutando la citación.</span>
           </div>
           <div class="field">
             <label for="coordinatorPhone">WhatsApp de coordinación</label>
             <input id="coordinatorPhone" value="<%= coordinatorContact?.displayPhone || 'Sin número configurado' %>" readonly />
-            <span class="hint">Se toma del teléfono configurado para el usuario que está ejecutando la citación.</span>
+            <span class="hint">El botón “Contactar a coordinador” abrirá este WhatsApp.</span>
           </div>
         </div>
 
@@ -194,9 +180,9 @@
           <div class="empty">No hay candidatos aprobados disponibles con los filtros actuales.</div>
         <% } else { %>
           <% if (role === 'dev') { %>
-            <p class="hint">Cada envío es individual por la API oficial. Una sola ronda debe corresponder a una misma vacante para compartir fecha, hora y dirección. La confirmación del candidato es operativa y no crea un <code>InterviewBooking</code>.</p>
+            <p class="hint">Cada envío es individual por la API oficial y usa la vacante propia de cada candidato. La citación solo deriva al coordinador: no crea un <code>InterviewBooking</code>, no define fecha/hora/lugar y no registra confirmación automática.</p>
           <% } else { %>
-            <p class="hint">Selecciona candidatos de una sola vacante por ronda para compartir la misma fecha, hora y dirección.</p>
+            <p class="hint">Selecciona los candidatos que deseas derivar al coordinador de esta ronda.</p>
           <% } %>
           <table class="candidate-table">
             <thead>
@@ -225,7 +211,7 @@
           </table>
           <div class="toolbar">
             <button type="submit" class="btn btn-primary" <%= coordinatorContact?.apiPhone ? '' : 'disabled' %>><%= role === 'dev' ? 'Enviar citaciones por Meta' : 'Enviar citaciones' %></button>
-            <span class="hint"><%= role === 'dev' ? 'Solo los envíos aceptados por Meta pasarán a Contactados.' : 'Solo los envíos confirmados pasarán a Contactados.' %></span>
+            <span class="hint"><%= role === 'dev' ? 'Solo los envíos aceptados por Meta pasarán a Contactados.' : 'Solo los envíos realizados correctamente pasarán a Contactados.' %></span>
           </div>
         <% } %>
       </form>
@@ -233,7 +219,7 @@
 
     <% if (preparedRecipients.length > 0) { %>
       <div class="card">
-        <h2><%= role === 'dev' ? 'Citaciones confirmadas por Meta' : 'Citaciones enviadas' %></h2>
+        <h2><%= role === 'dev' ? 'Citaciones aceptadas por Meta' : 'Citaciones enviadas' %></h2>
         <div class="delivery-list">
           <% for (const recipient of preparedRecipients) { %>
             <div class="delivery-item">
@@ -278,15 +264,6 @@
 
       citySelect.addEventListener('change', syncVacanciesToCity);
       syncVacanciesToCity();
-    }
-
-    const interviewAddress = document.getElementById('interviewAddress');
-    const filteredVacancyId = '<%= outreachFilters.vacancyId %>';
-    if (interviewAddress && filteredVacancyId) {
-      const option = Array.from(document.querySelectorAll('#vacancyId option')).find((item) => item.value === filteredVacancyId);
-      if (!interviewAddress.value.trim() && option?.dataset?.address) {
-        interviewAddress.value = option.dataset.address;
-      }
     }
   </script>
 </body>
