@@ -1,4 +1,4 @@
-name: Temporary 1546 actor audit diagnosis
+name: Temporary 1546 actor audit validation
 
 on:
   push:
@@ -8,21 +8,38 @@ on:
       - .github/workflows/tmp-1546-diagnose.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/1546-candidate-admin-actor-name
-      - name: Inspect candidate admin audit writers
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Apply focused patch
+        run: python3 .github/scripts/tmp_1546_apply.py
+      - name: Validate Prisma
         run: |
-          grep -n -B 30 -A 35 "Citacion de entrevista enviada por Meta" src/routes/admin.js
-          echo '--- logCandidateAdminEvent callers ---'
-          grep -n -B 3 -A 8 "logCandidateAdminEvent" src/routes/admin.js
-          echo '--- actor role request occurrences ---'
-          grep -n -B 2 -A 3 "actorRole: req.userRole" src/routes/admin.js
-          echo '--- admin event read ---'
-          grep -n -B 8 -A 18 "candidateAdminEvent.findMany" src/routes/admin.js
+          npx prisma validate
+          npm run prisma:generate
+      - name: Run focal regression
+        run: node --test test/adminManualCv.test.js
+      - name: Check syntax and diff
+        run: |
+          node --check src/routes/admin.js
+          node --check test/adminManualCv.test.js
+          git diff --check
+      - name: Commit focused change
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add prisma/schema.prisma prisma/migrations/20260902140500_add_candidate_admin_event_actor_user/migration.sql src/routes/admin.js src/views/detail.ejs test/adminManualCv.test.js
+          git commit -m 'fix(dev): identify candidate movement actors'
+          git push origin HEAD:fix/1546-candidate-admin-actor-name
