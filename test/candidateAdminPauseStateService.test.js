@@ -4,7 +4,7 @@ import {
   pauseCandidateAutomationFromAdmin,
   resumeCandidateAutomationFromAdmin
 } from '../src/services/candidateStateService.js';
-import { EXPLICIT_ADMIN_PAUSE_MODE } from '../src/services/botAutomationPolicy.js';
+import { EXPLICIT_ADMIN_PAUSE_MODE, shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';
 
 function sameValue(left, right) {
   if (left instanceof Date || right instanceof Date) {
@@ -105,6 +105,7 @@ test('pausa desde admin únicamente el snapshot exacto y cancela recordatorios',
   assert.equal(result.candidate.botPausedBy, 'dev');
   assert.equal(result.candidate.botPauseReason, 'Revisión manual de conversación');
   assert.equal(result.candidate.botResumeMode, EXPLICIT_ADMIN_PAUSE_MODE);
+  assert.equal(shouldResumeAutomationOnInbound(result.candidate), false);
   assert.equal(result.candidate.reminderScheduledFor, null);
   assert.equal(result.candidate.reminderState, 'CANCELLED');
   assert.deepEqual(calls.updateMany[0].where, { id: unpausedCandidate.id, ...unpausedSnapshot });

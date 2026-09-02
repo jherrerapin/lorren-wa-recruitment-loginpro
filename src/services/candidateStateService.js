@@ -287,16 +287,32 @@ export async function finalizeManualOutboundDelivery(client, input = {}) {
   const candidateClient = requireCandidateClient(client);
   const candidateId = requireCandidateId(input.candidateId);
   const expected = requireClaimedManualOutboundSnapshot(input.expected);
+  const previous = input.previous == null ? null : normalizeManualOutboundSnapshot(input.previous);
   const sentAtInput = input.sentAt === undefined ? new Date() : input.sentAt;
   const sentAt = requireValidDate(sentAtInput, 'candidate_manual_outbound_sent_at');
+  const preserveExplicitAdminPause = Boolean(
+    previous?.botPaused
+    && previous?.botResumeMode === EXPLICIT_ADMIN_PAUSE_MODE
+  );
 
   return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
     expected: manualOutboundExpectedWhere(expected),
-    data: {
-      lastOutboundAt: sentAt,
-      botResumeMode: 'manual_resume_dashboard'
-    }
+    data: preserveExplicitAdminPause
+      ? {
+        botPaused: true,
+        botPausedAt: previous.botPausedAt,
+        botPausedBy: previous.botPausedBy,
+        botPauseReason: previous.botPauseReason,
+        botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE,
+        reminderScheduledFor: previous.reminderScheduledFor,
+        reminderState: previous.reminderState,
+        lastOutboundAt: sentAt
+      }
+      : {
+        lastOutboundAt: sentAt,
+        botResumeMode: 'manual_resume_dashboard'
+      }
   });
 }
 

@@ -11,6 +11,7 @@ import {
   MANUAL_OUTBOUND_SENDING_MODE,
   MANUAL_OUTBOUND_UNKNOWN_MODE
 } from '../src/services/candidateStateService.js';
+import { EXPLICIT_ADMIN_PAUSE_MODE, shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
@@ -206,6 +207,38 @@ test('crea intención antes de Meta y finaliza mensaje y candidato al confirmar 
   assert.equal(harness.state.candidate.botPaused, true);
   assert.equal(harness.state.candidate.botResumeMode, 'manual_resume_dashboard');
   assert.equal(harness.state.candidate.lastOutboundAt.toISOString(), '2026-07-16T01:00:02.000Z');
+});
+
+test('envío manual exitoso conserva una pausa explícita de DEV hasta reactivación administrativa', async () => {
+  const explicitPauseAt = new Date('2026-07-16T00:45:00.000Z');
+  const explicitPausedCandidate = {
+    ...baseCandidate,
+    botPaused: true,
+    botPausedAt: explicitPauseAt,
+    botPausedBy: 'dev',
+    botPauseReason: 'Revisión manual de conversación',
+    botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE,
+    reminderScheduledFor: null,
+    reminderState: 'CANCELLED'
+  };
+  const harness = createHarness({ candidate: explicitPausedCandidate });
+
+  const result = await deliverManualOutboundText(harness.prisma, input, {
+    sendText: harness.sendText,
+    now: createClock('2026-07-16T01:02:00.000Z', '2026-07-16T01:02:02.000Z')
+  });
+
+  assert.equal(result.sent, true);
+  assert.equal(harness.calls.sends.length, 1);
+  assert.equal(harness.state.candidate.botPaused, true);
+  assert.equal(harness.state.candidate.botResumeMode, EXPLICIT_ADMIN_PAUSE_MODE);
+  assert.equal(harness.state.candidate.botPausedAt.toISOString(), explicitPauseAt.toISOString());
+  assert.equal(harness.state.candidate.botPausedBy, 'dev');
+  assert.equal(harness.state.candidate.botPauseReason, 'Revisión manual de conversación');
+  assert.equal(harness.state.candidate.reminderScheduledFor, null);
+  assert.equal(harness.state.candidate.reminderState, 'CANCELLED');
+  assert.equal(harness.state.candidate.lastOutboundAt.toISOString(), '2026-07-16T01:02:02.000Z');
+  assert.equal(shouldResumeAutomationOnInbound(harness.state.candidate), false);
 });
 
 test('un rechazo HTTP confirmado marca FAILED y restaura todo el snapshot previo', async () => {

@@ -337,8 +337,6 @@ El bot solo puede retomar cuando:
 - llega un nuevo mensaje del candidato y la política permite la reanudación;
 - o el reclutador lo reactiva explícitamente.
 
-Una pausa explícita ejecutada por DEV mediante **Pausar bot** es distinta de una intervención humana ordinaria: no puede levantarse por mensajes posteriores del candidato. Mientras esa pausa siga activa, solo una acción explícita de **Reactivar bot** desde DEV puede devolver el control a la automatización.
-
 Nunca debe responder encima del mensaje humano antes de una nueva entrada del candidato.
 
 Todas las fuentes manuales deben clasificarse mediante una política canónica única.
