@@ -735,6 +735,7 @@ function formatAdminEventLabel(event = {}) {
 
 async function logCandidateAdminEvent(prisma, {
   candidateId,
+  actorUserId = null,
   actorRole,
   eventType,
   eventLabel,
@@ -747,6 +748,7 @@ async function logCandidateAdminEvent(prisma, {
     await prisma.candidateAdminEvent.create({
       data: {
         candidateId,
+        actorUserId: normalizeString(actorUserId),
         actorRole: normalizeString(actorRole) || 'system',
         eventType,
         eventLabel,
@@ -1526,6 +1528,7 @@ export async function finalizeApprovedInterviewOutreachHandoff(client, input = {
     throw new TypeError('approved_interview_handoff_audit_create_required');
   }
   const candidateId = normalizeString(input.candidateId);
+  const actorUserId = normalizeString(input.actorUserId);
   const actorRole = normalizeString(input.actorRole) || 'system';
   const sentAt = input.sentAt instanceof Date ? new Date(input.sentAt.getTime()) : new Date(input.sentAt);
   if (!candidateId) throw new TypeError('approved_interview_handoff_candidate_id_required');
@@ -1556,6 +1559,7 @@ export async function finalizeApprovedInterviewOutreachHandoff(client, input = {
   await client.candidateAdminEvent.create({
     data: {
       candidateId,
+      actorUserId,
       actorRole,
       eventType: 'STATUS_CHANGED',
       eventLabel: 'Citacion de entrevista enviada por Meta',
@@ -2139,6 +2143,7 @@ export function adminRouter(prisma) {
             }),
             afterFinalize: (tx, context) => finalizeApprovedInterviewOutreachHandoff(tx, {
               candidateId: context.candidateId,
+              actorUserId: req.userId || null,
               actorRole: req.userRole,
               sentAt: context.sentAt
             })
@@ -2316,6 +2321,11 @@ export function adminRouter(prisma) {
     const adminEvents = req.userRole === 'dev' && typeof prisma?.candidateAdminEvent?.findMany === 'function'
       ? await prisma.candidateAdminEvent.findMany({
         where: { candidateId: candidate.id },
+        include: {
+          actorUser: {
+            select: { displayName: true, username: true }
+          }
+        },
         orderBy: { createdAt: 'desc' },
         take: 30
       })
@@ -2457,6 +2467,7 @@ export function adminRouter(prisma) {
 
     await logCandidateAdminEvent(prisma, {
       candidateId: booking.candidateId,
+      actorUserId: req.userId || null,
       actorRole: req.userRole,
       eventType: 'INTERVIEW_STATUS_CHANGED',
       eventLabel: 'Actualizó estado de entrevista',
@@ -2506,6 +2517,7 @@ export function adminRouter(prisma) {
       });
       await logCandidateAdminEvent(prisma, {
         candidateId: booking.candidateId,
+        actorUserId: req.userId || null,
         actorRole: req.userRole,
         eventType: 'INTERVIEW_MANUAL_REMINDER_SENT',
         eventLabel: 'Envio recordatorio manual de entrevista',
@@ -2695,6 +2707,7 @@ export function adminRouter(prisma) {
 
       await logCandidateAdminEvent(prisma, {
         candidateId: candidate.id,
+        actorUserId: req.userId || null,
         actorRole: req.userRole,
         eventType: 'INTERVIEW_ASSIGNED',
         eventLabel: 'Asignó entrevista manualmente',
@@ -2748,6 +2761,7 @@ export function adminRouter(prisma) {
     if (existingCandidate.status !== status) {
       await logCandidateAdminEvent(prisma, {
         candidateId: id,
+        actorUserId: req.userId || null,
         actorRole: req.userRole,
         eventType: 'STATUS_CHANGED',
         eventLabel: 'Cambio de estado',
@@ -2816,6 +2830,7 @@ export function adminRouter(prisma) {
     if (req.userRole !== 'dev' && candidate.status !== 'CONTACTADO') {
       await logCandidateAdminEvent(prisma, {
         candidateId: id,
+        actorUserId: req.userId || null,
         actorRole: req.userRole,
         eventType: 'WHATSAPP_OPENED',
         fromValue: formatAdminEventValue(candidate.status),
@@ -2947,6 +2962,7 @@ export function adminRouter(prisma) {
     const nextVacancyLabel = `${vacancy.title || vacancy.role}${vacancy.city ? ` (${vacancy.city})` : ''}`;
     await logCandidateAdminEvent(prisma, {
       candidateId: id,
+      actorUserId: req.userId || null,
       actorRole: req.userRole,
       eventType: 'VACANCY_ASSIGNED',
       eventLabel: candidate.vacancyId ? 'Cambio vacante asignada' : 'Asignó vacante al candidato',
@@ -3068,6 +3084,7 @@ export function adminRouter(prisma) {
     if (existingCandidate.status !== data.status && data.status) {
       await logCandidateAdminEvent(prisma, {
         candidateId: id,
+        actorUserId: req.userId || null,
         actorRole: req.userRole,
         eventType: 'STATUS_CHANGED',
         eventLabel: 'Edición manual de estado',
@@ -3078,6 +3095,7 @@ export function adminRouter(prisma) {
     if (req.userRole === 'dev' && existingCandidate.interviewNotes !== data.interviewNotes && data.interviewNotes !== undefined) {
       await logCandidateAdminEvent(prisma, {
         candidateId: id,
+        actorUserId: req.userId || null,
         actorRole: req.userRole,
         eventType: 'DEV_NOTES_UPDATED',
         eventLabel: 'Actualizó observaciones dev',
@@ -3087,6 +3105,7 @@ export function adminRouter(prisma) {
     if (req.userRole === 'dev' && existingCandidate.gender !== data.gender && data.gender) {
       await logCandidateAdminEvent(prisma, {
         candidateId: id,
+        actorUserId: req.userId || null,
         actorRole: req.userRole,
         eventType: 'GENDER_UPDATED',
         eventLabel: 'Actualizó género del candidato',
@@ -3138,6 +3157,7 @@ export function adminRouter(prisma) {
 
     await logCandidateAdminEvent(prisma, {
       candidateId: id,
+      actorUserId: req.userId || null,
       actorRole: req.userRole,
       eventType: 'BOT_PAUSED',
       eventLabel: 'Pausó el bot',
@@ -3183,6 +3203,7 @@ export function adminRouter(prisma) {
 
     await logCandidateAdminEvent(prisma, {
       candidateId: id,
+      actorUserId: req.userId || null,
       actorRole: req.userRole,
       eventType: 'BOT_RESUMED',
       eventLabel: 'Reanudó el bot'

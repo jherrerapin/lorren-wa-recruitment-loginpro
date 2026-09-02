@@ -92,6 +92,26 @@ function createPrismaMock(initialCandidate) {
         return [];
       }
     },
+    appUser: {
+      async findMany() {
+        return [];
+      },
+      async findUnique({ where } = {}) {
+        const id = where?.id || null;
+        const username = where?.username || (id === 'user-dev-fixture' ? 'dev-fixture' : 'reclutador-fixture');
+        if (!id && !where?.username) return null;
+        return {
+          id: id || `user-${username}`,
+          username,
+          displayName: id === 'user-dev-fixture' ? 'Usuario Dev Prueba' : 'Usuario Reclutador Prueba',
+          email: null,
+          recoveryPhone: null,
+          dispatchAlertPhone: null,
+          role: id === 'user-dev-fixture' ? 'DEV' : 'ADMIN',
+          isActive: true
+        };
+      }
+    },
     candidateAdminEvent: {
       async findMany({ where, orderBy, take } = {}) {
         let rows = state.candidateAdminEvents.filter((event) => !where?.candidateId || event.candidateId === where.candidateId);
@@ -132,7 +152,11 @@ async function createServer(initialCandidate) {
 
   app.get('/test-login/:role', (req, res) => {
     const sid = `sid-${Math.random().toString(16).slice(2)}`;
-    sessions.set(sid, { userRole: req.params.role });
+    sessions.set(sid, {
+      userRole: req.params.role,
+      userId: `user-${req.params.role}-fixture`,
+      username: `${req.params.role}-fixture`
+    });
     res.setHeader('Set-Cookie', `sid=${sid}; Path=/; HttpOnly`);
     res.status(204).end();
   });
@@ -428,11 +452,33 @@ test('movimientos del reclutador solo aparecen en perfil dev', async () => {
       {
         id: 'event-1',
         actorRole: 'admin',
+        actorUser: {
+          displayName: 'Usuario Prueba Norte',
+          username: 'reclutador-prueba-norte'
+        },
         eventType: 'STATUS_CHANGED',
         eventLabel: 'Cambio de estado',
         fromValue: 'Registrado',
         toValue: 'Aprobado',
         createdAt: new Date('2026-04-08T15:12:00.000Z')
+      },
+      {
+        id: 'event-2',
+        actorRole: 'admin',
+        eventType: 'WHATSAPP_OPENED',
+        eventLabel: 'Apertura histórica',
+        createdAt: new Date('2026-04-08T15:11:00.000Z')
+      },
+      {
+        id: 'event-3',
+        actorRole: 'admin',
+        actorUser: {
+          displayName: null,
+          username: 'usuario-prueba-centro'
+        },
+        eventType: 'STATUS_CHANGED',
+        eventLabel: 'Movimiento con usuario',
+        createdAt: new Date('2026-04-08T15:10:00.000Z')
       }
     ]
   };
@@ -465,7 +511,11 @@ test('movimientos del reclutador solo aparecen en perfil dev', async () => {
     assert.equal(devResponse.status, 200);
     assert.match(devHtml, /Movimientos del reclutador/);
     assert.match(devHtml, /Cambio de estado/);
-    assert.match(devHtml, /Reclutador/);
+    assert.match(devHtml, /Por:\s*Usuario Prueba Norte/);
+    assert.match(devHtml, /Abrio WhatsApp del candidato/);
+    assert.match(devHtml, /Por:\s*Reclutador/);
+    assert.match(devHtml, /Movimiento con usuario/);
+    assert.match(devHtml, /Por:\s*usuario-prueba-centro/);
     assert.match(devHtml, /Registrado/);
     assert.match(devHtml, /Aprobado/);
   } finally {
@@ -507,6 +557,7 @@ test('cambio de estado registra trazabilidad administrativa', async () => {
     assert.equal(prisma.state.candidateAdminEvents.length, 1);
     assert.equal(prisma.state.candidateAdminEvents[0].eventType, 'STATUS_CHANGED');
     assert.equal(prisma.state.candidateAdminEvents[0].actorRole, 'admin');
+    assert.equal(prisma.state.candidateAdminEvents[0].actorUserId, 'user-admin-fixture');
     assert.equal(prisma.state.candidateAdminEvents[0].fromValue, 'Registrado');
     assert.equal(prisma.state.candidateAdminEvents[0].toValue, 'Aprobado');
   } finally {
