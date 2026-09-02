@@ -1,0 +1,28 @@
+name: Temporary 1546 actor audit diagnosis
+
+on:
+  push:
+    branches:
+      - fix/1546-candidate-admin-actor-name
+    paths:
+      - .github/workflows/tmp-1546-diagnose.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/1546-candidate-admin-actor-name
+      - name: Inspect candidate admin audit writers
+        run: |
+          grep -n -B 30 -A 35 "Citacion de entrevista enviada por Meta" src/routes/admin.js
+          echo '--- logCandidateAdminEvent callers ---'
+          grep -n -B 3 -A 8 "logCandidateAdminEvent" src/routes/admin.js
+          echo '--- actor role request occurrences ---'
+          grep -n -B 2 -A 3 "actorRole: req.userRole" src/routes/admin.js
+          echo '--- admin event read ---'
+          grep -n -B 8 -A 18 "candidateAdminEvent.findMany" src/routes/admin.js
