@@ -154,6 +154,9 @@ test('la configuración usa actor y teléfono persistidos y construye solo las t
   assert.equal(delivery.coordinatorPhone, '573007654321');
   assert.match(delivery.body, /Coordinación Prueba/);
   assert.match(delivery.body, /proceso es gratuito/i);
+  assert.match(delivery.body, /No somos una bolsa de empleo/i);
+  assert.match(delivery.body, /nunca te pediremos dinero para postularte, asistir o continuar/i);
+  assert.doesNotMatch(delivery.body, /LoginPro Service/i);
   assert.doesNotMatch(delivery.body, /Te esperamos|Dirección Prueba|8:00|27 de agosto/);
 });
 
@@ -166,11 +169,11 @@ test('el dashboard ya no deriva ni dibuja confirmación automática de la citaci
   assert.doesNotMatch(source, /interviewOutreachAttendanceByVacancy/);
 });
 
-test('la vista deriva al coordinador y elimina fecha, hora, lugar y Quick Replies', () => {
+test('la vista deriva al coordinador y elimina fecha, hora, lugar y campos manuales', () => {
   const view = readFileSync(new URL('../src/views/outreachApproved.ejs', import.meta.url), 'utf8');
   assert.match(view, /Contactar a coordinador/);
   assert.match(view, /https:\/\/wa\.me\/\{\{1\}\}/);
-  assert.match(view, /Gestionante \/ coordinador/);
+  assert.doesNotMatch(view, /id="coordinatorName"|id="coordinatorPhone"|Gestionante \/ coordinador|WhatsApp de coordinación/);
   assert.doesNotMatch(view, /id="interviewDate"|name="interviewDate"/);
   assert.doesNotMatch(view, /id="interviewTime"|name="interviewTime"/);
   assert.doesNotMatch(view, /id="interviewAddress"|name="interviewAddress"/);
