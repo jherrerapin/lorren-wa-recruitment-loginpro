@@ -4,22 +4,11 @@ import assert from 'node:assert/strict';
 import { extractMessages } from '../src/services/whatsapp.js';
 import { consolidateTextMessages } from '../src/services/multiline.js';
 
-const OLD_META_AD_CONTEXT_MAP = process.env.META_AD_CONTEXT_MAP;
-
-test.afterEach(() => {
-  if (OLD_META_AD_CONTEXT_MAP === undefined) {
-    delete process.env.META_AD_CONTEXT_MAP;
-  } else {
-    process.env.META_AD_CONTEXT_MAP = OLD_META_AD_CONTEXT_MAP;
-  }
-});
-
-test('extractMessages adjunta contexto de publicidad si Meta envia referral', () => {
+test('extractMessages conserva referral CTWA como contexto descriptivo sin mapa paralelo de vacante', () => {
   process.env.META_AD_CONTEXT_MAP = JSON.stringify({
-    AD_IBAGUE_AUX: {
-      city: 'Ibague',
-      vacancy: 'Auxiliar de cargue y descargue',
-      zone: 'Aeropuerto'
+    '120000000000701': {
+      city: 'Ciudad equivocada',
+      vacancy: 'Vacante equivocada'
     }
   });
 
@@ -28,13 +17,15 @@ test('extractMessages adjunta contexto de publicidad si Meta envia referral', ()
       changes: [{
         value: {
           messages: [{
-            id: 'wamid-1',
-            from: '573001112233',
+            id: 'wamid-ctwa-context',
+            from: '573000000701',
             type: 'text',
             text: { body: 'Hola, información' },
             referral: {
-              ad_id: 'AD_IBAGUE_AUX',
-              headline: 'Trabajo en Ibagué'
+              source_id: '120000000000701',
+              source_type: 'ad',
+              headline: 'Auxiliar de bodega Siberia',
+              body: 'Proceso operativo'
             }
           }]
         }
@@ -44,29 +35,61 @@ test('extractMessages adjunta contexto de publicidad si Meta envia referral', ()
 
   const [message] = extractMessages(payload);
 
-  assert.equal(message.lorrenAdContext.adId, 'AD_IBAGUE_AUX');
-  assert.equal(message.lorrenAdContext.mapped, true);
-  assert.match(message.lorrenAdContext.text, /Ibague/i);
-  assert.match(message.lorrenAdContext.text, /Auxiliar de cargue y descargue/i);
+  assert.equal(message.lorrenAdContext.adId, '120000000000701');
+  assert.equal(message.lorrenAdContext.mapped, false);
+  assert.match(message.lorrenAdContext.text, /Auxiliar de bodega Siberia/i);
+  assert.doesNotMatch(message.lorrenAdContext.text, /Vacante equivocada/i);
+  assert.doesNotMatch(message.lorrenAdContext.text, /Ciudad equivocada/i);
+
+  delete process.env.META_AD_CONTEXT_MAP;
 });
 
-test('consolidateTextMessages usa la publicidad como pista interna sin borrar el texto del candidato', () => {
+test('consolidateTextMessages marca referral como contexto descriptivo y no como autoridad de vacante', () => {
   const text = consolidateTextMessages([
     {
       body: 'Hola, información',
       rawPayload: {
         lorrenAdContext: {
-          text: 'Ciudad: Ibague | Vacante: Auxiliar de cargue y descargue',
-          mapped: true,
-          reason: 'mapped_ad_context'
+          text: 'Auxiliar de bodega Siberia | ad | 120000000000702',
+          mapped: false,
+          reason: 'referral_context'
         }
       }
     }
   ]);
 
-  assert.match(text, /Pista interna de origen Meta Ads/i);
-  assert.match(text, /Ciudad: Ibague/i);
+  assert.match(text, /Contexto descriptivo recibido desde Meta Ads/i);
+  assert.match(text, /la asociación persistida del anuncio es la autoridad/i);
+  assert.match(text, /Auxiliar de bodega Siberia/i);
   assert.match(text, /Hola, información/i);
+});
+
+test('source_id de una publicación no se expone como adId', () => {
+  const payload = {
+    entry: [{
+      changes: [{
+        value: {
+          messages: [{
+            id: 'wamid-post-context',
+            from: '573000000703',
+            type: 'text',
+            text: { body: 'Hola' },
+            referral: {
+              source_id: '120000000000703',
+              source_type: 'post',
+              headline: 'Publicación orgánica'
+            }
+          }]
+        }
+      }]
+    }]
+  };
+
+  const [message] = extractMessages(payload);
+
+  assert.equal(message.lorrenAdContext.adId, null);
+  assert.equal(message.lorrenAdContext.mapped, false);
+  assert.match(message.lorrenAdContext.text, /Publicación orgánica/i);
 });
 
 test('extractMessages no cambia el flujo organico si no hay referral', () => {
@@ -75,8 +98,8 @@ test('extractMessages no cambia el flujo organico si no hay referral', () => {
       changes: [{
         value: {
           messages: [{
-            id: 'wamid-2',
-            from: '573001112233',
+            id: 'wamid-organic-context',
+            from: '573000000704',
             type: 'text',
             text: { body: 'Vengo referido por un amigo' }
           }]
