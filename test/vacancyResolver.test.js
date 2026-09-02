@@ -157,6 +157,19 @@ test('una búsqueda explícita de vacantes en otra ciudad mantiene el filtro ter
   assert.equal(resolution.reason, 'city_without_active_vacancies');
 });
 
+test('destino explícito de búsqueda tiene prioridad aunque la residencia aparezca después en el mismo turno', async () => {
+  const resolution = await resolveVacancyFromText(null, 'Busco vacantes de auxiliar de bodega en Medellín y soy de Soacha', {
+    activeVacancies: [activeSiberiaBodegaVacancy],
+    allVacancies: [activeSiberiaBodegaVacancy]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.vacancy, null);
+  assert.equal(resolution.city, 'Medellin');
+  assert.equal(resolution.residenceLocation, 'Soacha');
+  assert.equal(resolution.reason, 'city_without_active_vacancies');
+});
+
 test('metadato confiable de publicidad conserva precedencia aunque el candidato declare otra residencia', async () => {
   const resolution = await resolveVacancyFromText(null, 'Soy de Mosquera y quiero información', {
     trustedVacancyId: 'vac-sib-bodega-active',
