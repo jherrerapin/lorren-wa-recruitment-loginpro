@@ -76,7 +76,7 @@ import {
 export const INTERVIEW_COORDINATION_HANDOFF_MODE = 'interview_coordination_handoff';
 export const DEFAULT_INTERVIEW_TEMPLATE_NAME = 'citacion_entrevista_loginpro';
 export const DEFAULT_INTERVIEW_TEMPLATE_LANGUAGE = 'es_CO';
-export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\n\nPara continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} usando el botón de abajo.\n\nRecuerda: este proceso es gratuito. Nunca te pediremos dinero para asistir o continuar.';
+export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\n\nPara continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} usando el botón de abajo.\n\nRecuerda: este proceso es gratuito. No somos una bolsa de empleo y nunca te pediremos dinero para postularte, asistir o continuar.';
 const MANUAL_OUTBOUND_BLOCKING_MODES = new Set(['manual_outbound_sending', 'manual_outbound_delivery_unknown']);
 
 function sessionAuth(req, res, next) {
