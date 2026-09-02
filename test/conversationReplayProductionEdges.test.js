@@ -8,6 +8,13 @@ import {
   resolveVacancyFirstGate,
   VacancyFirstGateAction
 } from '../src/services/vacancyFirstGate.js';
+import { resolveVacancyFromText } from '../src/services/vacancyResolver.js';
+import {
+  attributeCandidateCampaignFromMessage,
+  extractMetaAttributionFields,
+  resolveCampaignForReferral
+} from '../src/services/campaignAttribution.js';
+import { CAMPAIGN_VACANCY_CONFIRMATION_MODE } from '../src/services/dataConsentGate.js';
 import { appendUniqueReplySegment } from '../src/services/replyComposition.js';
 import { markConversationMessagesResponded } from '../src/services/conversationMessageRepository.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
@@ -52,6 +59,18 @@ function vacancy(overrides = {}) {
   };
 }
 
+function siberiaVacancy(overrides = {}) {
+  return vacancy({
+    id: 'vac-siberia-aux',
+    title: 'Auxiliar de bodega Siberia',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: operation('bogota-siberia', 'Bogota'),
+    operationAddress: 'Parque industrial Siberia',
+    ...overrides
+  });
+}
+
 function prismaFor(vacancies) {
   return {
     vacancy: {
@@ -72,6 +91,7 @@ function candidate(overrides = {}) {
     currentStep: 'COLLECTING_DATA',
     vacancyId: null,
     botResumeMode: null,
+    dataConsentStatus: 'PENDING',
     reminderScheduledFor: null,
     reminderState: 'SKIPPED',
     ...overrides
@@ -197,6 +217,191 @@ test('metadata confiable conserva autoridad frente a texto ambiguo contradictori
   assert.equal(decision.resolution.fallback, false);
   assert.match(decision.reply, /Auxiliar de cargue y descargue Neiva/i);
   assert.match(decision.reply, /te interesa continuar/i);
+});
+
+test('Click-to-WhatsApp resuelve por source_id exacto del anuncio y no por nombre de campaña', () => {
+  const campaigns = [
+    {
+      id: 'campaign-ad-siberia',
+      code: '120000000000001',
+      name: 'Anuncio Siberia',
+      notes: 'Campaña de operación',
+      sourceType: 'META_ADS',
+      vacancyId: 'vac-siberia-aux'
+    },
+    {
+      id: 'campaign-ad-other',
+      code: '120000000000002',
+      name: 'Campaña que coincide por nombre',
+      notes: null,
+      sourceType: 'META_ADS',
+      vacancyId: 'vac-other'
+    }
+  ];
+  const message = {
+    referral: {
+      source_id: '120000000000001',
+      source_type: 'ad',
+      campaign_id: 'campaign-objective-id',
+      campaign_name: 'Campaña que coincide por nombre',
+      ctwa_clid: 'ctwa-test-token'
+    }
+  };
+
+  const resolution = resolveCampaignForReferral(campaigns, message);
+  const metaFields = extractMetaAttributionFields(message);
+
+  assert.equal(resolution.campaign.id, 'campaign-ad-siberia');
+  assert.equal(resolution.matchMode, 'meta_source_ad_id_exact');
+  assert.equal(metaFields.metaAdId, '120000000000001');
+  assert.equal(metaFields.metaCtwaClid, 'ctwa-test-token');
+});
+
+test('Click-to-WhatsApp falla cerrado si source_id no corresponde al anuncio exacto aunque otros metadatos coincidan', () => {
+  const campaigns = [{
+    id: 'campaign-wrong-ad',
+    code: 'campaign-objective-id',
+    name: 'Campaña Siberia',
+    notes: 'Siberia',
+    sourceType: 'META_ADS',
+    vacancyId: 'vac-wrong'
+  }];
+  const message = {
+    referral: {
+      source_id: '120000000009999',
+      source_type: 'ad',
+      campaign_id: 'campaign-objective-id',
+      campaign_name: 'Campaña Siberia',
+      headline: 'Auxiliar de bodega Siberia'
+    }
+  };
+
+  const resolution = resolveCampaignForReferral(campaigns, message);
+
+  assert.equal(resolution.campaign, null);
+  assert.equal(resolution.reason, 'objective_metadata_without_exact_campaign_match');
+  assert.deepEqual(resolution.matches, []);
+});
+
+test('source_id de una publicación no se persiste como metaAdId ni puede seleccionar un anuncio', () => {
+  const campaigns = [{
+    id: 'campaign-ad',
+    code: '120000000000003',
+    name: 'Anuncio operativo',
+    sourceType: 'META_ADS',
+    vacancyId: 'vac-one'
+  }];
+  const message = {
+    referral: {
+      source_id: '120000000000003',
+      source_type: 'post',
+      headline: 'Publicación orgánica'
+    }
+  };
+
+  const fields = extractMetaAttributionFields(message);
+  const resolution = resolveCampaignForReferral(campaigns, message);
+
+  assert.equal(fields.metaAdId, undefined);
+  assert.equal(resolution.campaign, null);
+  assert.equal(resolution.reason, 'objective_metadata_without_exact_campaign_match');
+});
+
+test('atribución CTWA persiste anuncio y vacante exactos dejando confirmación pendiente', async () => {
+  const updates = [];
+  const prisma = {
+    candidate: {
+      async findUnique() {
+        return {
+          id: 'candidate-ctwa-test',
+          campaignId: null,
+          vacancyId: null,
+          sourceType: 'UNKNOWN',
+          campaignCodeRaw: null,
+          botResumeMode: null,
+          metaCtwaClid: null,
+          metaAdId: null,
+          metaCampaignId: null,
+          metaCampaignName: null
+        };
+      },
+      async update(args) {
+        updates.push(args);
+        return { id: args.where.id, ...args.data };
+      }
+    },
+    campaign: {
+      async findMany() {
+        return [{
+          id: 'campaign-ad-siberia',
+          code: '120000000000004',
+          name: 'Anuncio Siberia',
+          notes: null,
+          sourceType: 'META_ADS',
+          vacancyId: 'vac-siberia-aux'
+        }];
+      }
+    }
+  };
+  const message = {
+    referral: {
+      source_id: '120000000000004',
+      source_type: 'ad',
+      ctwa_clid: 'ctwa-test-assignment'
+    }
+  };
+
+  const result = await attributeCandidateCampaignFromMessage(prisma, 'candidate-ctwa-test', message);
+
+  assert.equal(result.attributed, true);
+  assert.equal(result.vacancyId, 'vac-siberia-aux');
+  assert.equal(result.matchMode, 'meta_source_ad_id_exact');
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].data.campaignId, 'campaign-ad-siberia');
+  assert.equal(updates[0].data.vacancyId, 'vac-siberia-aux');
+  assert.equal(updates[0].data.botResumeMode, CAMPAIGN_VACANCY_CONFIRMATION_MODE);
+  assert.equal(updates[0].data.metaAdId, '120000000000004');
+});
+
+test('residencia en Madrid habilita una vacante compatible de Siberia sin convertir Madrid en ciudad de la vacante', async () => {
+  const target = siberiaVacancy();
+  const resolution = await resolveVacancyFromText(null, 'Soy de Madrid y me interesa auxiliar de bodega', {
+    activeVacancies: [target],
+    allVacancies: [target]
+  });
+
+  assert.equal(resolution.resolved, true);
+  assert.equal(resolution.vacancy.id, target.id);
+  assert.equal(resolution.city, 'Bogota');
+  assert.equal(resolution.residenceLocation, 'Madrid');
+});
+
+test('una búsqueda explícita en Medellín no cruza hacia la vacante de Siberia', async () => {
+  const target = siberiaVacancy();
+  const resolution = await resolveVacancyFromText(null, 'Busco vacantes de auxiliar de bodega en Medellín', {
+    activeVacancies: [target],
+    allVacancies: [target]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.vacancy, null);
+  assert.equal(resolution.city, 'Medellin');
+  assert.equal(resolution.reason, 'city_without_active_vacancies');
+});
+
+test('residencia sin cargo pide el anuncio de forma contextual y no como catálogo de vacantes', async () => {
+  const target = siberiaVacancy();
+  const decision = await resolveGate({
+    text: 'Soy de Madrid',
+    candidateState: candidate({ currentStep: 'GREETING_SENT' }),
+    vacancies: [target]
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'RESIDENCE_CAPTURED_VACANCY_NEEDED');
+  assert.match(decision.reply, /cargo.*anuncio|anuncio.*cargo/i);
+  assert.doesNotMatch(decision.reply, /qué vacante.*te interesa|para qué vacante.*interesad/i);
+  assert.doesNotMatch(decision.reply, /no tengo vacantes activas/i);
 });
 
 test('el compositor no duplica un seguimiento que la respuesta generada ya contiene', () => {
