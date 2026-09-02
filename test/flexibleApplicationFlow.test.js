@@ -205,9 +205,9 @@ test('si declara no tener experiencia no exige tiempo ni descripción', () => {
   assert.deepEqual(readiness.missingFields, []);
 });
 
-test('atribución prioriza coincidencia exacta y conserva identificadores Meta', () => {
+test('atribución usa el ad_id exacto y conserva identificadores Meta', () => {
   const campaigns = [
-    { id: 'campaign-1', code: '120000001', name: 'Neiva líder', notes: null },
+    { id: 'campaign-1', code: 'ad-55', name: 'Neiva líder', notes: null },
     { id: 'campaign-2', code: 'NEIVA-AUXILIAR', name: 'Neiva auxiliar', notes: null }
   ];
   const message = {
@@ -222,7 +222,7 @@ test('atribución prioriza coincidencia exacta y conserva identificadores Meta',
   const resolution = resolveCampaignForReferral(campaigns, message);
   assert.equal(resolution.campaign.id, 'campaign-1');
   assert.equal(resolution.reason, 'exact_campaign_match');
-  assert.equal(resolution.matchMode, 'objective_id_exact');
+  assert.equal(resolution.matchMode, 'meta_ad_id_exact');
   assert.deepEqual(extractMetaAttributionFields(message), {
     metaCtwaClid: 'clid-99',
     metaAdId: 'ad-55',
@@ -231,7 +231,7 @@ test('atribución prioriza coincidencia exacta y conserva identificadores Meta',
   });
 });
 
-test('un identificador objetivo gana sobre una coincidencia textual más larga', () => {
+test('campaign_id no sustituye el ad_id requerido para asociar una vacante', () => {
   const campaigns = [
     { id: 'campaign-objective', code: '120000001', name: 'Campaña correcta', notes: null },
     { id: 'campaign-text', code: 'LIDER-OPERACION-NEIVA-JULIO-2026', name: 'Líder Operación Neiva Julio 2026', notes: null }
@@ -244,8 +244,9 @@ test('un identificador objetivo gana sobre una coincidencia textual más larga',
   };
 
   const resolution = resolveCampaignForReferral(campaigns, message);
-  assert.equal(resolution.campaign.id, 'campaign-objective');
-  assert.equal(resolution.matchMode, 'objective_id_exact');
+  assert.equal(resolution.campaign, null);
+  assert.equal(resolution.reason, 'objective_metadata_without_exact_campaign_match');
+  assert.deepEqual(resolution.matches, []);
 });
 
 test('un ad_id desconocido no degrada a una campaña de nombre parecido', () => {
