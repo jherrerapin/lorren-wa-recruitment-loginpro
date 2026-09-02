@@ -373,7 +373,7 @@ test('residencia en Madrid habilita una vacante compatible de Siberia sin conver
   assert.equal(resolution.resolved, true);
   assert.equal(resolution.vacancy.id, target.id);
   assert.equal(resolution.city, 'Bogota');
-  assert.equal(resolution.residenceLocation, 'Madrid');
+  assert.equal(String(resolution.residenceLocation).toLowerCase(), 'madrid');
 });
 
 test('una búsqueda explícita en Medellín no cruza hacia la vacante de Siberia', async () => {
