@@ -3,10 +3,7 @@ import {
   buildCandidateAccessWhere,
   getAccessContext
 } from '../services/appUsers.js';
-import {
-  INTERVIEW_COORDINATION_HANDOFF_MODE,
-  deriveInterviewOutreachAttendance
-} from '../services/vacancyDashboardSearchExpansion.js';
+import { INTERVIEW_COORDINATION_HANDOFF_MODE } from './admin.js';
 import {
   buildInterviewManagementSnapshot,
   createInterviewComplementaryField,
@@ -87,8 +84,8 @@ async function loadAuthorizedCandidate(prisma, req, candidateId) {
   });
 }
 
-async function loadLatestCitationEvidence(prisma, candidateId) {
-  const citation = await prisma.message.findFirst({
+async function loadLatestCitation(prisma, candidateId) {
+  return prisma.message.findFirst({
     where: {
       candidateId,
       direction: 'OUTBOUND',
@@ -100,40 +97,13 @@ async function loadLatestCitationEvidence(prisma, candidateId) {
     orderBy: { createdAt: 'desc' },
     select: { id: true, createdAt: true, body: true, rawPayload: true }
   });
-
-  if (!citation) {
-    return {
-      citation: null,
-      evidence: { status: 'PENDIENTE', respondedAt: null, source: null }
-    };
-  }
-
-  const messages = await prisma.message.findMany({
-    where: {
-      candidateId,
-      direction: 'INBOUND',
-      createdAt: { gte: citation.createdAt }
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
-    select: { body: true, rawPayload: true, createdAt: true }
-  });
-
-  return {
-    citation,
-    evidence: deriveInterviewOutreachAttendance({
-      botResumeMode: INTERVIEW_COORDINATION_HANDOFF_MODE,
-      botPausedAt: citation.createdAt,
-      messages
-    })
-  };
 }
 
 async function loadCandidateManagementData(prisma, req, candidateId) {
   const candidate = await loadAuthorizedCandidate(prisma, req, candidateId);
   if (!candidate?.vacancyId) return null;
 
-  const [review, citationEvidence, fields, values] = await Promise.all([
+  const [review, citation, fields, values] = await Promise.all([
     prisma.interviewCandidateReview.findUnique({
       where: {
         candidateId_vacancyId: {
@@ -142,7 +112,7 @@ async function loadCandidateManagementData(prisma, req, candidateId) {
         }
       }
     }),
-    loadLatestCitationEvidence(prisma, candidate.id),
+    loadLatestCitation(prisma, candidate.id),
     prisma.interviewComplementaryField.findMany({
       where: { vacancyId: candidate.vacancyId },
       orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }]
@@ -152,19 +122,17 @@ async function loadCandidateManagementData(prisma, req, candidateId) {
     })
   ]);
 
-  const isCited = Boolean(citationEvidence.citation)
+  const isCited = Boolean(citation)
     || candidate.botResumeMode === INTERVIEW_COORDINATION_HANDOFF_MODE
     || Boolean(review);
   if (!isCited) return null;
 
   return {
     candidate,
-    citedAt: citationEvidence.citation?.createdAt || candidate.botPausedAt || null,
+    citedAt: citation?.createdAt || candidate.botPausedAt || null,
     review,
-    evidence: citationEvidence.evidence,
     snapshot: buildInterviewManagementSnapshot({
       review,
-      evidence: citationEvidence.evidence,
       fields,
       values
     })
@@ -242,12 +210,6 @@ export function interviewOutreachManagementRouter(prisma) {
         id: true,
         botPausedAt: true,
         botResumeMode: true,
-        messages: {
-          where: { direction: 'INBOUND' },
-          orderBy: { createdAt: 'desc' },
-          take: 50,
-          select: { body: true, rawPayload: true, createdAt: true }
-        },
         interviewCandidateReviews: {
           where: { vacancyId },
           take: 1
@@ -256,9 +218,8 @@ export function interviewOutreachManagementRouter(prisma) {
     });
 
     const entries = candidates.map((candidate) => {
-      const evidence = deriveInterviewOutreachAttendance(candidate);
       const review = candidate.interviewCandidateReviews?.[0] || null;
-      const snapshot = buildInterviewManagementSnapshot({ review, evidence });
+      const snapshot = buildInterviewManagementSnapshot({ review });
       return {
         candidateId: candidate.id,
         invitation: snapshot.invitation,
