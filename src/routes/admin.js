@@ -76,7 +76,7 @@ import {
 export const INTERVIEW_COORDINATION_HANDOFF_MODE = 'interview_coordination_handoff';
 export const DEFAULT_INTERVIEW_TEMPLATE_NAME = 'citacion_entrevista_loginpro';
 export const DEFAULT_INTERVIEW_TEMPLATE_LANGUAGE = 'es_CO';
-export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\n\nPara continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} usando el botón de abajo.\n\nRecuerda: este proceso es gratuito. Nunca te pediremos dinero para asistir o continuar y no somos una bolsa de empleo.';
+export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\n\nPara continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} al WhatsApp {{4}}.\n\nRecuerda: este proceso es gratuito. Nunca te pediremos dinero para asistir o continuar y no somos una bolsa de empleo.';
 const MANUAL_OUTBOUND_BLOCKING_MODES = new Set(['manual_outbound_sending', 'manual_outbound_delivery_unknown']);
 
 function sessionAuth(req, res, next) {
@@ -1062,18 +1062,19 @@ export function buildApprovedInterviewTemplateDelivery(candidate = {}, config = 
   const vacancy = normalizeString(candidate?.vacancy?.title) || normalizeString(candidate?.vacancy?.role);
   const coordinatorName = normalizeString(coordinatorContact.name);
   const coordinatorPhone = normalizeString(coordinatorContact.apiPhone);
+  const coordinatorDisplayPhone = normalizeString(coordinatorContact.displayPhone);
   if (!fullName) throw new TypeError('interview_outreach_candidate_name_required');
   if (!vacancy) throw new TypeError('interview_outreach_vacancy_required');
   if (!coordinatorName) throw new TypeError('interview_outreach_coordinator_name_required');
-  if (!coordinatorPhone) throw new TypeError('interview_outreach_coordinator_phone_required');
+  if (!coordinatorPhone || !coordinatorDisplayPhone) throw new TypeError('interview_outreach_coordinator_phone_required');
 
-  const parameters = [fullName, vacancy, coordinatorName];
+  const parameters = [fullName, vacancy, coordinatorName, coordinatorDisplayPhone];
   let body = INTERVIEW_OUTREACH_TEMPLATE_REFERENCE;
   parameters.forEach((value, index) => {
     body = body.replaceAll(`{{${index + 1}}}`, value);
   });
 
-  return { parameters, body, coordinatorPhone };
+  return { parameters, body, coordinatorPhone, coordinatorDisplayPhone };
 }
 
 function sortOutreachCandidates(a, b) {
@@ -2121,7 +2122,7 @@ export function adminRouter(prisma) {
               name: outreachConfig.templateName,
               languageCode: outreachConfig.templateLanguage,
               bodyParameters: invitation.parameters,
-              urlButtonParameters: [invitation.coordinatorPhone]
+              quickReplyPayloads: ['No deseo continuar']
             }),
             afterFinalize: (tx, context) => finalizeApprovedInterviewOutreachHandoff(tx, {
               candidateId: context.candidateId,

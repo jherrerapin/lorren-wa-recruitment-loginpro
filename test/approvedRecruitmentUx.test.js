@@ -217,16 +217,16 @@ test('backend conserva solo la configuración canónica y toma coordinador desde
   assert.doesNotMatch(adminSource, /req\.body\.(?:coordinatorName|coordinatorPhone)/);
 });
 
-test('DEV documenta tres variables y el CTA dinámico al coordinador sin campos manuales', () => {
+test('DEV documenta cuatro variables y un único Quick Reply sin campos manuales', () => {
   const html = renderInterviewOutreach('dev');
 
   assert.match(html, /Plantilla oficial de Meta/);
   assert.match(html, /Nombre de plantilla/);
   assert.match(html, /Idioma Meta/);
-  assert.match(html, /tres variables/);
-  assert.match(html, /Contactar a coordinador/);
-  assert.match(html, /https:\/\/wa\.me\/\{\{1\}\}/);
-  assert.doesNotMatch(html, /Quick Reply|Confirmo asistencia|No puedo asistir/);
+  assert.match(html, /cuatro variables/);
+  assert.match(html, /No deseo continuar/);
+  assert.doesNotMatch(html, /https:\/\/wa\.me|Contactar a coordinador/);
+  assert.doesNotMatch(html, /Confirmo asistencia|No puedo asistir/);
   assert.doesNotMatch(html, /id="coordinatorName"|id="coordinatorPhone"/);
   assert.match(html, /id="templateName" name="templateName" value="citacion_entrevista_loginpro"/);
   assert.match(html, /id="templateLanguage" name="templateLanguage" value="es_CO"/);

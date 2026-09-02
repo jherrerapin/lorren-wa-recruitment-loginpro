@@ -138,12 +138,12 @@
     <% if (role === 'dev') { %>
       <div class="card">
         <h2>Plantilla oficial de Meta</h2>
-        <p class="hint">El texto real lo gobierna la plantilla aprobada en Meta. El cuerpo debe conservar tres variables, en este orden: candidato, vacante y coordinador. El botón URL es independiente de esas variables.</p>
+        <p class="hint">El texto real lo gobierna la plantilla aprobada en Meta. El cuerpo debe conservar cuatro variables, en este orden: candidato, vacante, coordinador y WhatsApp del coordinador.</p>
         <div class="template-reference"><%= templateReference %></div>
         <div class="template-actions" aria-label="Acción requerida de la plantilla">
-          <span class="template-action">Contactar a coordinador</span>
+          <span class="template-action">No deseo continuar</span>
         </div>
-        <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener un botón URL dinámico <strong>Contactar a coordinador</strong> con base <code>https://wa.me/{{1}}</code>. Lórren suministra como variable del botón el número del usuario que gestiona esta ronda; el nombre y el teléfono se toman automáticamente del usuario autenticado y no se diligencian en este módulo.</p>
+        <p class="hint" style="margin-top:10px;">La plantilla aprobada en Meta debe tener un único botón de respuesta rápida <strong>No deseo continuar</strong>. El nombre y el WhatsApp que aparecen en el cuerpo se toman automáticamente del usuario autenticado que realiza el envío y no se diligencian en este módulo.</p>
       </div>
     <% } %>
 
