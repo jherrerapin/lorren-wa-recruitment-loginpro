@@ -92,9 +92,18 @@ const DOMAIN_ROLE_TOKENS = [
 const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|cargar|cargando|descargue|descarge|descargar|descargando|bodega|bidega|operari|operativo|operativa|mensajer|conductor|coordinador|coordinadora|lider|lideres|logistic|logistica|logistico|operacion|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento|servicio|servicios|general|generales|montacarg|administrativ|jefe|supervisor|optacion|optaciones)\b/i;
 const SPECIFIC_ROLE_TOKEN_REGEX = /^(aux|auxiliar|cargue|cargar|descargue|descargar|bodega|operari|operativo|operativa|operaciones|mensajer|mensajero|conductor|coordinador|coordinadora|logistic|logistica|logistico|ruta|analista|supervisor|lider|jefe|asesor|comercial|mantenimiento|produccion|servicio|servicios|montacarg|administrativ|maquila|empaque|planta|picking|packing|alistamiento|general)/i;
 const GENERIC_ROLE_HINT_TOKENS = new Set(['trabajo', 'empleo', 'vacante', 'cargo', 'informacion', 'trabajar', 'puesto', 'rol']);
+const INTERNAL_VACANCY_CONTEXT_PREFIX = /^\s*(?:Pista interna de origen Meta Ads|Contexto descriptivo recibido desde Meta Ads)\b/i;
+
+function stripInternalVacancyContext(text = '') {
+  return String(text || '')
+    .split(/\r?\n/)
+    .filter((line) => !INTERNAL_VACANCY_CONTEXT_PREFIX.test(line))
+    .join('\n')
+    .trim();
+}
 
 export function normalizeResolverText(text = '') {
-  return String(text || '')
+  return stripInternalVacancyContext(text)
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -201,7 +210,7 @@ function escapeLocationPattern(value = '') {
 function locationSegments(text = '', location = '') {
   const normalizedLocation = normalizeResolverText(location);
   if (!normalizedLocation) return [];
-  return String(text || '')
+  return stripInternalVacancyContext(text)
     .split(/[\n,;.!?]+/)
     .map((segment) => normalizeResolverText(segment))
     .filter((segment) => segment && ` ${segment} `.includes(` ${normalizedLocation} `));
@@ -357,7 +366,10 @@ function mergeRoleHints(...values) {
 }
 
 function splitMeaningfulSegments(text = '') {
-  return String(text || '').split(/[\n,;]+/).map((segment) => normalizeResolverText(segment)).filter(Boolean);
+  return stripInternalVacancyContext(text)
+    .split(/[\n,;]+/)
+    .map((segment) => normalizeResolverText(segment))
+    .filter(Boolean);
 }
 
 export function detectRoleHintFromText(text = '', options = {}) {
