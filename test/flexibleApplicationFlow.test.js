@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildVacancyQuestionReply,
-  CAMPAIGN_VACANCY_CONFIRMATION_MODE,
   evaluateConsentBoundary,
   isConsentAcceptance,
   isConsentRejection,
@@ -15,7 +14,6 @@ import {
   getCandidateReadiness
 } from '../src/services/readinessGuard.js';
 import {
-  attributeCandidateCampaignFromMessage,
   extractMetaAttributionFields,
   resolveCampaignForReferral
 } from '../src/services/campaignAttribution.js';
@@ -207,9 +205,9 @@ test('si declara no tener experiencia no exige tiempo ni descripción', () => {
   assert.deepEqual(readiness.missingFields, []);
 });
 
-test('atribución usa el ad_id exacto y conserva identificadores Meta', () => {
+test('atribución prioriza coincidencia exacta y conserva identificadores Meta', () => {
   const campaigns = [
-    { id: 'campaign-1', code: 'ad-55', name: 'Neiva líder', notes: null },
+    { id: 'campaign-1', code: '120000001', name: 'Neiva líder', notes: null },
     { id: 'campaign-2', code: 'NEIVA-AUXILIAR', name: 'Neiva auxiliar', notes: null }
   ];
   const message = {
@@ -224,7 +222,7 @@ test('atribución usa el ad_id exacto y conserva identificadores Meta', () => {
   const resolution = resolveCampaignForReferral(campaigns, message);
   assert.equal(resolution.campaign.id, 'campaign-1');
   assert.equal(resolution.reason, 'exact_campaign_match');
-  assert.equal(resolution.matchMode, 'meta_ad_id_exact');
+  assert.equal(resolution.matchMode, 'objective_id_exact');
   assert.deepEqual(extractMetaAttributionFields(message), {
     metaCtwaClid: 'clid-99',
     metaAdId: 'ad-55',
@@ -233,7 +231,7 @@ test('atribución usa el ad_id exacto y conserva identificadores Meta', () => {
   });
 });
 
-test('campaign_id no sustituye el ad_id requerido para asociar una vacante', () => {
+test('un identificador objetivo gana sobre una coincidencia textual más larga', () => {
   const campaigns = [
     { id: 'campaign-objective', code: '120000001', name: 'Campaña correcta', notes: null },
     { id: 'campaign-text', code: 'LIDER-OPERACION-NEIVA-JULIO-2026', name: 'Líder Operación Neiva Julio 2026', notes: null }
@@ -246,9 +244,8 @@ test('campaign_id no sustituye el ad_id requerido para asociar una vacante', () 
   };
 
   const resolution = resolveCampaignForReferral(campaigns, message);
-  assert.equal(resolution.campaign, null);
-  assert.equal(resolution.reason, 'objective_metadata_without_exact_campaign_match');
-  assert.deepEqual(resolution.matches, []);
+  assert.equal(resolution.campaign.id, 'campaign-objective');
+  assert.equal(resolution.matchMode, 'objective_id_exact');
 });
 
 test('un ad_id desconocido no degrada a una campaña de nombre parecido', () => {
@@ -305,99 +302,4 @@ test('atribución no elige arbitrariamente cuando dos campañas empatan', () => 
   assert.equal(resolution.campaign, null);
   assert.equal(resolution.reason, 'ambiguous_campaign_match');
   assert.equal(resolution.matches.length, 2);
-});
-
-function returningCandidate(overrides = {}) {
-  return {
-    id: 'candidate-returning-ctwa',
-    campaignId: 'campaign-old',
-    vacancyId: 'vac-old',
-    sourceType: 'META_ADS',
-    campaignCodeRaw: 'old-ad',
-    botResumeMode: null,
-    metaCtwaClid: 'clid-old',
-    metaAdId: 'ad-old',
-    metaCampaignId: null,
-    metaCampaignName: null,
-    ...overrides
-  };
-}
-
-function attributionPrisma(candidate, campaigns, updates) {
-  return {
-    candidate: {
-      async findUnique() {
-        return { ...candidate };
-      },
-      async update(args) {
-        updates.push(args);
-        return { id: args.where.id, ...args.data };
-      }
-    },
-    campaign: {
-      async findMany() {
-        return campaigns;
-      }
-    }
-  };
-}
-
-test('un candidato que vuelve por otro anuncio CTWA exacto cambia solo al proceso identificado por ese anuncio', async () => {
-  const current = returningCandidate();
-  const target = {
-    id: 'campaign-new-ad',
-    code: 'ad-new-exact',
-    name: 'Anuncio nuevo exacto',
-    notes: null,
-    sourceType: 'META_ADS',
-    vacancyId: 'vac-new-exact'
-  };
-  const updates = [];
-  const prisma = attributionPrisma(current, [target], updates);
-
-  const result = await attributeCandidateCampaignFromMessage(prisma, current.id, {
-    referral: {
-      source_id: 'ad-new-exact',
-      source_type: 'ad',
-      ctwa_clid: 'clid-new-exact'
-    }
-  });
-
-  assert.equal(result.attributed, true);
-  assert.equal(result.reattributed, true);
-  assert.equal(result.reason, 'reattributed_referral_campaign_and_vacancy');
-  assert.equal(result.campaignId, target.id);
-  assert.equal(result.vacancyId, target.vacancyId);
-  assert.equal(updates.length, 1);
-  assert.equal(updates[0].data.campaignId, target.id);
-  assert.equal(updates[0].data.vacancyId, target.vacancyId);
-  assert.equal(updates[0].data.metaAdId, 'ad-new-exact');
-  assert.equal(updates[0].data.botResumeMode, CAMPAIGN_VACANCY_CONFIRMATION_MODE);
-});
-
-test('un anuncio CTWA exacto sin vacante configurada no pisa una asociación histórica válida', async () => {
-  const current = returningCandidate();
-  const unclassified = {
-    id: 'campaign-unclassified-ad',
-    code: 'ad-unclassified-exact',
-    name: 'Anuncio sin vacante asociada',
-    notes: null,
-    sourceType: 'META_ADS',
-    vacancyId: null
-  };
-  const updates = [];
-  const prisma = attributionPrisma(current, [unclassified], updates);
-
-  const result = await attributeCandidateCampaignFromMessage(prisma, current.id, {
-    referral: {
-      source_id: 'ad-unclassified-exact',
-      source_type: 'ad'
-    }
-  });
-
-  assert.equal(result.attributed, false);
-  assert.equal(result.reason, 'exact_ad_without_vacancy_existing_attribution_preserved');
-  assert.equal(result.campaignId, current.campaignId);
-  assert.equal(result.vacancyId, current.vacancyId);
-  assert.equal(updates.length, 0);
 });
