@@ -363,6 +363,145 @@ test('atribución CTWA persiste anuncio y vacante exactos dejando confirmación 
   assert.equal(updates[0].data.metaAdId, '120000000000004');
 });
 
+test('un candidato que vuelve por otro anuncio exacto cambia al proceso identificado por el nuevo AD_ID', async () => {
+  const updates = [];
+  const current = {
+    id: 'candidate-returning-ctwa',
+    campaignId: 'campaign-old',
+    vacancyId: 'vac-old',
+    sourceType: 'META_ADS',
+    campaignCodeRaw: 'ad-old',
+    botResumeMode: null,
+    metaCtwaClid: 'clid-old',
+    metaAdId: 'ad-old',
+    metaCampaignId: null,
+    metaCampaignName: null
+  };
+  const target = {
+    id: 'campaign-new',
+    code: 'ad-new-exact',
+    name: 'Anuncio nuevo',
+    notes: null,
+    sourceType: 'META_ADS',
+    vacancyId: 'vac-new'
+  };
+  const prisma = {
+    candidate: {
+      async findUnique() {
+        return { ...current };
+      },
+      async update(args) {
+        updates.push(args);
+        return { id: args.where.id, ...args.data };
+      }
+    },
+    campaign: {
+      async findMany() {
+        return [target];
+      }
+    }
+  };
+
+  const result = await attributeCandidateCampaignFromMessage(prisma, current.id, {
+    referral: {
+      source_id: 'ad-new-exact',
+      source_type: 'ad',
+      ctwa_clid: 'clid-new-exact'
+    }
+  });
+
+  assert.equal(result.attributed, true);
+  assert.equal(result.reattributed, true);
+  assert.equal(result.reason, 'reattributed_referral_campaign_and_vacancy');
+  assert.equal(result.campaignId, target.id);
+  assert.equal(result.vacancyId, target.vacancyId);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].data.campaignId, target.id);
+  assert.equal(updates[0].data.vacancyId, target.vacancyId);
+  assert.equal(updates[0].data.metaAdId, 'ad-new-exact');
+  assert.equal(updates[0].data.botResumeMode, CAMPAIGN_VACANCY_CONFIRMATION_MODE);
+});
+
+test('un anuncio exacto sin vacancyId no pisa una asociación histórica válida', async () => {
+  const updates = [];
+  const current = {
+    id: 'candidate-returning-unclassified',
+    campaignId: 'campaign-old',
+    vacancyId: 'vac-old',
+    sourceType: 'META_ADS',
+    campaignCodeRaw: 'ad-old',
+    botResumeMode: null,
+    metaCtwaClid: 'clid-old',
+    metaAdId: 'ad-old',
+    metaCampaignId: null,
+    metaCampaignName: null
+  };
+  const target = {
+    id: 'campaign-unclassified',
+    code: 'ad-unclassified',
+    name: 'Anuncio sin vacante',
+    notes: null,
+    sourceType: 'META_ADS',
+    vacancyId: null
+  };
+  const prisma = {
+    candidate: {
+      async findUnique() {
+        return { ...current };
+      },
+      async update(args) {
+        updates.push(args);
+        return { id: args.where.id, ...args.data };
+      }
+    },
+    campaign: {
+      async findMany() {
+        return [target];
+      }
+    }
+  };
+
+  const result = await attributeCandidateCampaignFromMessage(prisma, current.id, {
+    referral: {
+      source_id: 'ad-unclassified',
+      source_type: 'ad'
+    }
+  });
+
+  assert.equal(result.attributed, false);
+  assert.equal(result.reason, 'exact_ad_without_vacancy_existing_attribution_preserved');
+  assert.equal(result.campaignId, current.campaignId);
+  assert.equal(result.vacancyId, current.vacancyId);
+  assert.equal(updates.length, 0);
+});
+
+test('un hint legacy de publicidad no puede seleccionar ciudad, cargo ni vacante', async () => {
+  const wrong = vacancy({
+    id: 'vac-legacy-hint-wrong',
+    title: 'Auxiliar de cargue y descargue Ibague',
+    role: 'Auxiliar de cargue y descargue',
+    city: 'Ibague',
+    operation: operation('ibague-legacy', 'Ibague'),
+    operationAddress: 'Aeropuerto'
+  });
+  const target = siberiaVacancy();
+  const text = [
+    'Pista interna de origen Meta Ads para acotar ciudad/vacante; no la repitas literal al candidato y no la uses como unica verdad si el candidato la contradice: Ciudad: Ibague | Vacante: Auxiliar de cargue y descargue | Zona: Aeropuerto',
+    'Hola, quisiera información'
+  ].join('\n');
+
+  const resolution = await resolveVacancyFromText(null, text, {
+    activeVacancies: [wrong, target],
+    allVacancies: [wrong, target]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.vacancy, null);
+  assert.equal(resolution.city, null);
+  assert.equal(resolution.roleHint, null);
+  assert.equal(resolution.reason, 'missing_city_and_role');
+});
+
 test('residencia en Madrid habilita una vacante compatible de Siberia sin convertir Madrid en ciudad de la vacante', async () => {
   const target = siberiaVacancy();
   const resolution = await resolveVacancyFromText(null, 'Soy de Madrid y me interesa auxiliar de bodega', {
