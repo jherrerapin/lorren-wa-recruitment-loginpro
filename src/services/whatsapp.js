@@ -1,13 +1,6 @@
 import axios from 'axios';
 import { attachAdContextToMessage } from './adContext.js';
 
-export const INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD = 'INTERVIEW_ATTEND_YES';
-export const INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD = 'INTERVIEW_ATTEND_NO';
-export const INTERVIEW_ATTENDANCE_QUICK_REPLY_PAYLOADS = [
-  INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
-  INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD
-];
-
 function requireTemplateString(value, label) {
   const normalized = String(value ?? '').trim();
   if (!normalized) throw new TypeError(`${label}_required`);
@@ -29,6 +22,21 @@ function buildTemplateQuickReplyComponents(rawPayloads = []) {
   }));
 }
 
+function buildTemplateUrlButtonComponents(rawParameters = []) {
+  if (!Array.isArray(rawParameters)) {
+    throw new TypeError('whatsapp_template_url_button_parameters_invalid');
+  }
+  return rawParameters.map((value, index) => ({
+    type: 'button',
+    sub_type: 'url',
+    index: String(index),
+    parameters: [{
+      type: 'text',
+      text: requireTemplateString(value, 'whatsapp_template_url_button_parameter')
+    }]
+  }));
+}
+
 export function buildWhatsAppTemplatePayload(to, options = {}) {
   const recipient = requireTemplateString(to, 'whatsapp_template_recipient');
   const name = requireTemplateString(options.name, 'whatsapp_template_name');
@@ -41,10 +49,8 @@ export function buildWhatsAppTemplatePayload(to, options = {}) {
     type: 'text',
     text: requireTemplateString(value, 'whatsapp_template_body_parameter')
   }));
-  const quickReplyPayloads = options.quickReplyPayloads === undefined
-    ? INTERVIEW_ATTENDANCE_QUICK_REPLY_PAYLOADS
-    : options.quickReplyPayloads;
-  const quickReplyComponents = buildTemplateQuickReplyComponents(quickReplyPayloads);
+  const quickReplyComponents = buildTemplateQuickReplyComponents(options.quickReplyPayloads ?? []);
+  const urlButtonComponents = buildTemplateUrlButtonComponents(options.urlButtonParameters ?? []);
 
   const template = {
     name,
@@ -57,7 +63,7 @@ export function buildWhatsAppTemplatePayload(to, options = {}) {
       parameters: bodyParameters
     });
   }
-  components.push(...quickReplyComponents);
+  components.push(...quickReplyComponents, ...urlButtonComponents);
   if (components.length) template.components = components;
 
   return {

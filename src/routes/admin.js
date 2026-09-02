@@ -76,7 +76,7 @@ import {
 export const INTERVIEW_COORDINATION_HANDOFF_MODE = 'interview_coordination_handoff';
 export const DEFAULT_INTERVIEW_TEMPLATE_NAME = 'citacion_entrevista_loginpro';
 export const DEFAULT_INTERVIEW_TEMPLATE_LANGUAGE = 'es_CO';
-export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\n\nTe esperamos el {{3}} a las {{4}} en {{5}}.\n\nSi tienes alguna duda sobre esta citación, por favor escríbenos al WhatsApp {{6}}.\n\nTe agradecemos confirmar tu asistencia con el equipo de coordinación.';
+export const INTERVIEW_OUTREACH_TEMPLATE_REFERENCE = 'Hola {{1}}. Tu proceso para la vacante {{2}} avanzó a entrevista.\n\nPara continuar con la coordinación de tu entrevista, comunícate directamente con {{3}} usando el botón de abajo.\n\nRecuerda: este proceso es gratuito. Nunca te pediremos dinero para asistir o continuar.';
 const MANUAL_OUTBOUND_BLOCKING_MODES = new Set(['manual_outbound_sending', 'manual_outbound_delivery_unknown']);
 
 function sessionAuth(req, res, next) {
@@ -1040,13 +1040,10 @@ function normalizeOutreachFilters(source = {}) {
   };
 }
 
-export function normalizeInterviewOutreachConfig(source = {}, fallbackAddress = '') {
+export function normalizeInterviewOutreachConfig(source = {}) {
   return {
     templateName: normalizeString(source.templateName) || DEFAULT_INTERVIEW_TEMPLATE_NAME,
-    templateLanguage: normalizeString(source.templateLanguage) || DEFAULT_INTERVIEW_TEMPLATE_LANGUAGE,
-    interviewDate: isValidDateString(source.interviewDate) ? source.interviewDate : '',
-    interviewTime: /^\d{2}:\d{2}$/.test(String(source.interviewTime || '')) ? String(source.interviewTime) : '',
-    interviewAddress: normalizeString(source.interviewAddress) || normalizeString(fallbackAddress) || ''
+    templateLanguage: normalizeString(source.templateLanguage) || DEFAULT_INTERVIEW_TEMPLATE_LANGUAGE
   };
 }
 
@@ -1057,58 +1054,26 @@ function validateInterviewOutreachConfig(config = {}) {
   if (!/^[a-z]{2}(?:_[A-Z]{2})?$/.test(config.templateLanguage || '')) {
     return 'El idioma de la plantilla Meta no tiene un formato válido.';
   }
-  if (!isValidDateString(config.interviewDate)) return 'Selecciona una fecha de entrevista válida.';
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(config.interviewTime || '')) return 'Selecciona una hora de entrevista válida.';
-  if (!normalizeString(config.interviewAddress)) return 'Ingresa la dirección de citación.';
-  if (config.interviewAddress.length > 500) return 'La dirección de citación es demasiado larga.';
   return null;
-}
-
-function formatInterviewOutreachDate(dateStr) {
-  if (!isValidDateString(dateStr)) throw new TypeError('interview_outreach_date_invalid');
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const value = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
-  return new Intl.DateTimeFormat('es-CO', {
-    timeZone: 'America/Bogota',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
-  }).format(value);
-}
-
-function formatInterviewOutreachTime(timeStr) {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(timeStr || ''));
-  if (!match) throw new TypeError('interview_outreach_time_invalid');
-  const hour24 = Number(match[1]);
-  const minute = match[2];
-  const hour12 = hour24 % 12 || 12;
-  return `${hour12}:${minute} ${hour24 < 12 ? 'a. m.' : 'p. m.'}`;
 }
 
 export function buildApprovedInterviewTemplateDelivery(candidate = {}, config = {}, coordinatorContact = {}) {
   const fullName = normalizeString(candidate.fullName);
   const vacancy = normalizeString(candidate?.vacancy?.title) || normalizeString(candidate?.vacancy?.role);
-  const address = normalizeString(config.interviewAddress);
-  const coordinatorPhone = normalizeString(coordinatorContact.displayPhone);
+  const coordinatorName = normalizeString(coordinatorContact.name);
+  const coordinatorPhone = normalizeString(coordinatorContact.apiPhone);
   if (!fullName) throw new TypeError('interview_outreach_candidate_name_required');
   if (!vacancy) throw new TypeError('interview_outreach_vacancy_required');
-  if (!address) throw new TypeError('interview_outreach_address_required');
+  if (!coordinatorName) throw new TypeError('interview_outreach_coordinator_name_required');
   if (!coordinatorPhone) throw new TypeError('interview_outreach_coordinator_phone_required');
 
-  const parameters = [
-    fullName,
-    vacancy,
-    formatInterviewOutreachDate(config.interviewDate),
-    formatInterviewOutreachTime(config.interviewTime),
-    address,
-    coordinatorPhone
-  ];
+  const parameters = [fullName, vacancy, coordinatorName];
   let body = INTERVIEW_OUTREACH_TEMPLATE_REFERENCE;
   parameters.forEach((value, index) => {
     body = body.replaceAll(`{{${index + 1}}}`, value);
   });
 
-  return { parameters, body };
+  return { parameters, body, coordinatorPhone };
 }
 
 function sortOutreachCandidates(a, b) {
@@ -1137,18 +1102,11 @@ function buildOutreachViewOptions(candidates = []) {
     .map((candidate) => ({
       id: candidate.vacancy.id,
       city: candidate.vacancy.city || '',
-      address: candidate.vacancy.interviewAddress || candidate.vacancy.operationAddress || '',
       label: `${candidate.vacancy.city || 'Sin ciudad'} · ${candidate.vacancy.title || candidate.vacancy.role || 'Sin vacante'}`
     }))
     .filter((option, index, array) => array.findIndex((item) => item.id === option.id) === index)
     .sort((a, b) => a.label.localeCompare(b.label, 'es', { sensitivity: 'base' }));
   return { cityOptions, vacancyOptions };
-}
-
-function defaultOutreachAddress(candidates = [], vacancyId = '') {
-  if (!vacancyId) return '';
-  const candidate = candidates.find((item) => item?.vacancyId === vacancyId);
-  return candidate?.vacancy?.interviewAddress || candidate?.vacancy?.operationAddress || '';
 }
 
 async function findCurrentOutreachAppUser(prisma, req) {
@@ -1175,6 +1133,7 @@ async function loadCurrentOutreachCoordinator(prisma, req) {
   const phone = dispatchPhone || recoveryPhone;
   return {
     available: Boolean(user),
+    name: normalizeString(user?.displayName) || normalizeString(user?.username) || null,
     apiPhone: phone?.apiPhone || null,
     displayPhone: phone?.displayPhone || null
   };
@@ -1535,9 +1494,7 @@ async function loadApprovedOutreachCandidates(prisma, accessContext = null) {
           id: true,
           title: true,
           role: true,
-          city: true,
-          interviewAddress: true,
-          operationAddress: true
+          city: true
         }
       }
     }
@@ -2085,10 +2042,7 @@ export function adminRouter(prisma) {
     const { cityOptions, vacancyOptions } = buildOutreachViewOptions(allApprovedCandidates);
     const candidates = filterOutreachCandidates(allApprovedCandidates, outreachFilters);
     const coordinatorContact = await loadCurrentOutreachCoordinator(prisma, req);
-    const outreachConfig = normalizeInterviewOutreachConfig(
-      req.query,
-      defaultOutreachAddress(candidates, outreachFilters.vacancyId)
-    );
+    const outreachConfig = normalizeInterviewOutreachConfig(req.query);
 
     res.render('outreachApproved', {
       role: req.userRole,
@@ -2119,7 +2073,6 @@ export function adminRouter(prisma) {
     const candidates = filterOutreachCandidates(allApprovedCandidates, outreachFilters);
     const selectedCandidates = candidates.filter((candidate) => selectedIds.has(candidate.id));
     const coordinatorContact = await loadCurrentOutreachCoordinator(prisma, req);
-    const selectedVacancyIds = new Set(selectedCandidates.map((candidate) => candidate.vacancyId).filter(Boolean));
     const successIds = new Set();
     const blockedIds = new Set();
     const failureMessages = new Set();
@@ -2133,8 +2086,8 @@ export function adminRouter(prisma) {
       preparedError = 'Selecciona al menos un candidato aprobado para enviar la citación.';
     } else if (selectedCandidates.length !== selectedIds.size) {
       preparedError = 'Uno o más candidatos ya no están aprobados, están en una entrega pendiente o no pertenecen al alcance actual. Actualiza la lista e intenta de nuevo.';
-    } else if (selectedVacancyIds.size !== 1) {
-      preparedError = 'Selecciona candidatos de una sola vacante por ronda para compartir la misma fecha, hora y dirección.';
+    } else if (!coordinatorContact.name) {
+      preparedError = 'Tu usuario no tiene un nombre configurado para identificar al coordinador.';
     } else if (!coordinatorContact.apiPhone) {
       preparedError = 'Tu usuario no tiene un número móvil colombiano válido configurado para coordinación.';
     } else if (configError) {
@@ -2167,7 +2120,8 @@ export function adminRouter(prisma) {
             sendText: (phone) => sendTemplateMessage(phone, {
               name: outreachConfig.templateName,
               languageCode: outreachConfig.templateLanguage,
-              bodyParameters: invitation.parameters
+              bodyParameters: invitation.parameters,
+              urlButtonParameters: [invitation.coordinatorPhone]
             }),
             afterFinalize: (tx, context) => finalizeApprovedInterviewOutreachHandoff(tx, {
               candidateId: context.candidateId,
@@ -2181,7 +2135,7 @@ export function adminRouter(prisma) {
             personalizedMessage: invitation.body
           });
         } catch (error) {
-          const userMessage = getManualOutboundUserMessage(error, 'No fue posible confirmar la citación con WhatsApp.');
+          const userMessage = getManualOutboundUserMessage(error, 'No fue posible enviar la citación por WhatsApp.');
           failureMessages.add(userMessage);
           if (
             error?.persistencePending
@@ -2197,12 +2151,12 @@ export function adminRouter(prisma) {
         !successIds.has(candidate.id) && !blockedIds.has(candidate.id)
       ));
       if (preparedRecipients.length) {
-        preparedSuccess = `${preparedRecipients.length} citación(es) confirmada(s) por Meta. Los candidatos pasaron a Contactados y quedaron en coordinación humana.`;
+        preparedSuccess = `${preparedRecipients.length} citación(es) enviada(s) por Meta. Los candidatos pasaron a Contactados y quedaron en coordinación humana.`;
       }
       const failedCount = selectedCandidates.length - preparedRecipients.length;
       if (failedCount) {
         const details = [...failureMessages].slice(0, 3).join(' ');
-        preparedError = `${failedCount} citación(es) no quedaron confirmadas. ${details}`.trim();
+        preparedError = `${failedCount} citación(es) no se pudieron enviar. ${details}`.trim();
       }
     }
 

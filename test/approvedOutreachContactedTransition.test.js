@@ -8,236 +8,64 @@ import {
   INTERVIEW_COORDINATION_HANDOFF_MODE,
   normalizeCoordinatorContactPhone
 } from '../src/routes/admin.js';
-import {
-  buildInterviewOutreachAttendanceScript,
-  deriveInterviewOutreachAttendance,
-  INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD as DASHBOARD_CONFIRM_PAYLOAD,
-  INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD as DASHBOARD_DECLINE_PAYLOAD,
-  summarizeInterviewOutreachAttendanceCandidates
-} from '../src/services/vacancyDashboardSearchExpansion.js';
-import {
-  buildWhatsAppTemplatePayload,
-  INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
-  INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD
-} from '../src/services/whatsapp.js';
-import { sanitizeForRawPayload } from '../src/services/debugTrace.js';
+import { buildWhatsAppTemplatePayload } from '../src/services/whatsapp.js';
 import { shouldResumeAutomationOnInbound } from '../src/services/botAutomationPolicy.js';
 
-const handoffAt = new Date('2026-08-25T14:00:00.000Z');
-
-function inboundMessage({ id = null, title = '', body = '', createdAt }) {
+function handoffCandidate() {
   return {
-    body: body || title,
-    createdAt: new Date(createdAt),
-    rawPayload: id ? {
-      interactive: {
-        type: 'button_reply',
-        button_reply: { id, title }
-      }
-    } : {}
-  };
-}
-
-function handoffCandidate(messages = []) {
-  return {
-    id: 'candidate-attendance-1',
+    id: 'candidate-handoff-test',
     fullName: 'Persona Prueba',
     phone: '573001234567',
     status: 'CONTACTADO',
     botPaused: true,
-    botPausedAt: handoffAt,
+    botPausedAt: new Date('2026-08-25T14:00:00.000Z'),
     botPausedBy: null,
     botPauseReason: 'Citacion de entrevista entregada; coordinacion externa',
-    botResumeMode: INTERVIEW_COORDINATION_HANDOFF_MODE,
-    messages
+    botResumeMode: INTERVIEW_COORDINATION_HANDOFF_MODE
   };
 }
 
-test('la plantilla Meta incluye seis variables y dos Quick Replies estables por defecto', () => {
-  assert.equal(INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD, DASHBOARD_CONFIRM_PAYLOAD);
-  assert.equal(INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD, DASHBOARD_DECLINE_PAYLOAD);
-
+test('la plantilla Meta usa tres variables de cuerpo y un CTA URL dinámico sin Quick Replies', () => {
   const payload = buildWhatsAppTemplatePayload('573001234567', {
     name: 'citacion_entrevista_loginpro',
     languageCode: 'es_CO',
     bodyParameters: [
       'Persona Prueba',
       'Vacante Prueba',
-      '27 de agosto de 2026',
-      '8:00 a. m.',
-      'Dirección Prueba',
-      '+57 300 765 4321'
-    ]
+      'Coordinación Prueba'
+    ],
+    urlButtonParameters: ['573007654321']
   });
 
   assert.equal(payload.type, 'template');
   assert.equal(payload.template.components[0].type, 'body');
-  assert.equal(payload.template.components[0].parameters.length, 6);
+  assert.deepEqual(
+    payload.template.components[0].parameters.map((parameter) => parameter.text),
+    ['Persona Prueba', 'Vacante Prueba', 'Coordinación Prueba']
+  );
   assert.deepEqual(payload.template.components.slice(1), [
     {
       type: 'button',
-      sub_type: 'quick_reply',
+      sub_type: 'url',
       index: '0',
-      parameters: [{ type: 'payload', payload: INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD }]
-    },
-    {
-      type: 'button',
-      sub_type: 'quick_reply',
-      index: '1',
-      parameters: [{ type: 'payload', payload: INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD }]
+      parameters: [{ type: 'text', text: '573007654321' }]
     }
   ]);
+  assert.doesNotMatch(JSON.stringify(payload), /quick_reply|INTERVIEW_ATTEND_(?:YES|NO)/);
 });
 
-test('el sanitizer conserva id y título del botón sin copiar payloads ajenos', () => {
-  const sanitized = sanitizeForRawPayload({
-    id: 'wamid.button.test',
-    from: '573001234567',
-    timestamp: '1787670000',
-    type: 'interactive',
-    interactive: {
-      type: 'button_reply',
-      button_reply: {
-        id: INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
-        title: 'Confirmo asistencia',
-        tracking: 'no-debe-persistirse'
-      },
-      private_metadata: 'no-debe-persistirse'
-    }
+test('sin configuración explícita la plantilla no agrega botones de asistencia por defecto', () => {
+  const payload = buildWhatsAppTemplatePayload('573001234567', {
+    name: 'plantilla_prueba',
+    languageCode: 'es_CO',
+    bodyParameters: ['Persona Prueba']
   });
 
-  assert.deepEqual(sanitized.interactive, {
-    type: 'button_reply',
-    button_reply: {
-      id: INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
-      title: 'Confirmo asistencia'
-    },
-    list_reply: undefined
-  });
-  assert.doesNotMatch(JSON.stringify(sanitized), /tracking|private_metadata/);
+  assert.equal(payload.template.components.length, 1);
+  assert.equal(payload.template.components[0].type, 'body');
 });
 
-test('sin respuesta posterior al handoff la citación queda pendiente', () => {
-  const result = deriveInterviewOutreachAttendance(handoffCandidate([
-    inboundMessage({
-      id: INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
-      title: 'Confirmo asistencia',
-      createdAt: '2026-08-25T13:59:00.000Z'
-    })
-  ]));
-
-  assert.deepEqual(result, { status: 'PENDIENTE', respondedAt: null, source: null });
-});
-
-test('el Quick Reply positivo posterior al handoff confirma asistencia', () => {
-  const confirmedAt = '2026-08-25T14:05:00.000Z';
-  const result = deriveInterviewOutreachAttendance(handoffCandidate([
-    inboundMessage({
-      id: INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
-      title: 'Confirmo asistencia',
-      createdAt: confirmedAt
-    })
-  ]));
-
-  assert.equal(result.status, 'CONFIRMADO');
-  assert.equal(result.source, 'BUTTON');
-  assert.equal(new Date(result.respondedAt).toISOString(), confirmedAt);
-});
-
-test('la última respuesta válida permite cambiar de confirmado a no asiste', () => {
-  const result = deriveInterviewOutreachAttendance(handoffCandidate([
-    inboundMessage({
-      id: INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
-      title: 'Confirmo asistencia',
-      createdAt: '2026-08-25T14:05:00.000Z'
-    }),
-    inboundMessage({
-      id: INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD,
-      title: 'No puedo asistir',
-      createdAt: '2026-08-25T14:15:00.000Z'
-    })
-  ]));
-
-  assert.equal(result.status, 'NO_ASISTE');
-  assert.equal(result.source, 'BUTTON');
-  assert.equal(new Date(result.respondedAt).toISOString(), '2026-08-25T14:15:00.000Z');
-});
-
-test('texto explícito posterior al handoff funciona como compatibilidad sin desplazar el payload estable', () => {
-  const result = deriveInterviewOutreachAttendance(handoffCandidate([
-    inboundMessage({
-      body: 'Sí asisto',
-      createdAt: '2026-08-25T14:06:00.000Z'
-    })
-  ]));
-
-  assert.equal(result.status, 'CONFIRMADO');
-  assert.equal(result.source, 'TEXT');
-});
-
-test('el resumen por vacante conserva confirmados, no asistentes y pendientes con identidad', () => {
-  const vacancyId = 'vacancy-attendance-test';
-  const candidates = [
-    {
-      ...handoffCandidate([
-        inboundMessage({
-          id: INTERVIEW_ATTENDANCE_CONFIRM_PAYLOAD,
-          title: 'Confirmo asistencia',
-          createdAt: '2026-08-25T14:05:00.000Z'
-        })
-      ]),
-      id: 'candidate-confirmed-test',
-      vacancyId,
-      fullName: 'Persona Confirmada'
-    },
-    {
-      ...handoffCandidate([
-        inboundMessage({
-          id: INTERVIEW_ATTENDANCE_DECLINE_PAYLOAD,
-          title: 'No puedo asistir',
-          createdAt: '2026-08-25T14:15:00.000Z'
-        })
-      ]),
-      id: 'candidate-declined-test',
-      vacancyId,
-      fullName: 'Persona No Asiste'
-    },
-    {
-      ...handoffCandidate([]),
-      id: 'candidate-pending-test',
-      vacancyId,
-      fullName: 'Persona Pendiente'
-    },
-    {
-      ...handoffCandidate([]),
-      id: 'candidate-outside-scope-test',
-      vacancyId: 'vacancy-not-visible-test',
-      fullName: 'Persona Fuera de Alcance'
-    }
-  ];
-
-  const summaries = summarizeInterviewOutreachAttendanceCandidates(
-    candidates,
-    new Map([[vacancyId, 'Ciudad Prueba']])
-  );
-  const summary = summaries[vacancyId];
-
-  assert.equal(Object.keys(summaries).length, 1);
-  assert.equal(summary.total, 3);
-  assert.equal(summary.confirmedCount, 1);
-  assert.equal(summary.declinedCount, 1);
-  assert.equal(summary.pendingCount, 1);
-  assert.deepEqual(
-    summary.responses.map(({ id, attendanceStatus }) => [id, attendanceStatus]),
-    [
-      ['candidate-declined-test', 'NO_ASISTE'],
-      ['candidate-confirmed-test', 'CONFIRMADO'],
-      ['candidate-pending-test', 'PENDIENTE']
-    ]
-  );
-});
-
-test('la confirmación operativa no auto-reanuda a Lórren', () => {
+test('el handoff de coordinación no auto-reanuda a Lórren', () => {
   assert.equal(shouldResumeAutomationOnInbound(handoffCandidate()), false);
 });
 
@@ -303,9 +131,9 @@ test('Monitor excluye candidatos transferidos a coordinación humana', async () 
   assert.deepEqual(result, [visible]);
 });
 
-test('la configuración usa teléfono colombiano persistido y construye las seis variables', () => {
-  const coordinator = normalizeCoordinatorContactPhone('3007654321');
-  assert.deepEqual(coordinator, {
+test('la configuración usa actor y teléfono persistidos y construye solo las tres variables del cuerpo', () => {
+  const phone = normalizeCoordinatorContactPhone('3007654321');
+  assert.deepEqual(phone, {
     apiPhone: '573007654321',
     displayPhone: '+57 300 765 4321'
   });
@@ -313,87 +141,44 @@ test('la configuración usa teléfono colombiano persistido y construye las seis
   const delivery = buildApprovedInterviewTemplateDelivery({
     fullName: 'Persona Prueba',
     vacancy: { title: 'Vacante Prueba' }
-  }, {
-    interviewDate: '2026-08-27',
-    interviewTime: '08:00',
-    interviewAddress: 'Dirección Prueba'
-  }, coordinator);
-
-  assert.equal(delivery.parameters.length, 6);
-  assert.equal(delivery.parameters[0], 'Persona Prueba');
-  assert.equal(delivery.parameters[1], 'Vacante Prueba');
-  assert.equal(delivery.parameters[4], 'Dirección Prueba');
-  assert.equal(delivery.parameters[5], '+57 300 765 4321');
-});
-
-test('el dashboard muestra la respuesta individual de todos los citados sin crear agenda automática', () => {
-  const script = buildInterviewOutreachAttendanceScript({
-    'vacancy-test': {
-      vacancyId: 'vacancy-test',
-      total: 3,
-      confirmedCount: 1,
-      pendingCount: 1,
-      declinedCount: 1,
-      responses: [
-        {
-          id: 'candidate-confirmed-test',
-          fullName: 'Persona Confirmada',
-          phone: '573001234567',
-          attendanceStatus: 'CONFIRMADO',
-          respondedAt: '2026-08-25T14:05:00.000Z'
-        },
-        {
-          id: 'candidate-declined-test',
-          fullName: 'Persona No Asiste',
-          phone: '573001234568',
-          attendanceStatus: 'NO_ASISTE',
-          respondedAt: '2026-08-25T14:15:00.000Z'
-        },
-        {
-          id: 'candidate-pending-test',
-          fullName: 'Persona Pendiente',
-          phone: '573001234569',
-          attendanceStatus: 'PENDIENTE',
-          respondedAt: null
-        }
-      ]
-    }
+  }, {}, {
+    ...phone,
+    name: 'Coordinación Prueba'
   });
 
-  assert.match(script, /Respuestas de citación/);
-  assert.match(script, /no crea agenda automática/);
-  assert.match(script, /No asistirán/);
-  assert.match(script, /candidate-confirmed-test/);
-  assert.match(script, /candidate-declined-test/);
-  assert.match(script, /candidate-pending-test/);
-  assert.match(script, /Asiste/);
-  assert.match(script, /No asiste/);
-  assert.match(script, /Pendiente/);
-  assert.match(script, /Sin respuesta hasta el momento/);
-  assert.doesNotMatch(script, /responses\.slice|confirmados más/);
-  assert.doesNotMatch(script, /InterviewBooking|interviewBooking\.create/);
-
-  const body = script.replace(/^\s*<script>\s*/, '').replace(/\s*<\/script>\s*$/, '');
-  assert.doesNotThrow(() => new Function(body));
+  assert.deepEqual(delivery.parameters, [
+    'Persona Prueba',
+    'Vacante Prueba',
+    'Coordinación Prueba'
+  ]);
+  assert.equal(delivery.coordinatorPhone, '573007654321');
+  assert.match(delivery.body, /Coordinación Prueba/);
+  assert.match(delivery.body, /proceso es gratuito/i);
+  assert.doesNotMatch(delivery.body, /Te esperamos|Dirección Prueba|8:00|27 de agosto/);
 });
 
-test('la consulta de respuestas conserva la autoridad de acceso por usuario y vacante', () => {
+test('el dashboard ya no deriva ni dibuja confirmación automática de la citación', () => {
   const source = readFileSync(new URL('../src/services/vacancyDashboardSearchExpansion.js', import.meta.url), 'utf8');
-  assert.match(source, /buildCandidateAccessWhere\(accessContext\)/);
-  assert.match(source, /\{ vacancyId: \{ in: vacancyIds \} \}/);
-  assert.match(source, /visibleVacancyIds/);
+  assert.doesNotMatch(source, /INTERVIEW_ATTEND_YES|INTERVIEW_ATTEND_NO/);
+  assert.doesNotMatch(source, /deriveInterviewOutreachAttendance/);
+  assert.doesNotMatch(source, /summarizeInterviewOutreachAttendanceCandidates/);
+  assert.doesNotMatch(source, /buildInterviewOutreachAttendanceScript/);
+  assert.doesNotMatch(source, /interviewOutreachAttendanceByVacancy/);
 });
 
-test('la vista explica los dos botones Meta y no usa diálogos nativos', () => {
+test('la vista deriva al coordinador y elimina fecha, hora, lugar y Quick Replies', () => {
   const view = readFileSync(new URL('../src/views/outreachApproved.ejs', import.meta.url), 'utf8');
-  assert.match(view, /Confirmo asistencia/);
-  assert.match(view, /No puedo asistir/);
-  assert.match(view, /Quick Reply/);
-  assert.match(view, /no crea un <code>InterviewBooking<\/code>/);
+  assert.match(view, /Contactar a coordinador/);
+  assert.match(view, /https:\/\/wa\.me\/\{\{1\}\}/);
+  assert.match(view, /Gestionante \/ coordinador/);
+  assert.doesNotMatch(view, /id="interviewDate"|name="interviewDate"/);
+  assert.doesNotMatch(view, /id="interviewTime"|name="interviewTime"/);
+  assert.doesNotMatch(view, /id="interviewAddress"|name="interviewAddress"/);
+  assert.doesNotMatch(view, /Confirmo asistencia|No puedo asistir|Quick Reply/);
   assert.doesNotMatch(view, /window\.(?:alert|confirm|prompt)\s*\(/);
 });
 
-test('el flujo de outreach no crea bookings ni activa schedulingEnabled', () => {
+test('el flujo de outreach usa CTA del coordinador, conserva el handoff y no crea bookings', () => {
   const source = readFileSync(new URL('../src/routes/admin.js', import.meta.url), 'utf8');
   const postStart = source.indexOf("router.post('/outreach/approved/prepare'");
   const nextRoute = source.indexOf("router.get('/bot-knowledge'", postStart);
@@ -402,7 +187,9 @@ test('el flujo de outreach no crea bookings ni activa schedulingEnabled', () => 
 
   assert.match(postRoute, /deliverManualOutboundText/);
   assert.match(postRoute, /sendTemplateMessage/);
+  assert.match(postRoute, /urlButtonParameters:\s*\[invitation\.coordinatorPhone\]/);
   assert.match(postRoute, /finalizeApprovedInterviewOutreachHandoff/);
   assert.doesNotMatch(postRoute, /interviewBooking\.(?:create|createMany|update|upsert)/);
   assert.doesNotMatch(postRoute, /schedulingEnabled\s*:/);
+  assert.doesNotMatch(postRoute, /selectedVacancyIds/);
 });
