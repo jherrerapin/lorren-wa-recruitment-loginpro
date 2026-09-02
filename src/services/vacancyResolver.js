@@ -215,7 +215,7 @@ export function classifyLocationMention(text = '', location = '') {
   const targetPatterns = [
     new RegExp(`\\b${vacancyTerms}\\b.{0,80}\\b(?:en|para|de)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
     new RegExp(`\\b(?:quiero|busco|deseo|necesito|me\\s+interesa)\\b.{0,60}\\b(?:trabajar|empleo|vacante|vacantes|cargo|puesto)\\b.{0,60}\\b(?:en|para)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
-    new RegExp(`\\b${vacancyTerms}\\b.{0,40}\\b(?:queda|esta|es|seria|será)\\b.{0,20}\\b(?:en|para)?\\s*${locationPattern}\\b`)
+    new RegExp(`\\b${vacancyTerms}\\b.{0,40}\\b(?:queda|esta|es|seria|sera)\\b.{0,20}\\b(?:en|para)?\\s*${locationPattern}\\b`)
   ];
   const residencePatterns = [
     new RegExp(`\\b(?:vivo|resido|radico|estoy\\s+radicad[oa]|soy)\\s+(?:en|de)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
@@ -236,12 +236,6 @@ export function classifyLocationMention(text = '', location = '') {
 function detectVacancyOperationZoneEvidence(text = '') {
   return detectOperationZoneEvidence(text)
     .filter((zone) => classifyLocationMention(text, zone) !== 'residence');
-}
-
-function detectResidenceLocation(text = '', detectedCity = null) {
-  if (detectedCity && classifyLocationMention(text, detectedCity) === 'residence') return detectedCity;
-  return detectOperationZoneEvidence(text)
-    .find((zone) => classifyLocationMention(text, zone) === 'residence') || null;
 }
 
 function cityMatchesVacancy(vacancy, requestedCity = '') {
@@ -271,9 +265,9 @@ function findLastWholePhraseIndex(paddedText = '', phrase = '') {
   return paddedText.lastIndexOf(` ${normalizedPhrase} `);
 }
 
-export function detectCityFromText(text = '', cityNames = []) {
+function collectCityMatches(text = '', cityNames = []) {
   const normalized = normalizeResolverText(text);
-  if (!normalized) return null;
+  if (!normalized) return [];
   const padded = ` ${normalized} `;
   const matches = [];
 
@@ -300,7 +294,23 @@ export function detectCityFromText(text = '', cityNames = []) {
     || right.normalized.length - left.normalized.length
     || right.priority - left.priority
   ));
-  return matches[0]?.value || null;
+  return matches;
+}
+
+export function detectCityFromText(text = '', cityNames = []) {
+  return collectCityMatches(text, cityNames)[0]?.value || null;
+}
+
+function detectCityMentionByMeaning(text = '', cityNames = [], meaning = 'unspecified') {
+  return collectCityMatches(text, cityNames)
+    .find((match) => classifyLocationMention(text, match.normalized) === meaning)?.value || null;
+}
+
+function detectResidenceLocation(text = '', cityNames = []) {
+  return detectCityMentionByMeaning(text, cityNames, 'residence')
+    || detectOperationZoneEvidence(text)
+      .find((zone) => classifyLocationMention(text, zone) === 'residence')
+    || null;
 }
 
 function cleanRoleTokens(tokens = [], cityTokens = new Set()) {
@@ -576,12 +586,14 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   const activeVacancies = options.activeVacancies || options.vacancies || allVacancies.filter(isVacancyOpen);
   if (!allVacancies.length) return { resolved: false, vacancy: null, city: null, residenceLocation: null, roleHint: null, reason: 'no_vacancies_configured', source: 'text_inference_fallback', fallback: true };
 
-  const detectedCity = detectCityFromText(text, buildCityNames(allVacancies));
+  const cityNames = buildCityNames(allVacancies);
+  const detectedCity = detectCityFromText(text, cityNames);
+  const explicitTargetCity = detectCityMentionByMeaning(text, cityNames, 'vacancy_target');
   const detectedCityMeaning = detectedCity ? classifyLocationMention(text, detectedCity) : 'unspecified';
-  const residenceLocation = detectResidenceLocation(text, detectedCity);
-  const city = detectedCityMeaning === 'residence'
+  const residenceLocation = detectResidenceLocation(text, cityNames);
+  const city = explicitTargetCity || (detectedCityMeaning === 'residence'
     ? null
-    : (detectedCity || options.cityHint || null);
+    : (detectedCity || options.cityHint || null));
   const operationZones = detectVacancyOperationZoneEvidence(text);
   const localRoleHint = detectRoleHintFromText(text, { city });
   const roleHint = mergeRoleHints(options.roleHint, localRoleHint, city);
