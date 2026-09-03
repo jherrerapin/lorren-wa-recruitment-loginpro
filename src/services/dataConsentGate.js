@@ -719,6 +719,7 @@ async function saveInboundConsentEvidence(prisma, candidateId, message, body, de
     candidateId,
     waMessageId,
     messageType: inboundMessageType(message),
+    respondedAt: new Date(),
     body: consentEvidenceBody(decision, body, message),
     rawPayload: {
       source: 'data_consent_gate',
@@ -791,6 +792,7 @@ async function claimPreConsentTurn(prisma, candidateId, message, decision) {
         candidateId,
         waMessageId,
         messageType: inboundMessageType(message),
+        respondedAt: new Date(),
         body: consentEvidenceBody(decision, inboundText(message), message),
         rawPayload: {
           source: 'data_consent_gate',
