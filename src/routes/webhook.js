@@ -43,6 +43,7 @@ import { storeCandidateCv } from '../services/cvStorage.js';
 import { applyFieldPolicy } from '../services/policyLayer.js';
 import { analyzeAttachment } from '../services/attachmentAnalyzer.js';
 import { buildContextualReply, deriveAttachmentDecision, shouldEscalateHumanReview } from '../services/contextualReply.js';
+import { deliverAutomaticOutboundText } from '../services/automaticOutboundDeliveryService.js';
 import { isFeatureEnabled } from '../services/featureFlags.js';
 import { enqueueJob, JOB_TYPES } from '../services/jobQueue.js';
 import { findActiveVacancies, findAllVacancies, normalizeResolverText, resolveVacancyFromText } from '../services/vacancyResolver.js';
@@ -1594,14 +1595,29 @@ async function reply(prisma, candidateId, to, body, inboundText = '', rawPayload
     cleanedPayload.replySafety = { blocked: true, blockedClaims: safety.blockedClaims, reason: safety.reason };
     console.warn('[BOT_REPLY_SAFETY_BLOCKED]', JSON.stringify({ candidateId, blockedClaims: safety.blockedClaims, reason: safety.reason }));
   }
-  await sleep(getNaturalDelayMs(inboundText, finalBody));
+  let delivery;
   try {
-    await sendTextMessage(to, finalBody);
+    delivery = await deliverAutomaticOutboundText(prisma, {
+      candidateId,
+      to,
+      body: finalBody,
+      rawPayload: cleanedPayload
+    }, {
+      sendText: sendTextMessage,
+      beforeSend: () => sleep(getNaturalDelayMs(inboundText, finalBody))
+    });
   } catch (error) {
     console.error('[BOT_SEND_ERROR]', JSON.stringify({ candidateId, error: error?.message?.slice(0, 200) }));
     throw error;
   }
-  await saveOutboundMessage(prisma, candidateId, finalBody, cleanedPayload);
+  if (delivery.suppressed) {
+    console.info('[BOT_REPLY_DUPLICATE_SUPPRESSED]', JSON.stringify({
+      candidateId,
+      reason: delivery.reason,
+      duplicateMessageId: delivery.duplicateMessageId || null
+    }));
+    return;
+  }
   await scheduleReminderForCandidate(prisma, candidateId);
 }
 
