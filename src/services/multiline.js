@@ -1,31 +1,9 @@
-import { buildAdContextSystemHint } from './adContext.js';
-
 const DEFAULT_REASONING_WINDOW_MS = 8000;
 const MIN_REASONING_WINDOW_MS = 3000;
 const MAX_REASONING_WINDOW_MS = 20000;
 
 function normalizeText(text = '') {
   return String(text || '').trim();
-}
-
-function getMessageAdContext(message = {}) {
-  return message?.rawPayload?.lorrenAdContext
-    || message?.lorrenAdContext
-    || null;
-}
-
-function buildAdContextHintFromMessages(messages = []) {
-  const contexts = messages
-    .map(getMessageAdContext)
-    .filter((context) => context?.text)
-    .filter((context, index, list) => list.findIndex((item) => item.text === context.text) === index);
-
-  if (!contexts.length) return '';
-
-  return contexts
-    .map(buildAdContextSystemHint)
-    .filter(Boolean)
-    .join('\n');
 }
 
 export function getMultilineWindowMs() {
@@ -51,13 +29,8 @@ export function summarizeConsolidatedInput(text = '') {
 }
 
 export function consolidateTextMessages(messages = []) {
-  const adContextHint = buildAdContextHintFromMessages(messages);
-  const candidateText = messages
+  return messages
     .map((message) => normalizeText(message.body || ''))
-    .filter(Boolean)
-    .join('\n');
-
-  return [adContextHint, candidateText]
     .filter(Boolean)
     .join('\n');
 }
