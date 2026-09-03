@@ -112,6 +112,7 @@ function createHarness(initialCandidate, vacancy) {
   };
 }
 
+// Replica el criterio que usa el batch conversacional para considerar un TEXT aún pendiente.
 function pendingTextRows(harness) {
   return harness.inboundRows.filter((row) => row.messageType === 'TEXT' && row.respondedAt == null);
 }
