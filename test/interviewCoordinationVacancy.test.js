@@ -82,6 +82,43 @@ test('No interesado oculta inmediatamente fecha y entrevista; Confirmó usa fech
   assert.doesNotMatch(uiSource, /(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
 });
 
+test('guardar una confirmación mueve visualmente la persona de pendientes a entrevistas programadas', () => {
+  assert.match(uiSource, /function splitCoordinationEntries/);
+  assert.match(uiSource, /status === 'CONFIRMED' && entry\?\.booking\?\.scheduledAt/);
+  assert.match(uiSource, /'Pendientes de respuesta'/);
+  assert.match(uiSource, /'Entrevistas programadas'/);
+  assert.match(uiSource, /'No interesados'/);
+  assert.match(uiSource, /await refresh\(\)/);
+  assert.match(uiSource, /Gestiona primero las respuestas pendientes/);
+});
+
+test('el día de la entrevista amplía la tabla existente sin crear otra agenda paralela', () => {
+  assert.match(uiSource, /function bogotaToday/);
+  assert.match(uiSource, /timeZone: 'America\/Bogota'/);
+  assert.match(uiSource, /selectedDashboardDate/);
+  assert.match(uiSource, /\[data-vacancy-panel\] \.bookings-table/);
+  assert.match(uiSource, /candidateIdFromBookingRow/);
+  assert.match(uiSource, /Gestión del día de entrevista/);
+  assert.match(uiSource, /Asistencia real, evaluación e información complementaria/);
+  assert.doesNotMatch(uiSource, /createScheduledInterviewBooking/);
+});
+
+test('gestión del día reutiliza APIs canónicas para asistencia, evaluación y complementarios', () => {
+  assert.match(uiSource, /ATTENDANCE_OPTIONS/);
+  assert.match(uiSource, /\['ATTENDED', 'Asistió'\]/);
+  assert.match(uiSource, /\['NO_SHOW', 'No asistió'\]/);
+  assert.match(uiSource, /\/attendance/);
+  assert.match(uiSource, /\/evaluation/);
+  assert.match(uiSource, /ratingInput\.min = '1'/);
+  assert.match(uiSource, /ratingInput\.max = '5'/);
+  assert.match(uiSource, /ratingInput\.step = '0\.01'/);
+  assert.match(uiSource, /observationEnabled/);
+  assert.match(uiSource, /complementaryFields/);
+  assert.match(uiSource, /values: complementaryInputs\.map/);
+  assert.doesNotMatch(uiSource, /\/webhook/);
+  assert.doesNotMatch(uiSource, /(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
+});
+
 test('Prisma y migración representan booking manual sin fabricar InterviewSlot', () => {
   assert.match(schemaSource, /slotId\s+String\?/);
   assert.match(schemaSource, /slot\s+InterviewSlot\?\s+@relation\(fields: \[slotId\], references: \[id\]\)/);
