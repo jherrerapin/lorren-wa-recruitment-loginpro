@@ -272,7 +272,7 @@ function residenceMatchesVacancyCity(residenceLocation = '', vacancy = null) {
   const aligned = alignCandidateLocationFields(
     { neighborhood: residenceLocation },
     vacancyCity,
-    { clearAlternate: false }
+    { clearAlternate: true }
   );
   return Boolean(aligned?.locality || aligned?.neighborhood);
 }
