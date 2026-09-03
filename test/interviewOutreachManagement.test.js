@@ -289,14 +289,16 @@ test('snapshot conserva confirmación, asistencia, clasificación y autoría sin
   assert.equal(snapshot.complementaryFields[0].value, 'Valor Prueba');
 });
 
-test('la ruta deriva actor de sesión/AppUser, preserva alcance y no acepta actor desde body', () => {
+test('la ruta deriva actor de sesión/AppUser, preserva alcance y activa una única UI por vacante', () => {
   const source = readFileSync(new URL('../src/routes/interviewOutreachManagement.js', import.meta.url), 'utf8');
   assert.match(source, /req\.userId \|\| req\.session\?\.userId/);
   assert.match(source, /displayName:\s*true/);
   assert.match(source, /buildCandidateAccessWhere\(getRequestAccessContext\(req\)\)/);
   assert.match(source, /interviewCandidateReviews:\s*\{\s*some:/);
   assert.doesNotMatch(source, /req\.body\??\.?actor|req\.body\??\.?updatedBy|req\.body\??\.?userId/);
-  assert.doesNotMatch(source, /interview-outreach-management\.js/);
+  assert.match(source, /interview-outreach-management\.js/);
+  assert.match(source, /data-interview-outreach-management/);
+  assert.doesNotMatch(source, /direction:\s*'INBOUND'/);
 });
 
 test('las tres entidades nuevas declaran una única autoridad canónica', () => {
