@@ -57,6 +57,25 @@ test('la autoridad semántica reconoce labores de cargue y descargue como experi
   assert.equal(result.fields.experienceSummary, 'Cargue y descargue');
 });
 
+test('el sanitizador rechaza un bloque completo de perfil propuesto como experienceSummary', () => {
+  const text = 'Persona Ejemplo cédula de ciudadanía 100000001 edad 22 localidad de Usme transporte público sí tengo experiencia laboral 6 meses en cargue y descargue';
+  const result = sanitizeCandidateFieldsForConversation({
+    fields: { experienceSummary: text },
+    evidence: {
+      experienceSummary: {
+        snippet: text,
+        confidence: 0.99,
+        source: 'ai_extraction'
+      }
+    },
+    text,
+    context: MULTIPURPOSE_CONTEXT,
+    turnType: null
+  });
+
+  assert.equal(result.fields.experienceSummary, undefined);
+});
+
 test('una respuesta multipropósito no se guarda completa como experienceSummary', async () => {
   const text = [
     'Nombre de Prueba',
