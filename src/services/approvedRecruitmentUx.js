@@ -356,6 +356,13 @@ function approvedRecruitmentScript() {
     if (city) url.searchParams.set('city', city);
     url.searchParams.set('vacancyId', vacancyId);
     outreachLink.href = url.pathname + url.search;
+
+    const vacancyHeader = panel.querySelector('.vacancy-header');
+    const headerTarget = panel.querySelector('.vacancy-badges') || vacancyHeader;
+    if (!headerTarget) return;
+    outreachLink.dataset.approvedOutreachHeaderLink = vacancyId;
+    outreachLink.style.whiteSpace = 'nowrap';
+    headerTarget.appendChild(outreachLink);
   });
 })();
 </script>`;
