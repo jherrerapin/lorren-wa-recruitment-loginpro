@@ -8,6 +8,7 @@ import {
   resolveVacancyFirstGate,
   VacancyFirstGateAction
 } from '../src/services/vacancyFirstGate.js';
+import { buildProfessionalVacancyPresentation } from '../src/services/vacancyPublicInfo.js';
 import { appendUniqueReplySegment } from '../src/services/replyComposition.js';
 import { markConversationMessagesResponded } from '../src/services/conversationMessageRepository.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
@@ -281,4 +282,47 @@ test('la misma decisión de vacante se suprime dentro de diez minutos y vuelve a
     reason: common.rawPayload.reason,
     windowMinutes: 10
   }), false);
+});
+
+test('la ficha pública de una vacante zonificada prioriza la ubicación real y no la ciudad administrativa', () => {
+  const presentation = buildProfessionalVacancyPresentation(vacancy({
+    title: 'Auxiliar Cargue y Descargue Siberia',
+    city: 'Bogota',
+    operation: operation('bogota', 'Bogota'),
+    operationAddress: 'Parques Logísticos Siberia, Metropolitano, Tierrapuerto, Celta',
+    roleDescription: 'Cargue y descargue de mercancía',
+    requirements: 'Experiencia mínima de 3 meses',
+    conditions: 'Vinculación inmediata',
+    requiredDocuments: 'Documento de identidad y hoja de vida'
+  }), { includeInterestPrompt: true });
+
+  assert.match(presentation, /\*Zona de trabajo:\* Parques Logísticos Siberia, Metropolitano, Tierrapuerto, Celta/);
+  assert.doesNotMatch(presentation, /\*Ciudad:\*\s*Bogota/i);
+  assert.doesNotMatch(presentation, /Documentación para el proceso/i);
+  assert.doesNotMatch(presentation, /Documento de identidad y hoja de vida/i);
+  assert.match(presentation, /¿Te interesa continuar con esta vacante\?/i);
+});
+
+test('la ficha pública conserva ciudad sin zona y permite documentos solo cuando una etapa los solicita explícitamente', () => {
+  const withoutZone = buildProfessionalVacancyPresentation(vacancy({
+    title: 'Auxiliar de operación Neiva',
+    city: 'Neiva',
+    operation: operation('neiva', 'Neiva'),
+    operationAddress: '',
+    requiredDocuments: 'Documento de identidad de prueba'
+  }));
+
+  assert.match(withoutZone, /\*Ciudad:\* Neiva/);
+  assert.doesNotMatch(withoutZone, /Documentación para el proceso/i);
+
+  const laterStage = buildProfessionalVacancyPresentation(vacancy({
+    title: 'Auxiliar de operación Neiva',
+    city: 'Neiva',
+    operation: operation('neiva', 'Neiva'),
+    operationAddress: '',
+    requiredDocuments: 'Documento de identidad de prueba'
+  }), { includeDocuments: true });
+
+  assert.match(laterStage, /\*Documentación para el proceso\*/);
+  assert.match(laterStage, /Documento de identidad de prueba/);
 });
