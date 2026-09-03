@@ -214,4 +214,5 @@ test('PII enviada antes de autorizar no se persiste literalmente y usa una expli
   assert.doesNotMatch(inbound.body || '', /99999123/);
   assert.doesNotMatch(inbound.body || '', /^\[.*\]$/);
   assert.match(inbound.body || '', /no fue almacenado|no se almacenó/i);
+  assert.doesNotMatch(JSON.stringify(inbound.rawPayload || {}), /99999123/);
 });
