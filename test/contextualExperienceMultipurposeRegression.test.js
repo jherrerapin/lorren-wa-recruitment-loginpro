@@ -55,6 +55,10 @@ test('una respuesta multipropósito no se guarda completa como experienceSummary
 
   assert.notEqual(result.candidateFields.experienceSummary, text.replace(/\s+/g, ' ').trim());
   assert.equal(result.candidateFields.experienceSummary, 'Cargue y descargue');
+  assert.doesNotMatch(
+    result.candidateFields.experienceSummary || '',
+    /nombre de prueba|\bcc\b|100000001|a[nñ]os|suba/i
+  );
 });
 
 test('una pregunta estrecha de labores conserva una respuesta corta como experiencia', async () => {
