@@ -80,6 +80,34 @@ test('una respuesta multipropósito no se guarda completa como experienceSummary
   );
 });
 
+test('una respuesta multipropósito de una sola línea no usa afirmación y duración como resumen laboral', async () => {
+  const text = 'Persona Ejemplo cédula de ciudadanía 100000001 edad 22 localidad de Usme transporte público sí tengo experiencia laboral 6 meses';
+
+  const result = await conversationUnderstanding(text, {
+    context: MULTIPURPOSE_CONTEXT,
+    aiResult: disabledAiResult()
+  });
+
+  assert.equal(result.candidateFields.experienceInfo, 'Sí');
+  assert.equal(result.candidateFields.experienceTime, '6 meses');
+  assert.equal(result.candidateFields.experienceSummary, undefined);
+});
+
+test('una respuesta multipropósito de una sola línea conserva solo el detalle laboral real', async () => {
+  const text = 'Persona Ejemplo cédula de ciudadanía 100000001 edad 22 localidad de Usme transporte público sí tengo experiencia laboral 6 meses en cargue y descargue';
+
+  const result = await conversationUnderstanding(text, {
+    context: MULTIPURPOSE_CONTEXT,
+    aiResult: disabledAiResult()
+  });
+
+  assert.match(result.candidateFields.experienceSummary || '', /cargue y descargue/i);
+  assert.doesNotMatch(
+    result.candidateFields.experienceSummary || '',
+    /persona ejemplo|c[eé]dula|100000001|edad|usme|transporte p[uú]blico/i
+  );
+});
+
 test('una pregunta estrecha de labores conserva una respuesta corta como experiencia', async () => {
   const result = await conversationUnderstanding('Cargue y descargue', {
     context: {
