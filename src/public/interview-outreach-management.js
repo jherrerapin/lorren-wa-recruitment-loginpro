@@ -19,7 +19,7 @@
       .ic-counts{display:flex;gap:6px;flex-wrap:wrap}.ic-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:800;background:#e8f1fb;color:#28557a}
       .ic-list{display:grid;gap:8px}.ic-row{display:grid;grid-template-columns:minmax(180px,1.25fr) minmax(190px,.9fr) minmax(220px,1.05fr) auto;gap:10px;align-items:center;padding:10px 12px;background:#fff;border:1px solid #dbe5ef;border-radius:10px}
       .ic-person{min-width:0}.ic-name{display:block;color:var(--navy,#243b53);font-weight:800;text-decoration:none;overflow-wrap:anywhere}.ic-meta{margin-top:3px;color:var(--text-muted,#64748b);font-size:11px;line-height:1.35}
-      .ic-field{display:flex;flex-direction:column;gap:4px}.ic-field label{font-size:11px;font-weight:800;color:#526477}.ic-select{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 8px;color:#1f2937;font:inherit;font-size:12px}
+      .ic-field{display:flex;flex-direction:column;gap:4px}.ic-field label{font-size:11px;font-weight:800;color:#526477}.ic-control{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 8px;color:#1f2937;font:inherit;font-size:12px;box-sizing:border-box}
       .ic-save{min-height:36px;border:0;border-radius:7px;padding:7px 12px;background:#1d4f7a;color:#fff;font-weight:800;cursor:pointer}.ic-save:disabled{opacity:.6;cursor:default}
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
@@ -51,6 +51,30 @@
     }).format(date);
   }
 
+  function toBogotaDateTimeLocal(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(date);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+  }
+
+  function bogotaDateTimeToIso(value) {
+    const normalized = String(value || '').trim();
+    if (!normalized) return null;
+    const date = new Date(`${normalized.length === 16 ? `${normalized}:00` : normalized}-05:00`);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
   async function api(path, options = {}) {
     const response = await fetch(`${API_BASE}${path}`, {
       credentials: 'same-origin',
@@ -70,7 +94,7 @@
   }
 
   function statusSelect(value) {
-    const select = element('select', 'ic-select');
+    const select = element('select', 'ic-control');
     for (const [optionValue, label] of STATUS_OPTIONS) {
       const option = element('option', '', label);
       option.value = optionValue;
@@ -80,41 +104,12 @@
     return select;
   }
 
-  function slotValue(slot) {
-    return `${slot.slotId || ''}::${slot.scheduledAt || ''}`;
-  }
-
-  function parseSlotValue(value) {
-    const separator = String(value || '').indexOf('::');
-    if (separator < 1) return null;
-    const slotId = value.slice(0, separator);
-    const scheduledAt = value.slice(separator + 2);
-    if (!slotId || !scheduledAt) return null;
-    return { slotId, scheduledAt };
-  }
-
-  function interviewSlotSelect(entry, availableSlots) {
-    const select = element('select', 'ic-select');
-    const placeholder = element('option', '', 'Selecciona día y hora');
-    placeholder.value = '';
-    select.appendChild(placeholder);
-
-    const seen = new Set();
-    const addSlot = (slot, prefix = '') => {
-      if (!slot?.slotId || !slot?.scheduledAt) return;
-      const value = slotValue(slot);
-      if (seen.has(value)) return;
-      seen.add(value);
-      const option = element('option', '', `${prefix}${slot.label || formatDate(slot.scheduledAt)}`);
-      option.value = value;
-      select.appendChild(option);
-    };
-
-    if (entry.booking) addSlot(entry.booking, 'Actual · ');
-    (availableSlots || []).forEach((slot) => addSlot(slot));
-
-    if (entry.booking) select.value = slotValue(entry.booking);
-    return select;
+  function interviewDateInput(entry) {
+    const input = element('input', 'ic-control');
+    input.type = 'datetime-local';
+    input.step = '60';
+    input.value = toBogotaDateTimeLocal(entry?.booking?.scheduledAt);
+    return input;
   }
 
   function statusCounts(entries) {
@@ -126,12 +121,13 @@
   }
 
   function friendlyError(error) {
-    if (error?.message === 'interview_management_slot_required') return 'Selecciona un día y hora para confirmar la entrevista.';
-    if (error?.message === 'interview_management_slot_unavailable') return 'Ese horario ya no está disponible. Actualiza la vacante y selecciona otro.';
+    if (error?.message === 'interview_management_datetime_required') {
+      return 'Selecciona el día y la hora acordados para confirmar la entrevista.';
+    }
     return 'No fue posible guardar la gestión. Intenta nuevamente.';
   }
 
-  function renderRow(entry, availableSlots, vacancyId, refresh) {
+  function renderRow(entry, vacancyId, refresh) {
     const row = element('div', 'ic-row');
     row.dataset.interviewCoordinationCandidate = entry.candidateId;
 
@@ -141,46 +137,51 @@
     person.appendChild(link);
     if (entry.phone) person.appendChild(element('div', 'ic-meta', `WhatsApp: ${entry.phone}`));
     if (entry.contactedAt) person.appendChild(element('div', 'ic-meta', `Contactado: ${formatDate(entry.contactedAt)}`));
-    if (entry.booking?.scheduledAt) person.appendChild(element('div', 'ic-meta ic-booking', `Entrevista: ${entry.booking.label || formatDate(entry.booking.scheduledAt)}`));
+
+    let bookingMeta = null;
+    if (entry.booking?.scheduledAt) {
+      bookingMeta = element('div', 'ic-meta ic-booking', `Entrevista: ${entry.booking.label || formatDate(entry.booking.scheduledAt)}`);
+      person.appendChild(bookingMeta);
+    }
 
     const managementField = element('div', 'ic-field');
     const managementLabel = element('label', '', 'Gestión');
     const management = statusSelect(entry.invitation?.status || 'PENDING');
     managementField.append(managementLabel, management);
 
-    const slotField = element('div', 'ic-field');
-    const slotLabel = element('label', '', 'Día y hora de entrevista');
-    const slots = interviewSlotSelect(entry, availableSlots);
-    slotField.append(slotLabel, slots);
+    const dateField = element('div', 'ic-field');
+    const dateLabel = element('label', '', 'Día y hora de entrevista');
+    const dateInput = interviewDateInput(entry);
+    dateField.append(dateLabel, dateInput);
 
     const save = element('button', 'ic-save', 'Guardar');
     save.type = 'button';
     const feedback = element('div', 'ic-feedback');
 
-    const syncSlotVisibility = () => {
+    const syncDateVisibility = () => {
       const confirmed = management.value === 'CONFIRMED';
-      slotField.hidden = !confirmed;
-      slots.required = confirmed;
+      dateField.hidden = !confirmed;
+      dateInput.required = confirmed;
+      if (bookingMeta) bookingMeta.hidden = !confirmed;
     };
-    management.addEventListener('change', syncSlotVisibility);
-    syncSlotVisibility();
+    management.addEventListener('change', syncDateVisibility);
+    syncDateVisibility();
 
     save.addEventListener('click', async () => {
       const body = { status: management.value };
       if (management.value === 'CONFIRMED') {
-        const selected = parseSlotValue(slots.value);
-        if (!selected) {
-          feedback.textContent = 'Selecciona un día y hora para confirmar la entrevista.';
+        const scheduledAt = bogotaDateTimeToIso(dateInput.value);
+        if (!scheduledAt) {
+          feedback.textContent = 'Selecciona el día y la hora acordados para confirmar la entrevista.';
           feedback.dataset.kind = 'error';
           return;
         }
-        body.slotId = selected.slotId;
-        body.scheduledAt = selected.scheduledAt;
+        body.scheduledAt = scheduledAt;
       }
 
       save.disabled = true;
       management.disabled = true;
-      slots.disabled = true;
+      dateInput.disabled = true;
       feedback.textContent = 'Guardando...';
       delete feedback.dataset.kind;
 
@@ -197,11 +198,11 @@
         feedback.dataset.kind = 'error';
         save.disabled = false;
         management.disabled = false;
-        slots.disabled = false;
+        dateInput.disabled = false;
       }
     });
 
-    row.append(person, managementField, slotField, save, feedback);
+    row.append(person, managementField, dateField, save, feedback);
     return row;
   }
 
@@ -226,7 +227,7 @@
       const titleGroup = element('div');
       titleGroup.append(
         element('h3', 'ic-title', 'Coordinación de entrevistas'),
-        element('p', 'ic-subtitle', 'Personas contactadas desde Mensajes a aprobados. Registra aquí la respuesta y, cuando confirme, el horario acordado.')
+        element('p', 'ic-subtitle', 'Personas contactadas desde Mensajes a aprobados. Si confirman, registra libremente el día y la hora acordados con cada persona.')
       );
 
       const counts = statusCounts(entries);
@@ -240,7 +241,7 @@
 
       const list = element('div', 'ic-list');
       const refresh = () => renderBoard(panel);
-      entries.forEach((entry) => list.appendChild(renderRow(entry, response.availableSlots || [], vacancyId, refresh)));
+      entries.forEach((entry) => list.appendChild(renderRow(entry, vacancyId, refresh)));
       board.append(head, list);
 
       if (!current) {

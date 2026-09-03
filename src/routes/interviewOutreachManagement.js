@@ -16,11 +16,12 @@ import {
 } from '../services/interviewOutreachManagement.js';
 import {
   cancelCandidateBookings,
-  createBooking,
-  formatInterviewDate,
-  listOfferableSlots
+  formatInterviewDate
 } from '../services/interviewScheduler.js';
-import { ACTIVE_INTERVIEW_BOOKING_STATUSES } from '../services/interviewBookingStateService.js';
+import {
+  ACTIVE_INTERVIEW_BOOKING_STATUSES,
+  createScheduledInterviewBooking
+} from '../services/interviewBookingStateService.js';
 
 const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
 const MANAGEMENT_SCRIPT = '<script src="/public/interview-outreach-management.js" defer data-interview-outreach-management></script>';
@@ -166,7 +167,6 @@ async function loadAuthorizedCandidate(prisma, req, candidateId) {
       status: true,
       botResumeMode: true,
       botPausedAt: true,
-      lastInboundAt: true,
       vacancy: { select: { id: true, title: true, role: true, city: true } },
       interviewBookings: {
         where: { status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES } },
@@ -264,14 +264,6 @@ async function runEvaluationTransaction(prisma, input) {
   });
 }
 
-function serializeOffer(option = {}) {
-  return {
-    slotId: option.slot?.id || null,
-    scheduledAt: option.date || null,
-    label: option.formattedDate || (option.date ? formatInterviewDate(option.date) : null)
-  };
-}
-
 async function loadVacancyCoordinationEntries(prisma, req, vacancyId) {
   const candidates = await prisma.candidate.findMany({
     where: {
@@ -329,10 +321,9 @@ async function runCoordinationTransaction(prisma, callback) {
   return prisma.$transaction((tx) => callback(tx));
 }
 
-function sameBooking(booking, slotId, scheduledAt) {
-  if (!booking || !slotId || !scheduledAt) return false;
-  return booking.slotId === slotId
-    && new Date(booking.scheduledAt).getTime() === new Date(scheduledAt).getTime();
+function sameBookingTime(booking, scheduledAt) {
+  if (!booking || !scheduledAt) return false;
+  return new Date(booking.scheduledAt).getTime() === new Date(scheduledAt).getTime();
 }
 
 export function interviewOutreachManagementRouter(prisma) {
@@ -367,16 +358,7 @@ export function interviewOutreachManagementRouter(prisma) {
     }
 
     const entries = await loadVacancyCoordinationEntries(prisma, req, vacancyId);
-    const offers = entries.length
-      ? await listOfferableSlots(prisma, vacancyId, null, new Date(), 0)
-      : [];
-
-    return res.json({
-      ok: true,
-      vacancyId,
-      entries,
-      availableSlots: offers.map(serializeOffer)
-    });
+    return res.json({ ok: true, vacancyId, entries });
   });
 
   router.post('/interview-management/candidates/:candidateId/coordination', apiSessionAuth, async (req, res) => {
@@ -388,41 +370,21 @@ export function interviewOutreachManagementRouter(prisma) {
       const actor = await resolveCurrentActor(prisma, req);
 
       if (status === 'CONFIRMED') {
-        const slotId = normalizeString(req.body?.slotId);
         const scheduledAt = req.body?.scheduledAt ? new Date(req.body.scheduledAt) : null;
-        if (!slotId || !scheduledAt || Number.isNaN(scheduledAt.getTime())) {
-          return res.status(400).json({ ok: false, error: 'interview_management_slot_required' });
+        if (!scheduledAt || Number.isNaN(scheduledAt.getTime())) {
+          return res.status(400).json({ ok: false, error: 'interview_management_datetime_required' });
         }
 
-        const bookingAlreadyMatches = sameBooking(data.booking, slotId, scheduledAt);
-        let chosenOffer = null;
-        if (!bookingAlreadyMatches) {
-          const offers = await listOfferableSlots(
-            prisma,
-            data.candidate.vacancyId,
-            data.candidate.lastInboundAt ? new Date(data.candidate.lastInboundAt) : null,
-            new Date(),
-            0
-          );
-          chosenOffer = offers.find((option) => (
-            option.slot?.id === slotId
-            && option.date?.getTime?.() === scheduledAt.getTime()
-          )) || null;
-          if (!chosenOffer?.slot) {
-            return res.status(409).json({ ok: false, error: 'interview_management_slot_unavailable' });
-          }
-        }
-
+        const bookingAlreadyMatches = sameBookingTime(data.booking, scheduledAt);
         await runCoordinationTransaction(prisma, async (tx) => {
           if (!bookingAlreadyMatches) {
-            await createBooking(
-              tx,
-              data.candidate.id,
-              data.candidate.vacancyId,
-              chosenOffer.slot.id,
-              chosenOffer.date,
-              !chosenOffer.windowOk
-            );
+            await createScheduledInterviewBooking(tx, {
+              candidateId: data.candidate.id,
+              vacancyId: data.candidate.vacancyId,
+              slotId: null,
+              scheduledAt,
+              manualScheduling: true
+            });
           }
           await setInterviewInvitationStatus(tx, {
             candidateId: data.candidate.id,

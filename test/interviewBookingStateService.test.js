@@ -341,6 +341,42 @@ test('rechaza destinos arbitrarios y RESCHEDULED como cancelación ordinaria', a
   assert.equal(calls.updateMany.length, 0);
 });
 
+test('booking manual acepta fecha libre sin slot y conserva una sola autoridad de persistencia', async () => {
+  const { prisma, calls, getState } = createPrismaHarness();
+  const manualScheduledAt = new Date('2026-09-10T15:30:00.000Z');
+
+  const result = await createScheduledInterviewBooking(prisma, {
+    candidateId: 'candidate-manual-test',
+    vacancyId: 'vacancy-manual-test',
+    slotId: null,
+    scheduledAt: manualScheduledAt,
+    manualScheduling: true
+  });
+
+  assert.equal(result.slotId, null);
+  assert.equal(result.scheduledAt.getTime(), manualScheduledAt.getTime());
+  assert.equal(calls.create.length, 1);
+  assert.equal(calls.create[0].data.slotId, null);
+  assert.equal(getState().length, 1);
+});
+
+test('booking automático sigue exigiendo un slot real aunque el esquema permita null para coordinación manual', async () => {
+  const { prisma, calls } = createPrismaHarness();
+
+  await assert.rejects(
+    () => createScheduledInterviewBooking(prisma, {
+      candidateId: 'candidate-auto-test',
+      vacancyId: 'vacancy-auto-test',
+      slotId: null,
+      scheduledAt: new Date('2026-09-10T15:30:00.000Z')
+    }),
+    /slot_id_required/
+  );
+
+  assert.equal(calls.transactions.length, 0);
+  assert.equal(calls.create.length, 0);
+});
+
 test('rechaza contratos, entradas, identificadores y fechas inválidas antes de escribir', async () => {
   await assert.rejects(
     () => createScheduledInterviewBooking({}, bookingInput),

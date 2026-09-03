@@ -5,6 +5,11 @@ import { sortInterviewCoordinationEntries } from '../src/routes/interviewOutreac
 
 const routeSource = readFileSync(new URL('../src/routes/interviewOutreachManagement.js', import.meta.url), 'utf8');
 const uiSource = readFileSync(new URL('../src/public/interview-outreach-management.js', import.meta.url), 'utf8');
+const schemaSource = readFileSync(new URL('../prisma/schema.prisma', import.meta.url), 'utf8');
+const migrationSource = readFileSync(
+  new URL('../prisma/migrations/20260903163000_manual_interview_booking_without_slot/migration.sql', import.meta.url),
+  'utf8'
+);
 
 test('coordinación por vacante prioriza pendientes, luego entrevistas confirmadas y al final no interesados', () => {
   const entries = sortInterviewCoordinationEntries([
@@ -38,28 +43,47 @@ test('coordinación por vacante prioriza pendientes, luego entrevistas confirmad
   ]);
 });
 
-test('la gestión reutiliza Review y Booking, sin derivar respuestas WhatsApp ni cambiar Candidate a rechazado', () => {
+test('la coordinación humana usa Booking canónico sin depender de slots configurados', () => {
   assert.match(routeSource, /setInterviewInvitationStatus/);
-  assert.match(routeSource, /listOfferableSlots/);
-  assert.match(routeSource, /createBooking/);
+  assert.match(routeSource, /createScheduledInterviewBooking/);
+  assert.match(routeSource, /manualScheduling:\s*true/);
+  assert.match(routeSource, /slotId:\s*null/);
   assert.match(routeSource, /cancelCandidateBookings/);
   assert.match(routeSource, /interviewBookings/);
   assert.match(routeSource, /buildVacancyAccessWhere/);
   assert.match(routeSource, /interview_management_vacancy_not_found/);
+  assert.match(routeSource, /interview_management_datetime_required/);
   assert.match(routeSource, /router\.post\('\/interview-management\/candidates\/:candidateId\/coordination'/);
+  assert.doesNotMatch(routeSource, /listOfferableSlots/);
+  assert.doesNotMatch(routeSource, /createBooking\s*\(/);
   assert.doesNotMatch(routeSource, /deriveInterviewOutreachAttendance/);
   assert.doesNotMatch(routeSource, /direction:\s*'INBOUND'/);
   assert.doesNotMatch(routeSource, /status:\s*['"]RECHAZADO['"]/);
   assert.doesNotMatch(routeSource, /prisma\.candidate\.(?:update|updateMany)\s*\(/);
 });
 
-test('la interfaz vive dentro de cada vacante y usa No interesado sin diálogos nativos', () => {
+test('No interesado oculta inmediatamente fecha y entrevista; Confirmó usa fecha libre', () => {
   assert.match(uiSource, /data-vacancy-panel/);
   assert.match(uiSource, /Coordinación de entrevistas/);
   assert.match(uiSource, /Pendiente de respuesta/);
   assert.match(uiSource, /Confirmó entrevista/);
   assert.match(uiSource, /No interesado/);
   assert.match(uiSource, /Día y hora de entrevista/);
+  assert.match(uiSource, /input\.type = 'datetime-local'/);
+  assert.match(uiSource, /dateField\.hidden = !confirmed/);
+  assert.match(uiSource, /bookingMeta\.hidden = !confirmed/);
+  assert.match(uiSource, /management\.value === 'CONFIRMED'/);
+  assert.match(uiSource, /body\.scheduledAt = scheduledAt/);
   assert.match(uiSource, /\/coordination/);
+  assert.doesNotMatch(uiSource, /availableSlots/);
+  assert.doesNotMatch(uiSource, /interviewSlotSelect/);
+  assert.doesNotMatch(uiSource, /parseSlotValue/);
+  assert.doesNotMatch(uiSource, /body\.slotId/);
   assert.doesNotMatch(uiSource, /(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
+});
+
+test('Prisma y migración representan booking manual sin fabricar InterviewSlot', () => {
+  assert.match(schemaSource, /slotId\s+String\?/);
+  assert.match(schemaSource, /slot\s+InterviewSlot\?\s+@relation\(fields: \[slotId\], references: \[id\]\)/);
+  assert.match(migrationSource, /ALTER COLUMN "slotId" DROP NOT NULL/);
 });
