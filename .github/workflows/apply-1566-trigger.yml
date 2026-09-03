@@ -31,16 +31,20 @@ jobs:
           exec(compile(code, 'apply-1566-entity-authority', 'exec'))
           PY
       - run: npm ci
-      - name: Validate contextual entity authority
-        run: >-
-          node --test
-          test/contextualEntityPersistenceAuthority.test.js
-          test/fieldSanitizer.test.js
-          test/conversationRegression.test.js
-          test/conversationUnderstanding.test.js
-          test/conversationEngineGuardRails.test.js
-          test/conversationEngineStepAuthority.test.js
-          test/readinessGuard.test.js
+      - name: Focal contextual entity replay
+        run: node --test test/contextualEntityPersistenceAuthority.test.js
+      - name: Field sanitizer regressions
+        run: node --test test/fieldSanitizer.test.js
+      - name: Conversation regression suite
+        run: node --test test/conversationRegression.test.js
+      - name: Conversation understanding suite
+        run: node --test test/conversationUnderstanding.test.js
+      - name: Conversation engine guard rails
+        run: node --test test/conversationEngineGuardRails.test.js
+      - name: Conversation engine step authority
+        run: node --test test/conversationEngineStepAuthority.test.js
+      - name: Readiness guard suite
+        run: node --test test/readinessGuard.test.js
       - name: Validate syntax
         run: node --check src/services/fieldSanitizer.js && node --check src/services/chatEngine.js && node --check src/services/conversationEngine.js
       - name: Commit product fix
