@@ -31,8 +31,18 @@ jobs:
           exec(compile(code, 'apply-1566-entity-authority', 'exec'))
           PY
       - run: npm ci
-      - name: Focal contextual entity replay
-        run: node --test test/contextualEntityPersistenceAuthority.test.js
+      - name: Focal medical contextual negative
+        run: node --test --test-name-pattern="negativa corta contextual" test/contextualEntityPersistenceAuthority.test.js
+      - name: Focal medical negative outside context
+        run: node --test --test-name-pattern="negativa corta fuera" test/contextualEntityPersistenceAuthority.test.js
+      - name: Focal engine med transport persistence
+        run: node --test --test-name-pattern="engine persiste restricciones" test/contextualEntityPersistenceAuthority.test.js
+      - name: Focal curated locality precedence
+        run: node --test --test-name-pattern="campos ya curados" test/contextualEntityPersistenceAuthority.test.js
+      - name: Focal natural locality transport
+        run: node --test --test-name-pattern="localidad y transporte" test/contextualEntityPersistenceAuthority.test.js
+      - name: Focal post CV readiness
+        run: node --test --test-name-pattern="después de persistir" test/contextualEntityPersistenceAuthority.test.js
       - name: Field sanitizer regressions
         run: node --test test/fieldSanitizer.test.js
       - name: Conversation regression suite
