@@ -69,7 +69,8 @@ const MUNICIPALITY_RESIDENCE_VALUES = Object.freeze({
   soacha: 'Soacha Cundinamarca',
   funza: 'Funza Cundinamarca',
   mosquera: 'Mosquera Cundinamarca',
-  madrid: 'Madrid Cundinamarca'
+  madrid: 'Madrid Cundinamarca',
+  facatativa: 'Facatativa Cundinamarca'
 });
 const SOACHA_RESIDENCE_VALUE = MUNICIPALITY_RESIDENCE_VALUES.soacha;
 
@@ -158,10 +159,8 @@ export function getResidenceFieldConfig(vacancyOrCity = null) {
 export function getCandidateResidenceValue(candidate = {}, vacancyOrCity = null) {
   const config = getResidenceFieldConfig(vacancyOrCity || candidate?.vacancy || candidate);
   if (config.field === 'locality') {
-    const residenceSource = candidate?.locality || candidate?.neighborhood || candidate?.zone || '';
-    return normalizeBogotaLocalidad(residenceSource)
-      || normalizeMunicipalityResidence(residenceSource)
-      || (looksLikeLocationChunk(residenceSource) ? normalizeResidenceValue(residenceSource) : null);
+    return normalizeBogotaLocalidad(candidate?.locality || candidate?.neighborhood || candidate?.zone || '')
+      || normalizeMunicipalityResidence(candidate?.neighborhood || candidate?.zone || candidate?.locality || '');
   }
   return candidate?.neighborhood || candidate?.locality || candidate?.zone || null;
 }
@@ -184,9 +183,6 @@ export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, 
     } else if (municipalityResidence) {
       normalized.locality = null;
       normalized.neighborhood = municipalityResidence;
-    } else if (looksLikeLocationChunk(residenceSource)) {
-      normalized.locality = null;
-      normalized.neighborhood = normalizeResidenceValue(residenceSource);
     } else {
       normalized.locality = null;
       if (clearAlternate) normalized.neighborhood = null;
