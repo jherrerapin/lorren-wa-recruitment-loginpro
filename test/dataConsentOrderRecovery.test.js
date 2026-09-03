@@ -112,7 +112,7 @@ test('un interés explícito recupera una etapa heredada adelantada sin volver a
   assert.equal(shouldRequestConsentForTurn(candidate, message.text.body).allowed, true);
   assert.deepEqual(evaluateConsentBoundary(candidate, message), {
     block: true,
-    reason: 'protected_step_without_consent'
+    reason: 'candidate_wants_to_continue'
   });
 
   const harness = createHarness(candidate, vacancy);

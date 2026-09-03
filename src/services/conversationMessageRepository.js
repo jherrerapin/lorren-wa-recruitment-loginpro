@@ -243,6 +243,10 @@ export async function loadConversationInterpretationContext(prisma, input = {}) 
 
   const recentConversation = [...rows]
     .reverse()
+    .filter((row) => !(
+      row?.direction === MessageDirection.INBOUND
+      && row?.rawPayload?.preConsentProtected === true
+    ))
     .map((row) => ({
       direction: row.direction,
       body: String(row.body ?? '')
