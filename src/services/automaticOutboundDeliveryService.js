@@ -110,7 +110,10 @@ function deliveryState(message = {}) {
 function canBlockDuplicate(message = {}) {
   const state = deliveryState(message);
   if (!state) return true; // outbound histórico previo al contrato de delivery
-  return state === 'SENDING' || state === 'SENT';
+  // UNKNOWN significa que el proveedor pudo haber recibido el mensaje. No se
+  // reenvía automáticamente: la reconciliación debe ser manual para evitar
+  // duplicados por una respuesta incierta de Meta.
+  return state === 'SENDING' || state === 'SENT' || state === 'UNKNOWN';
 }
 
 function sameLogicalScope(nextPayload = {}, previousPayload = {}) {
@@ -120,8 +123,13 @@ function sameLogicalScope(nextPayload = {}, previousPayload = {}) {
 function isDuplicateReply(body, rawPayload, message) {
   if (!message?.body || !canBlockDuplicate(message)) return false;
   if (!sameLogicalScope(rawPayload, message.rawPayload || {})) return false;
+  // Una vez probado que ambos mensajes persiguen el mismo propósito durable,
+  // usamos el umbral general del loop guard. CONTEXTUAL_REPLY (0.85) está
+  // pensado para variar redacción del modelo y resulta demasiado estricto para
+  // equivalencias como "restricciones médicas y medio de transporte" frente a
+  // "las restricciones médicas y el medio de transporte".
   return isSubstantiallySimilarReply(body, message.body, {
-    threshold: ReplySimilarityThreshold.CONTEXTUAL_REPLY
+    threshold: ReplySimilarityThreshold.LOOP_GUARD
   });
 }
 
