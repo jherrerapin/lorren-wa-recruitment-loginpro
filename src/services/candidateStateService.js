@@ -343,6 +343,34 @@ export async function markManualOutboundDeliveryUnknown(client, input = {}) {
   });
 }
 
+export async function recordCandidateAutomaticOutboundSent(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const sentAtInput = input.sentAt === undefined ? new Date() : input.sentAt;
+  const sentAt = requireValidDate(sentAtInput, 'candidate_automatic_outbound_sent_at');
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      OR: [
+        { lastOutboundAt: null },
+        { lastOutboundAt: { lt: sentAt } }
+      ]
+    },
+    data: { lastOutboundAt: sentAt }
+  });
+
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    sentAt
+  };
+}
+
 export async function completeSupervisorReviewAfterDelivery(client, input = {}) {
   const candidateClient = requireCandidateClient(client);
   const candidateId = requireCandidateId(input.candidateId);

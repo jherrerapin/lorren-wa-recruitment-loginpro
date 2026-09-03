@@ -8,6 +8,7 @@ import {
   isSubstantiallySimilarReply,
   normalizeReplySignature
 } from './replySimilarityPolicy.js';
+import { recordCandidateAutomaticOutboundSent } from './candidateStateService.js';
 
 const SERIALIZABLE_ISOLATION_LEVEL = 'Serializable';
 const MAX_SERIALIZABLE_RETRIES = 3;
@@ -28,7 +29,8 @@ function requirePrisma(prisma) {
     || typeof prisma?.message?.create !== 'function'
     || typeof prisma?.message?.findUnique !== 'function'
     || typeof prisma?.message?.update !== 'function'
-    || typeof prisma?.candidate?.update !== 'function'
+    || typeof prisma?.candidate?.updateMany !== 'function'
+    || typeof prisma?.candidate?.findUnique !== 'function'
   ) {
     throw new Error('automatic_outbound_prisma_contract_invalid');
   }
@@ -276,15 +278,16 @@ export async function deliverAutomaticOutboundText(prismaInput, input = {}, depe
   const waMessageId = providerMessageId(response);
   try {
     await prisma.$transaction(async (tx) => {
+      const candidateTransition = await recordCandidateAutomaticOutboundSent(tx, {
+        candidateId,
+        sentAt
+      });
       await updateOutboundConversationDelivery(tx, {
         messageId: claim.messageId,
         state: 'SENT',
         occurredAt: sentAt,
-        providerMessageId: waMessageId
-      });
-      await tx.candidate.update({
-        where: { id: candidateId },
-        data: { lastOutboundAt: sentAt }
+        providerMessageId: waMessageId,
+        candidateStateCount: candidateTransition.count
       });
     });
   } catch (error) {
