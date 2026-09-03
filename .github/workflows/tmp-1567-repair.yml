@@ -1,0 +1,49 @@
+name: Temporary 1567 repair validation
+
+on:
+  push:
+    branches:
+      - fix/1567-consentimiento-auditoria-repair
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply scoped repair
+        run: python .github/scripts/tmp-1567-repair.py
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Validate consent order and preconsent audit
+        run: >-
+          node --test
+          test/dataConsentOrderRecovery.test.js
+          test/preConsentDataEvidence.test.js
+          test/conversationalReleaseCandidatePreConsent.test.js
+          test/consentBoundaryHardening.test.js
+          test/dataConsentPromptIdempotencyReplay.test.js
+          test/preConsentCodexReviewRegressions.test.js
+          test/conversationReplayConsentAttachmentEdges.test.js
+          test/conversationInterpretationContext.test.js
+      - name: Validate syntax and Prisma
+        run: |
+          node --check src/services/dataConsentGate.js
+          node --check src/services/conversationMessageRepository.js
+          npx prisma validate
+      - name: Commit only validated product changes
+        run: |
+          rm .github/scripts/tmp-1567-repair.py .github/workflows/tmp-1567-repair.yml
+          git config user.name "jherrerapin"
+          git config user.email "37624185+jherrerapin@users.noreply.github.com"
+          git add src/services/dataConsentGate.js src/services/conversationMessageRepository.js lorren_comportamiento_completo.md .github/scripts/tmp-1567-repair.py .github/workflows/tmp-1567-repair.yml
+          git commit -m "fix(bot): restaurar orden de consentimiento y auditoría #1567"
+          git push origin HEAD:fix/1567-consentimiento-auditoria-repair
