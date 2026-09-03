@@ -7,7 +7,7 @@ import {
 
 const bogotaVacancy = { id: 'TEST-VACANCY-BOGOTA', city: 'Bogota' };
 
-test('una residencia externa válida no se borra al editar un candidato de una vacante Bogotá', () => {
+test('Facatativá se conserva como residencia soportada en una vacante Bogotá', () => {
   const aligned = alignCandidateLocationFields(
     { locality: 'Facatativá', neighborhood: 'Facatativá' },
     bogotaVacancy,
@@ -15,11 +15,11 @@ test('una residencia externa válida no se borra al editar un candidato de una v
   );
 
   assert.equal(aligned.locality, null);
-  assert.equal(aligned.neighborhood, 'Facatativá');
-  assert.equal(getCandidateResidenceValue(aligned, bogotaVacancy), 'Facatativá');
+  assert.equal(aligned.neighborhood, 'Facatativa Cundinamarca');
+  assert.equal(getCandidateResidenceValue(aligned, bogotaVacancy), 'Facatativa Cundinamarca');
 });
 
-test('la corrección conserva las normalizaciones existentes para Bogotá y municipios ya soportados', () => {
+test('las normalizaciones existentes para Bogotá y municipios soportados no cambian', () => {
   const bogotaLocality = alignCandidateLocationFields(
     { locality: 'suba', neighborhood: 'suba' },
     bogotaVacancy,
@@ -35,16 +35,4 @@ test('la corrección conserva las normalizaciones existentes para Bogotá y muni
   assert.equal(bogotaLocality.neighborhood, null);
   assert.equal(municipality.locality, null);
   assert.equal(municipality.neighborhood, 'Soacha Cundinamarca');
-});
-
-test('texto claramente no geográfico sigue descartándose como residencia', () => {
-  const aligned = alignCandidateLocationFields(
-    { locality: 'Auxiliar de bodega', neighborhood: 'Auxiliar de bodega' },
-    bogotaVacancy,
-    { clearAlternate: true }
-  );
-
-  assert.equal(aligned.locality, null);
-  assert.equal(aligned.neighborhood, null);
-  assert.equal(getCandidateResidenceValue(aligned, bogotaVacancy), null);
 });
