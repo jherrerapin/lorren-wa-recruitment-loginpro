@@ -1,0 +1,307 @@
+name: Apply 1566 entity authority
+
+on:
+  push:
+    branches:
+      - fix/1566-entidades-persistidas-contextuales
+    paths:
+      - .github/workflows/apply-1566-entity-authority.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Consolidate contextual entity authority
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # 1) Semantic gate: contextual short answers and canonical transport/medical values.
+          path = Path('src/services/fieldSanitizer.js')
+          text = path.read_text()
+
+          old_import = "import { classifyAgeEvidence } from './ageEvidence.js';\n"
+          new_import = old_import + "import { looksLikeNoMedicalRestrictionsText, normalizeTransportMode } from './candidateData.js';\n"
+          if "looksLikeNoMedicalRestrictionsText, normalizeTransportMode" not in text:
+            if old_import not in text:
+              raise SystemExit('fieldSanitizer import anchor missing')
+            text = text.replace(old_import, new_import, 1)
+
+          pending_anchor = """  if (field === 'experienceInfo' || field === 'experienceTime' || field === 'experienceSummary') {
+    return pending.some((item) => /\\b(experiencia|tiempo de experiencia|trabajado|laborado)\\b/.test(item));
+  }
+"""
+          pending_insert = """  if (field === 'transportMode') {
+    return pending.some((item) => /\\b(medio de transporte|transporte|moviliz|moto|motocicleta|bicicleta|bici|carro|automovil|bus)\\b/.test(item));
+  }
+
+  if (field === 'medicalRestrictions') {
+    return pending.some((item) => /\\b(restric\\w*|medic\\w*|salud)\\b/.test(item));
+  }
+
+""" + pending_anchor
+          if "if (field === 'transportMode')" not in text.split('function lastQuestionAskedForField', 1)[0]:
+            if pending_anchor not in text:
+              raise SystemExit('fieldWasPending anchor missing')
+            text = text.replace(pending_anchor, pending_insert, 1)
+
+          semantic_anchor = "function currentStepCollectsCandidateData(context = {}) {"
+          semantic_helpers = r'''function splitCandidateAnswerSegments(text = '') {
+  return String(text || '')
+    .split(/[\n,;]+/)
+    .map((segment) => normalizeText(segment))
+    .filter(Boolean);
+}
+
+function hasShortNegativeSegment(text = '') {
+  return splitCandidateAnswerSegments(text)
+    .some((segment) => /^(?:no+|ningun[oa]?|ninguna? cosa|nada|para nada)$/.test(segment));
+}
+
+function sanitizeMedicalRestrictions(value, evidence, text, context = {}, turnType = null) {
+  const raw = String(value || '').trim();
+  const normalizedValue = normalizeText(raw);
+  if (!normalizedValue) return { ok: false, reason: 'empty_medical_restrictions' };
+
+  const fieldContext = fieldWasPending('medicalRestrictions', context)
+    || lastQuestionAskedForField('medicalRestrictions', context);
+  const explicitNo = looksLikeNoMedicalRestrictionsText(text, { allowImplicit: false })
+    || looksLikeNoMedicalRestrictionsText(raw, { allowImplicit: false });
+  const proposedNo = looksLikeNoMedicalRestrictionsText(raw, { allowImplicit: true })
+    || /^(?:no+|ningun[oa]?|nada|sin restricciones?(?: medicas?)?)$/.test(normalizedValue);
+  const contextualShortNo = fieldContext && proposedNo && hasShortNegativeSegment(text);
+
+  if (explicitNo || contextualShortNo) {
+    return { ok: true, value: 'Sin restricciones médicas' };
+  }
+
+  // Un "sí" aislado solo confirma existencia, pero no describe la restricción.
+  if (/^(?:si+|sip|claro)$/.test(normalizedValue)) {
+    return { ok: false, reason: 'medical_restriction_detail_missing' };
+  }
+
+  if (looksLikeNonDataText(raw) && !fieldContext) {
+    return { ok: false, reason: 'medical_restrictions_non_data_text' };
+  }
+
+  const valueGrounded = Boolean(normalizeText(text).includes(normalizedValue));
+  const usableEvidence = evidenceIsUsable('medicalRestrictions', evidence, { allowLocalParser: true });
+  const groundedEvidence = evidenceSnippetIsGrounded('medicalRestrictions', evidence, text);
+  if (!valueGrounded && !(fieldContext && usableEvidence && groundedEvidence)) {
+    return { ok: false, reason: 'medical_restrictions_evidence_not_grounded' };
+  }
+
+  if (turnLooksLikeOnlyConversation(turnType) && !fieldContext) {
+    return { ok: false, reason: 'medical_restrictions_without_active_context' };
+  }
+
+  return { ok: true, value: raw.slice(0, 280) };
+}
+
+function sanitizeTransportMode(value, evidence, text, context = {}, turnType = null) {
+  const canonical = normalizeTransportMode(value);
+  if (!canonical) return { ok: false, reason: 'invalid_transport_mode' };
+
+  const fieldContext = fieldWasPending('transportMode', context)
+    || lastQuestionAskedForField('transportMode', context);
+  const textCanonical = normalizeTransportMode(text);
+  const evidenceSnippet = getEvidence('transportMode', evidence).snippet || '';
+  const evidenceCanonical = normalizeTransportMode(evidenceSnippet);
+  const grounded = canonical === textCanonical || canonical === evidenceCanonical;
+  const usableEvidence = evidenceIsUsable('transportMode', evidence, { allowLocalParser: true });
+  const groundedEvidence = evidenceSnippetIsGrounded('transportMode', evidence, text);
+
+  if (!grounded && !(fieldContext && usableEvidence && groundedEvidence)) {
+    return { ok: false, reason: 'transport_mode_evidence_not_grounded' };
+  }
+  if (turnLooksLikeOnlyConversation(turnType) && !fieldContext) {
+    return { ok: false, reason: 'transport_mode_without_active_context' };
+  }
+
+  return { ok: true, value: canonical };
+}
+
+'''
+          if 'function sanitizeMedicalRestrictions' not in text:
+            if semantic_anchor not in text:
+              raise SystemExit('semantic helper anchor missing')
+            text = text.replace(semantic_anchor, semantic_helpers + semantic_anchor, 1)
+
+          eval_anchor = """  if (field === 'experienceInfo') return sanitizeExperienceInfo(value, evidence, text, context, turnType);
+  if (field === 'experienceSummary') return sanitizeExperienceSummary(value, evidence, text, context, turnType);
+  if (isStringCandidateValue(value) && looksLikeNonDataText(value)) return { ok: false, reason: 'non_data_text' };
+"""
+          eval_replacement = """  if (field === 'experienceInfo') return sanitizeExperienceInfo(value, evidence, text, context, turnType);
+  if (field === 'experienceSummary') return sanitizeExperienceSummary(value, evidence, text, context, turnType);
+  if (field === 'medicalRestrictions') return sanitizeMedicalRestrictions(value, evidence, text, context, turnType);
+  if (field === 'transportMode') return sanitizeTransportMode(value, evidence, text, context, turnType);
+  if (isStringCandidateValue(value) && looksLikeNonDataText(value)) return { ok: false, reason: 'non_data_text' };
+"""
+          if "field === 'medicalRestrictions') return sanitizeMedicalRestrictions" not in text:
+            if eval_anchor not in text:
+              raise SystemExit('evaluateField anchor missing')
+            text = text.replace(eval_anchor, eval_replacement, 1)
+
+          path.write_text(text)
+
+          # 2) Chat engine: curated turn fields are authoritative; engine may only fill missing keys.
+          path = Path('src/services/chatEngine.js')
+          text = path.read_text()
+
+          old_block = """  const engineCandidateFields = extractEngineCandidateFields(actions, extractedFields);
+  const candidateFields = {
+    ...(candidateFieldHints && typeof candidateFieldHints === 'object' ? candidateFieldHints : {}),
+    ...engineCandidateFields
+  };
+  const engineEvidence = Object.fromEntries(
+    Object.keys(candidateFields).map((field) => [
+      field,
+      { snippet: String(inboundText || '').slice(0, 180), confidence: 0.78, source: 'engine' }
+    ])
+  );
+  const sanitized = sanitizeCandidateFieldsForConversation({
+    fields: candidateFields,
+    evidence: engineEvidence,
+    text: inboundText,
+    context: { currentStep },
+    turnType: null
+  });
+
+  const actResult = await act({
+    actions,
+    candidate,
+    extractedFields: sanitized.fields,
+    candidateFields: sanitized.fields,
+"""
+          new_block = """  const engineCandidateFields = extractEngineCandidateFields(actions, extractedFields);
+  // candidateFieldHints proviene de conversationUnderstanding y ya pasó por la compuerta
+  // semántica completa del turno. El engine puede completar huecos, nunca reinterpretar
+  // ni sobrescribir una entidad ya curada con menos contexto.
+  const curatedCandidateFields = candidateFieldHints && typeof candidateFieldHints === 'object'
+    ? { ...candidateFieldHints }
+    : {};
+  const engineFallbackFields = Object.fromEntries(
+    Object.entries(engineCandidateFields)
+      .filter(([field]) => !Object.hasOwn(curatedCandidateFields, field))
+  );
+  const lastBotQuestion = [...(recentMessages || [])]
+    .reverse()
+    .find((message) => message?.direction === 'OUTBOUND')?.body || '';
+  const engineEvidence = Object.fromEntries(
+    Object.keys(engineFallbackFields).map((field) => [
+      field,
+      { snippet: String(inboundText || '').slice(0, 180), confidence: 0.78, source: 'engine' }
+    ])
+  );
+  const sanitizedEngineFallback = sanitizeCandidateFieldsForConversation({
+    fields: engineFallbackFields,
+    evidence: engineEvidence,
+    text: inboundText,
+    context: {
+      currentStep,
+      pendingFields: readiness.missingFieldLabels || readiness.missingFields || [],
+      lastBotQuestion,
+      recentConversation: recentMessages || []
+    },
+    turnType: null
+  });
+  const candidateFields = {
+    ...sanitizedEngineFallback.fields,
+    ...curatedCandidateFields
+  };
+
+  const actResult = await act({
+    actions,
+    candidate,
+    extractedFields: candidateFields,
+    candidateFields,
+"""
+          if 'const engineFallbackFields = Object.fromEntries' not in text:
+            if old_block not in text:
+              raise SystemExit('chatEngine candidate field block anchor missing')
+            text = text.replace(old_block, new_block, 1)
+
+          old_rejected = "    rejectedFields: sanitized.rejectedFields,\n"
+          new_rejected = "    rejectedFields: sanitizedEngineFallback.rejectedFields,\n"
+          if old_rejected in text:
+            text = text.replace(old_rejected, new_rejected, 1)
+
+          # Deterministic guard: if the model tried to persist a required field, backend still
+          # marks it missing, and prose claims progress, never echo a false persistence claim.
+          guard_anchor = """  const staleStepConflict = Boolean(actResult?.stepTransition?.conflict);
+  const progressReply = staleStepConflict ? null : buildDeterministicProgressReply(actResult);
+  const guardedReply = staleStepConflict
+    ? null
+    : (actResult?.blockedActions?.length
+      ? buildMissingFieldReply(actResult.readiness)
+      : (progressReply || result.reply));
+"""
+          guard_replacement = """  const staleStepConflict = Boolean(actResult?.stepTransition?.conflict);
+  const progressReply = staleStepConflict ? null : buildDeterministicProgressReply(actResult);
+  const attemptedProfileFields = new Set(Object.keys(candidateFields));
+  const unpersistedAttemptedFields = (actResult?.readiness?.missingFields || [])
+    .filter((field) => attemptedProfileFields.has(field));
+  const replyClaimsPersistence = /\\b(?:registr(?:e|é|ado|ada)|guard(?:e|é|ado|ada)|actualic(?:e|é|ado|ada)|anot(?:e|é|ado|ada)|qued(?:o|ó)\\s+registrad|ya\\s+(?:tengo|quedo|quedó)|entend[ií]\\s+que)\\b/i
+    .test(String(result.reply || ''));
+  const persistenceClaimDrift = unpersistedAttemptedFields.length > 0 && replyClaimsPersistence;
+  const guardedReply = staleStepConflict
+    ? null
+    : (persistenceClaimDrift || actResult?.blockedActions?.length
+      ? buildMissingFieldReply(actResult.readiness)
+      : (progressReply || result.reply));
+"""
+          if 'const persistenceClaimDrift =' not in text:
+            if guard_anchor not in text:
+              raise SystemExit('chatEngine reply guard anchor missing')
+            text = text.replace(guard_anchor, guard_replacement, 1)
+
+          path.write_text(text)
+
+          # 3) Conversation model contract: prose cannot claim persistence without structured data.
+          path = Path('src/services/conversationEngine.js')
+          text = path.read_text()
+          prompt_anchor = """- extractedFields tiene peso real: guarda correcciones y datos nuevos aunque no esten solo en save_fields.
+- Si haces una pregunta y pides algo en el mismo mensaje, responde primero la duda y luego retoma el siguiente paso.
+"""
+          prompt_replacement = """- extractedFields tiene peso real: guarda correcciones y datos nuevos aunque no esten solo en save_fields.
+- Si en reply afirmas que entendiste, registraste, guardaste, anotaste o actualizaste un dato del candidato, ese dato debe estar ya capturado en ESTADO CURADO DEL CANDIDATO o incluido de forma estructurada en extractedFields/save_fields de este turno. Nunca confirmes persistencia solo en prosa.
+- Cuando la ultima pregunta o el historial inmediato pide varios campos y el candidato responde en varios fragmentos consecutivos, interpreta cada fragmento contra esos campos pendientes y extrae todos los datos que puedas sostener con evidencia.
+- Respuestas cortas como si/no/ninguna/nada solo pueden interpretarse usando el campo pendiente y la ultima pregunta; nunca las reasignes por intuicion a otro campo.
+- Si haces una pregunta y pides algo en el mismo mensaje, responde primero la duda y luego retoma el siguiente paso.
+"""
+          if 'Nunca confirmes persistencia solo en prosa.' not in text:
+            if prompt_anchor not in text:
+              raise SystemExit('conversationEngine prompt anchor missing')
+            text = text.replace(prompt_anchor, prompt_replacement, 1)
+          path.write_text(text)
+          PY
+      - run: npm ci
+      - name: Validate contextual entity authority
+        run: >-
+          node --test
+          test/contextualEntityPersistenceAuthority.test.js
+          test/fieldSanitizer.test.js
+          test/conversationRegression.test.js
+          test/conversationUnderstanding.test.js
+          test/conversationEngineGuardRails.test.js
+          test/conversationEngineStepAuthority.test.js
+          test/readinessGuard.test.js
+      - name: Validate syntax
+        run: node --check src/services/fieldSanitizer.js && node --check src/services/chatEngine.js && node --check src/services/conversationEngine.js
+      - name: Commit product fix
+        shell: bash
+        run: |
+          git config user.name "jherrerapin"
+          git config user.email "37624185+jherrerapin@users.noreply.github.com"
+          git add src/services/fieldSanitizer.js src/services/chatEngine.js src/services/conversationEngine.js
+          git commit -m "fix(bot): consolidar entidades contextuales #1566"
+          git push
