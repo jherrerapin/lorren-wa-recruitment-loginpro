@@ -106,10 +106,51 @@ test('no reescribe el formato documental configurado para llevar a entrevista', 
   assert.deepEqual(result.normalizations, []);
 });
 
+test('permite referencias territoriales públicas configuradas aunque tengan forma de calle', () => {
+  const vacancy = {
+    ...baseVacancy,
+    requirements: 'Vivir por Suba, Calle 80, Funza, Mosquera o zonas aledañas',
+    interviewAddress: 'Carrera 50 # 20-30'
+  };
+  const reply = '*Requisitos*\nVivir por Suba, Calle 80, Funza, Mosquera o zonas aledañas.';
+  const result = sanitizeOutboundReply({
+    reply,
+    vacancy,
+    currentStep: 'GREETING_SENT',
+    source: 'vacancy_first_gate'
+  });
+
+  assert.equal(result.blocked, false);
+  assert.equal(result.reply, reply);
+  assert.deepEqual(result.blockedClaims, []);
+});
+
 test('bloquea dirección de entrevista no registrada', () => {
   const result = sanitizeOutboundReply({ reply: 'Preséntate en Calle 100 # 20-30 mañana.', vacancy: baseVacancy });
   assert.equal(result.blocked, true);
   assert.ok(result.blockedClaims.some((claim) => claim.startsWith('unregistered_interview_address')));
+});
+
+test('bloquea dirección de entrevista registrada antes de una reserva confirmada', () => {
+  const result = sanitizeOutboundReply({
+    reply: 'La entrevista es en Calle 80 # 10-20.',
+    vacancy: baseVacancy,
+    currentStep: 'COLLECTING_DATA'
+  });
+  assert.equal(result.blocked, true);
+  assert.ok(result.blockedClaims.some((claim) => claim.startsWith('interview_address_before_confirmed_booking')));
+});
+
+test('fallback de claim no soportado no inventa que el candidato preguntó sobre ese punto', () => {
+  const result = sanitizeOutboundReply({
+    reply: 'La vacante tiene contrato directo.',
+    vacancy: baseVacancy,
+    currentStep: 'GREETING_SENT',
+    source: 'vacancy_first_gate'
+  });
+
+  assert.equal(result.blocked, true);
+  assert.doesNotMatch(result.reply, /sobre ese punto/i);
 });
 
 test('bloquea horario especifico no registrado', () => {
