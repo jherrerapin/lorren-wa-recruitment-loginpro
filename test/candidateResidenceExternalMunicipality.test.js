@@ -5,7 +5,7 @@ import {
   getCandidateResidenceValue
 } from '../src/services/candidateData.js';
 
-test('vacante Bogotá conserva una residencia externa válida en lugar de borrarla', () => {
+test('vacante Bogotá admite Facatativa como residencia configurada', () => {
   const vacancy = { city: 'Bogota' };
   const aligned = alignCandidateLocationFields(
     { locality: 'Facatativa', neighborhood: 'Facatativa' },
@@ -14,8 +14,8 @@ test('vacante Bogotá conserva una residencia externa válida en lugar de borrar
   );
 
   assert.equal(aligned.locality, null);
-  assert.equal(aligned.neighborhood, 'Facatativa');
-  assert.equal(getCandidateResidenceValue(aligned, vacancy), 'Facatativa');
+  assert.equal(aligned.neighborhood, 'Facatativa Cundinamarca');
+  assert.equal(getCandidateResidenceValue(aligned, vacancy), 'Facatativa Cundinamarca');
 });
 
 test('vacante Bogotá conserva la semántica existente para localidades y municipios canonizados', () => {
@@ -29,7 +29,7 @@ test('vacante Bogotá conserva la semántica existente para localidades y munici
   assert.equal(soacha.neighborhood, 'Soacha Cundinamarca');
 });
 
-test('vacante Bogotá sigue descartando texto que no tiene forma de residencia', () => {
+test('vacante Bogotá sigue descartando texto no configurado como residencia válida', () => {
   const aligned = alignCandidateLocationFields(
     { locality: 'Auxiliar de bodega', neighborhood: 'Auxiliar de bodega' },
     { city: 'Bogota' },
