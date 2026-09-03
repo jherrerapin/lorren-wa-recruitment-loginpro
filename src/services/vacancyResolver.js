@@ -115,7 +115,7 @@ function editDistance(a = '', b = '') {
   if (!right) return left.length;
   const dp = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0));
   for (let i = 0; i <= left.length; i += 1) dp[i][0] = i;
-  for (let j = 1; j <= right.length; j += 1) dp[0][j] = j;
+  for (let j = 0; j <= right.length; j += 1) dp[0][j] = j;
   for (let i = 1; i <= left.length; i += 1) {
     for (let j = 1; j <= right.length; j += 1) {
       const cost = left[i - 1] === right[j - 1] ? 0 : 1;
