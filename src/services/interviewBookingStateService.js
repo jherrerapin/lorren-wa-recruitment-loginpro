@@ -232,10 +232,14 @@ export async function createScheduledInterviewBooking(prisma, input = {}) {
     'interview_booking_create'
   );
   const createInput = requireInputObject(input, 'interview_booking_create_input');
+  const manualScheduling = createInput.manualScheduling === true;
+  const slotId = manualScheduling && (createInput.slotId === null || createInput.slotId === undefined || createInput.slotId === '')
+    ? null
+    : requireNonEmptyString(createInput.slotId, 'slot_id');
   const normalized = {
     candidateId: requireNonEmptyString(createInput.candidateId, 'candidate_id'),
     vacancyId: requireNonEmptyString(createInput.vacancyId, 'vacancy_id'),
-    slotId: requireNonEmptyString(createInput.slotId, 'slot_id'),
+    slotId,
     scheduledAt: requireTimestamp(createInput.scheduledAt, 'scheduled_at'),
     reminderWindowClosed: createInput.reminderWindowClosed === undefined
       ? false
