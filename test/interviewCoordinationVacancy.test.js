@@ -64,7 +64,7 @@ test('la coordinación humana usa Booking canónico sin depender de slots config
 
 test('No interesado oculta inmediatamente fecha y entrevista; Confirmó usa fecha libre', () => {
   assert.match(uiSource, /data-vacancy-panel/);
-  assert.match(uiSource, /Coordinación de entrevistas/);
+  assert.match(uiSource, /Coordinación manual de entrevistas/);
   assert.match(uiSource, /Pendiente de respuesta/);
   assert.match(uiSource, /Confirmó entrevista/);
   assert.match(uiSource, /No interesado/);
@@ -79,6 +79,55 @@ test('No interesado oculta inmediatamente fecha y entrevista; Confirmó usa fech
   assert.doesNotMatch(uiSource, /interviewSlotSelect/);
   assert.doesNotMatch(uiSource, /parseSlotValue/);
   assert.doesNotMatch(uiSource, /body\.slotId/);
+  assert.doesNotMatch(uiSource, /(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
+});
+
+test('guardar una confirmación mueve visualmente la persona de pendientes a entrevistas programadas', () => {
+  assert.match(uiSource, /function splitCoordinationEntries/);
+  assert.match(uiSource, /status === 'CONFIRMED' && entry\?\.booking\?\.scheduledAt/);
+  assert.match(uiSource, /'Pendientes de respuesta'/);
+  assert.match(uiSource, /'Entrevistas programadas'/);
+  assert.match(uiSource, /'No interesados'/);
+  assert.match(uiSource, /await refresh\(\)/);
+});
+
+test('el proceso manual tiene gestión propia del día sin depender de habilitar agenda automática', () => {
+  assert.match(uiSource, /function bogotaToday/);
+  assert.match(uiSource, /timeZone: 'America\/Bogota'/);
+  assert.match(uiSource, /isTodayDashboard/);
+  assert.match(uiSource, /isManualBooking/);
+  assert.match(uiSource, /entry\?\.booking\?\.slotId == null/);
+  assert.match(uiSource, /'Entrevistas manuales — Hoy'/);
+  assert.match(uiSource, /appendManualTodayGroup/);
+  assert.match(uiSource, /Gestión del día de entrevista/);
+  assert.match(uiSource, /sin activar “Habilitar entrevistas”/);
+  assert.doesNotMatch(uiSource, /schedulingEnabled/);
+});
+
+test('manual y automático coexisten sin duplicar la misma cita en el visualizador automático', () => {
+  assert.match(uiSource, /function separateAutomaticInterviews/);
+  assert.match(uiSource, /function findAutomaticInterviewSection/);
+  assert.match(uiSource, /Entrevistas automáticas/);
+  assert.match(uiSource, /manualCandidateIds/);
+  assert.match(uiSource, /candidateIdFromBookingRow/);
+  assert.match(uiSource, /row\.remove\(\)/);
+  assert.match(uiSource, /found\.section\.hidden = true/);
+  assert.doesNotMatch(uiSource, /createScheduledInterviewBooking/);
+});
+
+test('gestión del día reutiliza APIs canónicas para asistencia, evaluación y complementarios', () => {
+  assert.match(uiSource, /ATTENDANCE_OPTIONS/);
+  assert.match(uiSource, /\['ATTENDED', 'Asistió'\]/);
+  assert.match(uiSource, /\['NO_SHOW', 'No asistió'\]/);
+  assert.match(uiSource, /\/attendance/);
+  assert.match(uiSource, /\/evaluation/);
+  assert.match(uiSource, /ratingInput\.min = '1'/);
+  assert.match(uiSource, /ratingInput\.max = '5'/);
+  assert.match(uiSource, /ratingInput\.step = '0\.01'/);
+  assert.match(uiSource, /observationEnabled/);
+  assert.match(uiSource, /complementaryFields/);
+  assert.match(uiSource, /values: complementaryInputs\.map/);
+  assert.doesNotMatch(uiSource, /\/webhook/);
   assert.doesNotMatch(uiSource, /(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
 });
 
