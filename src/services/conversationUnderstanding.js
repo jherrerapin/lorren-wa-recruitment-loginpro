@@ -210,29 +210,46 @@ function semanticGateAcceptsExperienceConfirmation(context = {}) {
 }
 
 function buildContextualExperienceSummaryCandidate(input = '', context = {}) {
-  const raw = String(input || '').replace(/\s+/g, ' ').trim();
-  if (!raw) return { fields: {}, evidence: {} };
+  const segments = String(input || '')
+    .split(/\n+/)
+    .map((segment) => segment.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (!segments.length) return { fields: {}, evidence: {} };
 
-  const evidence = {
-    experienceSummary: {
-      snippet: raw.slice(0, 120),
-      confidence: 0.95,
-      source: 'contextual_answer'
+  const acceptedSegments = [];
+  for (const segment of segments) {
+    const segmentEvidence = {
+      experienceSummary: {
+        snippet: segment.slice(0, 120),
+        confidence: 0.95,
+        source: 'contextual_answer'
+      }
+    };
+    const probe = sanitizeCandidateFieldsForConversation({
+      fields: { experienceSummary: segment },
+      evidence: segmentEvidence,
+      text: segment,
+      context,
+      turnType: null
+    });
+    if (hasValue(probe.fields.experienceSummary)) {
+      acceptedSegments.push(probe.fields.experienceSummary);
     }
-  };
-  const probe = sanitizeCandidateFieldsForConversation({
-    fields: { experienceSummary: raw },
-    evidence,
-    text: input,
-    context,
-    turnType: null
-  });
-  const experienceSummary = probe.fields.experienceSummary;
-  if (!hasValue(experienceSummary)) return { fields: {}, evidence: {} };
+  }
 
+  const uniqueSegments = [...new Set(acceptedSegments)];
+  if (!uniqueSegments.length) return { fields: {}, evidence: {} };
+
+  const experienceSummary = uniqueSegments.join('; ');
   return {
     fields: { experienceSummary },
-    evidence
+    evidence: {
+      experienceSummary: {
+        snippet: experienceSummary.slice(0, 120),
+        confidence: 0.95,
+        source: 'contextual_answer'
+      }
+    }
   };
 }
 
