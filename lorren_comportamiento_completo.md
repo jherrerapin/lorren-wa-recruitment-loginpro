@@ -118,13 +118,15 @@ No se debe:
 
 - duplicar la solicitud;
 - enviar varias versiones consecutivas;
-- persistir datos personales antes de autorización válida;
+- persistir datos personales como entidades del perfil, documentos o archivos antes de autorización válida;
 - interpretar una pregunta como consentimiento;
 - ni reiniciar la vacante después de autorizar.
 
 La solicitud debe ser idempotente: mientras esté pendiente, un mismo evento, lote o reintento no puede producir otra solicitud.
 
-Si llega un archivo antes del consentimiento, el sistema debe informar brevemente que no fue guardado y solicitar una sola autorización. Tras aceptar, debe pedir reenviar el archivo únicamente si efectivamente no fue persistido.
+Para trazabilidad operativa, el texto inbound recibido antes del consentimiento puede conservarse literalmente en el historial conversacional accesible al personal autorizado. Esa evidencia debe quedar marcada como preconsentimiento protegido y no puede alimentar la interpretación automática posterior, prellenar el perfil ni convertirse en una entidad persistida del candidato sin autorización válida. El texto no debe duplicarse innecesariamente en logs o metadata técnica.
+
+Si llega un archivo antes del consentimiento, el sistema debe informar brevemente que no fue guardado y solicitar una sola autorización. Tras aceptar, debe pedir reenviar el archivo únicamente si efectivamente no fue persistido. Esta excepción de trazabilidad aplica al texto; no autoriza descargar o conservar archivos preconsentimiento.
 
 ## 7. Datos configurables por vacante
 

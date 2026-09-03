@@ -289,9 +289,8 @@ test('TEST-RC-PAUSED-DATA: un dato personal durante pausa se adquiere sin reanud
   assert.equal(observed.nextCalls, 0);
   assert.deepEqual(observed.statuses, [200]);
   assert.equal(harness.inboundRows.length, 1);
-  assert.match(harness.inboundRows[0].body || '', /no fue almacenado|no se almacenó/i);
-  assert.doesNotMatch(harness.inboundRows[0].body || '', /TEST-100000001/);
-  assert.doesNotMatch(harness.inboundRows[0].body || '', /^\[.*\]$/);
+  assert.equal(harness.inboundRows[0].body, 'Mi cédula es TEST-100000001');
+  assert.equal(harness.inboundRows[0].rawPayload?.preConsentProtected, true);
   assert.doesNotMatch(JSON.stringify(harness.inboundRows[0].rawPayload || {}), /TEST-100000001/);
   assert.equal(harness.providerOutbound.length, 0);
   assert.equal(harness.outboundRows.length, 0);
@@ -299,7 +298,7 @@ test('TEST-RC-PAUSED-DATA: un dato personal durante pausa se adquiere sin reanud
   assert.equal(harness.candidateUpdates.length, 0);
 });
 
-test('TEST-RC-PRECONSENT-RAW: deduplicar no persiste texto personal crudo', async () => {
+test('TEST-RC-PRECONSENT-RAW: conserva texto solo como auditoría protegida', async () => {
   const harness = buildHarness();
   const observed = await runMiddleware(harness, 'Mi cédula es TEST-100000001', 'TEST-RC-RAW-BODY');
 
@@ -307,11 +306,11 @@ test('TEST-RC-PRECONSENT-RAW: deduplicar no persiste texto personal crudo', asyn
   assert.deepEqual(observed.statuses, [200]);
   assert.equal(harness.inboundRows.length, 1);
   assert.equal(harness.inboundRows[0].waMessageId, 'TEST-RC-RAW-BODY');
-  assert.match(harness.inboundRows[0].body || '', /no fue almacenado|no se almacenó/i);
-  assert.doesNotMatch(harness.inboundRows[0].body || '', /TEST-100000001/);
-  assert.doesNotMatch(harness.inboundRows[0].body || '', /^\[.*\]$/);
+  assert.equal(harness.inboundRows[0].body, 'Mi cédula es TEST-100000001');
+  assert.equal(harness.inboundRows[0].rawPayload?.preConsentProtected, true);
   assert.doesNotMatch(JSON.stringify(harness.inboundRows[0].rawPayload || {}), /TEST-100000001/);
   assert.equal(harness.inboundRows[0].rawPayload?.consentGateProcessing?.state, 'COMPLETED');
+  assert.equal(harness.candidateUpdates.some((update) => Object.hasOwn(update, 'documentNumber')), false);
   assert.equal(harness.providerOutbound.length, 1);
 });
 

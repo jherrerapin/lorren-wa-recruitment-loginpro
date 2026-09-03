@@ -552,19 +552,33 @@ function isContextualInterestConfirmationMode(mode = '') {
     || parseAlternativeMode(value).active;
 }
 
+function isShortAffirmativeTurn(text = '') {
+  const value = normalize(text);
+  return /^(?:s+i+|sip|claro|correcto|exacto|de acuerdo|dale|ok|listo)$/.test(value);
+}
+
 export function shouldRequestConsentForTurn(candidate = {}, text = '') {
   const mode = String(candidate?.botResumeMode || '');
   const turn = analyzeConversationTurn(text, { currentStep: candidate?.currentStep });
-  const explicitInterest = Boolean(
-    turn.interest
-    || (turn.confirmation && isContextualInterestConfirmationMode(mode))
-  );
   const captureAlreadyAuthorized = isPreConsentCaptureMode(mode);
   const alternativePending = parseAlternativeMode(mode).active;
   const futureProfilePending = PRE_CONSENT_OFFER_TO_CAPTURE_MODE.has(mode);
   const activeVacancyReady = Boolean(
     candidate?.vacancyId
     && !isAwaitingCampaignVacancyConfirmation(candidate)
+  );
+  const contextualShortInterest = Boolean(
+    activeVacancyReady
+    && isShortAffirmativeTurn(text)
+    && (
+      isContextualInterestConfirmationMode(mode)
+      || PROTECTED_STEPS.has(candidate?.currentStep)
+    )
+  );
+  const explicitInterest = Boolean(
+    turn.interest
+    || (turn.confirmation && isContextualInterestConfirmationMode(mode))
+    || contextualShortInterest
   );
 
   return {
@@ -620,11 +634,22 @@ export function evaluateConsentBoundary(candidate = {}, message = {}, options = 
   if (parseConsentPendingMode(candidate?.botResumeMode).pending) return { block: true, reason: 'consent_pending' };
   if (isPreConsentCaptureMode(candidate?.botResumeMode)) return { block: true, reason: 'capture_mode_without_consent' };
   if (isProtectedAttachment(message)) return { block: true, reason: 'attachment_before_consent' };
-  if (PROTECTED_STEPS.has(candidate?.currentStep)) return { block: true, reason: 'protected_step_without_consent' };
+  if (PROTECTED_STEPS.has(candidate?.currentStep)) {
+    if (shouldRequestConsentForTurn(candidate, body).allowed) {
+      return { block: true, reason: 'candidate_wants_to_continue' };
+    }
+    return { block: true, reason: 'protected_step_without_consent' };
+  }
   const profileDataDecision = options.profileDataDecision || evaluateProfileDataEvidence(body, { candidate });
   if (profileDataDecision.containsProfileData) return { block: true, reason: 'profile_data_before_consent' };
   if (shouldRequestConsentForTurn(candidate, body).allowed) {
     return { block: true, reason: 'candidate_wants_to_continue' };
+  }
+  if (
+    String(candidate?.botResumeMode || '') === APPLICATION_INTEREST_PENDING_MODE
+    && !isQuestionLike(body)
+  ) {
+    return { block: true, reason: 'application_interest_pending' };
   }
   return { block: false, reason: 'consent_not_required_for_this_turn' };
 }
@@ -675,7 +700,6 @@ function inboundMessageType(message = {}) {
   return MessageType.UNKNOWN;
 }
 
-const PRE_CONSENT_DATA_EVIDENCE_BODY = 'Mensaje con datos personales enviado antes de autorizar; el contenido no fue almacenado.';
 const PRE_CONSENT_ATTACHMENT_EVIDENCE_BODY = 'Archivo enviado antes de autorizar; el archivo no fue almacenado.';
 const PRE_CONSENT_PROTECTED_EVIDENCE_BODY = 'Mensaje recibido antes de completar la autorización; el contenido protegido no fue almacenado.';
 
@@ -686,22 +710,24 @@ function consentEvidenceBody(decision = '', body = '', message = {}) {
   // verse en la conversación tal como la expresó el candidato.
   if (['ACCEPTED', 'REVOKED'].includes(decision) && literalBody) return literalBody;
 
-  // Archivos y datos personales recibidos antes del consentimiento nunca se
-  // reconstruyen ni se persisten literalmente solo para mejorar la trazabilidad.
+  // Los archivos siguen sin descargarse ni persistirse antes del consentimiento.
   if (isProtectedAttachment(message) || /ATTACHMENT/i.test(decision)) {
     return PRE_CONSENT_ATTACHMENT_EVIDENCE_BODY;
   }
-  const profileData = literalBody
-    ? evaluateProfileDataEvidence(literalBody).containsProfileData
-    : false;
-  if (/profile_data_before_consent/i.test(decision) || profileData) {
-    return PRE_CONSENT_DATA_EVIDENCE_BODY;
-  }
 
-  // Los turnos no sensibles que disparan o aclaran el consentimiento sí pueden
-  // conservar el lenguaje real del candidato en lugar de una etiqueta interna.
+  // El texto inbound se conserva literalmente como trazabilidad conversacional.
+  // Esto no lo convierte en dato de perfil ni autoriza su extracción posterior.
   if (literalBody) return literalBody;
   return PRE_CONSENT_PROTECTED_EVIDENCE_BODY;
+}
+
+function isPreConsentProtectedTextEvidence(decision = '', body = '', message = {}) {
+  if (isProtectedAttachment(message) || /ATTACHMENT/i.test(decision)) return false;
+  if (['ACCEPTED', 'REVOKED'].includes(decision)) return false;
+  const literalBody = String(body || '').trim();
+  if (!literalBody) return false;
+  return /profile_data_before_consent/i.test(decision)
+    || evaluateProfileDataEvidence(literalBody).containsProfileData;
 }
 
 function consentGateProcessingState(message = {}) {
@@ -725,7 +751,8 @@ async function saveInboundConsentEvidence(prisma, candidateId, message, body, de
       source: 'data_consent_gate',
       consentVersion: DATA_CONSENT_VERSION,
       consentDecision: decision,
-      waMessageId
+      waMessageId,
+      preConsentProtected: isPreConsentProtectedTextEvidence(decision, body, message)
     }
   });
   return result.created;
@@ -799,6 +826,7 @@ async function claimPreConsentTurn(prisma, candidateId, message, decision) {
           consentVersion: DATA_CONSENT_VERSION,
           consentDecision: decision,
           waMessageId,
+          preConsentProtected: isPreConsentProtectedTextEvidence(decision, inboundText(message), message),
           consentGateProcessing: { state: 'PENDING', decision }
         }
       });
