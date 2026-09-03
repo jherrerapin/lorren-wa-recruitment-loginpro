@@ -29,7 +29,7 @@
       .ic-save{min-height:36px;border:0;border-radius:7px;padding:7px 12px;background:#1d4f7a;color:#fff;font-weight:800;cursor:pointer}.ic-save:disabled{opacity:.6;cursor:default}.ic-save-secondary{background:#475569}
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
-      .ic-day-row td{padding:0!important;background:#f8fbff!important}.ic-day-panel{border-top:1px dashed #cbd5e1;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
+      .ic-manual-today-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
       @media(max-width:900px){.ic-row{grid-template-columns:1fr 1fr}.ic-save{width:100%}.ic-day-grid{grid-template-columns:1fr 1fr}}
       @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}}
     `;
@@ -58,13 +58,19 @@
     }).format(date);
   }
 
-  function bogotaToday() {
+  function bogotaDay(value = new Date()) {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: 'America/Bogota',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit'
-    }).format(new Date());
+    }).format(date);
+  }
+
+  function bogotaToday() {
+    return bogotaDay(new Date());
   }
 
   function selectedDashboardDate() {
@@ -149,14 +155,22 @@
     }, { PENDING: 0, CONFIRMED: 0, DECLINED: 0 });
   }
 
-  function splitCoordinationEntries(entries = []) {
-    const result = { pending: [], scheduled: [], declined: [] };
+  function isManualBooking(entry) {
+    return Boolean(entry?.booking?.scheduledAt) && entry?.booking?.slotId == null;
+  }
+
+  function splitCoordinationEntries(entries = [], includeToday = false) {
+    const result = { pending: [], today: [], scheduled: [], declined: [] };
     for (const entry of entries) {
       const status = entry?.invitation?.status || 'PENDING';
       if (status === 'DECLINED') {
         result.declined.push(entry);
       } else if (status === 'CONFIRMED' && entry?.booking?.scheduledAt) {
-        result.scheduled.push(entry);
+        const belongsToToday = includeToday
+          && isManualBooking(entry)
+          && bogotaDay(entry.booking.scheduledAt) === bogotaToday();
+        if (belongsToToday) result.today.push(entry);
+        else result.scheduled.push(entry);
       } else {
         result.pending.push(entry);
       }
@@ -277,100 +291,14 @@
     board.appendChild(group);
   }
 
-  async function renderBoard(panel) {
-    const vacancyId = String(panel.dataset.vacancyPanel || '').trim();
-    if (!vacancyId) return;
-
-    const current = panel.querySelector('[data-interview-coordination-board]');
-    try {
-      const response = await api(`/vacancies/${encodeURIComponent(vacancyId)}`);
-      const entries = response.entries || [];
-      if (!entries.length) {
-        current?.remove();
-        return;
-      }
-
-      const board = current || element('section', 'ic-board');
-      board.dataset.interviewCoordinationBoard = vacancyId;
-      board.replaceChildren();
-
-      const head = element('div', 'ic-head');
-      const titleGroup = element('div');
-      titleGroup.append(
-        element('h3', 'ic-title', 'Coordinación de entrevistas'),
-        element('p', 'ic-subtitle', 'Gestiona primero las respuestas pendientes. Al guardar una fecha y hora, la persona pasa a Entrevistas programadas, donde puedes corregir el acuerdo si hace falta.')
-      );
-
-      const counts = statusCounts(entries);
-      const chips = element('div', 'ic-counts');
-      chips.append(
-        element('span', 'ic-chip', `${counts.PENDING} pendientes`),
-        element('span', 'ic-chip', `${counts.CONFIRMED} programadas`),
-        element('span', 'ic-chip', `${counts.DECLINED} no interesados`)
-      );
-      head.append(titleGroup, chips);
-      board.appendChild(head);
-
-      const groups = splitCoordinationEntries(entries);
-      const refresh = () => renderBoard(panel);
-      appendCoordinationGroup(
-        board,
-        'Pendientes de respuesta',
-        groups.pending,
-        vacancyId,
-        refresh,
-        'No hay contactos pendientes de gestionar.'
-      );
-      appendCoordinationGroup(
-        board,
-        'Entrevistas programadas',
-        groups.scheduled,
-        vacancyId,
-        refresh,
-        'Todavía no hay entrevistas con fecha y hora asignadas.'
-      );
-      appendCoordinationGroup(
-        board,
-        'No interesados',
-        groups.declined,
-        vacancyId,
-        refresh,
-        'No hay personas marcadas como no interesadas.'
-      );
-
-      if (!current) {
-        const header = panel.querySelector('.vacancy-header');
-        if (header) header.insertAdjacentElement('afterend', board);
-        else panel.prepend(board);
-      }
-    } catch (_error) {
-      if (current) {
-        current.replaceChildren(element('div', 'ic-empty', 'No fue posible cargar la coordinación de entrevistas.'));
-      }
-    }
-  }
-
-  function candidateIdFromBookingRow(row) {
-    const link = row.querySelector('a.link-detail[href*="/admin/candidates/"]');
-    if (!link) return null;
-    const match = /\/admin\/candidates\/([^/?#]+)/.exec(link.getAttribute('href') || '');
-    return match ? decodeURIComponent(match[1]) : null;
-  }
-
   function managementField(label, control) {
     const wrapper = element('div', 'ic-field');
     wrapper.append(element('label', '', label), control);
     return wrapper;
   }
 
-  function renderTodayManagementRow(sourceRow, candidateId, response) {
-    if (sourceRow.nextElementSibling?.dataset?.interviewDayManagement === candidateId) return;
-
+  function buildDayManagementPanel(candidateId, response) {
     const management = response.management || {};
-    const extraRow = element('tr', 'ic-day-row');
-    extraRow.dataset.interviewDayManagement = candidateId;
-    const cell = document.createElement('td');
-    cell.colSpan = Math.max(sourceRow.children.length, 1);
     const panel = element('div', 'ic-day-panel');
 
     const title = element('div', 'ic-day-title');
@@ -506,28 +434,153 @@
       }
     });
 
-    cell.appendChild(panel);
-    extraRow.appendChild(cell);
-    sourceRow.insertAdjacentElement('afterend', extraRow);
+    return panel;
   }
 
-  async function enhanceTodayInterviews() {
-    if (!isTodayDashboard()) return;
-    const tables = [...document.querySelectorAll('[data-vacancy-panel] .bookings-table')];
-    for (const table of tables) {
-      const rows = [...table.querySelectorAll('tbody > tr')];
-      for (const row of rows) {
-        if (row.classList.contains('ic-day-row')) continue;
-        const candidateId = candidateIdFromBookingRow(row);
-        if (!candidateId) continue;
-        try {
-          const response = await api(`/candidates/${encodeURIComponent(candidateId)}`);
-          renderTodayManagementRow(row, candidateId, response);
-        } catch (error) {
-          if (error?.status !== 404) {
-            console.error('[INTERVIEW_DAY_MANAGEMENT_LOAD_ERROR]', { candidateId, error });
-          }
-        }
+  async function appendManualTodayGroup(board, entries, vacancyId, refresh) {
+    if (!entries.length) return;
+
+    const group = element('section', 'ic-group');
+    group.dataset.manualInterviewToday = 'true';
+    const head = element('div', 'ic-group-head');
+    head.append(
+      element('span', 'ic-group-title', 'Entrevistas manuales — Hoy'),
+      element('span', 'ic-group-count', entries.length)
+    );
+    group.appendChild(head);
+
+    const list = element('div', 'ic-list');
+    for (const entry of entries) {
+      const item = element('div', 'ic-manual-today-item');
+      item.appendChild(renderRow(entry, vacancyId, refresh));
+      try {
+        const response = await api(`/candidates/${encodeURIComponent(entry.candidateId)}`);
+        item.appendChild(buildDayManagementPanel(entry.candidateId, response));
+      } catch (error) {
+        const message = error?.status === 404
+          ? 'La gestión complementaria de esta entrevista no está disponible.'
+          : 'No fue posible cargar la gestión del día de entrevista.';
+        item.appendChild(element('div', 'ic-empty', message));
+      }
+      list.appendChild(item);
+    }
+    group.appendChild(list);
+    board.appendChild(group);
+  }
+
+  function candidateIdFromBookingRow(row) {
+    const link = row.querySelector('a.link-detail[href*="/admin/candidates/"]');
+    if (!link) return null;
+    const match = /\/admin\/candidates\/([^/?#]+)/.exec(link.getAttribute('href') || '');
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  function findAutomaticInterviewSection(panel) {
+    const titles = [...panel.querySelectorAll('.vacancy-body .section-title')];
+    const title = titles.find((node) => /Entrevistas/i.test(node.textContent || ''));
+    return title ? { title, section: title.closest('.section') } : null;
+  }
+
+  function separateAutomaticInterviews(panel, entries = []) {
+    const found = findAutomaticInterviewSection(panel);
+    if (!found?.section) return;
+
+    if (!/Entrevistas automáticas/i.test(found.title.textContent || '')) {
+      found.title.textContent = String(found.title.textContent || '').replace(/Entrevistas/i, 'Entrevistas automáticas');
+    }
+
+    const manualCandidateIds = new Set(entries
+      .filter((entry) => isManualBooking(entry))
+      .map((entry) => String(entry.candidateId || ''))
+      .filter(Boolean));
+    if (!manualCandidateIds.size) return;
+
+    const table = found.section.querySelector('.bookings-table');
+    if (!table) return;
+
+    for (const row of [...table.querySelectorAll('tbody > tr')]) {
+      const candidateId = candidateIdFromBookingRow(row);
+      if (candidateId && manualCandidateIds.has(candidateId)) row.remove();
+    }
+
+    const remainingRows = table.querySelectorAll('tbody > tr').length;
+    const count = found.section.querySelector('.section-count');
+    if (count) count.textContent = `${remainingRows} cita${remainingRows === 1 ? '' : 's'}`;
+    if (remainingRows === 0) found.section.hidden = true;
+  }
+
+  async function renderBoard(panel) {
+    const vacancyId = String(panel.dataset.vacancyPanel || '').trim();
+    if (!vacancyId) return;
+
+    const current = panel.querySelector('[data-interview-coordination-board]');
+    try {
+      const response = await api(`/vacancies/${encodeURIComponent(vacancyId)}`);
+      const entries = response.entries || [];
+      separateAutomaticInterviews(panel, entries);
+
+      if (!entries.length) {
+        current?.remove();
+        return;
+      }
+
+      const board = current || element('section', 'ic-board');
+      board.dataset.interviewCoordinationBoard = vacancyId;
+      board.replaceChildren();
+
+      const head = element('div', 'ic-head');
+      const titleGroup = element('div');
+      titleGroup.append(
+        element('h3', 'ic-title', 'Coordinación manual de entrevistas'),
+        element('p', 'ic-subtitle', 'Este flujo es independiente de la agenda automática de Lórren. Gestiona respuestas, fecha acordada y el día de entrevista sin activar “Habilitar entrevistas” en la vacante.')
+      );
+
+      const counts = statusCounts(entries);
+      const chips = element('div', 'ic-counts');
+      chips.append(
+        element('span', 'ic-chip', `${counts.PENDING} pendientes`),
+        element('span', 'ic-chip', `${counts.CONFIRMED} programadas`),
+        element('span', 'ic-chip', `${counts.DECLINED} no interesados`)
+      );
+      head.append(titleGroup, chips);
+      board.appendChild(head);
+
+      const groups = splitCoordinationEntries(entries, isTodayDashboard());
+      const refresh = () => renderBoard(panel);
+      appendCoordinationGroup(
+        board,
+        'Pendientes de respuesta',
+        groups.pending,
+        vacancyId,
+        refresh,
+        'No hay contactos pendientes de gestionar.'
+      );
+      await appendManualTodayGroup(board, groups.today, vacancyId, refresh);
+      appendCoordinationGroup(
+        board,
+        'Entrevistas programadas',
+        groups.scheduled,
+        vacancyId,
+        refresh,
+        'Todavía no hay entrevistas con fecha y hora asignadas.'
+      );
+      appendCoordinationGroup(
+        board,
+        'No interesados',
+        groups.declined,
+        vacancyId,
+        refresh,
+        'No hay personas marcadas como no interesadas.'
+      );
+
+      if (!current) {
+        const header = panel.querySelector('.vacancy-header');
+        if (header) header.insertAdjacentElement('afterend', board);
+        else panel.prepend(board);
+      }
+    } catch (_error) {
+      if (current) {
+        current.replaceChildren(element('div', 'ic-empty', 'No fue posible cargar la coordinación de entrevistas.'));
       }
     }
   }
@@ -536,7 +589,6 @@
     addStyles();
     const panels = [...document.querySelectorAll('[data-vacancy-panel]')];
     for (const panel of panels) await renderBoard(panel);
-    await enhanceTodayInterviews();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
