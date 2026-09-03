@@ -81,18 +81,21 @@ function professionalExperienceLine(vacancy = {}, requirements = '') {
 }
 
 // Fuente única para la ficha pública de vacante usada en los distintos puntos de entrada conversacionales.
-export function buildProfessionalVacancyPresentation(vacancy = {}, { includeInterestPrompt = false } = {}) {
+export function buildProfessionalVacancyPresentation(
+  vacancy = {},
+  { includeInterestPrompt = false, includeDocuments = false } = {}
+) {
   const title = publicVacancyTitle(vacancy);
   const city = publicVacancyCity(vacancy);
   const roleDescription = cleanConfiguredFragment(vacancy?.roleDescription);
   const requirements = cleanConfiguredFragment(vacancy?.requirements);
   const conditions = cleanConfiguredFragment(vacancy?.conditions);
   const address = cleanConfiguredFragment(vacancy?.operationAddress);
-  const documents = cleanConfiguredFragment(vacancy?.requiredDocuments);
+  const documents = includeDocuments ? cleanConfiguredFragment(vacancy?.requiredDocuments) : '';
 
   const sections = [`*Vacante: ${title}*`];
-  if (city) sections.push(`*Ciudad:* ${city}`);
   if (address) sections.push(`*Zona de trabajo:* ${address}`);
+  else if (city) sections.push(`*Ciudad:* ${city}`);
   if (roleDescription) sections.push(`*Funciones del cargo*\n${professionalSentence(roleDescription)}`);
 
   const requirementLines = [
