@@ -300,6 +300,35 @@ function hasGroundedExperienceSummaryContext(text = '', context = {}, turnType =
   return fieldWasPending('experienceSummary', context) && hasExperienceEvidence(text);
 }
 
+function experienceSummaryProfileEvidenceScore(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized) return 0;
+
+  let score = 0;
+  if (/\b(?:cc|cedula|cedula de ciudadania|documento|ppt)\b[^.]{0,80}\b\d{5,12}\b/.test(normalized)) score += 2;
+  if (/\bedad\s*(?:es|de)?\s*\d{1,2}\b/.test(normalized)) score += 1;
+  if (/\b(?:localidad|barrio|residencia|municipio)\b(?:\s+de)?\s+[a-z]/.test(normalized)) score += 1;
+  if (/\b(?:medio de transporte|transporte publico|me movilizo|me transporto)\b/.test(normalized)) score += 1;
+  if (/\brestricciones?\s+medicas?\b/.test(normalized)) score += 1;
+  return score;
+}
+
+function hasMeaningfulExperienceSummaryDetail(value = '') {
+  const normalized = normalizeText(value);
+  if (!normalized) return false;
+
+  const detail = normalized
+    .replace(/\b(?:si|sii|sip|claro|afirmativo)\b/g, ' ')
+    .replace(/\b(?:tengo|cuento con|poseo|acredito|he adquirido)\b/g, ' ')
+    .replace(/\bexperiencia(?: laboral)?\b/g, ' ')
+    .replace(/\b(?:mas de|aproximadamente)?\s*(?:\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:es)?|anos?|semanas?)\b/g, ' ')
+    .replace(/\b(?:en|de|del|la|el|los|las|un|una|y|o|como|laboral)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return detail.length >= 5 && /[a-z]/.test(detail);
+}
+
 function hasNameEvidenceCue(text = '') {
   const normalized = normalizeText(text);
   return /\b(mi nombre es|nombre completo|me llamo|soy)\b/.test(normalized);
@@ -478,6 +507,12 @@ function sanitizeExperienceSummary(value, evidence, text, context = {}, turnType
   if (raw.length < 12) return { ok: false, reason: 'experience_summary_too_short' };
   if (!hasGroundedExperienceSummaryContext(text, context, turnType)) {
     return { ok: false, reason: 'missing_experience_summary_context' };
+  }
+  if (!hasMeaningfulExperienceSummaryDetail(raw)) {
+    return { ok: false, reason: 'experience_summary_without_work_detail' };
+  }
+  if (experienceSummaryProfileEvidenceScore(raw) >= 2) {
+    return { ok: false, reason: 'experience_summary_contains_profile_fields' };
   }
 
   const normalizedText = normalizeText(text);

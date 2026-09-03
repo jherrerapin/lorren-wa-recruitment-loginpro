@@ -57,6 +57,25 @@ test('la autoridad semántica reconoce labores de cargue y descargue como experi
   assert.equal(result.fields.experienceSummary, 'Cargue y descargue');
 });
 
+test('el sanitizador rechaza un bloque completo de perfil propuesto como experienceSummary', () => {
+  const text = 'Persona Ejemplo cédula de ciudadanía 100000001 edad 22 localidad de Usme transporte público sí tengo experiencia laboral 6 meses en cargue y descargue';
+  const result = sanitizeCandidateFieldsForConversation({
+    fields: { experienceSummary: text },
+    evidence: {
+      experienceSummary: {
+        snippet: text,
+        confidence: 0.99,
+        source: 'ai_extraction'
+      }
+    },
+    text,
+    context: MULTIPURPOSE_CONTEXT,
+    turnType: null
+  });
+
+  assert.equal(result.fields.experienceSummary, undefined);
+});
+
 test('una respuesta multipropósito no se guarda completa como experienceSummary', async () => {
   const text = [
     'Nombre de Prueba',
@@ -77,6 +96,34 @@ test('una respuesta multipropósito no se guarda completa como experienceSummary
   assert.doesNotMatch(
     result.candidateFields.experienceSummary || '',
     /nombre de prueba|\bcc\b|100000001|a[nñ]os|suba/i
+  );
+});
+
+test('una respuesta multipropósito de una sola línea no usa afirmación y duración como resumen laboral', async () => {
+  const text = 'Persona Ejemplo cédula de ciudadanía 100000001 edad 22 localidad de Usme transporte público sí tengo experiencia laboral 6 meses';
+
+  const result = await conversationUnderstanding(text, {
+    context: MULTIPURPOSE_CONTEXT,
+    aiResult: disabledAiResult()
+  });
+
+  assert.equal(result.candidateFields.experienceInfo, 'Sí');
+  assert.equal(result.candidateFields.experienceTime, '6 meses');
+  assert.equal(result.candidateFields.experienceSummary, undefined);
+});
+
+test('una respuesta multipropósito de una sola línea conserva solo el detalle laboral real', async () => {
+  const text = 'Persona Ejemplo cédula de ciudadanía 100000001 edad 22 localidad de Usme transporte público sí tengo experiencia laboral 6 meses en cargue y descargue';
+
+  const result = await conversationUnderstanding(text, {
+    context: MULTIPURPOSE_CONTEXT,
+    aiResult: disabledAiResult()
+  });
+
+  assert.match(result.candidateFields.experienceSummary || '', /cargue y descargue/i);
+  assert.doesNotMatch(
+    result.candidateFields.experienceSummary || '',
+    /persona ejemplo|c[eé]dula|100000001|edad|usme|transporte p[uú]blico/i
   );
 });
 
