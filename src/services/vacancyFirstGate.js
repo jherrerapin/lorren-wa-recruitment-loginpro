@@ -157,6 +157,18 @@ function buildNeedRoleForCityReply(city = null, roleHint = null, inboundText = '
     .join(' ');
 }
 
+function buildNeedTargetForResidenceReply(inboundText = '') {
+  const normalized = normalizeResolverText(inboundText);
+  const asksCompany = /\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized);
+  const companyAnswer = asksCompany
+    ? 'El proceso de selección lo gestiona LoginPro Service. Para decirte la empresa u operación exacta necesito ubicar primero el proceso correcto.'
+    : '';
+  return [
+    companyAnswer,
+    'Ya tengo tu residencia y el cargo. Para ubicar el proceso correcto, ¿recuerdas la operación, la zona o el anuncio por el que nos contactaste, o en qué lugar quieres aplicar?'
+  ].filter(Boolean).join(' ');
+}
+
 function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
   if (!vacancy) return '';
   const turn = analyzeConversationTurn(inboundText);
@@ -343,8 +355,6 @@ function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMes
   const explicitProfileIntent = /\b(dejar|registr|guardar|tomar|enviar|adjuntar|mandar|compartir)\b/.test(normalized)
     && /\b(perfil|hoja de vida|hv|datos|registro|registrada|registrado)\b/.test(normalized);
 
-  // Una pregunta o una solicitud de información tiene prioridad conversacional.
-  // "Me interesa" expresa interés en la vacante, no autoriza por sí solo guardar el perfil.
   if (turn.question || turn.vacancyInformationRequest) {
     return { accepted: false, passiveAck: false, reason: 'information_request_before_future_profile_decision', lastReplyKind };
   }
@@ -873,13 +883,16 @@ export async function resolveVacancyFirstGate({
     }, { recentMessages, inboundText, city: resolution.city, currentStep });
   }
 
-  if (resolution.reason === 'missing_city_and_role' && resolution.residenceLocation) {
+  if (resolution.residenceLocation && ['missing_city_and_role', 'residence_without_compatible_vacancy'].includes(resolution.reason)) {
+    const hasRole = Boolean(String(resolution.roleHint || '').trim());
     return preventRepeatDecision({
       action: VacancyFirstGateAction.REPLY,
-      reason: 'RESIDENCE_CAPTURED_VACANCY_NEEDED',
-      replyKind: 'ASK_VACANCY_ROLE',
+      reason: hasRole ? 'RESIDENCE_AND_ROLE_CAPTURED_TARGET_NEEDED' : 'RESIDENCE_CAPTURED_VACANCY_NEEDED',
+      replyKind: hasRole ? 'ASK_VACANCY_TARGET' : 'ASK_VACANCY_ROLE',
       candidateUpdates: { currentStep: GREETING_SENT },
-      reply: buildNeedRoleForCityReply(resolution.residenceLocation, null, inboundText),
+      reply: hasRole
+        ? buildNeedTargetForResidenceReply(inboundText)
+        : buildNeedRoleForCityReply(resolution.residenceLocation, null, inboundText),
       resolution
     }, { recentMessages, inboundText, city: null, currentStep });
   }
