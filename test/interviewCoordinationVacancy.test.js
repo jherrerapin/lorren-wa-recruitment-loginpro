@@ -91,6 +91,24 @@ test('guardar una confirmación mueve visualmente la persona de pendientes a ent
   assert.match(uiSource, /await refresh\(\)/);
 });
 
+test('la coordinación usa pestañas compactas y conserva la sección activa al refrescar', () => {
+  assert.match(uiSource, /className\) node\.className = className/);
+  assert.match(uiSource, /function installTabNavigation/);
+  assert.match(uiSource, /function activateCoordinationTab/);
+  assert.match(uiSource, /role', 'tablist'/);
+  assert.match(uiSource, /role', 'tab'/);
+  assert.match(uiSource, /role', 'tabpanel'/);
+  assert.match(uiSource, /aria-selected/);
+  assert.match(uiSource, /data\.activeCoordinationTab|dataset\.activeCoordinationTab/);
+  assert.match(uiSource, /previousActiveKey = current\?\.dataset\.activeCoordinationTab \|\| 'pending'/);
+  assert.match(uiSource, /panel\.hidden = panel\.dataset\.interviewCoordinationPanel !== activeKey/);
+  assert.match(uiSource, /\['pending', 'Por gestionar'/);
+  assert.match(uiSource, /\['scheduled', 'Programadas'/);
+  assert.match(uiSource, /\['declined', 'No interesados'/);
+  assert.match(uiSource, /overflow-x:auto/);
+  assert.doesNotMatch(uiSource, /\.scrollIntoView\s*\(/);
+});
+
 test('el proceso manual tiene gestión propia del día sin depender de habilitar agenda automática', () => {
   assert.match(uiSource, /function bogotaToday/);
   assert.match(uiSource, /timeZone: 'America\/Bogota'/);
@@ -100,7 +118,7 @@ test('el proceso manual tiene gestión propia del día sin depender de habilitar
   assert.match(uiSource, /'Entrevistas manuales — Hoy'/);
   assert.match(uiSource, /appendManualTodayGroup/);
   assert.match(uiSource, /Gestión del día de entrevista/);
-  assert.match(uiSource, /sin activar “Habilitar entrevistas”/);
+  assert.match(uiSource, /no requiere activar “Habilitar entrevistas”/);
   assert.doesNotMatch(uiSource, /schedulingEnabled/);
 });
 

@@ -19,10 +19,14 @@
     style.id = 'interview-coordination-styles';
     style.textContent = `
       .ic-board{margin:0;border-bottom:1px solid var(--border-soft,#dbe5ef);background:#f8fbff;padding:14px 18px 16px}
-      .ic-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+      .ic-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
       .ic-title{margin:0;color:var(--navy,#243b53);font-size:16px}.ic-subtitle{margin:4px 0 0;color:var(--text-muted,#64748b);font-size:12px;line-height:1.45}
-      .ic-counts{display:flex;gap:6px;flex-wrap:wrap}.ic-chip{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:11px;font-weight:800;background:#e8f1fb;color:#28557a}
-      .ic-group{margin-top:12px}.ic-group:first-of-type{margin-top:0}.ic-group-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.ic-group-title{font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.045em;color:#526477}.ic-group-count{font-size:11px;font-weight:800;color:#64748b;background:#eef2f7;border-radius:999px;padding:2px 7px}
+      .ic-tabs{display:flex;gap:7px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;padding:2px 0 9px;margin-bottom:8px;border-bottom:1px solid #dbe5ef}
+      .ic-tab{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;min-height:36px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:7px 11px;color:#526477;font:inherit;font-size:12px;font-weight:850;cursor:pointer;white-space:nowrap}
+      .ic-tab:hover{border-color:#8aa7c1;background:#f2f7fc}.ic-tab[aria-selected="true"]{border-color:#1d4f7a;background:#1d4f7a;color:#fff;box-shadow:0 1px 2px rgba(15,23,42,.12)}
+      .ic-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:21px;height:21px;border-radius:999px;padding:0 6px;background:#e8f1fb;color:#28557a;font-size:10px;font-weight:900;box-sizing:border-box}
+      .ic-tab[aria-selected="true"] .ic-tab-count{background:rgba(255,255,255,.2);color:#fff}
+      .ic-tabpanel[hidden]{display:none!important}.ic-group{margin-top:0}.ic-group-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.ic-group-title{font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.045em;color:#526477}.ic-group-count{font-size:11px;font-weight:800;color:#64748b;background:#eef2f7;border-radius:999px;padding:2px 7px}
       .ic-list{display:grid;gap:8px}.ic-row{display:grid;grid-template-columns:minmax(180px,1.25fr) minmax(190px,.9fr) minmax(220px,1.05fr) auto;gap:10px;align-items:center;padding:10px 12px;background:#fff;border:1px solid #dbe5ef;border-radius:10px}
       .ic-person{min-width:0}.ic-name{display:block;color:var(--navy,#243b53);font-weight:800;text-decoration:none;overflow-wrap:anywhere}.ic-meta{margin-top:3px;color:var(--text-muted,#64748b);font-size:11px;line-height:1.35}
       .ic-field{display:flex;flex-direction:column;gap:4px}.ic-field label{font-size:11px;font-weight:800;color:#526477}.ic-control{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 8px;color:#1f2937;font:inherit;font-size:12px;box-sizing:border-box}.ic-textarea{min-height:76px;resize:vertical}
@@ -31,7 +35,7 @@
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
       .ic-manual-today-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
       @media(max-width:900px){.ic-row{grid-template-columns:1fr 1fr}.ic-save{width:100%}.ic-day-grid{grid-template-columns:1fr 1fr}}
-      @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}}
+      @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}.ic-tabs{margin-left:-2px;margin-right:-2px}.ic-tab{min-height:40px}}
     `;
     document.head.appendChild(style);
   }
@@ -147,14 +151,6 @@
     return input;
   }
 
-  function statusCounts(entries) {
-    return entries.reduce((counts, entry) => {
-      const status = entry?.invitation?.status || 'PENDING';
-      counts[status] = (counts[status] || 0) + 1;
-      return counts;
-    }, { PENDING: 0, CONFIRMED: 0, DECLINED: 0 });
-  }
-
   function isManualBooking(entry) {
     return Boolean(entry?.booking?.scheduledAt) && entry?.booking?.slotId == null;
   }
@@ -209,14 +205,12 @@
     }
 
     const managementField = element('div', 'ic-field');
-    const managementLabel = element('label', '', 'Gestión');
     const management = statusSelect(entry.invitation?.status || 'PENDING');
-    managementField.append(managementLabel, management);
+    managementField.append(element('label', '', 'Gestión'), management);
 
     const dateField = element('div', 'ic-field');
-    const dateLabel = element('label', '', 'Día y hora de entrevista');
     const dateInput = interviewDateInput(entry);
-    dateField.append(dateLabel, dateInput);
+    dateField.append(element('label', '', 'Día y hora de entrevista'), dateInput);
 
     const save = element('button', 'ic-save', 'Guardar');
     save.type = 'button';
@@ -270,8 +264,18 @@
     return row;
   }
 
-  function appendCoordinationGroup(board, title, entries, vacancyId, refresh, emptyText) {
-    const group = element('section', 'ic-group');
+  function configureTabPanel(group, vacancyId, tabKey, activeKey) {
+    group.classList.add('ic-tabpanel');
+    group.id = `ic-panel-${vacancyId}-${tabKey}`;
+    group.dataset.interviewCoordinationPanel = tabKey;
+    group.setAttribute('role', 'tabpanel');
+    group.setAttribute('aria-labelledby', `ic-tab-${vacancyId}-${tabKey}`);
+    group.hidden = tabKey !== activeKey;
+    return group;
+  }
+
+  function appendCoordinationGroup(board, title, entries, vacancyId, refresh, emptyText, tabKey, activeKey) {
+    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, tabKey, activeKey);
     const head = element('div', 'ic-group-head');
     head.append(
       element('span', 'ic-group-title', title),
@@ -309,7 +313,6 @@
     panel.appendChild(title);
 
     const grid = element('div', 'ic-day-grid');
-
     const attendance = selectFor(ATTENDANCE_OPTIONS, management.attendance?.status || 'PENDING');
     const attendanceField = managementField('Asistencia real', attendance);
     if (management.attendance?.updatedAt) {
@@ -437,10 +440,10 @@
     return panel;
   }
 
-  async function appendManualTodayGroup(board, entries, vacancyId, refresh) {
+  async function appendManualTodayGroup(board, entries, vacancyId, refresh, activeKey) {
     if (!entries.length) return;
 
-    const group = element('section', 'ic-group');
+    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, 'today', activeKey);
     group.dataset.manualInterviewToday = 'true';
     const head = element('div', 'ic-group-head');
     head.append(
@@ -466,6 +469,71 @@
     }
     group.appendChild(list);
     board.appendChild(group);
+  }
+
+  function createTabButton(vacancyId, key, label, count, activeKey) {
+    const button = element('button', 'ic-tab');
+    button.type = 'button';
+    button.id = `ic-tab-${vacancyId}-${key}`;
+    button.dataset.interviewCoordinationTab = key;
+    button.setAttribute('role', 'tab');
+    button.setAttribute('aria-controls', `ic-panel-${vacancyId}-${key}`);
+    button.setAttribute('aria-selected', key === activeKey ? 'true' : 'false');
+    button.append(element('span', '', label), element('span', 'ic-tab-count', count));
+    return button;
+  }
+
+  function activateCoordinationTab(board, key, focus = false) {
+    const tabs = [...board.querySelectorAll('[data-interview-coordination-tab]')];
+    const target = tabs.find((tab) => tab.dataset.interviewCoordinationTab === key) || tabs[0];
+    if (!target) return;
+    const activeKey = target.dataset.interviewCoordinationTab;
+    board.dataset.activeCoordinationTab = activeKey;
+
+    for (const tab of tabs) {
+      const selected = tab === target;
+      tab.setAttribute('aria-selected', selected ? 'true' : 'false');
+      tab.tabIndex = selected ? 0 : -1;
+    }
+    for (const panel of board.querySelectorAll('[data-interview-coordination-panel]')) {
+      panel.hidden = panel.dataset.interviewCoordinationPanel !== activeKey;
+    }
+    if (focus) target.focus();
+  }
+
+  function installTabNavigation(board, vacancyId, groups, activeKey) {
+    const tabs = element('div', 'ic-tabs');
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Secciones de coordinación manual');
+
+    const definitions = [
+      ['pending', 'Por gestionar', groups.pending.length],
+      ...(groups.today.length ? [['today', 'Hoy', groups.today.length]] : []),
+      ['scheduled', 'Programadas', groups.scheduled.length],
+      ['declined', 'No interesados', groups.declined.length]
+    ];
+
+    for (const [key, label, count] of definitions) {
+      const button = createTabButton(vacancyId, key, label, count, activeKey);
+      button.addEventListener('click', () => activateCoordinationTab(board, key));
+      tabs.appendChild(button);
+    }
+
+    tabs.addEventListener('keydown', (event) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      const buttons = [...tabs.querySelectorAll('[data-interview-coordination-tab]')];
+      if (!buttons.length) return;
+      const currentIndex = Math.max(0, buttons.indexOf(document.activeElement));
+      let nextIndex = currentIndex;
+      if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + buttons.length) % buttons.length;
+      if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % buttons.length;
+      if (event.key === 'Home') nextIndex = 0;
+      if (event.key === 'End') nextIndex = buttons.length - 1;
+      event.preventDefault();
+      activateCoordinationTab(board, buttons[nextIndex].dataset.interviewCoordinationTab, true);
+    });
+
+    board.appendChild(tabs);
   }
 
   function candidateIdFromBookingRow(row) {
@@ -514,6 +582,7 @@
     if (!vacancyId) return;
 
     const current = panel.querySelector('[data-interview-coordination-board]');
+    const previousActiveKey = current?.dataset.activeCoordinationTab || 'pending';
     try {
       const response = await api(`/vacancies/${encodeURIComponent(vacancyId)}`);
       const entries = response.entries || [];
@@ -528,24 +597,22 @@
       board.dataset.interviewCoordinationBoard = vacancyId;
       board.replaceChildren();
 
+      const groups = splitCoordinationEntries(entries, isTodayDashboard());
+      const availableKeys = ['pending', ...(groups.today.length ? ['today'] : []), 'scheduled', 'declined'];
+      const activeKey = availableKeys.includes(previousActiveKey) ? previousActiveKey : 'pending';
+      board.dataset.activeCoordinationTab = activeKey;
+
       const head = element('div', 'ic-head');
       const titleGroup = element('div');
       titleGroup.append(
         element('h3', 'ic-title', 'Coordinación manual de entrevistas'),
-        element('p', 'ic-subtitle', 'Este flujo es independiente de la agenda automática de Lórren. Gestiona respuestas, fecha acordada y el día de entrevista sin activar “Habilitar entrevistas” en la vacante.')
+        element('p', 'ic-subtitle', 'Navega por cada etapa sin recorrer toda la vacante. Este flujo sigue independiente de la agenda automática y no requiere activar “Habilitar entrevistas”.')
       );
-
-      const counts = statusCounts(entries);
-      const chips = element('div', 'ic-counts');
-      chips.append(
-        element('span', 'ic-chip', `${counts.PENDING} pendientes`),
-        element('span', 'ic-chip', `${counts.CONFIRMED} programadas`),
-        element('span', 'ic-chip', `${counts.DECLINED} no interesados`)
-      );
-      head.append(titleGroup, chips);
+      head.appendChild(titleGroup);
       board.appendChild(head);
 
-      const groups = splitCoordinationEntries(entries, isTodayDashboard());
+      installTabNavigation(board, vacancyId, groups, activeKey);
+
       const refresh = () => renderBoard(panel);
       appendCoordinationGroup(
         board,
@@ -553,16 +620,20 @@
         groups.pending,
         vacancyId,
         refresh,
-        'No hay contactos pendientes de gestionar.'
+        'No hay contactos pendientes de gestionar.',
+        'pending',
+        activeKey
       );
-      await appendManualTodayGroup(board, groups.today, vacancyId, refresh);
+      await appendManualTodayGroup(board, groups.today, vacancyId, refresh, activeKey);
       appendCoordinationGroup(
         board,
         'Entrevistas programadas',
         groups.scheduled,
         vacancyId,
         refresh,
-        'Todavía no hay entrevistas con fecha y hora asignadas.'
+        'Todavía no hay entrevistas con fecha y hora asignadas.',
+        'scheduled',
+        activeKey
       );
       appendCoordinationGroup(
         board,
@@ -570,8 +641,11 @@
         groups.declined,
         vacancyId,
         refresh,
-        'No hay personas marcadas como no interesadas.'
+        'No hay personas marcadas como no interesadas.',
+        'declined',
+        activeKey
       );
+      activateCoordinationTab(board, activeKey);
 
       if (!current) {
         const header = panel.querySelector('.vacancy-header');
