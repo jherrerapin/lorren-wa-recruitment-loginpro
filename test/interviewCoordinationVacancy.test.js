@@ -44,6 +44,8 @@ test('la gestión reutiliza Review y Booking, sin derivar respuestas WhatsApp ni
   assert.match(routeSource, /createBooking/);
   assert.match(routeSource, /cancelCandidateBookings/);
   assert.match(routeSource, /interviewBookings/);
+  assert.match(routeSource, /buildVacancyAccessWhere/);
+  assert.match(routeSource, /interview_management_vacancy_not_found/);
   assert.match(routeSource, /router\.post\('\/interview-management\/candidates\/:candidateId\/coordination'/);
   assert.doesNotMatch(routeSource, /deriveInterviewOutreachAttendance/);
   assert.doesNotMatch(routeSource, /direction:\s*'INBOUND'/);
