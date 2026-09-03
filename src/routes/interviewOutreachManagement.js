@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   buildCandidateAccessWhere,
+  buildVacancyAccessWhere,
   getAccessContext
 } from '../services/appUsers.js';
 import { INTERVIEW_COORDINATION_HANDOFF_MODE } from './admin.js';
@@ -70,6 +71,18 @@ function getRequestAccessContext(req = {}) {
     userAccessScope: req.userAccessScope || req.session?.userAccessScope,
     userAccessCity: req.userAccessCity || req.session?.userAccessCity,
     userAccessVacancyId: req.userAccessVacancyId || req.session?.userAccessVacancyId
+  });
+}
+
+async function loadAuthorizedVacancy(prisma, req, vacancyId) {
+  return prisma.vacancy.findFirst({
+    where: {
+      AND: [
+        buildVacancyAccessWhere(getRequestAccessContext(req)),
+        { id: vacancyId }
+      ]
+    },
+    select: { id: true }
   });
 }
 
@@ -348,8 +361,15 @@ export function interviewOutreachManagementRouter(prisma) {
     const vacancyId = normalizeString(req.params.vacancyId);
     if (!vacancyId) return res.status(400).json({ ok: false, error: 'vacancy_id_required' });
 
+    const allowedVacancy = await loadAuthorizedVacancy(prisma, req, vacancyId);
+    if (!allowedVacancy) {
+      return res.status(404).json({ ok: false, error: 'interview_management_vacancy_not_found' });
+    }
+
     const entries = await loadVacancyCoordinationEntries(prisma, req, vacancyId);
-    const offers = await listOfferableSlots(prisma, vacancyId, null, new Date(), 0);
+    const offers = entries.length
+      ? await listOfferableSlots(prisma, vacancyId, null, new Date(), 0)
+      : [];
 
     return res.json({
       ok: true,
