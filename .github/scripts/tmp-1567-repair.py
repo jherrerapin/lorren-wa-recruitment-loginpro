@@ -115,6 +115,12 @@ replace_once(gate, """  if (parseConsentPendingMode(candidate?.botResumeMode).pe
   if (shouldRequestConsentForTurn(candidate, body).allowed) {
     return { block: true, reason: 'candidate_wants_to_continue' };
   }
+  if (
+    String(candidate?.botResumeMode || '') === APPLICATION_INTEREST_PENDING_MODE
+    && !isQuestionLike(body)
+  ) {
+    return { block: true, reason: 'application_interest_pending' };
+  }
   return { block: false, reason: 'consent_not_required_for_this_turn' };
 """)
 
@@ -208,4 +214,66 @@ Si llega un archivo antes del consentimiento, el sistema debe informar brevement
 Para trazabilidad operativa, el texto inbound recibido antes del consentimiento puede conservarse literalmente en el historial conversacional accesible al personal autorizado. Esa evidencia debe quedar marcada como preconsentimiento protegido y no puede alimentar la interpretación automática posterior, prellenar el perfil ni convertirse en una entidad persistida del candidato sin autorización válida. El texto no debe duplicarse innecesariamente en logs o metadata técnica.
 
 Si llega un archivo antes del consentimiento, el sistema debe informar brevemente que no fue guardado y solicitar una sola autorización. Tras aceptar, debe pedir reenviar el archivo únicamente si efectivamente no fue persistido. Esta excepción de trazabilidad aplica al texto; no autoriza descargar o conservar archivos preconsentimiento.
+""")
+
+order = 'test/dataConsentOrderRecovery.test.js'
+replace_once(order, """  assert.deepEqual(evaluateConsentBoundary(candidate, message), {
+    block: true,
+    reason: 'protected_step_without_consent'
+  });
+""", """  assert.deepEqual(evaluateConsentBoundary(candidate, message), {
+    block: true,
+    reason: 'candidate_wants_to_continue'
+  });
+""")
+
+rc = 'test/conversationalReleaseCandidatePreConsent.test.js'
+replace_once(rc, """  assert.equal(harness.inboundRows.length, 1);
+  assert.match(harness.inboundRows[0].body || '', /no fue almacenado|no se almacenó/i);
+  assert.doesNotMatch(harness.inboundRows[0].body || '', /TEST-100000001/);
+  assert.doesNotMatch(harness.inboundRows[0].body || '', /^\\[.*\\]$/);
+  assert.doesNotMatch(JSON.stringify(harness.inboundRows[0].rawPayload || {}), /TEST-100000001/);
+  assert.equal(harness.providerOutbound.length, 0);
+  assert.equal(harness.outboundRows.length, 0);
+  assert.equal(harness.getCandidate().botPaused, true);
+  assert.equal(harness.candidateUpdates.length, 0);
+""", """  assert.equal(harness.inboundRows.length, 1);
+  assert.equal(harness.inboundRows[0].body, 'Mi cédula es TEST-100000001');
+  assert.equal(harness.inboundRows[0].rawPayload?.preConsentProtected, true);
+  assert.doesNotMatch(JSON.stringify(harness.inboundRows[0].rawPayload || {}), /TEST-100000001/);
+  assert.equal(harness.providerOutbound.length, 0);
+  assert.equal(harness.outboundRows.length, 0);
+  assert.equal(harness.getCandidate().botPaused, true);
+  assert.equal(harness.candidateUpdates.length, 0);
+""")
+replace_once(rc, """test('TEST-RC-PRECONSENT-RAW: deduplicar no persiste texto personal crudo', async () => {
+  const harness = buildHarness();
+  const observed = await runMiddleware(harness, 'Mi cédula es TEST-100000001', 'TEST-RC-RAW-BODY');
+
+  assert.equal(observed.nextCalls, 0);
+  assert.deepEqual(observed.statuses, [200]);
+  assert.equal(harness.inboundRows.length, 1);
+  assert.equal(harness.inboundRows[0].waMessageId, 'TEST-RC-RAW-BODY');
+  assert.match(harness.inboundRows[0].body || '', /no fue almacenado|no se almacenó/i);
+  assert.doesNotMatch(harness.inboundRows[0].body || '', /TEST-100000001/);
+  assert.doesNotMatch(harness.inboundRows[0].body || '', /^\\[.*\\]$/);
+  assert.doesNotMatch(JSON.stringify(harness.inboundRows[0].rawPayload || {}), /TEST-100000001/);
+  assert.equal(harness.inboundRows[0].rawPayload?.consentGateProcessing?.state, 'COMPLETED');
+  assert.equal(harness.providerOutbound.length, 1);
+});
+""", """test('TEST-RC-PRECONSENT-RAW: conserva texto solo como auditoría protegida', async () => {
+  const harness = buildHarness();
+  const observed = await runMiddleware(harness, 'Mi cédula es TEST-100000001', 'TEST-RC-RAW-BODY');
+
+  assert.equal(observed.nextCalls, 0);
+  assert.deepEqual(observed.statuses, [200]);
+  assert.equal(harness.inboundRows.length, 1);
+  assert.equal(harness.inboundRows[0].waMessageId, 'TEST-RC-RAW-BODY');
+  assert.equal(harness.inboundRows[0].body, 'Mi cédula es TEST-100000001');
+  assert.equal(harness.inboundRows[0].rawPayload?.preConsentProtected, true);
+  assert.doesNotMatch(JSON.stringify(harness.inboundRows[0].rawPayload || {}), /TEST-100000001/);
+  assert.equal(harness.inboundRows[0].rawPayload?.consentGateProcessing?.state, 'COMPLETED');
+  assert.equal(harness.candidateUpdates.some((update) => Object.hasOwn(update, 'documentNumber')), false);
+  assert.equal(harness.providerOutbound.length, 1);
+});
 """)
