@@ -1,0 +1,45 @@
+name: Apply 1567 consent audit fix
+
+on:
+  push:
+    branches:
+      - fix/1567-consentimiento-auditoria-preconsent
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Restore redundant red-first test and apply scoped patch
+        run: |
+          git fetch origin main --depth=1
+          git checkout origin/main -- test/preConsentDataEvidence.test.js
+          python .github/scripts/apply-1567-consent-audit.py
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Validate focal consent and audit regressions
+        run: node --test test/dataConsentOrderRecovery.test.js test/conversationalReleaseCandidatePreConsent.test.js test/consentBoundaryHardening.test.js test/dataConsentPromptIdempotencyReplay.test.js test/preConsentCodexReviewRegressions.test.js test/conversationReplayConsentAttachmentEdges.test.js
+      - name: Validate conversation context repository
+        run: node --test test/conversationMessageRepository.test.js
+      - name: Validate syntax and Prisma
+        run: |
+          node --check src/services/dataConsentGate.js
+          node --check src/services/conversationMessageRepository.js
+          npx prisma validate
+      - name: Commit validated fix and remove temporary tooling
+        run: |
+          git config user.name "jherrerapin"
+          git config user.email "37624185+jherrerapin@users.noreply.github.com"
+          git rm .github/workflows/apply-1567-consent-audit.yml .github/scripts/apply-1567-consent-audit.py
+          git add src/services/dataConsentGate.js src/services/conversationMessageRepository.js test/dataConsentOrderRecovery.test.js test/conversationalReleaseCandidatePreConsent.test.js test/preConsentDataEvidence.test.js lorren_comportamiento_completo.md
+          git commit -m "fix(bot): preservar consentimiento y auditoría preconsentimiento #1567"
+          git push origin HEAD:fix/1567-consentimiento-auditoria-preconsent

@@ -7,6 +7,7 @@ import {
   evaluateConsentBoundary,
   evaluateProfileDataEvidence
 } from '../src/services/dataConsentGate.js';
+import { loadConversationInterpretationContext } from '../src/services/conversationMessageRepository.js';
 import {
   PRE_CONSENT_DATA_EVIDENCE_INCOMPLETE,
   PRE_CONSENT_DATA_EVIDENCE_REPLAYS
@@ -177,4 +178,92 @@ test('interés explícito solicita consentimiento una sola vez sin afirmar datos
     || Object.hasOwn(update, 'age')
     || Object.hasOwn(update, 'documentNumber')
   )), false);
+});
+
+test('el texto preconsentimiento queda visible en auditoría pero fuera del perfil y del contexto IA', async () => {
+  let candidate = {
+    id: 'TEST-CANDIDATE-AUDIT-PRECONSENT',
+    phone: 'TEST-PHONE-AUDIT-PRECONSENT',
+    status: 'NUEVO',
+    dataConsentStatus: 'PENDING',
+    currentStep: 'GREETING_SENT',
+    vacancyId: 'TEST-VACANCY-DATA-EVIDENCE',
+    botResumeMode: 'awaiting_data_consent',
+    botPaused: false,
+    fullName: null,
+    locality: null,
+    neighborhood: null
+  };
+  const inboundRows = [];
+  const candidateUpdates = [];
+  const body = 'Mi nombre es Persona de Prueba y vivo en Usme';
+  const prisma = {
+    candidate: {
+      upsert: async () => structuredClone(candidate),
+      findUnique: async () => structuredClone(candidate),
+      update: async ({ data }) => {
+        candidateUpdates.push(structuredClone(data));
+        candidate = { ...candidate, ...structuredClone(data) };
+        return structuredClone(candidate);
+      },
+      updateMany: async () => ({ count: 1 })
+    },
+    message: {
+      findFirst: async ({ where }) => inboundRows.find((row) => row.waMessageId === where.waMessageId) || null,
+      createMany: async ({ data }) => {
+        const row = {
+          id: `TEST-INBOUND-AUDIT-${inboundRows.length + 1}`,
+          createdAt: new Date(),
+          ...structuredClone(data[0])
+        };
+        inboundRows.push(row);
+        return { count: 1 };
+      },
+      create: async ({ data }) => ({ id: 'TEST-OUTBOUND-AUDIT', createdAt: new Date(), ...structuredClone(data) }),
+      findMany: async () => inboundRows.map((row) => structuredClone(row))
+    },
+    vacancy: {
+      findUnique: async () => ({
+        id: 'TEST-VACANCY-DATA-EVIDENCE',
+        title: 'Cargo de Prueba',
+        city: 'Neiva',
+        isActive: true,
+        acceptingApplications: true,
+        operation: { city: { name: 'Neiva' } }
+      })
+    },
+    candidateDataConsentEvent: { create: async () => ({ id: 'TEST-CONSENT-EVENT-AUDIT' }) },
+    interviewBooking: { updateMany: async () => ({ count: 0 }) }
+  };
+  axios.post = async () => ({ data: { messages: [{ id: 'TEST-OUTBOUND-AUDIT-PROVIDER' }] } });
+
+  const req = {
+    body: { entry: [{ changes: [{ value: { messages: [textMessage(body, 'TEST-WAMID-AUDIT-PRECONSENT')] } }] }] },
+    headers: {},
+    ip: '127.0.0.1'
+  };
+  const observed = { nextCalls: 0, statuses: [] };
+  const res = { sendStatus: (status) => observed.statuses.push(status) };
+  await dataConsentGateMiddleware(prisma)(req, res, () => { observed.nextCalls += 1; });
+
+  assert.equal(observed.nextCalls, 0);
+  assert.deepEqual(observed.statuses, [200]);
+  assert.equal(inboundRows.length, 1);
+  assert.equal(inboundRows[0].body, body);
+  assert.equal(inboundRows[0].rawPayload?.preConsentProtected, true);
+  assert.equal(candidate.fullName, null);
+  assert.equal(candidate.locality, null);
+  assert.equal(candidate.neighborhood, null);
+  assert.equal(candidateUpdates.some((update) => (
+    Object.hasOwn(update, 'fullName')
+    || Object.hasOwn(update, 'locality')
+    || Object.hasOwn(update, 'neighborhood')
+  )), false);
+
+  const interpretationContext = await loadConversationInterpretationContext(prisma, {
+    candidateId: candidate.id,
+    limit: 12
+  });
+  assert.equal(interpretationContext.recentConversation.some((row) => row.body.includes('Persona de Prueba')), false);
+  assert.equal(interpretationContext.recentConversation.some((row) => row.body.includes('Usme')), false);
 });
