@@ -67,7 +67,7 @@ jobs:
             candidate = candidate.replace(helper_anchor, helpers + helper_anchor, 1)
 
           old_line = '    if (isSafeExperienceStatement(statement)) summaries.push(statement);'
-          new_lines = '''    const focusedStatement = focusExperienceSummaryStatement(statement);\n    if (focusedStatement && isSafeExperienceStatement(focusedStatement)) summaries.push(focusedStatement);'''
+          new_lines = '''    const focusedStatement = focusExperienceSummaryStatement(statement);\n    const focusedWasIsolated = Boolean(focusedStatement && focusedStatement !== cleanExperienceStatement(statement));\n    if (focusedStatement && isSafeExperienceStatement(focusedStatement, { requireSummaryCue: !focusedWasIsolated })) {\n      summaries.push(focusedStatement);\n    }'''
           if old_line in candidate:
             candidate = candidate.replace(old_line, new_lines, 1)
           elif new_lines not in candidate:
