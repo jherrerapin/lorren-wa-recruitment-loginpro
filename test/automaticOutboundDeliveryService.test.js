@@ -52,10 +52,20 @@ function createHarness({ failFirstSerializable = false } = {}) {
       }
     },
     candidate: {
-      async update({ where, data }) {
-        assert.equal(where.id, candidate.id);
+      async updateMany({ where, data }) {
+        if (where.id !== candidate.id) return { count: 0 };
+        const nextAt = data.lastOutboundAt instanceof Date ? data.lastOutboundAt : null;
+        const currentAt = candidate.lastOutboundAt instanceof Date ? candidate.lastOutboundAt : null;
+        const allowsNull = Array.isArray(where.OR) && where.OR.some((item) => item.lastOutboundAt === null);
+        const allowsOlder = Array.isArray(where.OR) && where.OR.some((item) => item.lastOutboundAt?.lt instanceof Date);
+        const eligible = (!currentAt && allowsNull)
+          || (currentAt && allowsOlder && nextAt && currentAt.getTime() < nextAt.getTime());
+        if (!eligible) return { count: 0 };
         Object.assign(candidate, data);
-        return { ...candidate };
+        return { count: 1 };
+      },
+      async findUnique({ where }) {
+        return where.id === candidate.id ? { ...candidate } : null;
       }
     }
   };
@@ -129,6 +139,8 @@ test('dos entregas concurrentes del mismo propósito reclaman una sola salida pe
   assert.equal(harness.sends.length, 1);
   assert.equal(harness.messages.length, 1);
   assert.equal(harness.messages[0].rawPayload.delivery.state, 'SENT');
+  assert.equal(harness.messages[0].rawPayload.delivery.candidateStateCount, 1);
+  assert.ok(harness.candidate.lastOutboundAt instanceof Date);
   assert.ok(harness.transactionOptions.some((options) => options?.isolationLevel === 'Serializable'));
 });
 
@@ -228,6 +240,12 @@ test('webhook delega el transporte automático a la autoridad de delivery', () =
   const source = fs.readFileSync(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
   assert.match(source, /deliverAutomaticOutboundText/);
   assert.match(source, /await\s+deliverAutomaticOutboundText\(prisma/);
+});
+
+test('delivery automático delega lastOutboundAt y no escribe Candidate directamente', () => {
+  const source = fs.readFileSync(new URL('../src/services/automaticOutboundDeliveryService.js', import.meta.url), 'utf8');
+  assert.match(source, /recordCandidateAutomaticOutboundSent/);
+  assert.doesNotMatch(source, /\.candidate\s*\.\s*(?:update|updateMany)\s*\(/);
 });
 
 test('contrato del harness usa mensajes OUTBOUND TEXT persistidos', () => {
