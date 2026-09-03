@@ -20,7 +20,6 @@ export function summarizeConsolidatedInput(text = '') {
   const collapsed = normalizeText(String(text || '').replace(/\s+/g, ' '));
   if (!collapsed) return null;
   const sanitized = collapsed
-    .replace(/Pista interna de origen Meta Ads[^\n]+/gi, '[contexto_meta_ads]')
     .replace(/\b\d{5,}\b/g, '[doc]')
     .replace(/\b\d{1,2}\s*(a[ñn]os?)\b/gi, '[edad]')
     .replace(/\bedad\s*[:\-]?\s*\d{1,2}\b/gi, '[edad]')
