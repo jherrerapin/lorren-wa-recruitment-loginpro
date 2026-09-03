@@ -2,6 +2,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
 import {
+  APPLICATION_INTEREST_PENDING_MODE,
   dataConsentGateMiddleware,
   evaluateConsentBoundary,
   shouldRequestConsentForTurn
@@ -161,5 +162,130 @@ test('una etapa protegida sin vacante se recupera y conserva el mismo mensaje pa
   }), {
     block: false,
     reason: 'consent_not_required_for_this_turn'
+  });
+});
+
+test('un sí corto en una etapa adelantada abre consentimiento y nunca vuelve a pedir interés', async () => {
+  const candidate = {
+    id: 'TEST-CANDIDATE-RECOVERY-SHORT-YES',
+    phone: 'TEST-PHONE-RECOVERY-SHORT-YES',
+    vacancyId: 'TEST-VACANCY-RECOVERY',
+    dataConsentStatus: 'PENDING',
+    currentStep: 'COLLECTING_DATA',
+    botResumeMode: null,
+    botPaused: false
+  };
+  const vacancy = {
+    id: 'TEST-VACANCY-RECOVERY',
+    title: 'Auxiliar de Operación',
+    city: 'Neiva',
+    isActive: true,
+    acceptingApplications: true,
+    operation: { city: { name: 'Neiva' } }
+  };
+  const message = {
+    id: 'TEST-WAMID-RECOVERY-SHORT-YES',
+    from: candidate.phone,
+    type: 'text',
+    text: { body: 'Siii' }
+  };
+
+  assert.equal(shouldRequestConsentForTurn(candidate, message.text.body).allowed, true);
+  assert.deepEqual(evaluateConsentBoundary(candidate, message), {
+    block: true,
+    reason: 'candidate_wants_to_continue'
+  });
+
+  const harness = createHarness(candidate, vacancy);
+  const observed = await runMiddleware(harness, message);
+
+  assert.equal(observed.nextCalls, 0);
+  assert.equal(observed.remainingMessages, 0);
+  assert.equal(harness.sentBodies.length, 1);
+  assert.match(harness.sentBodies[0], /Autorizo a LoginPro/i);
+  assert.doesNotMatch(harness.sentBodies[0], /confírmame si deseas postularte/i);
+  assert.equal(harness.getCandidate().botResumeMode, 'awaiting_data_consent');
+});
+
+test('un lote con interés y texto consecutivo queda íntegramente dentro del gate de consentimiento', async () => {
+  const candidate = {
+    id: 'TEST-CANDIDATE-RECOVERY-BATCH',
+    phone: 'TEST-PHONE-RECOVERY-BATCH',
+    vacancyId: 'TEST-VACANCY-RECOVERY',
+    dataConsentStatus: 'PENDING',
+    currentStep: 'COLLECTING_DATA',
+    botResumeMode: null,
+    botPaused: false
+  };
+  const vacancy = {
+    id: 'TEST-VACANCY-RECOVERY',
+    title: 'Auxiliar de Operación',
+    city: 'Neiva',
+    isActive: true,
+    acceptingApplications: true,
+    operation: { city: { name: 'Neiva' } }
+  };
+  const messages = [
+    {
+      id: 'TEST-WAMID-RECOVERY-BATCH-1',
+      from: candidate.phone,
+      type: 'text',
+      text: { body: 'Siii' }
+    },
+    {
+      id: 'TEST-WAMID-RECOVERY-BATCH-2',
+      from: candidate.phone,
+      type: 'text',
+      text: { body: 'Zona de operación de prueba' }
+    }
+  ];
+  const harness = createHarness(candidate, vacancy);
+  const req = {
+    body: {
+      entry: [{ changes: [{ value: { messages: structuredClone(messages) } }] }]
+    },
+    headers: {},
+    ip: '127.0.0.1'
+  };
+  const observed = { nextCalls: 0, statuses: [] };
+  const res = {
+    sendStatus(status) {
+      observed.statuses.push(status);
+      return status;
+    }
+  };
+
+  await dataConsentGateMiddleware(harness.prisma)(req, res, () => {
+    observed.nextCalls += 1;
+  });
+
+  assert.equal(observed.nextCalls, 0);
+  assert.deepEqual(observed.statuses, [200]);
+  assert.equal(req.body.entry[0].changes[0].value.messages.length, 0);
+  assert.equal(harness.sentBodies.length, 1);
+  assert.match(harness.sentBodies[0], /Autorizo a LoginPro/i);
+  assert.equal(harness.getCandidate().botResumeMode, 'awaiting_data_consent');
+});
+
+test('mientras espera interés una respuesta no interrogativa no puede escapar al recolector', () => {
+  const candidate = {
+    id: 'TEST-CANDIDATE-RECOVERY-INTEREST-PENDING',
+    phone: 'TEST-PHONE-RECOVERY-INTEREST-PENDING',
+    vacancyId: 'TEST-VACANCY-RECOVERY',
+    dataConsentStatus: 'PENDING',
+    currentStep: 'GREETING_SENT',
+    botResumeMode: APPLICATION_INTEREST_PENDING_MODE,
+    botPaused: false
+  };
+  const message = {
+    id: 'TEST-WAMID-RECOVERY-DOC-TYPE',
+    from: candidate.phone,
+    type: 'text',
+    text: { body: 'Cédula de ciudadanía' }
+  };
+
+  assert.deepEqual(evaluateConsentBoundary(candidate, message), {
+    block: true,
+    reason: 'application_interest_pending'
   });
 });
