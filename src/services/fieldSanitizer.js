@@ -282,7 +282,7 @@ function hasAgeEvidence(text = '') {
 
 function hasExperienceEvidence(text = '') {
   const normalized = normalizeText(text);
-  return /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu|supervis|lider)\w*\b/.test(normalized)
+  return /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu|supervis|lider|carg|descarg)\w*\b/.test(normalized)
     || /\b(?:cargo|oficio|turnos?|personal|bodega)\b/.test(normalized);
 }
 
