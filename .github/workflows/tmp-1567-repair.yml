@@ -38,12 +38,12 @@ jobs:
         run: |
           node --check src/services/dataConsentGate.js
           node --check src/services/conversationMessageRepository.js
-          npx prisma validate
+          DATABASE_URL=postgresql://validation:validation@localhost:5432/validation npx prisma validate
       - name: Commit only validated product changes
         run: |
           rm .github/scripts/tmp-1567-repair.py .github/workflows/tmp-1567-repair.yml
           git config user.name "jherrerapin"
           git config user.email "37624185+jherrerapin@users.noreply.github.com"
-          git add src/services/dataConsentGate.js src/services/conversationMessageRepository.js lorren_comportamiento_completo.md .github/scripts/tmp-1567-repair.py .github/workflows/tmp-1567-repair.yml
+          git add src/services/dataConsentGate.js src/services/conversationMessageRepository.js lorren_comportamiento_completo.md test/dataConsentOrderRecovery.test.js test/conversationalReleaseCandidatePreConsent.test.js .github/scripts/tmp-1567-repair.py .github/workflows/tmp-1567-repair.yml
           git commit -m "fix(bot): restaurar orden de consentimiento y auditoría #1567"
           git push origin HEAD:fix/1567-consentimiento-auditoria-repair
