@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { conversationUnderstanding } from '../src/services/conversationUnderstanding.js';
+import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
 
 function disabledAiResult() {
   return {
@@ -36,6 +37,24 @@ const MULTIPURPOSE_CONTEXT = Object.freeze({
     'en qué labores tiene experiencia'
   ],
   lastBotQuestion: 'Compárteme nombre completo, tipo y número de documento, edad, localidad, restricciones médicas, medio de transporte y experiencia laboral: si tienes, cuánto tiempo y en qué labores.'
+});
+
+test('la autoridad semántica reconoce labores de cargue y descargue como experiencia contextual', () => {
+  const result = sanitizeCandidateFieldsForConversation({
+    fields: { experienceSummary: 'Cargue y descargue' },
+    evidence: {
+      experienceSummary: {
+        snippet: 'Cargue y descargue',
+        confidence: 0.95,
+        source: 'contextual_answer'
+      }
+    },
+    text: 'Cargue y descargue',
+    context: MULTIPURPOSE_CONTEXT,
+    turnType: null
+  });
+
+  assert.equal(result.fields.experienceSummary, 'Cargue y descargue');
 });
 
 test('una respuesta multipropósito no se guarda completa como experienceSummary', async () => {
