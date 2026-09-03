@@ -1,0 +1,232 @@
+name: Apply 1561 experience fix
+
+on:
+  push:
+    branches:
+      - fix/1561-experiencia-multiproposito-una-linea
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    if: ${{ !contains(github.event.head_commit.message, 'fix(bot): aislar experiencia multipropósito #1561') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Apply semantic fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          candidate_path = Path('src/services/candidateData.js')
+          candidate = candidate_path.read_text()
+          old_candidate = r'''function detectExperienceSummary(text = '') {
+            const statements = String(text || '')
+              .split(/(?<=[.!?])\s+|(?=¿)|[,;\n]+/)
+              .map(cleanExperienceStatement)
+              .filter(Boolean);
+            const summaries = [];
+
+            for (let index = 0; index < statements.length; index += 1) {
+              const statement = statements[index];
+              if (isExperienceAffirmationOnly(statement)) {
+                const continuation = statements[index + 1];
+                const continuationCompact = normalizeLooseText(continuation || '');
+                const hasContinuationCue = EXPERIENCE_SUMMARY_CUE.test(continuationCompact)
+                  || EXPERIENCE_DURATION_CUE.test(continuationCompact);
+                if (continuation && hasContinuationCue && isSafeExperienceStatement(continuation, { requireSummaryCue: false })) {
+                  summaries.push(continuation);
+                  index += 1;
+                }
+                continue;
+              }
+
+              if (isSafeExperienceStatement(statement)) summaries.push(statement);
+            }
+
+            if (!summaries.length) return null;
+            return summaries.join(' ').slice(0, 280);
+          }'''
+          new_candidate = r'''function hasMultipurposeProfileEvidenceBeforeExperience(value = '') {
+            const compact = normalizeLooseText(value);
+            if (!compact) return false;
+            return /\b(?:cc|cedula|documento|ppt|edad|localidad|barrio|residencia|municipio|restriccion|transporte)\b/.test(compact)
+              || /\b\d{5,12}\b/.test(compact);
+          }
+
+          function stripGenericExperienceMetadata(value = '') {
+            return cleanExperienceStatement(value)
+              .replace(/^[\s:;,.\-]+/, '')
+              .replace(/^(?:de\s+)?(?:(?:m[aá]s\s+de|aproximadamente)\s+)?(?:\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:es)?|a[nñ]os?|semanas?)\b[\s:;,.\-]*/i, '')
+              .replace(/^(?:en|como|de|sobre|realizando|haciendo)\s+/i, '')
+              .replace(/^[\s:;,.\-]+/, '')
+              .trim();
+          }
+
+          function focusExperienceSummaryStatement(statement = '') {
+            const raw = cleanExperienceStatement(statement);
+            if (!raw) return null;
+
+            const anchor = /\bexperiencia(?:\s+laboral)?\b/i.exec(raw);
+            if (!anchor) return raw;
+
+            const prefix = raw.slice(0, anchor.index);
+            const suffix = raw.slice(anchor.index + anchor[0].length);
+            const detail = stripGenericExperienceMetadata(suffix);
+
+            // "Sí tengo experiencia" y la duración responden a campos distintos;
+            // no deben inventar el resumen de en qué laboró el candidato.
+            if (!detail) return null;
+
+            // Si antes de "experiencia" ya venían datos de perfil, el mensaje es
+            // multipropósito. Solo el fragmento posterior puede competir por el
+            // resumen laboral; identidad/residencia/transporte quedan fuera.
+            if (hasMultipurposeProfileEvidenceBeforeExperience(prefix)) return detail;
+
+            return raw;
+          }
+
+          function detectExperienceSummary(text = '') {
+            const statements = String(text || '')
+              .split(/(?<=[.!?])\s+|(?=¿)|[,;\n]+/)
+              .map(cleanExperienceStatement)
+              .filter(Boolean);
+            const summaries = [];
+
+            for (let index = 0; index < statements.length; index += 1) {
+              const statement = statements[index];
+              if (isExperienceAffirmationOnly(statement)) {
+                const continuation = statements[index + 1];
+                const continuationCompact = normalizeLooseText(continuation || '');
+                const hasContinuationCue = EXPERIENCE_SUMMARY_CUE.test(continuationCompact)
+                  || EXPERIENCE_DURATION_CUE.test(continuationCompact);
+                if (continuation && hasContinuationCue && isSafeExperienceStatement(continuation, { requireSummaryCue: false })) {
+                  summaries.push(continuation);
+                  index += 1;
+                }
+                continue;
+              }
+
+              const focusedStatement = focusExperienceSummaryStatement(statement);
+              if (focusedStatement && isSafeExperienceStatement(focusedStatement)) summaries.push(focusedStatement);
+            }
+
+            if (!summaries.length) return null;
+            return summaries.join(' ').slice(0, 280);
+          }'''
+          if old_candidate not in candidate:
+            raise SystemExit('candidateData target block not found')
+          candidate_path.write_text(candidate.replace(old_candidate, new_candidate, 1))
+
+          sanitizer_path = Path('src/services/fieldSanitizer.js')
+          sanitizer = sanitizer_path.read_text()
+          context_anchor = r'''function hasGroundedExperienceSummaryContext(text = '', context = {}, turnType = null) {
+            if (hasExplicitPositiveExperienceEvidence(text)) return true;
+            if (looksLikeQuestionText(text, turnType)) return false;
+            return fieldWasPending('experienceSummary', context) && hasExperienceEvidence(text);
+          }'''
+          context_replacement = context_anchor + r'''
+
+          function experienceSummaryProfileEvidenceScore(value = '') {
+            const normalized = normalizeText(value);
+            if (!normalized) return 0;
+
+            let score = 0;
+            if (/\b(?:cc|cedula|cedula de ciudadania|documento|ppt)\b[^.]{0,80}\b\d{5,12}\b/.test(normalized)) score += 2;
+            if (/\bedad\s*(?:es|de)?\s*\d{1,2}\b/.test(normalized)) score += 1;
+            if (/\b(?:localidad|barrio|residencia|municipio)\b(?:\s+de)?\s+[a-z]/.test(normalized)) score += 1;
+            if (/\b(?:medio de transporte|transporte publico|me movilizo|me transporto)\b/.test(normalized)) score += 1;
+            if (/\brestricciones?\s+medicas?\b/.test(normalized)) score += 1;
+            return score;
+          }
+
+          function hasMeaningfulExperienceSummaryDetail(value = '') {
+            const normalized = normalizeText(value);
+            if (!normalized) return false;
+
+            const detail = normalized
+              .replace(/\b(?:si|sii|sip|claro|afirmativo)\b/g, ' ')
+              .replace(/\b(?:tengo|cuento con|poseo|acredito|he adquirido)\b/g, ' ')
+              .replace(/\bexperiencia(?: laboral)?\b/g, ' ')
+              .replace(/\b(?:mas de|aproximadamente)?\s*(?:\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:es)?|anos?|semanas?)\b/g, ' ')
+              .replace(/\b(?:en|de|del|la|el|los|las|un|una|y|o|como|laboral)\b/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            return detail.length >= 5 && /[a-z]/.test(detail);
+          }'''
+          if context_anchor not in sanitizer:
+            raise SystemExit('fieldSanitizer context anchor not found')
+          sanitizer = sanitizer.replace(context_anchor, context_replacement, 1)
+
+          old_summary = r'''function sanitizeExperienceSummary(value, evidence, text, context = {}, turnType = null) {
+            const raw = String(value || '').replace(/\s+/g, ' ').trim();
+            if (raw.length < 12) return { ok: false, reason: 'experience_summary_too_short' };
+            if (!hasGroundedExperienceSummaryContext(text, context, turnType)) {
+              return { ok: false, reason: 'missing_experience_summary_context' };
+            }
+
+            const normalizedText = normalizeText(text);
+            const normalizedValue = normalizeText(raw);
+            const valueIsGrounded = Boolean(normalizedText && normalizedValue && normalizedText.includes(normalizedValue));
+            const usableEvidence = evidenceIsUsable('experienceSummary', evidence, { allowLocalParser: true });
+            const evidenceIsGrounded = evidenceSnippetIsGrounded('experienceSummary', evidence, text);
+
+            if (!valueIsGrounded && !(usableEvidence && evidenceIsGrounded)) {
+              return { ok: false, reason: 'experience_summary_evidence_not_grounded' };
+            }
+
+            return { ok: true, value: raw.slice(0, 280) };
+          }'''
+          new_summary = r'''function sanitizeExperienceSummary(value, evidence, text, context = {}, turnType = null) {
+            const raw = String(value || '').replace(/\s+/g, ' ').trim();
+            if (raw.length < 12) return { ok: false, reason: 'experience_summary_too_short' };
+            if (!hasGroundedExperienceSummaryContext(text, context, turnType)) {
+              return { ok: false, reason: 'missing_experience_summary_context' };
+            }
+            if (!hasMeaningfulExperienceSummaryDetail(raw)) {
+              return { ok: false, reason: 'experience_summary_without_work_detail' };
+            }
+            if (experienceSummaryProfileEvidenceScore(raw) >= 2) {
+              return { ok: false, reason: 'experience_summary_contains_profile_fields' };
+            }
+
+            const normalizedText = normalizeText(text);
+            const normalizedValue = normalizeText(raw);
+            const valueIsGrounded = Boolean(normalizedText && normalizedValue && normalizedText.includes(normalizedValue));
+            const usableEvidence = evidenceIsUsable('experienceSummary', evidence, { allowLocalParser: true });
+            const evidenceIsGrounded = evidenceSnippetIsGrounded('experienceSummary', evidence, text);
+
+            if (!valueIsGrounded && !(usableEvidence && evidenceIsGrounded)) {
+              return { ok: false, reason: 'experience_summary_evidence_not_grounded' };
+            }
+
+            return { ok: true, value: raw.slice(0, 280) };
+          }'''
+          if old_summary not in sanitizer:
+            raise SystemExit('fieldSanitizer summary block not found')
+          sanitizer_path.write_text(sanitizer.replace(old_summary, new_summary, 1))
+          PY
+      - run: npm ci
+      - name: Validate focused regressions
+        run: >-
+          node --test
+          test/contextualExperienceMultipurposeRegression.test.js
+          test/experiencePersistencePipeline.test.js
+          test/conversationUnderstanding.test.js
+      - name: Validate syntax
+        run: node --check src/services/candidateData.js && node --check src/services/fieldSanitizer.js
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "jherrerapin"
+          git config user.email "37624185+jherrerapin@users.noreply.github.com"
+          git add src/services/candidateData.js src/services/fieldSanitizer.js
+          git commit -m "fix(bot): aislar experiencia multipropósito #1561"
+          git push
