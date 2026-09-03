@@ -158,8 +158,10 @@ export function getResidenceFieldConfig(vacancyOrCity = null) {
 export function getCandidateResidenceValue(candidate = {}, vacancyOrCity = null) {
   const config = getResidenceFieldConfig(vacancyOrCity || candidate?.vacancy || candidate);
   if (config.field === 'locality') {
-    return normalizeBogotaLocalidad(candidate?.locality || candidate?.neighborhood || candidate?.zone || '')
-      || normalizeMunicipalityResidence(candidate?.neighborhood || candidate?.zone || candidate?.locality || '');
+    const rawResidence = candidate?.neighborhood || candidate?.zone || candidate?.locality || '';
+    return normalizeBogotaLocalidad(candidate?.locality || rawResidence)
+      || normalizeMunicipalityResidence(rawResidence)
+      || (looksLikeLocationChunk(rawResidence) ? normalizeResidenceValue(rawResidence) : null);
   }
   return candidate?.neighborhood || candidate?.locality || candidate?.zone || null;
 }
@@ -182,6 +184,9 @@ export function alignCandidateLocationFields(fields = {}, vacancyOrCity = null, 
     } else if (municipalityResidence) {
       normalized.locality = null;
       normalized.neighborhood = municipalityResidence;
+    } else if (looksLikeLocationChunk(residenceSource)) {
+      normalized.locality = null;
+      normalized.neighborhood = normalizeResidenceValue(residenceSource);
     } else {
       normalized.locality = null;
       if (clearAlternate) normalized.neighborhood = null;
@@ -497,7 +502,6 @@ function normalizeExperienceInfo(value = '') {
 }
 
 const EXPERIENCE_WORK_CUE = /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/;
-
 function looksLikeRoleOrIntentPhrase(value = '') {
   const normalized = normalizeLooseText(value);
   if (!normalized) return false;
@@ -597,7 +601,6 @@ function detectRobustExperienceTime(text = '') {
   const hasShortAffirmativeContext = /\bsi\s+tengo\b/.test(compact) || (/\bsi\b/.test(compact) && /\bmas\s+de\b/.test(compact));
   let bestDuration = null;
   let bestScore = -1;
-
   for (const match of compact.matchAll(durationRegex)) {
     const duration = match?.[1];
     if (!duration) continue;
@@ -799,7 +802,6 @@ export function parseNaturalData(text = '') {
       remaining = remaining.replace(docNum[1], ' ');
     }
   }
-
   const detectedAge = detectContextualAge(text);
   if (detectedAge !== null) result.age = detectedAge;
   if (result.age === undefined) {
@@ -898,7 +900,6 @@ export function parseNaturalData(text = '') {
     result.experienceTime = experienceTime;
     if (!result.experienceInfo) result.experienceInfo = 'Sí';
   }
-
   const positiveExperience = /\b(tengo experiencia|cuento con experiencia|si tengo experiencia|tengo mas de|experiencia de|he trabajado|trabaje|trabajando)\b/i.test(normalizeLooseText(compact));
   if (!result.experienceInfo && positiveExperience) result.experienceInfo = 'Sí';
   if (!result.experienceSummary && (result.experienceInfo === 'Sí' || /experien|trabaj|labor|cargo|coordin|operaci/i.test(compact))) {
