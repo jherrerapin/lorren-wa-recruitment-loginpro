@@ -92,18 +92,9 @@ const DOMAIN_ROLE_TOKENS = [
 const ROLE_SIGNAL_REGEX = /\b(aux|auxiliar|cargue|carge|cargar|cargando|descargue|descarge|descargar|descargando|bodega|bidega|operari|operativo|operativa|mensajer|conductor|coordinador|coordinadora|lider|lideres|logistic|logistica|logistico|operacion|operaciones|ruta|cargo|vacante|puesto|rol|maquila|empaque|produccion|planta|picking|packing|alistamiento|servicio|servicios|general|generales|montacarg|administrativ|jefe|supervisor|optacion|optaciones)\b/i;
 const SPECIFIC_ROLE_TOKEN_REGEX = /^(aux|auxiliar|cargue|cargar|descargue|descargar|bodega|operari|operativo|operativa|operaciones|mensajer|mensajero|conductor|coordinador|coordinadora|logistic|logistica|logistico|ruta|analista|supervisor|lider|jefe|asesor|comercial|mantenimiento|produccion|servicio|servicios|montacarg|administrativ|maquila|empaque|planta|picking|packing|alistamiento|general)/i;
 const GENERIC_ROLE_HINT_TOKENS = new Set(['trabajo', 'empleo', 'vacante', 'cargo', 'informacion', 'trabajar', 'puesto', 'rol']);
-const INTERNAL_VACANCY_CONTEXT_PREFIX = /^\s*(?:Pista interna de origen Meta Ads|Contexto descriptivo recibido desde Meta Ads)\b/i;
-
-function stripInternalVacancyContext(text = '') {
-  return String(text || '')
-    .split(/\r?\n/)
-    .filter((line) => !INTERNAL_VACANCY_CONTEXT_PREFIX.test(line))
-    .join('\n')
-    .trim();
-}
 
 export function normalizeResolverText(text = '') {
-  return stripInternalVacancyContext(text)
+  return String(text || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -124,7 +115,7 @@ function editDistance(a = '', b = '') {
   if (!right) return left.length;
   const dp = Array.from({ length: left.length + 1 }, () => Array(right.length + 1).fill(0));
   for (let i = 0; i <= left.length; i += 1) dp[i][0] = i;
-  for (let j = 0; j <= right.length; j += 1) dp[0][j] = j;
+  for (let j = 1; j <= right.length; j += 1) dp[0][j] = j;
   for (let i = 1; i <= left.length; i += 1) {
     for (let j = 1; j <= right.length; j += 1) {
       const cost = left[i - 1] === right[j - 1] ? 0 : 1;
@@ -210,7 +201,7 @@ function escapeLocationPattern(value = '') {
 function locationSegments(text = '', location = '') {
   const normalizedLocation = normalizeResolverText(location);
   if (!normalizedLocation) return [];
-  return stripInternalVacancyContext(text)
+  return String(text || '')
     .split(/[\n,;.!?]+/)
     .map((segment) => normalizeResolverText(segment))
     .filter((segment) => segment && ` ${segment} `.includes(` ${normalizedLocation} `));
@@ -229,7 +220,7 @@ export function classifyLocationMention(text = '', location = '') {
     new RegExp(`\\b${vacancyTerms}\\b.{0,40}\\b(?:queda|esta|es|seria|sera)\\b.{0,20}\\b(?:en|para)?\\s*${locationPattern}\\b`)
   ];
   const residencePatterns = [
-    new RegExp(`\\b(?:vivo|resido|radico|estoy\\s+radicad[oa]|soy)\\s+(?:en|de)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
+    new RegExp(`\\b(?:vivo|resido|radico|soy|estoy\\s+radicad[oa]|estoy\\s+ubicad[oa]|me\\s+encuentro|me\\s+ubico|estoy)\\s+(?:en|de)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
     new RegExp(`\\b(?:te\\s+escribo|les\\s+escribo|escribo|te\\s+hablo|les\\s+hablo|hablo)\\s+desde\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
     new RegExp(`\\bdesde\\s+(?:el\\s+)?municipio\\s+de\\s+${locationPattern}\\b`),
     new RegExp(`\\b(?:mi\\s+)?(?:ciudad|municipio|lugar)\\s+de\\s+residencia\\s+(?:es|queda)?\\s*(?:en\\s+)?${locationPattern}\\b`),
@@ -366,7 +357,7 @@ function mergeRoleHints(...values) {
 }
 
 function splitMeaningfulSegments(text = '') {
-  return stripInternalVacancyContext(text)
+  return String(text || '')
     .split(/[\n,;]+/)
     .map((segment) => normalizeResolverText(segment))
     .filter(Boolean);
