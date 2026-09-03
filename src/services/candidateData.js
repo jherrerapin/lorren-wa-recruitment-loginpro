@@ -69,7 +69,8 @@ const MUNICIPALITY_RESIDENCE_VALUES = Object.freeze({
   soacha: 'Soacha Cundinamarca',
   funza: 'Funza Cundinamarca',
   mosquera: 'Mosquera Cundinamarca',
-  madrid: 'Madrid Cundinamarca'
+  madrid: 'Madrid Cundinamarca',
+  facatativa: 'Facatativa Cundinamarca'
 });
 const SOACHA_RESIDENCE_VALUE = MUNICIPALITY_RESIDENCE_VALUES.soacha;
 
