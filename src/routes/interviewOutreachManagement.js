@@ -7,18 +7,52 @@ import { INTERVIEW_COORDINATION_HANDOFF_MODE } from './admin.js';
 import {
   buildInterviewManagementSnapshot,
   createInterviewComplementaryField,
+  normalizeInterviewInvitationStatus,
   saveInterviewComplementaryValues,
   saveInterviewEvaluation,
   setInterviewAttendanceStatus,
   setInterviewInvitationStatus
 } from '../services/interviewOutreachManagement.js';
+import {
+  cancelCandidateBookings,
+  createBooking,
+  formatInterviewDate,
+  listOfferableSlots
+} from '../services/interviewScheduler.js';
+import { ACTIVE_INTERVIEW_BOOKING_STATUSES } from '../services/interviewBookingStateService.js';
 
 const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
+const MANAGEMENT_SCRIPT = '<script src="/public/interview-outreach-management.js" defer data-interview-outreach-management></script>';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed || null;
+}
+
+function timeValue(value) {
+  if (!value) return Number.POSITIVE_INFINITY;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? Number.POSITIVE_INFINITY : date.getTime();
+}
+
+export function sortInterviewCoordinationEntries(entries = []) {
+  const priority = { PENDING: 0, CONFIRMED: 1, DECLINED: 2 };
+  return [...entries].sort((left, right) => {
+    const leftStatus = left?.invitation?.status || 'PENDING';
+    const rightStatus = right?.invitation?.status || 'PENDING';
+    const statusDifference = (priority[leftStatus] ?? 3) - (priority[rightStatus] ?? 3);
+    if (statusDifference !== 0) return statusDifference;
+
+    if (leftStatus === 'CONFIRMED') {
+      const bookingDifference = timeValue(left?.booking?.scheduledAt) - timeValue(right?.booking?.scheduledAt);
+      if (bookingDifference !== 0) return bookingDifference;
+    }
+
+    const contactedDifference = timeValue(right?.contactedAt) - timeValue(left?.contactedAt);
+    if (Number.isFinite(contactedDifference) && contactedDifference !== 0) return contactedDifference;
+    return String(left?.candidateId || '').localeCompare(String(right?.candidateId || ''));
+  });
 }
 
 function apiSessionAuth(req, res, next) {
@@ -36,6 +70,26 @@ function getRequestAccessContext(req = {}) {
     userAccessScope: req.userAccessScope || req.session?.userAccessScope,
     userAccessCity: req.userAccessCity || req.session?.userAccessCity,
     userAccessVacancyId: req.userAccessVacancyId || req.session?.userAccessVacancyId
+  });
+}
+
+function installManagementScriptInjection(router) {
+  router.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path !== '/') return next();
+
+    const originalSend = res.send.bind(res);
+    res.send = (body) => {
+      if (
+        typeof body === 'string'
+        && body.includes('data-vacancy-panel')
+        && body.includes('</body>')
+        && !body.includes('data-interview-outreach-management')
+      ) {
+        return originalSend(body.replace('</body>', `${MANAGEMENT_SCRIPT}\n</body>`));
+      }
+      return originalSend(body);
+    };
+    return next();
   });
 }
 
@@ -61,6 +115,26 @@ async function resolveCurrentActor(prisma, req) {
   };
 }
 
+function activeBookingSelect() {
+  return {
+    id: true,
+    slotId: true,
+    scheduledAt: true,
+    status: true
+  };
+}
+
+function serializeBooking(booking = null) {
+  if (!booking) return null;
+  return {
+    id: booking.id,
+    slotId: booking.slotId,
+    scheduledAt: booking.scheduledAt,
+    status: booking.status,
+    label: booking.scheduledAt ? formatInterviewDate(new Date(booking.scheduledAt)) : null
+  };
+}
+
 async function loadAuthorizedCandidate(prisma, req, candidateId) {
   const id = normalizeString(candidateId);
   if (!id) return null;
@@ -79,7 +153,14 @@ async function loadAuthorizedCandidate(prisma, req, candidateId) {
       status: true,
       botResumeMode: true,
       botPausedAt: true,
-      vacancy: { select: { id: true, title: true, role: true, city: true } }
+      lastInboundAt: true,
+      vacancy: { select: { id: true, title: true, role: true, city: true } },
+      interviewBookings: {
+        where: { status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES } },
+        orderBy: { scheduledAt: 'asc' },
+        take: 1,
+        select: activeBookingSelect()
+      }
     }
   });
 }
@@ -131,6 +212,7 @@ async function loadCandidateManagementData(prisma, req, candidateId) {
     candidate,
     citedAt: citation?.createdAt || candidate.botPausedAt || null,
     review,
+    booking: candidate.interviewBookings?.[0] || null,
     snapshot: buildInterviewManagementSnapshot({
       review,
       fields,
@@ -169,8 +251,80 @@ async function runEvaluationTransaction(prisma, input) {
   });
 }
 
+function serializeOffer(option = {}) {
+  return {
+    slotId: option.slot?.id || null,
+    scheduledAt: option.date || null,
+    label: option.formattedDate || (option.date ? formatInterviewDate(option.date) : null)
+  };
+}
+
+async function loadVacancyCoordinationEntries(prisma, req, vacancyId) {
+  const candidates = await prisma.candidate.findMany({
+    where: {
+      AND: [
+        buildCandidateAccessWhere(getRequestAccessContext(req)),
+        { vacancyId },
+        {
+          OR: [
+            { botResumeMode: INTERVIEW_COORDINATION_HANDOFF_MODE },
+            { interviewCandidateReviews: { some: { vacancyId } } }
+          ]
+        }
+      ]
+    },
+    select: {
+      id: true,
+      fullName: true,
+      phone: true,
+      botPausedAt: true,
+      botResumeMode: true,
+      interviewCandidateReviews: {
+        where: { vacancyId },
+        take: 1
+      },
+      interviewBookings: {
+        where: {
+          vacancyId,
+          status: { in: ACTIVE_INTERVIEW_BOOKING_STATUSES }
+        },
+        orderBy: { scheduledAt: 'asc' },
+        take: 1,
+        select: activeBookingSelect()
+      }
+    }
+  });
+
+  return sortInterviewCoordinationEntries(candidates.map((candidate) => {
+    const review = candidate.interviewCandidateReviews?.[0] || null;
+    const snapshot = buildInterviewManagementSnapshot({ review });
+    return {
+      candidateId: candidate.id,
+      fullName: candidate.fullName,
+      phone: candidate.phone,
+      contactedAt: candidate.botPausedAt || null,
+      invitation: snapshot.invitation,
+      attendance: snapshot.attendance,
+      evaluation: snapshot.evaluation,
+      booking: serializeBooking(candidate.interviewBookings?.[0] || null)
+    };
+  }));
+}
+
+async function runCoordinationTransaction(prisma, callback) {
+  if (typeof prisma.$transaction !== 'function') return callback(prisma);
+  return prisma.$transaction((tx) => callback(tx));
+}
+
+function sameBooking(booking, slotId, scheduledAt) {
+  if (!booking || !slotId || !scheduledAt) return false;
+  return booking.slotId === slotId
+    && new Date(booking.scheduledAt).getTime() === new Date(scheduledAt).getTime();
+}
+
 export function interviewOutreachManagementRouter(prisma) {
   const router = express.Router();
+  installManagementScriptInjection(router);
 
   router.get('/interview-management/candidates/:candidateId', apiSessionAuth, async (req, res) => {
     const data = await requireCandidateManagementData(prisma, req, res);
@@ -185,6 +339,7 @@ export function interviewOutreachManagementRouter(prisma) {
         vacancy: data.candidate.vacancy,
         citedAt: data.citedAt
       },
+      booking: serializeBooking(data.booking),
       management: data.snapshot
     });
   });
@@ -193,42 +348,92 @@ export function interviewOutreachManagementRouter(prisma) {
     const vacancyId = normalizeString(req.params.vacancyId);
     if (!vacancyId) return res.status(400).json({ ok: false, error: 'vacancy_id_required' });
 
-    const candidates = await prisma.candidate.findMany({
-      where: {
-        AND: [
-          buildCandidateAccessWhere(getRequestAccessContext(req)),
-          { vacancyId },
-          {
-            OR: [
-              { botResumeMode: INTERVIEW_COORDINATION_HANDOFF_MODE },
-              { interviewCandidateReviews: { some: { vacancyId } } }
-            ]
-          }
-        ]
-      },
-      select: {
-        id: true,
-        botPausedAt: true,
-        botResumeMode: true,
-        interviewCandidateReviews: {
-          where: { vacancyId },
-          take: 1
+    const entries = await loadVacancyCoordinationEntries(prisma, req, vacancyId);
+    const offers = await listOfferableSlots(prisma, vacancyId, null, new Date(), 0);
+
+    return res.json({
+      ok: true,
+      vacancyId,
+      entries,
+      availableSlots: offers.map(serializeOffer)
+    });
+  });
+
+  router.post('/interview-management/candidates/:candidateId/coordination', apiSessionAuth, async (req, res) => {
+    const data = await requireCandidateManagementData(prisma, req, res);
+    if (!data) return;
+
+    try {
+      const status = normalizeInterviewInvitationStatus(req.body?.status);
+      const actor = await resolveCurrentActor(prisma, req);
+
+      if (status === 'CONFIRMED') {
+        const slotId = normalizeString(req.body?.slotId);
+        const scheduledAt = req.body?.scheduledAt ? new Date(req.body.scheduledAt) : null;
+        if (!slotId || !scheduledAt || Number.isNaN(scheduledAt.getTime())) {
+          return res.status(400).json({ ok: false, error: 'interview_management_slot_required' });
         }
+
+        const bookingAlreadyMatches = sameBooking(data.booking, slotId, scheduledAt);
+        let chosenOffer = null;
+        if (!bookingAlreadyMatches) {
+          const offers = await listOfferableSlots(
+            prisma,
+            data.candidate.vacancyId,
+            data.candidate.lastInboundAt ? new Date(data.candidate.lastInboundAt) : null,
+            new Date(),
+            0
+          );
+          chosenOffer = offers.find((option) => (
+            option.slot?.id === slotId
+            && option.date?.getTime?.() === scheduledAt.getTime()
+          )) || null;
+          if (!chosenOffer?.slot) {
+            return res.status(409).json({ ok: false, error: 'interview_management_slot_unavailable' });
+          }
+        }
+
+        await runCoordinationTransaction(prisma, async (tx) => {
+          if (!bookingAlreadyMatches) {
+            await createBooking(
+              tx,
+              data.candidate.id,
+              data.candidate.vacancyId,
+              chosenOffer.slot.id,
+              chosenOffer.date,
+              !chosenOffer.windowOk
+            );
+          }
+          await setInterviewInvitationStatus(tx, {
+            candidateId: data.candidate.id,
+            vacancyId: data.candidate.vacancyId,
+            status,
+            actor
+          });
+        });
+      } else {
+        await runCoordinationTransaction(prisma, async (tx) => {
+          if (data.booking) {
+            await cancelCandidateBookings(tx, data.candidate.id, 'CANCELLED');
+          }
+          await setInterviewInvitationStatus(tx, {
+            candidateId: data.candidate.id,
+            vacancyId: data.candidate.vacancyId,
+            status,
+            actor
+          });
+        });
       }
-    });
 
-    const entries = candidates.map((candidate) => {
-      const review = candidate.interviewCandidateReviews?.[0] || null;
-      const snapshot = buildInterviewManagementSnapshot({ review });
-      return {
-        candidateId: candidate.id,
-        invitation: snapshot.invitation,
-        attendance: snapshot.attendance,
-        evaluation: snapshot.evaluation
-      };
-    });
-
-    return res.json({ ok: true, vacancyId, entries });
+      const updated = await loadCandidateManagementData(prisma, req, data.candidate.id);
+      return res.json({
+        ok: true,
+        booking: serializeBooking(updated?.booking || null),
+        management: updated?.snapshot || null
+      });
+    } catch (error) {
+      return sendManagementError(res, error);
+    }
   });
 
   router.post('/interview-management/candidates/:candidateId/invitation', apiSessionAuth, async (req, res) => {
