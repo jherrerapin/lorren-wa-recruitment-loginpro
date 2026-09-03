@@ -178,7 +178,7 @@ test('un resultado realmente distinto permite una nueva respuesta', async () => 
   assert.equal(harness.sends.length, 2);
 });
 
-test('un rechazo confirmado del proveedor queda FAILED y no bloquea un reintento humano/posterior', async () => {
+test('un rechazo confirmado del proveedor queda FAILED y permite un reintento posterior', async () => {
   const harness = createHarness();
   const rejection = new Error('provider rejected');
   rejection.response = { status: 400 };
@@ -196,6 +196,26 @@ test('un rechazo confirmado del proveedor queda FAILED y no bloquea un reintento
   });
   assert.equal(retry.sent, true);
   assert.equal(harness.sends.length, 1);
+});
+
+test('una entrega incierta queda UNKNOWN y no se reenvía automáticamente', async () => {
+  const harness = createHarness();
+  const uncertain = new Error('network timeout after provider request');
+
+  await assert.rejects(
+    () => deliverAutomaticOutboundText(harness.prisma, deliveryInput(), {
+      sendText: async () => { throw uncertain; }
+    }),
+    /network timeout/
+  );
+  assert.equal(harness.messages[0].rawPayload.delivery.state, 'UNKNOWN');
+
+  const second = await deliverAutomaticOutboundText(harness.prisma, deliveryInput(), {
+    sendText: harness.sendText
+  });
+  assert.equal(second.suppressed, true);
+  assert.equal(harness.sends.length, 0);
+  assert.equal(harness.messages.length, 1);
 });
 
 test('el alcance fuerte se deriva del propósito persistido, no de un lock en memoria', () => {
