@@ -67,17 +67,19 @@ export function extractReferralAdIdentity(message = {}) {
   const sourceId = cleanMetaValue(referral.source_id || referral.sourceId);
   const explicitAdId = cleanMetaValue(referral.ad_id || referral.adId);
 
-  // Cloud API documenta source_id como el AD_ID cuando source_type=ad.
-  // Si source_type fue omitido por una capa intermedia conservamos compatibilidad,
-  // pero la asociación sigue exigiendo igualdad exacta contra Campaign.code.
-  if (sourceId && (!sourceType || sourceType === 'ad')) {
-    return {
-      adId: sourceId,
-      mode: sourceType === 'ad' ? 'meta_source_ad_id_exact' : 'meta_source_id_exact_legacy',
-      sourceType: sourceType || null
-    };
+  // source_id solo identifica un anuncio cuando Meta declara source_type=ad.
+  // Si el tipo falta o contradice ese origen, se conserva como trazabilidad pero
+  // no se eleva a autoridad de vacante.
+  if (sourceType && sourceType !== 'ad') {
+    return { adId: null, mode: null, sourceType };
   }
 
+  if (sourceType === 'ad' && sourceId) {
+    return { adId: sourceId, mode: 'meta_source_ad_id_exact', sourceType };
+  }
+
+  // ad_id es una identidad explícita de anuncio cuando no existe un source_type
+  // incompatible. La resolución posterior exige igualdad exacta con Campaign.code.
   if (explicitAdId) {
     return { adId: explicitAdId, mode: 'meta_ad_id_exact', sourceType: sourceType || null };
   }
@@ -152,15 +154,19 @@ function buildExactAdMatch(campaigns = [], message = {}) {
   return { identity, matches };
 }
 
-function isObjectiveAdMatchMode(mode = '') {
-  return ['meta_source_ad_id_exact', 'meta_source_id_exact_legacy', 'meta_ad_id_exact'].includes(String(mode || ''));
-}
-
 export function resolveCampaignForReferral(campaigns = [], message = {}) {
+  const referral = extractReferralFromInboundMessage(message) || {};
+  const sourceType = normalizeSourceType(referral.source_type || referral.sourceType);
   const objectiveTokens = referralObjectiveMetadataTokens(message);
   const descriptiveTokens = referralDescriptiveTokens(message);
   if (!objectiveTokens.length && !descriptiveTokens.length) {
     return { campaign: null, reason: 'no_referral_tokens', matches: [] };
+  }
+
+  // Un referral expresamente no publicitario nunca puede seleccionar una fila de
+  // Campaign aunque comparta headline, nombre u otro texto con un anuncio.
+  if (sourceType && sourceType !== 'ad') {
+    return { campaign: null, reason: 'objective_metadata_without_exact_campaign_match', matches: [] };
   }
 
   const exactAd = buildExactAdMatch(campaigns, message);
@@ -182,9 +188,6 @@ export function resolveCampaignForReferral(campaigns = [], message = {}) {
       };
     }
 
-    // Un AD_ID explícito es una señal más fuerte que nombres/headlines. Si no existe
-    // el anuncio exacto en el inventario actual, fallamos cerrado para no asociar
-    // accidentalmente otra vacante del mismo campaign/adset o con texto parecido.
     return {
       campaign: null,
       reason: 'objective_metadata_without_exact_campaign_match',
@@ -192,8 +195,8 @@ export function resolveCampaignForReferral(campaigns = [], message = {}) {
     };
   }
 
-  // campaign_id, adgroup_id y ctwa_clid son trazabilidad objetiva, pero Campaign.code
-  // representa ad.id. No son identificadores intercambiables y no deben elegir vacante.
+  // campaign_id, adgroup_id, ctwa_clid y source_id sin source_type=ad sirven para
+  // trazabilidad, pero Campaign.code representa ad.id y no son intercambiables.
   if (objectiveTokens.length) {
     return {
       campaign: null,
@@ -202,8 +205,8 @@ export function resolveCampaignForReferral(campaigns = [], message = {}) {
     };
   }
 
-  // Compatibilidad para referrals antiguos sin ID objetivo: únicamente coincidencias
-  // exactas descriptivas. Nunca se usa similitud parcial en esta capa persistente.
+  // Compatibilidad histórica para referrals sin identidad objetiva: solo acepta
+  // coincidencias descriptivas exactas y nunca similitud parcial.
   const matches = campaigns
     .map((campaign) => scoreLegacyCampaignForReferral(campaign, message))
     .filter((match) => match.score > 0)
@@ -231,7 +234,7 @@ export function resolveCampaignForReferral(campaigns = [], message = {}) {
   };
 }
 
-function buildAttributionUpdate(candidate = {}, matchedCampaign = null, campaignCodeRaw = '', metaFields = {}, options = {}) {
+function buildAttributionUpdate(candidate = {}, matchedCampaign = null, campaignCodeRaw = '', metaFields = {}) {
   const update = {
     sourceType: matchedCampaign?.sourceType || 'META_ADS',
     campaignCodeRaw: candidate.campaignCodeRaw || campaignCodeRaw,
@@ -243,11 +246,9 @@ function buildAttributionUpdate(candidate = {}, matchedCampaign = null, campaign
   update.campaignId = matchedCampaign.id;
   update.campaignCodeRaw = campaignCodeRaw;
 
-  // Un click CTWA exacto es evidencia objetiva del proceso consultado ahora.
-  // Puede reemplazar una asociación histórica, pero solo si el anuncio exacto
-  // tiene una vacante configurada. Nunca se cambia por headline o similitud.
-  const canReplaceVacancy = options.replaceExistingAttribution === true || !candidate.vacancyId;
-  if (matchedCampaign.vacancyId && canReplaceVacancy) {
+  // La vacante solo se asigna en el primer vínculo del proceso, cuando la campaña
+  // activa ya tiene vacancyId configurado. Una vacante persistida nunca se pisa aquí.
+  if (matchedCampaign.vacancyId && !candidate.vacancyId) {
     update.vacancyId = matchedCampaign.vacancyId;
     update.botResumeMode = CAMPAIGN_VACANCY_CONFIRMATION_MODE;
   }
@@ -293,6 +294,23 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
 
   const metaFields = extractMetaAttributionFields(message);
   const campaignCodeRaw = referralValues.slice(0, 8).join(' | ').slice(0, 1000);
+
+  // campaignAttribution solo crea el vínculo inicial. Un proceso ya persistido no
+  // puede cambiar por un nuevo click antes de una transición confirmada. El diseño
+  // de cambio de vacante propuesta se trabaja aparte en #1552.
+  if (candidate.campaignId || candidate.vacancyId) {
+    const metadataUpdate = onlyNewMetaFields(candidate, metaFields);
+    if (Object.keys(metadataUpdate).length) {
+      await prisma.candidate.update({ where: { id: candidateId }, data: metadataUpdate });
+    }
+    return {
+      attributed: false,
+      reason: 'candidate_already_attributed',
+      campaignId: candidate.campaignId || null,
+      vacancyId: candidate.vacancyId || null
+    };
+  }
+
   const activeCampaigns = await prisma.campaign.findMany({
     where: { isActive: true },
     select: {
@@ -307,42 +325,6 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
 
   const resolution = resolveCampaignForReferral(activeCampaigns, message);
   const matchedCampaign = resolution.campaign;
-  const objectiveAdMatch = isObjectiveAdMatchMode(resolution.matchMode);
-
-  // Una atribución anterior solo puede ser reemplazada por el ID exacto de un
-  // anuncio de Meta. Coincidencias descriptivas heredadas nunca pisan estado persistido.
-  if (candidate.campaignId && (!matchedCampaign || !objectiveAdMatch)) {
-    const metadataUpdate = onlyNewMetaFields(candidate, metaFields);
-    if (Object.keys(metadataUpdate).length) {
-      await prisma.candidate.update({ where: { id: candidateId }, data: metadataUpdate });
-    }
-    return {
-      attributed: false,
-      reason: matchedCampaign ? 'candidate_already_attributed' : 'candidate_attribution_preserved_without_exact_ad_match',
-      campaignId: candidate.campaignId,
-      vacancyId: candidate.vacancyId || null,
-      attributionResolutionReason: resolution.reason,
-      matches: resolution.matches
-    };
-  }
-
-  // Si llega un nuevo AD_ID exacto pero ese anuncio todavía no tiene vacante
-  // clasificada, se conserva la asociación anterior. Es preferible no cambiar
-  // nada a dejar Campaign y Vacancy apuntando a procesos distintos.
-  if (candidate.campaignId && objectiveAdMatch && !matchedCampaign?.vacancyId) {
-    const metadataUpdate = onlyNewMetaFields(candidate, metaFields);
-    if (Object.keys(metadataUpdate).length) {
-      await prisma.candidate.update({ where: { id: candidateId }, data: metadataUpdate });
-    }
-    return {
-      attributed: false,
-      reason: 'exact_ad_without_vacancy_existing_attribution_preserved',
-      campaignId: candidate.campaignId,
-      vacancyId: candidate.vacancyId || null,
-      matchedCampaignId: matchedCampaign?.id || null,
-      matchMode: resolution.matchMode || null
-    };
-  }
 
   if (!matchedCampaign) {
     await prisma.candidate.update({
@@ -362,33 +344,18 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
     };
   }
 
-  const previousCampaignId = candidate.campaignId || null;
-  const previousVacancyId = candidate.vacancyId || null;
-  const updateData = buildAttributionUpdate(candidate, matchedCampaign, campaignCodeRaw, metaFields, {
-    replaceExistingAttribution: objectiveAdMatch
-  });
+  const updateData = buildAttributionUpdate(candidate, matchedCampaign, campaignCodeRaw, metaFields);
   await prisma.candidate.update({
     where: { id: candidateId },
     data: updateData
   });
 
-  const reattributed = Boolean(
-    objectiveAdMatch
-    && previousCampaignId
-    && (previousCampaignId !== matchedCampaign.id || previousVacancyId !== (matchedCampaign.vacancyId || null))
-  );
-
   return {
     attributed: true,
-    reattributed,
-    reason: reattributed
-      ? 'reattributed_referral_campaign_and_vacancy'
-      : (matchedCampaign.vacancyId ? 'matched_referral_campaign_and_vacancy' : 'matched_referral_campaign_without_vacancy'),
+    reason: matchedCampaign.vacancyId ? 'matched_referral_campaign_and_vacancy' : 'matched_referral_campaign_without_vacancy',
     matchMode: resolution.matchMode || resolution.reason,
     campaignId: matchedCampaign.id,
     vacancyId: matchedCampaign.vacancyId || null,
-    previousCampaignId,
-    previousVacancyId,
     campaignCodeRaw,
     metaFields
   };
@@ -409,18 +376,15 @@ async function runCampaignAttribution(prisma, req) {
     });
 
     const result = await attributeCandidateCampaignFromMessage(prisma, candidate.id, message);
-    if (result.attributed || ['metadata_saved_without_campaign_match', 'ambiguous_referral_campaign', 'exact_ad_without_vacancy_existing_attribution_preserved'].includes(result.reason)) {
+    if (result.attributed || ['metadata_saved_without_campaign_match', 'ambiguous_referral_campaign'].includes(result.reason)) {
       console.info('[CAMPAIGN_ATTRIBUTION]', JSON.stringify({
         candidateId: candidate.id,
         attributed: result.attributed,
-        reattributed: Boolean(result.reattributed),
         reason: result.reason,
         attributionResolutionReason: result.attributionResolutionReason || null,
         matchMode: result.matchMode || null,
         campaignId: result.campaignId || null,
         vacancyId: result.vacancyId || null,
-        previousCampaignId: result.previousCampaignId || null,
-        previousVacancyId: result.previousVacancyId || null,
         metaAdId: result.metaFields?.metaAdId || null,
         metaCampaignId: result.metaFields?.metaCampaignId || null
       }));
@@ -433,8 +397,8 @@ export function campaignAttributionMiddleware(prisma) {
   return async (req, res, next) => {
     try {
       // Primero se guarda la señal objetiva de Meta Ads. Luego se aplica el gate
-      // conversacional. Así el bot confirma la vacante del anuncio exacto antes de
-      // pedir autorización o datos personales.
+      // conversacional. Así el bot confirma la vacante de campaña antes de pedir
+      // autorización o datos personales.
       await runCampaignAttribution(prisma, req);
       return consentGate(req, res, next);
     } catch (error) {
