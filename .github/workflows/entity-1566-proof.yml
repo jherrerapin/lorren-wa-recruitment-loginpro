@@ -1,0 +1,21 @@
+name: Entity 1566 regression proof
+
+on:
+  push:
+    branches:
+      - fix/1566-entidades-persistidas-contextuales
+
+permissions:
+  contents: read
+
+jobs:
+  focal-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node --test test/contextualEntityPersistenceAuthority.test.js
