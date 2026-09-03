@@ -112,6 +112,10 @@ function createHarness(initialCandidate, vacancy) {
   };
 }
 
+function pendingTextRows(harness) {
+  return harness.inboundRows.filter((row) => row.messageType === 'TEXT' && row.respondedAt == null);
+}
+
 async function runMiddleware(harness, message) {
   const middleware = dataConsentGateMiddleware(harness.prisma);
   const req = { body: webhookPayload(message), headers: {}, ip: '127.0.0.1' };
@@ -158,6 +162,33 @@ test('aceptación interactiva conserva literalmente la decisión visible en la c
   const inbound = harness.inboundRows.find((row) => row.waMessageId === 'TEST-WAMID-CONSENT-ACCEPT');
   assert.equal(inbound?.body, 'Sí, autorizo');
   assert.doesNotMatch(inbound?.body || '', /\[CONSENT_/);
+  assert.ok(inbound?.respondedAt, 'el gate debe cerrar el inbound que consumió');
+});
+
+test('aceptación por texto consumida no vuelve a quedar elegible para el batch conversacional', async () => {
+  const candidate = {
+    id: 'TEST-CANDIDATE-CONSENT-TEXT',
+    phone: 'TEST-PHONE-CONSENT-TEXT',
+    vacancyId: vacancy.id,
+    dataConsentStatus: 'PENDING',
+    currentStep: 'GREETING_SENT',
+    botResumeMode: DATA_CONSENT_PENDING_MODE,
+    botPaused: false,
+    status: 'NUEVO'
+  };
+  const harness = createHarness(candidate, vacancy);
+
+  await runMiddleware(harness, {
+    id: 'TEST-WAMID-CONSENT-TEXT',
+    from: candidate.phone,
+    type: 'text',
+    text: { body: 'Autorizo el tratamiento de mis datos' }
+  });
+
+  const inbound = harness.inboundRows.find((row) => row.waMessageId === 'TEST-WAMID-CONSENT-TEXT');
+  assert.equal(inbound?.body, 'Autorizo el tratamiento de mis datos');
+  assert.ok(inbound?.respondedAt, 'la aceptación ya manejada no puede seguir pendiente');
+  assert.equal(pendingTextRows(harness).some((row) => row.waMessageId === inbound.waMessageId), false);
 });
 
 test('rechazo por texto conserva literalmente la decisión visible en la conversación', async () => {
@@ -185,6 +216,8 @@ test('rechazo por texto conserva literalmente la decisión visible en la convers
   const inbound = harness.inboundRows.find((row) => row.waMessageId === 'TEST-WAMID-CONSENT-REJECT');
   assert.equal(inbound?.body, 'No autorizo el tratamiento de mis datos');
   assert.doesNotMatch(inbound?.body || '', /\[CONSENT_/);
+  assert.ok(inbound?.respondedAt, 'el rechazo ya manejado debe quedar cerrado');
+  assert.equal(pendingTextRows(harness).some((row) => row.waMessageId === inbound.waMessageId), false);
 });
 
 test('PII enviada antes de autorizar no se persiste literalmente y usa una explicación humana', async () => {
@@ -215,4 +248,6 @@ test('PII enviada antes de autorizar no se persiste literalmente y usa una expli
   assert.doesNotMatch(inbound.body || '', /^\[.*\]$/);
   assert.match(inbound.body || '', /no fue almacenado|no se almacenó/i);
   assert.doesNotMatch(JSON.stringify(inbound.rawPayload || {}), /99999123/);
+  assert.ok(inbound.respondedAt, 'la PII protegida ya consumida no puede reingresar al batch');
+  assert.equal(pendingTextRows(harness).some((row) => row.waMessageId === inbound.waMessageId), false);
 });
