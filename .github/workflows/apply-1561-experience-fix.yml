@@ -4,13 +4,14 @@ on:
   push:
     branches:
       - fix/1561-experiencia-multiproposito-una-linea
+    paths:
+      - .github/workflows/apply-1561-experience-fix.yml
 
 permissions:
   contents: write
 
 jobs:
   apply-fix:
-    if: ${{ !contains(github.event.head_commit.message, 'fix(bot): aislar experiencia multipropósito #1561') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,34 +27,8 @@ jobs:
 
           candidate_path = Path('src/services/candidateData.js')
           candidate = candidate_path.read_text()
-          old_candidate = r'''function detectExperienceSummary(text = '') {
-            const statements = String(text || '')
-              .split(/(?<=[.!?])\s+|(?=¿)|[,;\n]+/)
-              .map(cleanExperienceStatement)
-              .filter(Boolean);
-            const summaries = [];
-
-            for (let index = 0; index < statements.length; index += 1) {
-              const statement = statements[index];
-              if (isExperienceAffirmationOnly(statement)) {
-                const continuation = statements[index + 1];
-                const continuationCompact = normalizeLooseText(continuation || '');
-                const hasContinuationCue = EXPERIENCE_SUMMARY_CUE.test(continuationCompact)
-                  || EXPERIENCE_DURATION_CUE.test(continuationCompact);
-                if (continuation && hasContinuationCue && isSafeExperienceStatement(continuation, { requireSummaryCue: false })) {
-                  summaries.push(continuation);
-                  index += 1;
-                }
-                continue;
-              }
-
-              if (isSafeExperienceStatement(statement)) summaries.push(statement);
-            }
-
-            if (!summaries.length) return null;
-            return summaries.join(' ').slice(0, 280);
-          }'''
-          new_candidate = r'''function hasMultipurposeProfileEvidenceBeforeExperience(value = '') {
+          helper_anchor = "function detectExperienceSummary(text = '') {"
+          helpers = r'''function hasMultipurposeProfileEvidenceBeforeExperience(value = '') {
             const compact = normalizeLooseText(value);
             if (!compact) return false;
             return /\b(?:cc|cedula|documento|ppt|edad|localidad|barrio|residencia|municipio|restriccion|transporte)\b/.test(compact)
@@ -80,59 +55,29 @@ jobs:
             const suffix = raw.slice(anchor.index + anchor[0].length);
             const detail = stripGenericExperienceMetadata(suffix);
 
-            // "Sí tengo experiencia" y la duración responden a campos distintos;
-            // no deben inventar el resumen de en qué laboró el candidato.
             if (!detail) return null;
-
-            // Si antes de "experiencia" ya venían datos de perfil, el mensaje es
-            // multipropósito. Solo el fragmento posterior puede competir por el
-            // resumen laboral; identidad/residencia/transporte quedan fuera.
             if (hasMultipurposeProfileEvidenceBeforeExperience(prefix)) return detail;
-
             return raw;
           }
 
-          function detectExperienceSummary(text = '') {
-            const statements = String(text || '')
-              .split(/(?<=[.!?])\s+|(?=¿)|[,;\n]+/)
-              .map(cleanExperienceStatement)
-              .filter(Boolean);
-            const summaries = [];
+          '''
+          if 'function focusExperienceSummaryStatement' not in candidate:
+            if helper_anchor not in candidate:
+              raise SystemExit('candidate helper anchor not found')
+            candidate = candidate.replace(helper_anchor, helpers + helper_anchor, 1)
 
-            for (let index = 0; index < statements.length; index += 1) {
-              const statement = statements[index];
-              if (isExperienceAffirmationOnly(statement)) {
-                const continuation = statements[index + 1];
-                const continuationCompact = normalizeLooseText(continuation || '');
-                const hasContinuationCue = EXPERIENCE_SUMMARY_CUE.test(continuationCompact)
-                  || EXPERIENCE_DURATION_CUE.test(continuationCompact);
-                if (continuation && hasContinuationCue && isSafeExperienceStatement(continuation, { requireSummaryCue: false })) {
-                  summaries.push(continuation);
-                  index += 1;
-                }
-                continue;
-              }
-
-              const focusedStatement = focusExperienceSummaryStatement(statement);
-              if (focusedStatement && isSafeExperienceStatement(focusedStatement)) summaries.push(focusedStatement);
-            }
-
-            if (!summaries.length) return null;
-            return summaries.join(' ').slice(0, 280);
-          }'''
-          if old_candidate not in candidate:
-            raise SystemExit('candidateData target block not found')
-          candidate_path.write_text(candidate.replace(old_candidate, new_candidate, 1))
+          old_line = '    if (isSafeExperienceStatement(statement)) summaries.push(statement);'
+          new_lines = '''    const focusedStatement = focusExperienceSummaryStatement(statement);\n    if (focusedStatement && isSafeExperienceStatement(focusedStatement)) summaries.push(focusedStatement);'''
+          if old_line in candidate:
+            candidate = candidate.replace(old_line, new_lines, 1)
+          elif new_lines not in candidate:
+            raise SystemExit('candidate summary decision not found')
+          candidate_path.write_text(candidate)
 
           sanitizer_path = Path('src/services/fieldSanitizer.js')
           sanitizer = sanitizer_path.read_text()
-          context_anchor = r'''function hasGroundedExperienceSummaryContext(text = '', context = {}, turnType = null) {
-            if (hasExplicitPositiveExperienceEvidence(text)) return true;
-            if (looksLikeQuestionText(text, turnType)) return false;
-            return fieldWasPending('experienceSummary', context) && hasExperienceEvidence(text);
-          }'''
-          context_replacement = context_anchor + r'''
-
+          context_anchor = '''function hasGroundedExperienceSummaryContext(text = '', context = {}, turnType = null) {\n  if (hasExplicitPositiveExperienceEvidence(text)) return true;\n  if (looksLikeQuestionText(text, turnType)) return false;\n  return fieldWasPending('experienceSummary', context) && hasExperienceEvidence(text);\n}\n'''
+          sanitizer_helpers = r'''
           function experienceSummaryProfileEvidenceScore(value = '') {
             const normalized = normalizeText(value);
             if (!normalized) return 0;
@@ -160,58 +105,20 @@ jobs:
               .trim();
 
             return detail.length >= 5 && /[a-z]/.test(detail);
-          }'''
-          if context_anchor not in sanitizer:
-            raise SystemExit('fieldSanitizer context anchor not found')
-          sanitizer = sanitizer.replace(context_anchor, context_replacement, 1)
+          }
+          '''
+          if 'function experienceSummaryProfileEvidenceScore' not in sanitizer:
+            if context_anchor not in sanitizer:
+              raise SystemExit('sanitizer context anchor not found')
+            sanitizer = sanitizer.replace(context_anchor, context_anchor + sanitizer_helpers, 1)
 
-          old_summary = r'''function sanitizeExperienceSummary(value, evidence, text, context = {}, turnType = null) {
-            const raw = String(value || '').replace(/\s+/g, ' ').trim();
-            if (raw.length < 12) return { ok: false, reason: 'experience_summary_too_short' };
-            if (!hasGroundedExperienceSummaryContext(text, context, turnType)) {
-              return { ok: false, reason: 'missing_experience_summary_context' };
-            }
-
-            const normalizedText = normalizeText(text);
-            const normalizedValue = normalizeText(raw);
-            const valueIsGrounded = Boolean(normalizedText && normalizedValue && normalizedText.includes(normalizedValue));
-            const usableEvidence = evidenceIsUsable('experienceSummary', evidence, { allowLocalParser: true });
-            const evidenceIsGrounded = evidenceSnippetIsGrounded('experienceSummary', evidence, text);
-
-            if (!valueIsGrounded && !(usableEvidence && evidenceIsGrounded)) {
-              return { ok: false, reason: 'experience_summary_evidence_not_grounded' };
-            }
-
-            return { ok: true, value: raw.slice(0, 280) };
-          }'''
-          new_summary = r'''function sanitizeExperienceSummary(value, evidence, text, context = {}, turnType = null) {
-            const raw = String(value || '').replace(/\s+/g, ' ').trim();
-            if (raw.length < 12) return { ok: false, reason: 'experience_summary_too_short' };
-            if (!hasGroundedExperienceSummaryContext(text, context, turnType)) {
-              return { ok: false, reason: 'missing_experience_summary_context' };
-            }
-            if (!hasMeaningfulExperienceSummaryDetail(raw)) {
-              return { ok: false, reason: 'experience_summary_without_work_detail' };
-            }
-            if (experienceSummaryProfileEvidenceScore(raw) >= 2) {
-              return { ok: false, reason: 'experience_summary_contains_profile_fields' };
-            }
-
-            const normalizedText = normalizeText(text);
-            const normalizedValue = normalizeText(raw);
-            const valueIsGrounded = Boolean(normalizedText && normalizedValue && normalizedText.includes(normalizedValue));
-            const usableEvidence = evidenceIsUsable('experienceSummary', evidence, { allowLocalParser: true });
-            const evidenceIsGrounded = evidenceSnippetIsGrounded('experienceSummary', evidence, text);
-
-            if (!valueIsGrounded && !(usableEvidence && evidenceIsGrounded)) {
-              return { ok: false, reason: 'experience_summary_evidence_not_grounded' };
-            }
-
-            return { ok: true, value: raw.slice(0, 280) };
-          }'''
-          if old_summary not in sanitizer:
-            raise SystemExit('fieldSanitizer summary block not found')
-          sanitizer_path.write_text(sanitizer.replace(old_summary, new_summary, 1))
+          validation_anchor = '''  if (!hasGroundedExperienceSummaryContext(text, context, turnType)) {\n    return { ok: false, reason: 'missing_experience_summary_context' };\n  }\n'''
+          validation_checks = '''  if (!hasMeaningfulExperienceSummaryDetail(raw)) {\n    return { ok: false, reason: 'experience_summary_without_work_detail' };\n  }\n  if (experienceSummaryProfileEvidenceScore(raw) >= 2) {\n    return { ok: false, reason: 'experience_summary_contains_profile_fields' };\n  }\n'''
+          if validation_checks not in sanitizer:
+            if validation_anchor not in sanitizer:
+              raise SystemExit('sanitizer validation anchor not found')
+            sanitizer = sanitizer.replace(validation_anchor, validation_anchor + validation_checks, 1)
+          sanitizer_path.write_text(sanitizer)
           PY
       - run: npm ci
       - name: Validate focused regressions
