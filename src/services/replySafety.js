@@ -146,7 +146,7 @@ function containsUnsafeCvInstruction(reply = '', vacancy = null) {
   return UNSAFE_CV_REPLY_PATTERNS.some((pattern) => pattern.test(text));
 }
 
-const UNSUPPORTED_VACANCY_FACT_REPLY = 'Sobre ese punto no tengo una condición registrada para confirmarla. Te comparto solo la información registrada de la vacante: {summary}. Si quieres, seguimos con tu proceso.';
+const UNSUPPORTED_VACANCY_FACT_REPLY = 'No puedo confirmar información que no esté registrada para esta vacante. Te comparto únicamente la información confirmada: {summary}. Si te interesa, continuamos con la postulación.';
 
 function normalizeText(value = '') {
   return String(value || '')
@@ -176,6 +176,20 @@ function collectSupportedText(vacancy = {}) {
     vacancy.city,
     vacancy.title,
     vacancy.role
+  ];
+  return normalizeText(parts.filter(Boolean).join(' '));
+}
+
+function collectConfiguredPublicLocationText(vacancy = {}) {
+  const parts = [
+    vacancy.requirements,
+    vacancy.conditions,
+    vacancy.operationAddress,
+    vacancy.roleDescription,
+    vacancy.operation?.address,
+    vacancy.operation?.name,
+    vacancy.operation?.city?.name,
+    vacancy.city
   ];
   return normalizeText(parts.filter(Boolean).join(' '));
 }
@@ -242,6 +256,24 @@ function extractAddressClaims(reply = '') {
   return matches.map((match) => match.trim());
 }
 
+function addressClaimHasInterviewContext(reply = '', addressClaim = '') {
+  const text = String(reply || '');
+  const claim = String(addressClaim || '');
+  if (!text || !claim) return false;
+  const index = text.toLowerCase().indexOf(claim.toLowerCase());
+  const start = index >= 0 ? Math.max(0, index - 90) : 0;
+  const end = index >= 0 ? Math.min(text.length, index + claim.length + 90) : text.length;
+  const context = normalizeText(text.slice(start, end));
+  return /\b(?:entrevista|cita|presentate|presentarse|presentacion|asistir|asiste|dirigete|direccion de entrevista|lugar de entrevista)\b/.test(context);
+}
+
+function isConfiguredPublicLocationClaim(addressClaim = '', vacancy = {}) {
+  const normalizedClaim = normalizeText(addressClaim);
+  if (!normalizedClaim) return false;
+  const publicLocationText = collectConfiguredPublicLocationText(vacancy);
+  return Boolean(publicLocationText && publicLocationText.includes(normalizedClaim));
+}
+
 export function isManualAuthorizedSource(source = '') {
   const normalized = String(source || '').trim();
   if (!normalized) return false;
@@ -285,6 +317,10 @@ export function sanitizeOutboundReply({ reply, vacancy = null, candidate = null,
   const canRevealInterviewAddress = currentStep === 'SCHEDULED';
   for (const addressClaim of extractAddressClaims(normalizedCvReply)) {
     const normalizedAddress = normalizeText(addressClaim);
+    const configuredPublicLocation = isConfiguredPublicLocationClaim(addressClaim, vacancy || {});
+    const interviewLocationContext = addressClaimHasInterviewContext(normalizedCvReply, addressClaim);
+    if (configuredPublicLocation && !interviewLocationContext) continue;
+
     if (normalizedAddress && (!registeredAddress || !registeredAddress.includes(normalizedAddress))) {
       blockedClaims.push(`unregistered_interview_address:${addressClaim}`);
     } else if (normalizedAddress && registeredAddress && registeredAddress.includes(normalizedAddress) && !canRevealInterviewAddress) {
