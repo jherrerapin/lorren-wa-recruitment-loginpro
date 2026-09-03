@@ -21,6 +21,7 @@ function runtime() {
   };
 }
 
+// El contexto reproduce una sola pregunta del bot que solicita varios campos a la vez.
 const MULTIPURPOSE_CONTEXT = Object.freeze({
   currentStep: 'COLLECTING_DATA',
   pendingFields: [
