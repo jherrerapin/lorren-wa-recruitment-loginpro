@@ -670,6 +670,38 @@ function isSafeExperienceStatement(segment = '', { requireSummaryCue = true } = 
   return requireSummaryCue ? EXPERIENCE_SUMMARY_CUE.test(compact) : true;
 }
 
+function hasMultipurposeProfileEvidenceBeforeExperience(value = '') {
+  const compact = normalizeLooseText(value);
+  if (!compact) return false;
+  return /\b(?:cc|cedula|documento|ppt|edad|localidad|barrio|residencia|municipio|restriccion|transporte)\b/.test(compact)
+    || /\b\d{5,12}\b/.test(compact);
+}
+
+function stripGenericExperienceMetadata(value = '') {
+  return cleanExperienceStatement(value)
+    .replace(/^[\s:;,.\-]+/, '')
+    .replace(/^(?:de\s+)?(?:(?:m[aá]s\s+de|aproximadamente)\s+)?(?:\d+|un|uno|una|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s*(?:mes(?:es)?|a[nñ]os?|semanas?)\b[\s:;,.\-]*/i, '')
+    .replace(/^(?:en|como|de|sobre|realizando|haciendo)\s+/i, '')
+    .replace(/^[\s:;,.\-]+/, '')
+    .trim();
+}
+
+function focusExperienceSummaryStatement(statement = '') {
+  const raw = cleanExperienceStatement(statement);
+  if (!raw) return null;
+
+  const anchor = /\bexperiencia(?:\s+laboral)?\b/i.exec(raw);
+  if (!anchor) return raw;
+
+  const prefix = raw.slice(0, anchor.index);
+  const suffix = raw.slice(anchor.index + anchor[0].length);
+  const detail = stripGenericExperienceMetadata(suffix);
+
+  if (!detail) return null;
+  if (hasMultipurposeProfileEvidenceBeforeExperience(prefix)) return detail;
+  return raw;
+}
+
 function detectExperienceSummary(text = '') {
   const statements = String(text || '')
     .split(/(?<=[.!?])\s+|(?=¿)|[,;\n]+/)
@@ -691,7 +723,11 @@ function detectExperienceSummary(text = '') {
       continue;
     }
 
-    if (isSafeExperienceStatement(statement)) summaries.push(statement);
+    const focusedStatement = focusExperienceSummaryStatement(statement);
+    const focusedWasIsolated = Boolean(focusedStatement && focusedStatement !== cleanExperienceStatement(statement));
+    if (focusedStatement && isSafeExperienceStatement(focusedStatement, { requireSummaryCue: !focusedWasIsolated })) {
+      summaries.push(focusedStatement);
+    }
   }
 
   if (!summaries.length) return null;
