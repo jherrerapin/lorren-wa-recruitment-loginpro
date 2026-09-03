@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  CAMPAIGN_VACANCY_CONFIRMATION_MODE,
   buildVacancyQuestionReply,
   evaluateConsentBoundary,
   isConsentAcceptance,
@@ -14,9 +15,17 @@ import {
   getCandidateReadiness
 } from '../src/services/readinessGuard.js';
 import {
+  attributeCandidateCampaignFromMessage,
   extractMetaAttributionFields,
   resolveCampaignForReferral
 } from '../src/services/campaignAttribution.js';
+import { consolidateTextMessages } from '../src/services/multiline.js';
+import { conversationUnderstanding } from '../src/services/conversationUnderstanding.js';
+import { resolveVacancyFromText } from '../src/services/vacancyResolver.js';
+import {
+  resolveVacancyFirstGate,
+  VacancyFirstGateAction
+} from '../src/services/vacancyFirstGate.js';
 
 test('consentimiento reconoce intención natural sin frase única', () => {
   assert.equal(isConsentAcceptance('Sí, estoy de acuerdo'), true);
@@ -65,7 +74,7 @@ test('un archivo enviado antes del consentimiento queda bloqueado sin depender d
 test('datos personales enviados espontáneamente se bloquean antes del consentimiento', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'MENU', botResumeMode: null },
-    { type: 'text', text: { body: 'Me llamo Juan Pérez y mi cédula es 1020304050' } }
+    { type: 'text', text: { body: 'Me llamo Persona Prueba y mi cédula es 1020304050' } }
   );
 
   assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
@@ -74,7 +83,7 @@ test('datos personales enviados espontáneamente se bloquean antes del consentim
 test('un perfil futuro sin vacancyId también exige consentimiento antes de capturar datos', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'GREETING_SENT', botResumeMode: 'future_profile_capture' },
-    { type: 'text', text: { body: 'Me llamo Juan Pérez' } }
+    { type: 'text', text: { body: 'Me llamo Persona Prueba' } }
   );
 
   assert.deepEqual(decision, { block: true, reason: 'capture_mode_without_consent' });
@@ -95,15 +104,15 @@ test('un lote conserva los mensajes no manejados cuando otro quedó en consentim
       changes: [{
         value: {
           messages: [
-            { id: 'wamid-blocked', from: '573001111111', type: 'document', timestamp: '1' },
-            { id: 'wamid-allowed', from: '573002222222', type: 'text', timestamp: '2', text: { body: 'Quiero información' } }
+            { id: 'wamid-blocked', from: 'TEST-PHONE-1', type: 'document', timestamp: '1' },
+            { id: 'wamid-allowed', from: 'TEST-PHONE-2', type: 'text', timestamp: '2', text: { body: 'Quiero información' } }
           ]
         }
       }]
     }]
   };
 
-  removeHandledMessagesFromWebhook(body, [{ id: 'wamid-blocked', from: '573001111111', type: 'document', timestamp: '1' }]);
+  removeHandledMessagesFromWebhook(body, [{ id: 'wamid-blocked', from: 'TEST-PHONE-1', type: 'document', timestamp: '1' }]);
 
   assert.deepEqual(body.entry[0].changes[0].value.messages.map((message) => message.id), ['wamid-allowed']);
 });
@@ -178,7 +187,7 @@ test('los mensajes anteriores al consentimiento no se recuperan después de una 
 
 test('la recolección permite enviar datos juntos o por partes', () => {
   const message = buildCandidateDataCollectionMessage(
-    { fullName: 'Juan Pérez' },
+    { fullName: 'Persona Prueba' },
     { id: 'vacancy-1', city: 'Neiva', experienceRequired: 'NO' }
   );
 
@@ -187,7 +196,7 @@ test('la recolección permite enviar datos juntos o por partes', () => {
 
 test('si declara no tener experiencia no exige tiempo ni descripción', () => {
   const candidate = {
-    fullName: 'Juan Pérez',
+    fullName: 'Persona Prueba',
     documentType: 'CC',
     documentNumber: '123456789',
     age: 30,
@@ -205,16 +214,17 @@ test('si declara no tener experiencia no exige tiempo ni descripción', () => {
   assert.deepEqual(readiness.missingFields, []);
 });
 
-test('atribución prioriza coincidencia exacta y conserva identificadores Meta', () => {
+test('CTWA prioriza source_id exacto del anuncio y conserva identificadores Meta', () => {
   const campaigns = [
-    { id: 'campaign-1', code: '120000001', name: 'Neiva líder', notes: null },
+    { id: 'campaign-1', code: 'ad-55', name: 'Neiva líder', notes: null },
     { id: 'campaign-2', code: 'NEIVA-AUXILIAR', name: 'Neiva auxiliar', notes: null }
   ];
   const message = {
     referral: {
+      source_id: 'ad-55',
+      source_type: 'ad',
       campaign_id: '120000001',
       campaign_name: 'Campaña Neiva',
-      ad_id: 'ad-55',
       ctwa_clid: 'clid-99'
     }
   };
@@ -222,7 +232,7 @@ test('atribución prioriza coincidencia exacta y conserva identificadores Meta',
   const resolution = resolveCampaignForReferral(campaigns, message);
   assert.equal(resolution.campaign.id, 'campaign-1');
   assert.equal(resolution.reason, 'exact_campaign_match');
-  assert.equal(resolution.matchMode, 'objective_id_exact');
+  assert.equal(resolution.matchMode, 'meta_source_ad_id_exact');
   assert.deepEqual(extractMetaAttributionFields(message), {
     metaCtwaClid: 'clid-99',
     metaAdId: 'ad-55',
@@ -231,13 +241,15 @@ test('atribución prioriza coincidencia exacta y conserva identificadores Meta',
   });
 });
 
-test('un identificador objetivo gana sobre una coincidencia textual más larga', () => {
+test('source_id exacto gana sobre una coincidencia textual más larga', () => {
   const campaigns = [
-    { id: 'campaign-objective', code: '120000001', name: 'Campaña correcta', notes: null },
+    { id: 'campaign-objective', code: 'ad-objective', name: 'Campaña correcta', notes: null },
     { id: 'campaign-text', code: 'LIDER-OPERACION-NEIVA-JULIO-2026', name: 'Líder Operación Neiva Julio 2026', notes: null }
   ];
   const message = {
     referral: {
+      source_id: 'ad-objective',
+      source_type: 'ad',
       campaign_id: '120000001',
       ad_name: 'LIDER-OPERACION-NEIVA-JULIO-2026'
     }
@@ -245,7 +257,7 @@ test('un identificador objetivo gana sobre una coincidencia textual más larga',
 
   const resolution = resolveCampaignForReferral(campaigns, message);
   assert.equal(resolution.campaign.id, 'campaign-objective');
-  assert.equal(resolution.matchMode, 'objective_id_exact');
+  assert.equal(resolution.matchMode, 'meta_source_ad_id_exact');
 });
 
 test('un ad_id desconocido no degrada a una campaña de nombre parecido', () => {
@@ -269,6 +281,42 @@ test('un ad_id desconocido no degrada a una campaña de nombre parecido', () => 
   assert.equal(resolution.campaign, null);
   assert.equal(resolution.reason, 'objective_metadata_without_exact_campaign_match');
   assert.deepEqual(resolution.matches, []);
+});
+
+test('source_id sin source_type queda como trazabilidad y no selecciona una vacante', () => {
+  const campaigns = [{
+    id: 'campaign-ambiguous-source',
+    code: 'ad-ambiguous-source',
+    name: 'Anuncio sincronizado',
+    notes: null,
+    vacancyId: 'vacancy-ambiguous-source'
+  }];
+  const message = { referral: { source_id: 'ad-ambiguous-source' } };
+
+  const resolution = resolveCampaignForReferral(campaigns, message);
+  const fields = extractMetaAttributionFields(message);
+
+  assert.equal(resolution.campaign, null);
+  assert.equal(resolution.reason, 'objective_metadata_without_exact_campaign_match');
+  assert.equal(fields.metaAdId, undefined);
+});
+
+test('source_id de una publicación no se interpreta como AD_ID', () => {
+  const campaigns = [{
+    id: 'campaign-post-source',
+    code: 'post-source-id',
+    name: 'Anuncio sincronizado',
+    notes: null,
+    vacancyId: 'vacancy-post-source'
+  }];
+  const message = { referral: { source_id: 'post-source-id', source_type: 'post' } };
+
+  const resolution = resolveCampaignForReferral(campaigns, message);
+  const fields = extractMetaAttributionFields(message);
+
+  assert.equal(resolution.campaign, null);
+  assert.equal(resolution.reason, 'objective_metadata_without_exact_campaign_match');
+  assert.equal(fields.metaAdId, undefined);
 });
 
 test('una coincidencia descriptiva parcial no asigna campaña', () => {
@@ -302,4 +350,254 @@ test('atribución no elige arbitrariamente cuando dos campañas empatan', () => 
   assert.equal(resolution.campaign, null);
   assert.equal(resolution.reason, 'ambiguous_campaign_match');
   assert.equal(resolution.matches.length, 2);
+});
+
+function createCampaignAttributionPrisma({ candidate, campaigns }) {
+  const updates = [];
+  return {
+    updates,
+    prisma: {
+      candidate: {
+        async findUnique() {
+          return { ...candidate };
+        },
+        async update(args) {
+          updates.push(args);
+          return { id: args.where.id, ...args.data };
+        }
+      },
+      campaign: {
+        async findMany() {
+          return campaigns;
+        }
+      }
+    }
+  };
+}
+
+test('atribución CTWA inicial persiste el anuncio exacto y deja confirmación pendiente', async () => {
+  const previous = {
+    id: 'candidate-new-ctwa',
+    campaignId: null,
+    vacancyId: null,
+    sourceType: 'UNKNOWN',
+    campaignCodeRaw: null,
+    botResumeMode: null,
+    metaCtwaClid: null,
+    metaAdId: null,
+    metaCampaignId: null,
+    metaCampaignName: null
+  };
+  const target = {
+    id: 'campaign-siberia',
+    code: 'ad-siberia',
+    name: 'Anuncio Siberia',
+    notes: null,
+    sourceType: 'META_ADS',
+    vacancyId: 'vac-siberia'
+  };
+  const { prisma, updates } = createCampaignAttributionPrisma({ candidate: previous, campaigns: [target] });
+
+  const result = await attributeCandidateCampaignFromMessage(prisma, previous.id, {
+    referral: {
+      source_id: target.code,
+      source_type: 'ad',
+      ctwa_clid: 'clid-siberia'
+    }
+  });
+
+  assert.equal(result.attributed, true);
+  assert.equal(result.campaignId, target.id);
+  assert.equal(result.vacancyId, target.vacancyId);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].data.campaignId, target.id);
+  assert.equal(updates[0].data.vacancyId, target.vacancyId);
+  assert.equal(updates[0].data.metaAdId, target.code);
+  assert.equal(updates[0].data.botResumeMode, CAMPAIGN_VACANCY_CONFIRMATION_MODE);
+});
+
+test('un candidato con vacante persistida no es reatribuido antes de confirmar otro anuncio', async () => {
+  const previous = {
+    id: 'candidate-returning-ctwa',
+    campaignId: 'campaign-old',
+    vacancyId: 'vac-old',
+    sourceType: 'META_ADS',
+    campaignCodeRaw: 'old-ad',
+    botResumeMode: null,
+    metaCtwaClid: 'clid-old',
+    metaAdId: 'ad-old',
+    metaCampaignId: null,
+    metaCampaignName: null
+  };
+  const target = {
+    id: 'campaign-siberia',
+    code: 'ad-siberia',
+    name: 'Anuncio Siberia',
+    notes: null,
+    sourceType: 'META_ADS',
+    vacancyId: 'vac-siberia'
+  };
+  const { prisma, updates } = createCampaignAttributionPrisma({ candidate: previous, campaigns: [target] });
+
+  const result = await attributeCandidateCampaignFromMessage(prisma, previous.id, {
+    referral: {
+      source_id: target.code,
+      source_type: 'ad',
+      ctwa_clid: 'clid-siberia'
+    }
+  });
+
+  assert.equal(result.attributed, false);
+  assert.equal(result.reason, 'candidate_already_attributed');
+  assert.equal(result.campaignId, previous.campaignId);
+  assert.equal(result.vacancyId, previous.vacancyId);
+  assert.equal(updates.some((entry) => 'campaignId' in entry.data || 'vacancyId' in entry.data), false);
+});
+
+test('el texto consolidado enviado a comprensión contiene solo lo escrito por el candidato', async () => {
+  const candidateText = 'Hola, quisiera información';
+  const consolidated = consolidateTextMessages([{
+    body: candidateText,
+    rawPayload: {
+      lorrenAdContext: {
+        adId: 'TEST-AD-LEGACY',
+        mapped: true,
+        text: 'Ciudad: Ibague | Vacante: Auxiliar de cargue y descargue | Zona: Aeropuerto'
+      }
+    }
+  }]);
+
+  assert.equal(consolidated, candidateText);
+  assert.doesNotMatch(consolidated, /Ibague|cargue|Aeropuerto/i);
+
+  const understanding = await conversationUnderstanding(consolidated, {
+    aiResult: { status: 'disabled', intent: null, parsedFields: {} },
+    runtime: {
+      localParsedData: {},
+      engineFields: {},
+      engineUsage: {},
+      fallbackIntent: 'greeting'
+    },
+    context: {}
+  });
+
+  assert.equal(understanding.turnInterpretation.cityHint, null);
+  assert.equal(understanding.turnInterpretation.roleHint, null);
+});
+
+function operation(id, city, name = `Operación ${city}`) {
+  return { id, name, city: { id: `city-${id}`, name: city } };
+}
+
+function vacancy(overrides = {}) {
+  return {
+    id: 'vac-siberia-aux',
+    title: 'Auxiliar de bodega Siberia',
+    role: 'Auxiliar de bodega',
+    roleDescription: 'Apoyo operativo de bodega',
+    city: 'Bogota',
+    operation: operation('siberia', 'Bogota', 'Operación Siberia'),
+    operationAddress: 'Parque industrial Siberia',
+    isActive: true,
+    acceptingApplications: true,
+    ...overrides
+  };
+}
+
+const RESIDENCE_CASES = [
+  ['Estoy en Soacha y me interesa auxiliar de bodega', 'soacha'],
+  ['Me encuentro en Funza y me interesa auxiliar de bodega', 'funza'],
+  ['Vivo en Mosquera y me interesa auxiliar de bodega', 'mosquera'],
+  ['Soy de Madrid y me interesa auxiliar de bodega', 'madrid']
+];
+
+test('las formas naturales de residencia no se convierten en ciudad objetivo de la vacante', async () => {
+  const target = vacancy();
+  for (const [text, expectedResidence] of RESIDENCE_CASES) {
+    const resolution = await resolveVacancyFromText(null, text, {
+      activeVacancies: [target],
+      allVacancies: [target]
+    });
+
+    assert.equal(resolution.resolved, true, text);
+    assert.equal(resolution.vacancy.id, target.id, text);
+    assert.equal(resolution.city, 'Bogota', text);
+    assert.equal(String(resolution.residenceLocation || '').toLowerCase(), expectedResidence, text);
+    assert.notEqual(resolution.reason, 'city_without_active_vacancies', text);
+  }
+});
+
+test('una búsqueda explícita en Medellín sigue sin cruzarse hacia Siberia', async () => {
+  const target = vacancy();
+  const resolution = await resolveVacancyFromText(null, 'Busco vacantes de auxiliar de bodega en Medellín', {
+    activeVacancies: [target],
+    allVacancies: [target]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.vacancy, null);
+  assert.equal(resolution.city, 'Medellin');
+  assert.equal(resolution.reason, 'city_without_active_vacancies');
+});
+
+test('residencia Soacha y cargo no se cruzan globalmente a una vacante de Cali', async () => {
+  const cali = vacancy({
+    id: 'vac-cali-aux',
+    title: 'Auxiliar de bodega Cali',
+    city: 'Cali',
+    operation: operation('cali', 'Cali')
+  });
+  const text = 'Estoy en Soacha y me interesa auxiliar de bodega';
+  const resolution = await resolveVacancyFromText(null, text, {
+    activeVacancies: [cali],
+    allVacancies: [cali]
+  });
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.vacancy, null);
+  assert.equal(resolution.city, null);
+  assert.equal(String(resolution.residenceLocation || '').toLowerCase(), 'soacha');
+  assert.equal(resolution.reason, 'residence_without_compatible_vacancy');
+});
+
+test('residencia y cargo conocidos piden solo el dato faltante sin reiniciar la conversación', async () => {
+  const cali = vacancy({
+    id: 'vac-cali-aux',
+    title: 'Auxiliar de bodega Cali',
+    city: 'Cali',
+    operation: operation('cali', 'Cali')
+  });
+  const candidate = {
+    id: 'candidate-residence-target',
+    status: 'NUEVO',
+    currentStep: 'GREETING_SENT',
+    vacancyId: null,
+    botResumeMode: null,
+    dataConsentStatus: 'PENDING',
+    reminderScheduledFor: null,
+    reminderState: 'SKIPPED'
+  };
+  const prisma = {
+    vacancy: {
+      async findMany() { return [cali]; },
+      async findUnique({ where }) { return where.id === cali.id ? cali : null; }
+    }
+  };
+
+  const decision = await resolveVacancyFirstGate({
+    prisma,
+    candidate,
+    currentVacancy: null,
+    inboundText: 'Estoy en Soacha y me interesa auxiliar de bodega',
+    currentStep: candidate.currentStep,
+    recentMessages: [],
+    vacancyHints: { allVacancies: [cali], activeVacancies: [cali] }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'RESIDENCE_AND_ROLE_CAPTURED_TARGET_NEEDED');
+  assert.doesNotMatch(decision.reply, /^Hola\b/i);
+  assert.doesNotMatch(decision.reply, /desde qué ciudad|qué ciudad/i);
+  assert.doesNotMatch(decision.reply, /qué cargo viste|qué cargo te interesa/i);
+  assert.match(decision.reply, /operación|anuncio|zona|dónde quieres aplicar/i);
 });

@@ -30,8 +30,12 @@ function cleanMetaValue(value) {
   return text || null;
 }
 
+function normalizeSourceType(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
 export function extractReferralFromInboundMessage(message = {}) {
-  const referral = message?.referral || message?.context?.referral || null;
+  const referral = message?.referral || message?.context?.referral || message?.metadata?.referral || null;
   if (!referral || typeof referral !== 'object') return null;
   return referral;
 }
@@ -41,117 +45,175 @@ export function collectReferralAttributionValues(message = {}) {
   if (!referral) return [];
 
   return compactUnique([
-    referral.source_id,
-    referral.source_url,
+    referral.source_id || referral.sourceId,
+    referral.source_url || referral.sourceUrl,
+    referral.source_type || referral.sourceType,
     referral.headline,
     referral.body,
-    referral.ctwa_clid,
-    referral.ad_id,
-    referral.adgroup_id,
-    referral.campaign_id,
-    referral.campaign_name,
-    referral.ad_name
+    referral.ctwa_clid || referral.ctwaClid,
+    referral.ad_id || referral.adId,
+    referral.adgroup_id || referral.adgroupId,
+    referral.campaign_id || referral.campaignId,
+    referral.campaign_name || referral.campaignName,
+    referral.ad_name || referral.adName
   ].map((value) => String(value || '').trim()));
+}
+
+export function extractReferralAdIdentity(message = {}) {
+  const referral = extractReferralFromInboundMessage(message);
+  if (!referral) return { adId: null, mode: null, sourceType: null };
+
+  const sourceType = normalizeSourceType(referral.source_type || referral.sourceType);
+  const sourceId = cleanMetaValue(referral.source_id || referral.sourceId);
+  const explicitAdId = cleanMetaValue(referral.ad_id || referral.adId);
+
+  // source_id solo identifica un anuncio cuando Meta declara source_type=ad.
+  // Si el tipo falta o contradice ese origen, se conserva como trazabilidad pero
+  // no se eleva a autoridad de vacante.
+  if (sourceType && sourceType !== 'ad') {
+    return { adId: null, mode: null, sourceType };
+  }
+
+  if (sourceType === 'ad' && sourceId) {
+    return { adId: sourceId, mode: 'meta_source_ad_id_exact', sourceType };
+  }
+
+  // ad_id es una identidad explícita de anuncio cuando no existe un source_type
+  // incompatible. La resolución posterior exige igualdad exacta con Campaign.code.
+  if (explicitAdId) {
+    return { adId: explicitAdId, mode: 'meta_ad_id_exact', sourceType: sourceType || null };
+  }
+
+  return { adId: null, mode: null, sourceType: sourceType || null };
 }
 
 export function extractMetaAttributionFields(message = {}) {
   const referral = extractReferralFromInboundMessage(message);
   if (!referral) return {};
+  const adIdentity = extractReferralAdIdentity(message);
   const fields = {
-    metaCtwaClid: cleanMetaValue(referral.ctwa_clid),
-    metaAdId: cleanMetaValue(referral.ad_id || referral.source_id),
-    metaCampaignId: cleanMetaValue(referral.campaign_id),
-    metaCampaignName: cleanMetaValue(referral.campaign_name)
+    metaCtwaClid: cleanMetaValue(referral.ctwa_clid || referral.ctwaClid),
+    metaAdId: adIdentity.adId,
+    metaCampaignId: cleanMetaValue(referral.campaign_id || referral.campaignId),
+    metaCampaignName: cleanMetaValue(referral.campaign_name || referral.campaignName)
   };
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value));
 }
 
-function referralIdentityTokens(message = {}) {
+function referralObjectiveMetadataTokens(message = {}) {
   const referral = extractReferralFromInboundMessage(message) || {};
   return compactUnique([
-    referral.campaign_id,
-    referral.ad_id,
-    referral.source_id,
-    referral.adgroup_id
+    referral.source_id || referral.sourceId,
+    referral.ad_id || referral.adId,
+    referral.campaign_id || referral.campaignId,
+    referral.adgroup_id || referral.adgroupId,
+    referral.ctwa_clid || referral.ctwaClid
   ].map(normalizeCampaignCode)).filter((token) => token.length >= 3);
-}
-
-function referralCampaignNameToken(message = {}) {
-  const referral = extractReferralFromInboundMessage(message) || {};
-  return normalizeAttributionToken(referral.campaign_name);
 }
 
 function referralDescriptiveTokens(message = {}) {
   const referral = extractReferralFromInboundMessage(message) || {};
   return compactUnique([
-    referral.campaign_name,
-    referral.ad_name,
+    referral.campaign_name || referral.campaignName,
+    referral.ad_name || referral.adName,
     referral.headline,
-    referral.source_url
+    referral.source_url || referral.sourceUrl
   ].map(normalizeAttributionToken)).filter((token) => token.length >= 3);
 }
 
-function scoreCampaignForReferral(campaign = {}, message = {}) {
+function scoreLegacyCampaignForReferral(campaign = {}, message = {}) {
   const campaignCode = normalizeCampaignCode(campaign.code);
   const campaignCodeToken = normalizeAttributionToken(campaign.code);
   const campaignName = normalizeAttributionToken(campaign.name);
   const campaignNotes = normalizeAttributionToken(campaign.notes);
-  const identityTokens = referralIdentityTokens(message);
   const descriptiveTokens = referralDescriptiveTokens(message);
 
-  if (campaignCode && identityTokens.includes(campaignCode)) {
-    return { campaign, score: 10000, mode: 'objective_id_exact' };
-  }
-  if (campaignCodeToken && identityTokens.includes(campaignCodeToken)) {
-    return { campaign, score: 9900, mode: 'objective_id_exact' };
-  }
-
-  // Si Meta entregó IDs nuevos que todavía no están registrados internamente,
-  // solo aceptamos una segunda señal inequívoca: campaign_name exactamente igual
-  // al nombre interno de la campaña. No se degrada a ad_name, notas ni similitud.
-  const metaCampaignName = referralCampaignNameToken(message);
-  if (identityTokens.length && campaignName && metaCampaignName === campaignName) {
-    return { campaign, score: 8500, mode: 'campaign_name_exact_with_objective_metadata' };
-  }
-  if (identityTokens.length) return { campaign, score: 0, mode: null };
-
   if (campaignCode && descriptiveTokens.includes(campaignCode)) {
-    return { campaign, score: 8000, mode: 'campaign_code_exact' };
+    return { campaign, score: 8000, mode: 'campaign_code_exact_legacy' };
   }
   if (campaignCodeToken && descriptiveTokens.includes(campaignCodeToken)) {
-    return { campaign, score: 7900, mode: 'campaign_code_exact' };
+    return { campaign, score: 7900, mode: 'campaign_code_exact_legacy' };
   }
   if (campaignName && descriptiveTokens.includes(campaignName)) {
-    return { campaign, score: 7000, mode: 'campaign_name_exact' };
+    return { campaign, score: 7000, mode: 'campaign_name_exact_legacy' };
   }
   if (campaignNotes && descriptiveTokens.includes(campaignNotes)) {
-    return { campaign, score: 6000, mode: 'campaign_notes_exact' };
+    return { campaign, score: 6000, mode: 'campaign_notes_exact_legacy' };
   }
 
-  // Las coincidencias parciales no son una fuente inequívoca de atribución.
   return { campaign, score: 0, mode: null };
 }
 
+function buildExactAdMatch(campaigns = [], message = {}) {
+  const identity = extractReferralAdIdentity(message);
+  if (!identity.adId) return { identity, matches: [] };
+  const requestedCode = normalizeCampaignCode(identity.adId);
+  const matches = campaigns
+    .filter((campaign) => requestedCode && normalizeCampaignCode(campaign?.code) === requestedCode)
+    .map((campaign) => ({ campaign, score: 10000, mode: identity.mode || 'meta_ad_id_exact' }));
+  return { identity, matches };
+}
+
 export function resolveCampaignForReferral(campaigns = [], message = {}) {
-  const identityTokens = referralIdentityTokens(message);
+  const referral = extractReferralFromInboundMessage(message) || {};
+  const sourceType = normalizeSourceType(referral.source_type || referral.sourceType);
+  const objectiveTokens = referralObjectiveMetadataTokens(message);
   const descriptiveTokens = referralDescriptiveTokens(message);
-  if (!identityTokens.length && !descriptiveTokens.length) {
+  if (!objectiveTokens.length && !descriptiveTokens.length) {
     return { campaign: null, reason: 'no_referral_tokens', matches: [] };
   }
 
+  // Un referral expresamente no publicitario nunca puede seleccionar una fila de
+  // Campaign aunque comparta headline, nombre u otro texto con un anuncio.
+  if (sourceType && sourceType !== 'ad') {
+    return { campaign: null, reason: 'objective_metadata_without_exact_campaign_match', matches: [] };
+  }
+
+  const exactAd = buildExactAdMatch(campaigns, message);
+  if (exactAd.identity.adId) {
+    if (exactAd.matches.length === 1) {
+      const best = exactAd.matches[0];
+      return {
+        campaign: best.campaign,
+        reason: 'exact_campaign_match',
+        matchMode: best.mode,
+        matches: [{ campaignId: best.campaign.id, score: best.score, mode: best.mode }]
+      };
+    }
+    if (exactAd.matches.length > 1) {
+      return {
+        campaign: null,
+        reason: 'ambiguous_campaign_match',
+        matches: exactAd.matches.map((match) => ({ campaignId: match.campaign.id, score: match.score, mode: match.mode }))
+      };
+    }
+
+    return {
+      campaign: null,
+      reason: 'objective_metadata_without_exact_campaign_match',
+      matches: []
+    };
+  }
+
+  // campaign_id, adgroup_id, ctwa_clid y source_id sin source_type=ad sirven para
+  // trazabilidad, pero Campaign.code representa ad.id y no son intercambiables.
+  if (objectiveTokens.length) {
+    return {
+      campaign: null,
+      reason: 'objective_metadata_without_exact_campaign_match',
+      matches: []
+    };
+  }
+
+  // Compatibilidad histórica para referrals sin identidad objetiva: solo acepta
+  // coincidencias descriptivas exactas y nunca similitud parcial.
   const matches = campaigns
-    .map((campaign) => scoreCampaignForReferral(campaign, message))
+    .map((campaign) => scoreLegacyCampaignForReferral(campaign, message))
     .filter((match) => match.score > 0)
     .sort((a, b) => b.score - a.score || String(a.campaign.id).localeCompare(String(b.campaign.id)));
 
   if (!matches.length) {
-    return {
-      campaign: null,
-      reason: identityTokens.length
-        ? 'objective_metadata_without_exact_campaign_match'
-        : 'no_campaign_match',
-      matches: []
-    };
+    return { campaign: null, reason: 'no_campaign_match', matches: [] };
   }
 
   const best = matches[0];
@@ -184,8 +246,8 @@ function buildAttributionUpdate(candidate = {}, matchedCampaign = null, campaign
   update.campaignId = matchedCampaign.id;
   update.campaignCodeRaw = campaignCodeRaw;
 
-  // La vacante solo se asigna cuando la campaña activa tiene una vacante configurada
-  // de forma explícita. No se infiere por texto ni por similitud en esta capa.
+  // La vacante solo se asigna en el primer vínculo del proceso, cuando la campaña
+  // activa ya tiene vacancyId configurado. Una vacante persistida nunca se pisa aquí.
   if (matchedCampaign.vacancyId && !candidate.vacancyId) {
     update.vacancyId = matchedCampaign.vacancyId;
     update.botResumeMode = CAMPAIGN_VACANCY_CONFIRMATION_MODE;
@@ -233,12 +295,20 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
   const metaFields = extractMetaAttributionFields(message);
   const campaignCodeRaw = referralValues.slice(0, 8).join(' | ').slice(0, 1000);
 
-  if (candidate.campaignId) {
+  // campaignAttribution solo crea el vínculo inicial. Un proceso ya persistido no
+  // puede cambiar por un nuevo click antes de una transición confirmada. El diseño
+  // de cambio de vacante propuesta se trabaja aparte en #1552.
+  if (candidate.campaignId || candidate.vacancyId) {
     const metadataUpdate = onlyNewMetaFields(candidate, metaFields);
     if (Object.keys(metadataUpdate).length) {
       await prisma.candidate.update({ where: { id: candidateId }, data: metadataUpdate });
     }
-    return { attributed: false, reason: 'candidate_already_attributed', campaignId: candidate.campaignId };
+    return {
+      attributed: false,
+      reason: 'candidate_already_attributed',
+      campaignId: candidate.campaignId || null,
+      vacancyId: candidate.vacancyId || null
+    };
   }
 
   const activeCampaigns = await prisma.campaign.findMany({
@@ -308,7 +378,6 @@ async function runCampaignAttribution(prisma, req) {
     const result = await attributeCandidateCampaignFromMessage(prisma, candidate.id, message);
     if (result.attributed || ['metadata_saved_without_campaign_match', 'ambiguous_referral_campaign'].includes(result.reason)) {
       console.info('[CAMPAIGN_ATTRIBUTION]', JSON.stringify({
-        phone: from,
         candidateId: candidate.id,
         attributed: result.attributed,
         reason: result.reason,
