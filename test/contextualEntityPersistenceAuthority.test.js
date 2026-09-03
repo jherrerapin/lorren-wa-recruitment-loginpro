@@ -1,3 +1,4 @@
+// Replay sintético de autoridad semántica y persistencia; no contiene PII real.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
