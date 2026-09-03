@@ -1,9 +1,9 @@
 name: Consent consumed lifecycle regression proof
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - feat/1557-consentimiento-botones-trazabilidad
 
 permissions:
   contents: read
