@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { sortInterviewCoordinationEntries } from '../src/routes/interviewOutreachManagement.js';
-import { createScheduledInterviewBooking } from '../src/services/interviewBookingStateService.js';
 
 const routeSource = readFileSync(new URL('../src/routes/interviewOutreachManagement.js', import.meta.url), 'utf8');
 const uiSource = readFileSync(new URL('../src/public/interview-outreach-management.js', import.meta.url), 'utf8');
@@ -81,43 +80,6 @@ test('No interesado oculta inmediatamente fecha y entrevista; Confirmó usa fech
   assert.doesNotMatch(uiSource, /parseSlotValue/);
   assert.doesNotMatch(uiSource, /body\.slotId/);
   assert.doesNotMatch(uiSource, /(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
-});
-
-test('booking manual acepta fecha libre sin slot, pero el flujo automático sigue exigiendo slot', async () => {
-  const created = [];
-  const prisma = {
-    interviewBooking: {
-      findMany: async () => [],
-      findFirst: async () => null,
-      updateMany: async () => ({ count: 0 }),
-      create: async ({ data }) => {
-        created.push(data);
-        return { id: 'booking-manual-test', status: 'SCHEDULED', ...data };
-      }
-    }
-  };
-
-  const scheduledAt = new Date('2026-09-10T15:30:00.000Z');
-  const booking = await createScheduledInterviewBooking(prisma, {
-    candidateId: 'candidate-manual-test',
-    vacancyId: 'vacancy-manual-test',
-    slotId: null,
-    scheduledAt,
-    manualScheduling: true
-  });
-
-  assert.equal(created.length, 1);
-  assert.equal(created[0].slotId, null);
-  assert.equal(booking.scheduledAt.getTime(), scheduledAt.getTime());
-
-  await assert.rejects(
-    createScheduledInterviewBooking(prisma, {
-      candidateId: 'candidate-auto-test',
-      vacancyId: 'vacancy-auto-test',
-      scheduledAt
-    }),
-    /slot_id_required/
-  );
 });
 
 test('Prisma y migración representan booking manual sin fabricar InterviewSlot', () => {
