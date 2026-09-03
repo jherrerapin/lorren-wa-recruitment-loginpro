@@ -264,6 +264,24 @@ function onlyNewMetaFields(candidate = {}, metaFields = {}) {
   return update;
 }
 
+async function preserveExistingAttribution(prisma, candidate, candidateId, metaFields, reason, details = {}) {
+  const metadataUpdate = onlyNewMetaFields(candidate, metaFields);
+  if (Object.keys(metadataUpdate).length) {
+    await prisma.candidate.update({ where: { id: candidateId }, data: metadataUpdate });
+  }
+  return {
+    attributed: false,
+    reason,
+    campaignId: candidate.campaignId || null,
+    vacancyId: candidate.vacancyId || null,
+    ...details
+  };
+}
+
+function isObjectiveExactCampaignMatch(resolution = {}) {
+  return ['meta_source_ad_id_exact', 'meta_ad_id_exact'].includes(resolution.matchMode);
+}
+
 export async function attributeCandidateCampaignFromMessage(prisma, candidateId, message = {}) {
   if (!prisma?.campaign?.findMany || !prisma?.candidate?.update || !candidateId) {
     return { attributed: false, reason: 'prisma_not_ready' };
@@ -295,20 +313,16 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
   const metaFields = extractMetaAttributionFields(message);
   const campaignCodeRaw = referralValues.slice(0, 8).join(' | ').slice(0, 1000);
 
-  // campaignAttribution solo crea el vínculo inicial. Un proceso ya persistido no
-  // puede cambiar por un nuevo click antes de una transición confirmada. El diseño
-  // de cambio de vacante propuesta se trabaja aparte en #1552.
-  if (candidate.campaignId || candidate.vacancyId) {
-    const metadataUpdate = onlyNewMetaFields(candidate, metaFields);
-    if (Object.keys(metadataUpdate).length) {
-      await prisma.candidate.update({ where: { id: candidateId }, data: metadataUpdate });
-    }
-    return {
-      attributed: false,
-      reason: 'candidate_already_attributed',
-      campaignId: candidate.campaignId || null,
-      vacancyId: candidate.vacancyId || null
-    };
+  // Una vacante persistida es el proceso confirmado y nunca puede cambiar aquí.
+  // El cambio seguro A -> B continúa separado en #1552.
+  if (candidate.vacancyId) {
+    return preserveExistingAttribution(
+      prisma,
+      candidate,
+      candidateId,
+      metaFields,
+      'candidate_already_attributed'
+    );
   }
 
   const activeCampaigns = await prisma.campaign.findMany({
@@ -325,6 +339,29 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
 
   const resolution = resolveCampaignForReferral(activeCampaigns, message);
   const matchedCampaign = resolution.campaign;
+  const repairIncompleteCampaign = Boolean(
+    candidate.campaignId
+    && matchedCampaign?.vacancyId
+    && isObjectiveExactCampaignMatch(resolution)
+  );
+
+  // Un campaignId histórico sin vacante no es una vacante confirmada. Solo una
+  // identidad objetiva de anuncio exacta puede completar/corregir ese vínculo.
+  // El fallback descriptivo legacy nunca puede reatribuir un candidato histórico.
+  if (candidate.campaignId && !repairIncompleteCampaign) {
+    return preserveExistingAttribution(
+      prisma,
+      candidate,
+      candidateId,
+      metaFields,
+      'candidate_campaign_without_repairable_vacancy',
+      {
+        attributionResolutionReason: resolution.reason,
+        matchMode: resolution.matchMode || null,
+        matches: resolution.matches || []
+      }
+    );
+  }
 
   if (!matchedCampaign) {
     await prisma.candidate.update({
