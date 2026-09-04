@@ -13,16 +13,16 @@
     apiBase: '/admin/locations/users',
     accessSuffix: 'payroll-access',
     pendingKey: 'lorren-payroll-access-after-create',
-    title: 'Nómina y tiempo trabajado',
-    description: 'Permiso independiente para cortes, conceptos y exportaciones. No activa Operaciones ni Asistencia.',
-    summary: 'Nómina y tiempo trabajado'
+    title: 'Asistencia y Gestión de Tiempo',
+    description: 'Permiso independiente para cortes, conceptos y exportaciones de Gestión de Tiempo. No activa Operaciones / Despacho ni Asistencia operativa.',
+    summary: 'Asistencia y Gestión de Tiempo'
   };
   const testWorkspacePermission = {
     id: 'test-workspace',
     apiBase: '/admin/operaciones/pruebas/api/users',
     accessSuffix: 'access',
     pendingKey: 'lorren-test-workspace-access-after-create',
-    title: 'Entorno de pruebas de asistencia y nómina',
+    title: 'Entorno de pruebas de Asistencia y Gestión de Tiempo',
     description: 'Permite usar auxiliares, clientes y operaciones existentes dentro de registros DEV_TEST aislados. No modifica la operación real.',
     summary: 'Entorno de pruebas'
   };
