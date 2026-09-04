@@ -25,7 +25,7 @@
     style.textContent = `
       .ic-board{margin:0;border-bottom:1px solid var(--border-soft,#dbe5ef);background:#f8fbff;padding:14px 18px 16px}
       .ic-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
-      .ic-title{margin:0;color:var(--navy,#243b53);font-size:16px}.ic-subtitle{margin:4px 0 0;color:var(--text-muted,#64748b);font-size:12px;line-height:1.45}
+      .ic-title{margin:0;color:var(--navy,#243b53);font-size:16px}
       .ic-tabs{display:flex;gap:7px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;padding:2px 0 9px;margin-bottom:8px;border-bottom:1px solid #dbe5ef}
       .ic-tab{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;min-height:36px;border:1px solid #cbd5e1;border-radius:9px;background:#fff;padding:7px 11px;color:#526477;font:inherit;font-size:12px;font-weight:850;cursor:pointer;white-space:nowrap}
       .ic-tab:hover{border-color:#8aa7c1;background:#f2f7fc}.ic-tab[aria-selected="true"]{border-color:#1d4f7a;background:#1d4f7a;color:#fff;box-shadow:0 1px 2px rgba(15,23,42,.12)}
@@ -322,10 +322,7 @@
     const panel = element('div', 'ic-day-panel');
 
     const title = element('div', 'ic-day-title');
-    title.append(
-      element('strong', '', 'Gestión de entrevista'),
-      element('span', 'ic-meta', 'Asistencia real, evaluación e información complementaria')
-    );
+    title.appendChild(element('strong', '', 'Gestión de entrevista'));
     panel.appendChild(title);
 
     const grid = element('div', 'ic-day-grid');
@@ -337,8 +334,6 @@
         'ic-meta',
         `${management.attendance.updatedByLabel ? `Por ${management.attendance.updatedByLabel}` : 'Actualizado'} · ${formatDate(management.attendance.updatedAt)}`
       ));
-    } else {
-      attendanceField.appendChild(element('div', 'ic-meta', 'Registra aquí si asistió o no asistió.'));
     }
 
     const ratingInput = element('input', 'ic-control');
@@ -403,8 +398,7 @@
         complementaryInputs.push({ fieldId: item.id, labelInput, input });
         wrapper.append(
           managementField('Etiqueta', labelInput),
-          managementField('Valor', input),
-          element('div', 'ic-meta', 'La etiqueta es global para Reclutamiento; el valor pertenece solo a este candidato.')
+          managementField('Valor', input)
         );
         complementary.appendChild(wrapper);
       }
@@ -419,7 +413,6 @@
     complementaryLabelInput.maxLength = 80;
     complementaryLabelInput.placeholder = 'Ej. Disponibilidad de viaje';
     const complementaryLabelField = managementField('Nuevo campo complementario', complementaryLabelInput);
-    complementaryLabelField.appendChild(element('div', 'ic-meta', 'Al crearlo quedará disponible para todas las vacantes.'));
     const addComplementaryField = element('button', 'ic-save ic-save-secondary', 'Agregar campo');
     addComplementaryField.type = 'button';
     const complementaryStatus = element('div', 'ic-day-status');
@@ -454,7 +447,7 @@
           body: JSON.stringify({ label })
         });
         complementaryStatus.textContent = result.created
-          ? 'Campo agregado para todas las vacantes.'
+          ? 'Campo agregado.'
           : 'Ese campo ya existía y se reutilizará.';
         complementaryStatus.dataset.kind = 'success';
         await refresh();
@@ -866,10 +859,7 @@
 
       const head = element('div', 'ic-head');
       const titleGroup = element('div');
-      titleGroup.append(
-        element('h3', 'ic-title', 'Gestión de entrevistas'),
-        element('p', 'ic-subtitle', 'Coordina entrevistas y consulta el histórico evaluado sin mezclar invitación, asistencia, calificación y decisión laboral.')
-      );
+      titleGroup.appendChild(element('h3', 'ic-title', 'Gestión de entrevistas'));
       head.appendChild(titleGroup);
       board.appendChild(head);
 
