@@ -69,6 +69,13 @@
     }).format(date);
   }
 
+  function formatInterviewRating(value) {
+    if (value === null || value === undefined || String(value).trim() === '') return '';
+    const numeric = Number(String(value).trim().replace(',', '.'));
+    if (!Number.isFinite(numeric)) return String(value).trim();
+    return numeric.toFixed(2).replace('.', ',');
+  }
+
   function bogotaDay(value = new Date()) {
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return '';
@@ -176,7 +183,7 @@
       return 'Selecciona el día y la hora acordados para confirmar la entrevista.';
     }
     if (error?.message === 'interview_rating_out_of_range') {
-      return 'La calificación debe estar entre 1 y 5.';
+      return 'La calificación debe estar entre 1,00 y 5,00. Puedes usar coma o punto decimal.';
     }
     if (error?.message === 'interview_observation_required_when_enabled') {
       return 'Escribe la observación o desmarca la opción.';
@@ -332,16 +339,20 @@
     }
 
     const ratingInput = element('input', 'ic-control');
-    ratingInput.type = 'number';
-    ratingInput.min = '1';
-    ratingInput.max = '5';
-    ratingInput.step = '0.01';
+    ratingInput.type = 'text';
     ratingInput.inputMode = 'decimal';
-    ratingInput.placeholder = '1.00 a 5.00';
-    ratingInput.value = management.evaluation?.rating ?? '';
+    ratingInput.pattern = '[1-5](?:[.,][0-9]{1,2})?';
+    ratingInput.maxLength = 4;
+    ratingInput.autocomplete = 'off';
+    ratingInput.placeholder = '1,00 a 5,00';
+    ratingInput.value = formatInterviewRating(management.evaluation?.rating);
+    ratingInput.addEventListener('blur', () => {
+      const formatted = formatInterviewRating(ratingInput.value);
+      if (formatted) ratingInput.value = formatted;
+    });
     const ratingField = managementField('Calificación', ratingInput);
     const band = management.evaluation?.band?.label;
-    ratingField.appendChild(element('div', 'ic-meta', band ? `Clasificación actual: ${band}` : 'Escala de 1 a 5.'));
+    ratingField.appendChild(element('div', 'ic-meta', band ? `Clasificación actual: ${band}` : 'Escala de 1 a 5. Usa coma o punto decimal.'));
 
     const evaluation = element('div', 'ic-day-evaluation');
     const observationToggle = element('label', 'ic-observation-toggle');
@@ -478,9 +489,10 @@
           body: JSON.stringify(payload)
         });
         const nextBand = result.management?.evaluation?.band?.label;
+        ratingInput.value = formatInterviewRating(result.management?.evaluation?.rating);
         ratingField.querySelector('.ic-meta').textContent = nextBand
           ? `Clasificación actual: ${nextBand}`
-          : 'Escala de 1 a 5.';
+          : 'Escala de 1 a 5. Usa coma o punto decimal.';
         status.textContent = 'Evaluación actualizada.';
         status.dataset.kind = 'success';
         await refresh();
@@ -505,9 +517,9 @@
   function appendReviewedLegend(group) {
     const legend = element('div', 'ic-reviewed-legend');
     const definitions = [
-      ['OPTIONED', '3.60–5.00 · Opcionado a contratar'],
-      ['RESERVE', '3.00–3.59 · Reserva'],
-      ['DISQUALIFIED', '1.00–2.99 · Descalificado']
+      ['OPTIONED', '3,60–5,00 · Opcionado a contratar'],
+      ['RESERVE', '3,00–3,59 · Reserva'],
+      ['DISQUALIFIED', '1,00–2,99 · Descalificado']
     ];
     for (const [key, label] of definitions) {
       const item = element('span', 'ic-reviewed-legend-item');
@@ -585,7 +597,7 @@
       if (entry.evaluation?.updatedAt) person.appendChild(element('div', 'ic-meta', `Evaluación: ${formatDate(entry.evaluation.updatedAt)}`));
 
       const score = element('div', 'ic-reviewed-score');
-      score.appendChild(element('span', 'ic-reviewed-rating', Number(entry.evaluation?.rating || 0).toFixed(2)));
+      score.appendChild(element('span', 'ic-reviewed-rating', formatInterviewRating(entry.evaluation?.rating)));
       const band = element('span', 'ic-reviewed-band', entry?.evaluation?.band?.label || 'Sin clasificación');
       band.dataset.band = bandKey;
       score.appendChild(band);
