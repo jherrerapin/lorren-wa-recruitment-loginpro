@@ -309,9 +309,11 @@ function ensureUsersProgrammingAccessScript(html, path) {
 
 function normalizePayrollPresentation(html) {
   return html
-    .replace(/<title>\s*Nómina y tiempo trabajado\s*—\s*LoginPro<\/title>/gi, '<title>Gestión de Tiempo — LoginPro</title>')
-    .replace(/<title>\s*Personalizar Excel de nómina\s*—\s*LoginPro<\/title>/gi, '<title>Personalizar Excel · Gestión de Tiempo — LoginPro</title>')
-    .replace(/<h1>\s*Nómina y tiempo trabajado\s*<\/h1>/gi, '<h1>Gestión de Tiempo</h1>');
+    .replace(/<title>\s*Nómina y tiempo trabajado\s*—\s*LoginPro<\/title>/gi, '<title>Asistencia y Gestión de Tiempo — LoginPro</title>')
+    .replace(/<title>\s*Personalizar Excel de nómina\s*—\s*LoginPro<\/title>/gi, '<title>Personalizar Excel · Asistencia y Gestión de Tiempo — LoginPro</title>')
+    .replace(/<h1>\s*Nómina y tiempo trabajado\s*<\/h1>/gi, '<h1>Asistencia y Gestión de Tiempo</h1>')
+    .replace(/>\s*Nómina\s*</gi, '>Asistencia y Gestión de Tiempo<')
+    .replace(/cálculo de nómina/gi, 'cálculo de Asistencia y Gestión de Tiempo');
 }
 
 function normalizePayrollPaths(html) {

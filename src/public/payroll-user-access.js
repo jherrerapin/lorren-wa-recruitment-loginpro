@@ -8,6 +8,15 @@
   const OPERATIONAL_PENDING_KEY = 'lorren-operational-access-after-create';
   const OPERATIONAL_API_BASE = '/admin/locations/users';
 
+  const payrollPermission = {
+    id: 'payroll',
+    apiBase: '/admin/locations/users',
+    accessSuffix: 'payroll-access',
+    pendingKey: 'lorren-payroll-access-after-create',
+    title: 'Asistencia y Gestión de Tiempo',
+    description: 'Permiso independiente para cortes, conceptos y exportaciones de Gestión de Tiempo. No activa Operaciones / Despacho ni Asistencia operativa.',
+    summary: 'Asistencia y Gestión de Tiempo'
+  };
   const testWorkspacePermission = {
     id: 'test-workspace',
     apiBase: '/admin/operaciones/pruebas/api/users',
