@@ -9,6 +9,13 @@ import {
 } from '../services/appUsers.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { resolvePayrollFeatureAccess, setPayrollFeatureAccess } from '../services/payrollFeatureAccess.js';
+import {
+  canManageOperationalPermissions,
+  getOperationalAccessForUser,
+  listOperationalAccess,
+  operationalAccessCatalog,
+  setOperationalAccess
+} from '../services/operationalAccess.js';
 
 function sessionAuth(req, res, next) {
   const role = req.session?.userRole;
@@ -42,6 +49,20 @@ function payrollAccessActor(req) {
   };
 }
 
+function operationalAccessActor(req) {
+  return {
+    actorUserId: req.userId || req.session?.userId || null,
+    actorUsername: req.username || req.session?.username || null,
+    actorRole: req.userRole || req.session?.userRole || null,
+    actorOperationalRole: req.operationalRole || req.session?.operationalRole || null,
+    actorOperationalAccessConfigured: req.operationalAccessConfigured === true || req.session?.operationalAccessConfigured === true,
+    actorEffectivePermissions: req.operationalEffectivePermissions || req.session?.operationalEffectivePermissions || [],
+    actorDelegablePermissions: req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || [],
+    ipAddress: normalize(req.ip),
+    userAgent: normalize(req.get?.('user-agent'))
+  };
+}
+
 async function loadPayrollPermissionTarget(prisma, userId) {
   if (!userId) return null;
   return prisma.appUser.findUnique({
@@ -54,6 +75,29 @@ function canEditPayrollPermissionTarget(req, user) {
   if (!user || user.role !== 'ADMIN') return false;
   if (req.userRole === 'dev') return true;
   return !isProtectedRecruiterProfile(user);
+}
+
+function canEditOperationalTarget(req, access) {
+  if (!access) return false;
+  if (req.userRole === 'dev') return true;
+  if (!canManageOperationalPermissions(req)) return false;
+  const actorId = req.userId || req.session?.userId || null;
+  if (actorId && access.userId === actorId) return false;
+  if (!access.configured || access.role === 'SUPERVISOR') return false;
+  if (isProtectedRecruiterProfile(access)) return false;
+  return true;
+}
+
+function operationalAccessErrorStatus(error) {
+  const code = String(error?.message || '');
+  if (code === 'operational_access_user_not_found') return 404;
+  if ([
+    'operational_access_manager_required',
+    'operational_access_self_forbidden',
+    'operational_access_supervisor_target_forbidden',
+    'operational_access_capability_not_delegable'
+  ].includes(code)) return 403;
+  return 400;
 }
 
 function flash(res, type, msg) {
@@ -314,16 +358,13 @@ export function locationsRouter(prisma) {
     }
 
     try {
-      await prisma.city.update({
-        where: { id: city.id },
-        data: { name, ...unifiedBranchCompatibilityData() }
-      });
-      flash(res, 'success', `Sucursal "${name}" actualizada correctamente.`);
+      await prisma.operation.update({ where: { id: operation.id }, data: { name } });
+      flash(res, 'success', `Vacante renombrada a "${name}".`);
     } catch (error) {
       if (error.code === 'P2002') {
-        flash(res, 'error', `Ya existe una sucursal con el nombre "${name}".`);
+        flash(res, 'error', 'Ya existe una vacante con ese nombre en la misma sucursal.');
       } else {
-        flash(res, 'error', 'Error al actualizar la sucursal.');
+        flash(res, 'error', 'Error al renombrar la vacante.');
       }
     }
     return res.redirect('/admin/locations');
@@ -434,9 +475,93 @@ export function locationsRouter(prisma) {
       await prisma.operation.delete({ where: { id: operation.id } });
       flash(res, 'success', `Vacante "${operation.name}" eliminada.`);
     } catch (_error) {
-      flash(res, 'error', 'Error al eliminar la vacante.');
+      flash(res, 'error', 'Error al eliminar la sucursal.');
     }
     return res.redirect('/admin/locations');
+  });
+
+  router.get('/users/operational-access/catalog', async (req, res) => {
+    if (!canManageOperationalPermissions(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const catalog = operationalAccessCatalog();
+    const isDev = req.userRole === 'dev';
+    return res.json({
+      ok: true,
+      ...catalog,
+      actor: {
+        isDev,
+        role: isDev ? 'DEV' : req.operationalRole || req.session?.operationalRole || null,
+        delegablePermissions: isDev
+          ? catalog.capabilities.map((item) => item.key).filter((key) => key !== 'SUPERVISE_PERMISSIONS')
+          : req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || []
+      }
+    });
+  });
+
+  router.get('/users/operational-access', async (req, res) => {
+    if (!canManageOperationalPermissions(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    const users = await prisma.appUser.findMany({
+      where: { role: 'ADMIN', isActive: true },
+      select: { id: true, username: true, displayName: true, role: true, isActive: true },
+      orderBy: [{ displayName: 'asc' }, { username: 'asc' }]
+    });
+    const accesses = await listOperationalAccess(prisma, users);
+    const isDev = req.userRole === 'dev';
+    const actorId = req.userId || req.session?.userId || null;
+    const visible = isDev
+      ? accesses
+      : accesses.filter((access) => canEditOperationalTarget(req, access) && access.userId !== actorId);
+    const catalog = operationalAccessCatalog();
+    return res.json({
+      ok: true,
+      users: visible,
+      roles: catalog.roles,
+      capabilities: catalog.capabilities,
+      editableCapabilities: isDev
+        ? catalog.capabilities.map((item) => item.key)
+        : req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || []
+    });
+  });
+
+  router.get('/users/:id/operational-access', async (req, res) => {
+    if (!canManageOperationalPermissions(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    try {
+      const access = await getOperationalAccessForUser(prisma, req.params.id);
+      if (!access) return res.status(404).json({ ok: false, error: 'user_not_found' });
+      if (!canEditOperationalTarget(req, access)) return res.status(403).json({ ok: false, error: 'forbidden' });
+      const catalog = operationalAccessCatalog();
+      return res.json({
+        ok: true,
+        access,
+        roles: catalog.roles,
+        capabilities: catalog.capabilities,
+        canEditRole: req.userRole === 'dev',
+        canEditDelegation: req.userRole === 'dev',
+        editableCapabilities: req.userRole === 'dev'
+          ? catalog.capabilities.map((item) => item.key)
+          : req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || []
+      });
+    } catch (error) {
+      return res.status(operationalAccessErrorStatus(error)).json({ ok: false, error: error?.message || 'operational_access_failed' });
+    }
+  });
+
+  router.post('/users/:id/operational-access', async (req, res) => {
+    if (!canManageOperationalPermissions(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    try {
+      const current = await getOperationalAccessForUser(prisma, req.params.id);
+      if (!current) return res.status(404).json({ ok: false, error: 'user_not_found' });
+      if (!canEditOperationalTarget(req, current)) return res.status(403).json({ ok: false, error: 'forbidden' });
+      const result = await setOperationalAccess(prisma, {
+        targetUserId: req.params.id,
+        role: req.body?.role,
+        permissions: req.body?.permissions,
+        delegablePermissions: req.body?.delegablePermissions,
+        ...operationalAccessActor(req)
+      });
+      return res.json({ ok: true, access: result });
+    } catch (error) {
+      return res.status(operationalAccessErrorStatus(error)).json({ ok: false, error: error?.message || 'operational_access_failed' });
+    }
   });
 
   router.get('/users/:id/payroll-access', async (req, res) => {
