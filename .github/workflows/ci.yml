@@ -125,6 +125,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: node --test test/adminSession.test.js
 
+      - name: Run operational permission regressions
+        if: ${{ !cancelled() }}
+        run: node --test test/operationalAccessRoles.test.js test/operationalPermissionNavigation.test.js test/supervisorPermissionVisibility.test.js
+
       - name: Run interview booking authority regressions
         if: ${{ !cancelled() }}
         run: node --test test/interviewBookingStateService.test.js test/interviewSchedulerAuthority.test.js test/interviewLifecycle.test.js test/interviewBookingAdminStateService.test.js test/interviewBookingDeletionStateService.test.js test/adminInterviewBookingAuthority.test.js test/chatEngineInterviewBookingAuthority.test.js test/webhookInterviewBookingAuthority.test.js
