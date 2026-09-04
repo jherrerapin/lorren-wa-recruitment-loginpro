@@ -263,19 +263,17 @@ export async function saveInterviewEvaluation(prisma, input = {}) {
 
 export async function createInterviewComplementaryField(prisma, input = {}) {
   requireManagementClient(prisma, 'interviewComplementaryField', ['findUnique', 'count', 'upsert']);
-  const vacancyId = requireNonEmptyString(input.vacancyId, 'vacancy_id');
   const { label, normalizedLabel } = normalizeInterviewComplementaryLabel(input.label);
   const actor = normalizeActor(input.actor);
-  const uniqueWhere = { vacancyId_normalizedLabel: { vacancyId, normalizedLabel } };
+  const uniqueWhere = { normalizedLabel };
   const existing = await prisma.interviewComplementaryField.findUnique({ where: uniqueWhere });
   if (existing) return { field: existing, created: false };
 
-  const sortOrder = await prisma.interviewComplementaryField.count({ where: { vacancyId } });
+  const sortOrder = await prisma.interviewComplementaryField.count();
   const field = await prisma.interviewComplementaryField.upsert({
     where: uniqueWhere,
     update: {},
     create: {
-      vacancyId,
       label,
       normalizedLabel,
       sortOrder,
@@ -290,7 +288,6 @@ export async function saveInterviewComplementaryValues(prisma, input = {}) {
   requireManagementClient(prisma, 'interviewComplementaryField', ['findMany']);
   requireManagementClient(prisma, 'interviewComplementaryValue', ['upsert']);
   const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
-  const vacancyId = requireNonEmptyString(input.vacancyId, 'vacancy_id');
   const actor = normalizeActor(input.actor);
   const rawValues = Array.isArray(input.values) ? input.values : [];
   const unique = new Map();
@@ -308,14 +305,13 @@ export async function saveInterviewComplementaryValues(prisma, input = {}) {
 
   const fields = await prisma.interviewComplementaryField.findMany({
     where: {
-      id: { in: values.map(({ fieldId }) => fieldId) },
-      vacancyId
+      id: { in: values.map(({ fieldId }) => fieldId) }
     },
     select: { id: true }
   });
   const allowedIds = new Set(fields.map((field) => field.id));
   if (values.some(({ fieldId }) => !allowedIds.has(fieldId))) {
-    throw new TypeError('interview_complementary_field_scope_invalid');
+    throw new TypeError('interview_complementary_field_invalid');
   }
 
   const operations = values.map(({ fieldId, value }) => prisma.interviewComplementaryValue.upsert({

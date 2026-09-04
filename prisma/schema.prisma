@@ -197,7 +197,6 @@ model Vacancy {
   interviewSlots         InterviewSlot[]
   interviewBookings      InterviewBooking[]
   interviewCandidateReviews InterviewCandidateReview[]
-  interviewComplementaryFields InterviewComplementaryField[]
   accessUsers            AppUser[]              @relation("AppUserVacancies")
   scopedAccessUsers      AppUser[]              @relation("AppUserScopeVacancy")
   dispatchWorkers        DispatchWorkerVacancy[]
@@ -291,10 +290,8 @@ model InterviewCandidateReview {
 
 model InterviewComplementaryField {
   id              String                       @id @default(cuid())
-  vacancyId       String
-  vacancy         Vacancy                      @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
   label           String
-  normalizedLabel String
+  normalizedLabel String                       @unique
   sortOrder       Int                          @default(0)
   createdByUserId String?
   createdByLabel  String?
@@ -302,8 +299,7 @@ model InterviewComplementaryField {
   updatedAt       DateTime                     @updatedAt
   values          InterviewComplementaryValue[]
 
-  @@unique([vacancyId, normalizedLabel])
-  @@index([vacancyId, sortOrder])
+  @@index([sortOrder])
 }
 
 model InterviewComplementaryValue {
@@ -513,7 +509,7 @@ model CvAnalysisUsage {
   modelUsed         String
   inputTokens       Int      @default(0)
   cachedInputTokens Int      @default(0)
-  cacheWriteTokens  Int      @default(0)
+  cacheWriteTokens Int       @default(0)
   outputTokens      Int      @default(0)
   reasoningTokens   Int      @default(0)
   totalTokens       Int      @default(0)
@@ -898,8 +894,8 @@ model DispatchWorkerPortalSession {
   ipAddress           String?
   userAgent           String?
   platform            String?
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
 
   @@index([workerId, status, expiresAt])
   @@index([workerDeviceId, status, expiresAt])

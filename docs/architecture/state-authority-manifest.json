@@ -143,7 +143,7 @@
         {
           "path": "src/services/interviewOutreachManagement.js",
           "role": "canonical",
-          "reason": "Única autoridad para definir etiquetas complementarias reutilizables dentro de una vacante"
+          "reason": "Única autoridad para definir etiquetas complementarias globales y reutilizables en todo el módulo de entrevistas"
         }
       ]
     },

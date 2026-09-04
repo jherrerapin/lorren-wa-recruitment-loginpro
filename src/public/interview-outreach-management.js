@@ -29,13 +29,13 @@
       .ic-tabpanel[hidden]{display:none!important}.ic-group{margin-top:0}.ic-group-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.ic-group-title{font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.045em;color:#526477}.ic-group-count{font-size:11px;font-weight:800;color:#64748b;background:#eef2f7;border-radius:999px;padding:2px 7px}
       .ic-list{display:grid;gap:8px}.ic-row{display:grid;grid-template-columns:minmax(180px,1.25fr) minmax(190px,.9fr) minmax(220px,1.05fr) auto;gap:10px;align-items:center;padding:10px 12px;background:#fff;border:1px solid #dbe5ef;border-radius:10px}
       .ic-person{min-width:0}.ic-name{display:block;color:var(--navy,#243b53);font-weight:800;text-decoration:none;overflow-wrap:anywhere}.ic-meta{margin-top:3px;color:var(--text-muted,#64748b);font-size:11px;line-height:1.35}
-      .ic-field{display:flex;flex-direction:column;gap:4px}.ic-field label{font-size:11px;font-weight:800;color:#526477}.ic-control{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 8px;color:#1f2937;font:inherit;font-size:12px;box-sizing:border-box}.ic-textarea{min-height:76px;resize:vertical}
+      .ic-field{display:flex;flex-direction:column;gap:4px}.ic-field[hidden]{display:none!important}.ic-field label{font-size:11px;font-weight:800;color:#526477}.ic-control{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 8px;color:#1f2937;font:inherit;font-size:12px;box-sizing:border-box}.ic-textarea{min-height:76px;resize:vertical}
       .ic-save{min-height:36px;border:0;border-radius:7px;padding:7px 12px;background:#1d4f7a;color:#fff;font-weight:800;cursor:pointer}.ic-save:disabled{opacity:.6;cursor:default}.ic-save-secondary{background:#475569}
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
-      .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
+      .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-complementary-create{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;align-items:end;margin-top:9px}.ic-complementary-create .ic-day-status{grid-column:1/-1}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
       @media(max-width:900px){.ic-row{grid-template-columns:1fr 1fr}.ic-save{width:100%}.ic-day-grid{grid-template-columns:1fr 1fr}}
-      @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}.ic-tabs{margin-left:-2px;margin-right:-2px}.ic-tab{min-height:40px}}
+      @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}.ic-complementary-create{grid-template-columns:1fr}.ic-tabs{margin-left:-2px;margin-right:-2px}.ic-tab{min-height:40px}}
     `;
     document.head.appendChild(style);
   }
@@ -174,6 +174,12 @@
     if (error?.message === 'interview_observation_required_when_enabled') {
       return 'Escribe la observación o desmarca la opción.';
     }
+    if (error?.message === 'interview_complementary_label_required') {
+      return 'Escribe el nombre del campo complementario.';
+    }
+    if (error?.message === 'interview_complementary_label_too_long') {
+      return 'El nombre del campo complementario es demasiado largo.';
+    }
     return 'No fue posible guardar la gestión. Intenta nuevamente.';
   }
 
@@ -291,7 +297,7 @@
     return wrapper;
   }
 
-  function buildDayManagementPanel(candidateId, response) {
+  function buildDayManagementPanel(candidateId, response, refresh) {
     const management = response.management || {};
     const panel = element('div', 'ic-day-panel');
 
@@ -338,11 +344,14 @@
     observationArea.placeholder = 'Observación de la entrevista';
     observationArea.value = management.evaluation?.observation || '';
     const observationField = managementField('Observación', observationArea);
-    observationField.hidden = !observationCheckbox.checked;
-    observationCheckbox.addEventListener('change', () => {
-      observationField.hidden = !observationCheckbox.checked;
-      if (!observationCheckbox.checked) observationArea.value = '';
-    });
+    const syncObservationField = ({ clear = false } = {}) => {
+      const enabled = observationCheckbox.checked;
+      observationField.hidden = !enabled;
+      observationArea.disabled = !enabled;
+      if (!enabled && clear) observationArea.value = '';
+    };
+    observationCheckbox.addEventListener('change', () => syncObservationField({ clear: true }));
+    syncObservationField();
     evaluation.append(observationToggle, observationField);
 
     grid.append(attendanceField, ratingField, evaluation);
@@ -365,8 +374,21 @@
       }
       panel.appendChild(complementary);
     } else {
-      panel.appendChild(element('div', 'ic-empty', 'No hay campos complementarios definidos para esta vacante.'));
+      panel.appendChild(element('div', 'ic-empty', 'Todavía no hay campos complementarios definidos para entrevistas.'));
     }
+
+    const complementaryCreate = element('div', 'ic-complementary-create');
+    const complementaryLabelInput = element('input', 'ic-control');
+    complementaryLabelInput.type = 'text';
+    complementaryLabelInput.maxLength = 80;
+    complementaryLabelInput.placeholder = 'Ej. Disponibilidad de viaje';
+    const complementaryLabelField = managementField('Nuevo campo complementario', complementaryLabelInput);
+    complementaryLabelField.appendChild(element('div', 'ic-meta', 'Al crearlo quedará disponible para todas las vacantes.'));
+    const addComplementaryField = element('button', 'ic-save ic-save-secondary', 'Agregar campo');
+    addComplementaryField.type = 'button';
+    const complementaryStatus = element('div', 'ic-day-status');
+    complementaryCreate.append(complementaryLabelField, addComplementaryField, complementaryStatus);
+    panel.appendChild(complementaryCreate);
 
     const actions = element('div', 'ic-day-actions');
     const saveAttendance = element('button', 'ic-save ic-save-secondary', 'Guardar asistencia');
@@ -376,6 +398,37 @@
     const status = element('div', 'ic-day-status');
     actions.append(saveAttendance, saveEvaluation, status);
     panel.appendChild(actions);
+
+    addComplementaryField.addEventListener('click', async () => {
+      const label = String(complementaryLabelInput.value || '').trim();
+      if (!label) {
+        complementaryStatus.textContent = 'Escribe el nombre del campo complementario.';
+        complementaryStatus.dataset.kind = 'error';
+        complementaryLabelInput.focus();
+        return;
+      }
+
+      addComplementaryField.disabled = true;
+      complementaryLabelInput.disabled = true;
+      complementaryStatus.textContent = 'Agregando campo...';
+      delete complementaryStatus.dataset.kind;
+      try {
+        const result = await api(`/candidates/${encodeURIComponent(candidateId)}/complementary-fields`, {
+          method: 'POST',
+          body: JSON.stringify({ label })
+        });
+        complementaryStatus.textContent = result.created
+          ? 'Campo agregado para todas las vacantes.'
+          : 'Ese campo ya existía y se reutilizará.';
+        complementaryStatus.dataset.kind = 'success';
+        await refresh();
+      } catch (error) {
+        complementaryStatus.textContent = friendlyError(error);
+        complementaryStatus.dataset.kind = 'error';
+        addComplementaryField.disabled = false;
+        complementaryLabelInput.disabled = false;
+      }
+    });
 
     saveAttendance.addEventListener('click', async () => {
       saveAttendance.disabled = true;
@@ -448,7 +501,7 @@
       item.appendChild(renderRow(entry, vacancyId, refresh));
       try {
         const response = await api(`/candidates/${encodeURIComponent(entry.candidateId)}`);
-        item.appendChild(buildDayManagementPanel(entry.candidateId, response));
+        item.appendChild(buildDayManagementPanel(entry.candidateId, response, refresh));
       } catch (error) {
         const message = error?.status === 404
           ? 'La gestión complementaria de esta entrevista no está disponible.'

@@ -208,7 +208,6 @@ async function loadCandidateManagementData(prisma, req, candidateId) {
     }),
     loadLatestCitation(prisma, candidate.id),
     prisma.interviewComplementaryField.findMany({
-      where: { vacancyId: candidate.vacancyId },
       orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }]
     }),
     prisma.interviewComplementaryValue.findMany({
@@ -482,7 +481,6 @@ export function interviewOutreachManagementRouter(prisma) {
     try {
       const actor = await resolveCurrentActor(prisma, req);
       const result = await createInterviewComplementaryField(prisma, {
-        vacancyId: data.candidate.vacancyId,
         label: req.body?.label,
         actor
       });
