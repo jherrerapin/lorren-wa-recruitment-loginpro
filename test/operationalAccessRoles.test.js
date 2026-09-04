@@ -108,6 +108,24 @@ test('DEV asigna rol base y puede ampliar o restringir funciones individuales', 
   assert.equal(prisma.events.at(-1).metadata.roleAssignedByDev, true);
 });
 
+test('Supervisor inicia con administración sensible no destructiva y deja acciones críticas como opt-in de DEV', () => {
+  const base = new Set(operationalRoleBasePermissions('SUPERVISOR'));
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE), true);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_STATUS), true);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE), true);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.ATTENDANCE_MANAGE), true);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.ATTENDANCE_CONFIG), true);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.TIME_EXPORT), true);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.TIME_COMPENSATION), true);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS), true);
+
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE), false);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE), false);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT), false);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.TIME_IMPORT), false);
+  assert.equal(base.has(OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE), false);
+});
+
 test('solo DEV define Supervisor y su techo delegable', async () => {
   const prisma = createPrisma();
   const supervisor = await setOperationalAccess(prisma, {
@@ -169,6 +187,29 @@ test('Supervisor amplía o restringe únicamente funciones autorizadas y no camb
     }),
     /operational_access_capability_not_delegable/
   );
+});
+
+test('delegación parcial de Supervisor conserva overrides previos que no fueron enviados', async () => {
+  const prisma = createPrisma();
+  await setOperationalAccess(prisma, {
+    targetUserId: 'TEST-USER-COORD',
+    role: 'COORDINADOR',
+    permissions: effectiveState('COORDINADOR', {
+      [OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE]: true,
+      [OPERATIONAL_CAPABILITY.DISPATCH_ASSIGNMENT_MANAGE]: false
+    }),
+    ...devActor()
+  });
+
+  const delegated = await setOperationalAccess(prisma, {
+    targetUserId: 'TEST-USER-COORD',
+    permissions: { [OPERATIONAL_CAPABILITY.TIME_EXPORT]: true },
+    ...supervisorActor([OPERATIONAL_CAPABILITY.TIME_EXPORT])
+  });
+
+  assert.equal(delegated.effectivePermissions.includes(OPERATIONAL_CAPABILITY.TIME_EXPORT), true);
+  assert.equal(delegated.effectivePermissions.includes(OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE), true);
+  assert.equal(delegated.effectivePermissions.includes(OPERATIONAL_CAPABILITY.DISPATCH_ASSIGNMENT_MANAGE), false);
 });
 
 test('Supervisor no puede modificarse a sí mismo ni administrar otro Supervisor', async () => {
@@ -237,6 +278,14 @@ test('guardas centrales distinguen acciones sensibles de Despacho, Asistencia y 
   assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/admin/operaciones/asistencia/gestion-tiempo/policy' }), null);
 });
 
+test('guardas centrales cubren también rutas operativas heredadas fuera de /admin/operaciones', () => {
+  assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/operaciones/admin-delete/clientes/TEST-CLIENT' }), OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE);
+  assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/operaciones/admin-delete/personal/TEST-WORKER' }), OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE);
+  assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/operaciones/admin-delete/solicitudes/TEST-REQUEST' }), OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE);
+  assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/operaciones/admin-clientes' }), OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE);
+  assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/operaciones/admin-worker/nuevo' }), OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE);
+});
+
 test('API permite a DEV asignar rol y a Supervisor solo delegar su techo', async () => {
   const prisma = createPrisma();
   const app = express();
@@ -295,8 +344,9 @@ test('API permite a DEV asignar rol y a Supervisor solo delegar su techo', async
   }
 });
 
-test('middleware ejecutado conserva la guarda operativa antes de continuar', () => {
+test('middleware ejecutado refresca permisos, falla cerrado y aplica la guarda antes de continuar', () => {
   const source = readFileSync(new URL('../src/services/dispatchAuditMiddleware.js', import.meta.url), 'utf8');
   assert.match(source, /if \(!enforceOperationalCapability\(req, res\)\) return;/);
   assert.match(source, /await refreshDatabaseUserPermissions\(prisma, req\)/);
+  assert.match(source, /else denyOperationalAccess\(req\);/);
 });
