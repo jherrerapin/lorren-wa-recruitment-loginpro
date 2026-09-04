@@ -441,9 +441,8 @@ function injectPayrollUsersScript(html, req) {
   const path = requestPath(req);
   const isDev = (req.session?.userRole || req.userRole) === 'dev';
   const canSupervise = canManageOperationalPermissions(req) && !isDev;
-  const devUsersPage = path === '/admin/users' && canManageUserModulePermissions(req);
-  const supervisorUsersPage = path === '/admin/locations/users' && canSupervise;
-  if ((!devUsersPage && !supervisorUsersPage) || html.includes(PAYROLL_USERS_SCRIPT)) return html;
+  const usersPageAllowed = path === '/admin/users' && canManageUserModulePermissions(req);
+  if (!usersPageAllowed || html.includes(PAYROLL_USERS_SCRIPT)) return html;
   const canManageTestWorkspace = isDev;
   const operationalActorRole = isDev ? 'dev' : canSupervise ? 'supervisor' : 'none';
   return html.replace(
