@@ -236,8 +236,8 @@
         },
         {
           "path": "src/routes/interviewOutreachManagement.js",
-          "role": "observability",
-          "reason": "Registra movimientos administrativos de Gestión de entrevistas después de la persistencia canónica; no decide el estado actual"
+          "role": "admin",
+          "reason": "Registra movimientos administrativos de Gestión de entrevistas después de la persistencia canónica; solo aporta observabilidad y no decide el estado actual"
         }
       ]
     },
