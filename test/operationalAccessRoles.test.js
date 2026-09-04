@@ -206,7 +206,7 @@ test('catálogo marca una sola raíz visible por módulo', () => {
   assert.deepEqual(roots.map((item) => item.moduleLabel), [
     'Operaciones / Despacho',
     'Asistencia',
-    'Asistencia y Gestión de Tiempo'
+    'Gestión de Tiempo'
   ]);
 });
 
