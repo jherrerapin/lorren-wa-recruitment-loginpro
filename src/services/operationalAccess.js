@@ -87,12 +87,10 @@ const ROLE_BASE_PERMISSIONS = Object.freeze({
     OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE,
     OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW,
     OPERATIONAL_CAPABILITY.ATTENDANCE_MANAGE,
-    OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT,
     OPERATIONAL_CAPABILITY.ATTENDANCE_CONFIG,
     OPERATIONAL_CAPABILITY.TIME_VIEW,
     OPERATIONAL_CAPABILITY.TIME_EXPORT,
     OPERATIONAL_CAPABILITY.TIME_COMPENSATION,
-    OPERATIONAL_CAPABILITY.TIME_IMPORT,
     OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS
   ])
 });
@@ -167,9 +165,9 @@ function configFromPermissionStates(role, permissionStates, previous = null, edi
   const denials = new Set(normalizeCapabilities(previous?.denials));
 
   for (const capability of editable) {
+    if (!states.has(capability)) continue;
     grants.delete(capability);
     denials.delete(capability);
-    if (!states.has(capability)) continue;
     const state = states.get(capability);
     if (state === null || state === 'inherit') continue;
     if (state === true && !base.has(capability)) grants.add(capability);
@@ -205,7 +203,7 @@ async function latestConfigEvent(prisma, userId) {
       entityId: userId,
       action: OPERATIONAL_ACCESS_ACTION
     },
-    orderBy: { createdAt: 'desc' }
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
   });
 }
 
