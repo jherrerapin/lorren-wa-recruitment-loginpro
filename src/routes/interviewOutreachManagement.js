@@ -26,10 +26,7 @@ import {
 } from '../services/interviewBookingStateService.js';
 
 const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
-const MANAGEMENT_SCRIPT = [
-  '<script src="/public/interview-outreach-management.js" defer data-interview-outreach-management></script>',
-  '<script src="/public/interview-reviewed-candidates.js" defer data-interview-reviewed-candidates></script>'
-].join('\n');
+const MANAGEMENT_SCRIPT = '<script src="/public/interview-outreach-management.js" defer data-interview-outreach-management></script>';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
