@@ -242,6 +242,17 @@ test('el formulario acepta coma o punto y presenta la calificación en formato e
   assert.match(uiSource, /formatInterviewRating\(entry\.evaluation\?\.rating\)/);
 });
 
+test('la UI evita textos explicativos redundantes y conserva ayudas con reglas reales', () => {
+  assert.doesNotMatch(uiSource, /Coordina entrevistas y consulta el histórico evaluado/);
+  assert.doesNotMatch(uiSource, /Asistencia real, evaluación e información complementaria/);
+  assert.doesNotMatch(uiSource, /Registra aquí si asistió o no asistió/);
+  assert.doesNotMatch(uiSource, /La etiqueta es global para Reclutamiento/);
+  assert.doesNotMatch(uiSource, /Al crearlo quedará disponible para todas las vacantes/);
+  assert.doesNotMatch(uiSource, /Campo agregado para todas las vacantes/);
+  assert.doesNotMatch(uiSource, /ic-subtitle/);
+  assert.match(uiSource, /Escala de 1 a 5\. Usa coma o punto decimal\./);
+});
+
 test('información complementaria permite editar etiqueta global y valor individual en el mismo formulario', () => {
   assert.match(uiSource, /managementField\('Etiqueta', labelInput\)/);
   assert.match(uiSource, /managementField\('Valor', input\)/);
@@ -250,7 +261,6 @@ test('información complementaria permite editar etiqueta global y valor individ
   assert.match(uiSource, /label: labelInput\.value/);
   assert.match(uiSource, /value: input\.value/);
   assert.match(uiSource, /Guardar evaluación e información/);
-  assert.match(uiSource, /La etiqueta es global para Reclutamiento; el valor pertenece solo a este candidato\./);
   assert.match(uiSource, /interview_complementary_label_conflict/);
 });
 
