@@ -1,6 +1,6 @@
 'use strict';
 
-const BIOMETRIC_ASSET_RELEASE = '20260814-worker-portal-biometric-v10';
+const BIOMETRIC_ASSET_RELEASE = '20260904-worker-portal-camera-diagnostics-v11';
 const WORKER_PORTAL_USER_AGENT = String(window.navigator.userAgent || '');
 const LOAD_WORKER_PORTAL_HANDOFF = /Android/i.test(WORKER_PORTAL_USER_AGENT);
 
@@ -23,6 +23,129 @@ if ('serviceWorker' in navigator) {
     .then((registration) => registration?.update?.())
     .catch(() => {});
 }
+
+(() => {
+  const PORTAL_PATH_PATTERN = /^\/operaciones\/portal\/?$/;
+  const FAILURE_QUEUE_KEY = 'lorren-attendance-failure-v1';
+  const FAILURE_QUEUE_LIMIT = 40;
+  const CAMERA_FAILURES = Object.freeze({
+    NotAllowedError: { internalCode: 'camera_permission_denied', reportCode: 'client_camera_permission_denied' },
+    PermissionDeniedError: { internalCode: 'camera_permission_denied', reportCode: 'client_camera_permission_denied' },
+    NotReadableError: { internalCode: 'camera_in_use', reportCode: 'client_camera_in_use' },
+    TrackStartError: { internalCode: 'camera_in_use', reportCode: 'client_camera_in_use' },
+    NotFoundError: { internalCode: 'camera_not_found', reportCode: 'client_camera_not_found' },
+    DevicesNotFoundError: { internalCode: 'camera_not_found', reportCode: 'client_camera_not_found' },
+    OverconstrainedError: { internalCode: 'camera_constraints_unsupported', reportCode: 'client_camera_constraints_unsupported' },
+    ConstraintNotSatisfiedError: { internalCode: 'camera_constraints_unsupported', reportCode: 'client_camera_constraints_unsupported' },
+    AbortError: { internalCode: 'camera_start_aborted', reportCode: 'client_camera_start_aborted' },
+    SecurityError: { internalCode: 'camera_security_blocked', reportCode: 'client_camera_security_blocked' },
+    TypeError: { internalCode: 'camera_constraints_unsupported', reportCode: 'client_camera_constraints_unsupported' }
+  });
+  const INTERNAL_TO_REPORT = Object.freeze(Object.fromEntries(
+    Object.values(CAMERA_FAILURES).map((definition) => [definition.internalCode, definition.reportCode])
+  ));
+
+  if (!PORTAL_PATH_PATTERN.test(window.location.pathname)) return;
+
+  let lastMarkContext = null;
+
+  function newDiagnosticAttemptId() {
+    if (window.crypto?.randomUUID) return `camera_${window.crypto.randomUUID()}`;
+    return `camera_${Date.now()}_${Math.random().toString(36).slice(2, 18)}`;
+  }
+
+  function failureRecordKey(record) {
+    return [record?.assignmentId, record?.markType, record?.clientAttemptId, record?.errorCode].join(':');
+  }
+
+  function loadFailureQueue() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(FAILURE_QUEUE_KEY) || '[]');
+      return Array.isArray(parsed) ? parsed.filter((record) => (
+        record
+        && typeof record.assignmentId === 'string'
+        && typeof record.markType === 'string'
+        && typeof record.clientAttemptId === 'string'
+        && typeof record.errorCode === 'string'
+        && typeof record.occurredAt === 'string'
+      )).slice(-FAILURE_QUEUE_LIMIT) : [];
+    } catch (_error) {
+      return [];
+    }
+  }
+
+  function queueOfflineCameraFailure(error) {
+    if (navigator.onLine || !lastMarkContext?.assignmentId || !lastMarkContext?.markType) return false;
+    const reportCode = INTERNAL_TO_REPORT[String(error?.message || '')];
+    if (!reportCode) return false;
+    const record = {
+      assignmentId: lastMarkContext.assignmentId,
+      markType: lastMarkContext.markType,
+      clientAttemptId: newDiagnosticAttemptId(),
+      errorCode: reportCode,
+      occurredAt: new Date().toISOString()
+    };
+    try {
+      const queue = loadFailureQueue();
+      const key = failureRecordKey(record);
+      if (!queue.some((item) => failureRecordKey(item) === key)) queue.push(record);
+      window.localStorage.setItem(FAILURE_QUEUE_KEY, JSON.stringify(queue.slice(-FAILURE_QUEUE_LIMIT)));
+      return true;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function normalizeCameraError(error) {
+    const existingCode = String(error?.message || '');
+    if (INTERNAL_TO_REPORT[existingCode]) return error;
+    const definition = CAMERA_FAILURES[String(error?.name || '')];
+    if (!definition) return error;
+    const normalized = new Error(definition.internalCode);
+    normalized.name = 'LorrenCameraError';
+    normalized.cause = error;
+    return normalized;
+  }
+
+  document.addEventListener('click', (event) => {
+    const button = event.target instanceof Element
+      ? event.target.closest('.mark-button[data-assignment-id][data-mark-type]')
+      : null;
+    if (!button) return;
+    const assignmentId = String(button.dataset.assignmentId || '').trim();
+    const markType = String(button.dataset.markType || '').trim().toUpperCase();
+    if (!assignmentId || !markType) return;
+    lastMarkContext = { assignmentId, markType };
+  }, { capture: true });
+
+  const mediaDevices = navigator.mediaDevices;
+  const originalGetUserMedia = mediaDevices?.getUserMedia?.bind(mediaDevices);
+  if (originalGetUserMedia) {
+    const wrappedGetUserMedia = async (constraints) => {
+      try {
+        return await originalGetUserMedia(constraints);
+      } catch (error) {
+        const normalized = normalizeCameraError(error);
+        queueOfflineCameraFailure(normalized);
+        throw normalized;
+      }
+    };
+    try {
+      mediaDevices.getUserMedia = wrappedGetUserMedia;
+    } catch (_error) {
+      try {
+        Object.defineProperty(mediaDevices, 'getUserMedia', {
+          configurable: true,
+          value: wrappedGetUserMedia
+        });
+      } catch (_ignored) {
+        // Si el navegador impide envolver la API, el flujo existente conserva el comportamiento previo.
+      }
+    }
+  }
+
+  window.LorrenCameraDiagnostics = Object.freeze({ normalizeCameraError });
+})();
 
 (() => {
   const PORTAL_PATH_PATTERN = /^\/operaciones\/portal\/?$/;
