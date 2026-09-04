@@ -33,7 +33,7 @@
       .ic-save{min-height:36px;border:0;border-radius:7px;padding:7px 12px;background:#1d4f7a;color:#fff;font-weight:800;cursor:pointer}.ic-save:disabled{opacity:.6;cursor:default}.ic-save-secondary{background:#475569}
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
-      .ic-manual-today-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
+      .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
       @media(max-width:900px){.ic-row{grid-template-columns:1fr 1fr}.ic-save{width:100%}.ic-day-grid{grid-template-columns:1fr 1fr}}
       @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}.ic-tabs{margin-left:-2px;margin-right:-2px}.ic-tab{min-height:40px}}
     `;
@@ -73,17 +73,8 @@
     }).format(date);
   }
 
-  function bogotaToday() {
-    return bogotaDay(new Date());
-  }
-
   function selectedDashboardDate() {
     return String(document.getElementById('datePicker')?.value || '').trim();
-  }
-
-  function isTodayDashboard() {
-    const selected = selectedDashboardDate();
-    return Boolean(selected) && selected === bogotaToday();
   }
 
   function toBogotaDateTimeLocal(value) {
@@ -155,17 +146,16 @@
     return Boolean(entry?.booking?.scheduledAt) && entry?.booking?.slotId == null;
   }
 
-  function splitCoordinationEntries(entries = [], includeToday = false) {
-    const result = { pending: [], today: [], scheduled: [], declined: [] };
+  function splitCoordinationEntries(entries = [], selectedDay = '') {
+    const result = { pending: [], selected: [], scheduled: [], declined: [] };
     for (const entry of entries) {
       const status = entry?.invitation?.status || 'PENDING';
       if (status === 'DECLINED') {
         result.declined.push(entry);
       } else if (status === 'CONFIRMED' && entry?.booking?.scheduledAt) {
-        const belongsToToday = includeToday
-          && isManualBooking(entry)
-          && bogotaDay(entry.booking.scheduledAt) === bogotaToday();
-        if (belongsToToday) result.today.push(entry);
+        const bookingDay = bogotaDay(entry.booking.scheduledAt);
+        if (selectedDay && bookingDay !== selectedDay) continue;
+        if (selectedDay && isManualBooking(entry)) result.selected.push(entry);
         else result.scheduled.push(entry);
       } else {
         result.pending.push(entry);
@@ -440,21 +430,21 @@
     return panel;
   }
 
-  async function appendManualTodayGroup(board, entries, vacancyId, refresh, activeKey) {
+  async function appendManualSelectedDateGroup(board, entries, vacancyId, refresh, activeKey) {
     if (!entries.length) return;
 
-    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, 'today', activeKey);
-    group.dataset.manualInterviewToday = 'true';
+    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, 'selected', activeKey);
+    group.dataset.manualInterviewSelectedDate = 'true';
     const head = element('div', 'ic-group-head');
     head.append(
-      element('span', 'ic-group-title', 'Entrevistas manuales — Hoy'),
+      element('span', 'ic-group-title', 'Entrevistas manuales — fecha seleccionada'),
       element('span', 'ic-group-count', entries.length)
     );
     group.appendChild(head);
 
     const list = element('div', 'ic-list');
     for (const entry of entries) {
-      const item = element('div', 'ic-manual-today-item');
+      const item = element('div', 'ic-manual-day-item');
       item.appendChild(renderRow(entry, vacancyId, refresh));
       try {
         const response = await api(`/candidates/${encodeURIComponent(entry.candidateId)}`);
@@ -508,7 +498,7 @@
 
     const definitions = [
       ['pending', 'Por gestionar', groups.pending.length],
-      ...(groups.today.length ? [['today', 'Hoy', groups.today.length]] : []),
+      ...(groups.selected.length ? [['selected', 'Del día', groups.selected.length]] : []),
       ['scheduled', 'Programadas', groups.scheduled.length],
       ['declined', 'No interesados', groups.declined.length]
     ];
@@ -597,8 +587,9 @@
       board.dataset.interviewCoordinationBoard = vacancyId;
       board.replaceChildren();
 
-      const groups = splitCoordinationEntries(entries, isTodayDashboard());
-      const availableKeys = ['pending', ...(groups.today.length ? ['today'] : []), 'scheduled', 'declined'];
+      const selectedDay = selectedDashboardDate();
+      const groups = splitCoordinationEntries(entries, selectedDay);
+      const availableKeys = ['pending', ...(groups.selected.length ? ['selected'] : []), 'scheduled', 'declined'];
       const activeKey = availableKeys.includes(previousActiveKey) ? previousActiveKey : 'pending';
       board.dataset.activeCoordinationTab = activeKey;
 
@@ -606,7 +597,7 @@
       const titleGroup = element('div');
       titleGroup.append(
         element('h3', 'ic-title', 'Coordinación manual de entrevistas'),
-        element('p', 'ic-subtitle', 'Navega por cada etapa sin recorrer toda la vacante. Este flujo sigue independiente de la agenda automática y no requiere activar “Habilitar entrevistas”.')
+        element('p', 'ic-subtitle', 'Las entrevistas confirmadas respetan la fecha seleccionada arriba. Pendientes y no interesados permanecen como bandejas globales.')
       );
       head.appendChild(titleGroup);
       board.appendChild(head);
@@ -624,14 +615,14 @@
         'pending',
         activeKey
       );
-      await appendManualTodayGroup(board, groups.today, vacancyId, refresh, activeKey);
+      await appendManualSelectedDateGroup(board, groups.selected, vacancyId, refresh, activeKey);
       appendCoordinationGroup(
         board,
-        'Entrevistas programadas',
+        'Entrevistas programadas para la fecha seleccionada',
         groups.scheduled,
         vacancyId,
         refresh,
-        'Todavía no hay entrevistas con fecha y hora asignadas.',
+        'No hay entrevistas automáticas programadas para la fecha seleccionada.',
         'scheduled',
         activeKey
       );
