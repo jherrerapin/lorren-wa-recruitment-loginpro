@@ -144,6 +144,19 @@ test('el catálogo expone causas concretas en español y no acepta códigos inve
   assert.equal(timeout.clientReportable, true);
   assert.equal(timeout.phaseLabel, 'Ubicación');
   assert.equal(timeout.descriptionEs, 'El GPS agotó 20 segundos sin entregar una ubicación para la marcación.');
+
+  const cameraPermission = attendanceMarkFailureDefinition('client_camera_permission_denied');
+  assert.equal(cameraPermission.clientReportable, true);
+  assert.equal(cameraPermission.phaseLabel, 'Cámara');
+  assert.equal(cameraPermission.descriptionEs, 'El permiso de cámara estaba bloqueado o fue rechazado en el teléfono o navegador del auxiliar.');
+
+  const cameraInUse = attendanceMarkFailureDefinition('client_camera_in_use');
+  assert.equal(cameraInUse.clientReportable, true);
+  assert.equal(cameraInUse.descriptionEs, 'La cámara estaba siendo utilizada por otra aplicación o el teléfono no pudo entregarla al navegador.');
+  assert.equal(attendanceMarkFailureDefinition('client_camera_not_found')?.clientReportable, true);
+  assert.equal(attendanceMarkFailureDefinition('client_camera_constraints_unsupported')?.clientReportable, true);
+  assert.equal(attendanceMarkFailureDefinition('client_camera_start_aborted')?.clientReportable, true);
+  assert.equal(attendanceMarkFailureDefinition('client_camera_security_blocked')?.clientReportable, true);
   assert.equal(attendanceMarkFailureDefinition('error_inventado_por_auxiliar'), null);
 });
 
@@ -281,12 +294,28 @@ test('el panel de asistencia proyecta solo la explicación española guardada en
 });
 
 test('el flujo cliente conserva la auditoría técnica y la vista la presenta en lenguaje sencillo', () => {
+  const loaderSource = fs.readFileSync(new URL('../src/public/worker-biometric.js', import.meta.url), 'utf8');
   const flowSource = fs.readFileSync(new URL('../src/public/worker-portal-biometric-flow.js', import.meta.url), 'utf8');
   const viewSource = fs.readFileSync(new URL('../src/views/operacionesAsistencia.ejs', import.meta.url), 'utf8');
+
+  assert.match(loaderSource, /NotAllowedError:[\s\S]*camera_permission_denied/);
+  assert.match(loaderSource, /NotReadableError:[\s\S]*camera_in_use/);
+  assert.match(loaderSource, /NotFoundError:[\s\S]*camera_not_found/);
+  assert.match(loaderSource, /OverconstrainedError:[\s\S]*camera_constraints_unsupported/);
+  assert.match(loaderSource, /AbortError:[\s\S]*camera_start_aborted/);
+  assert.match(loaderSource, /SecurityError:[\s\S]*camera_security_blocked/);
+  assert.match(loaderSource, /lorren-attendance-failure-v1/);
+  assert.match(loaderSource, /queueOfflineCameraFailure/);
 
   assert.match(flowSource, /ATTENDANCE_FAILURE_QUEUE_KEY/);
   assert.match(flowSource, /client_location_timeout/);
   assert.match(flowSource, /client_network_request_failed/);
+  assert.match(flowSource, /client_camera_permission_denied/);
+  assert.match(flowSource, /client_camera_in_use/);
+  assert.match(flowSource, /client_camera_not_found/);
+  assert.match(flowSource, /client_camera_constraints_unsupported/);
+  assert.match(flowSource, /client_camera_start_aborted/);
+  assert.match(flowSource, /client_camera_security_blocked/);
   assert.match(flowSource, /intentos-fallidos/);
   assert.match(flowSource, /flushAttendanceFailureQueue/);
   assert.match(flowSource, /body:\s*JSON\.stringify\(\{\s*markType:\s*record\.markType,\s*clientAttemptId:\s*record\.clientAttemptId,\s*errorCode:\s*record\.errorCode,\s*occurredAt:\s*record\.occurredAt/s);
@@ -297,6 +326,11 @@ test('el flujo cliente conserva la auditoría técnica y la vista la presenta en
   assert.match(viewSource, /friendlyFailureSource\(attempt\.sourceLabel\)/);
   assert.match(viewSource, /friendlyFailureDescription\(attempt\)/);
   assert.match(viewSource, /La ubicación estaba fuera del rango permitido para marcar\./);
+  assert.match(viewSource, /El permiso de cámara estaba bloqueado o rechazado en el teléfono o navegador\./);
+  assert.match(viewSource, /La cámara estaba ocupada por otra aplicación o el teléfono no pudo entregarla al navegador\./);
+  assert.match(viewSource, /El teléfono o navegador no encontró una cámara disponible\./);
+  assert.match(viewSource, /La cámara de este teléfono no pudo iniciar con una configuración compatible\./);
+  assert.match(viewSource, /La configuración de seguridad del navegador bloqueó el acceso a la cámara\./);
   assert.match(viewSource, /Detectado por el sistema/);
   assert.doesNotMatch(viewSource, /<span><%= attempt\.phaseLabel %> · <%= attempt\.sourceLabel %><\/span>/);
   assert.doesNotMatch(viewSource, /<p><%= attempt\.description %><\/p>/);

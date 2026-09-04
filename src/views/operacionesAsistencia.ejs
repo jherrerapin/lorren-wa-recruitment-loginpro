@@ -151,6 +151,12 @@
         return 'No se pudo validar la ubicación para completar el registro.';
       }
       if (phase === 'Cámara') {
+        if (description.includes('permiso de cámara') || description.includes('bloqueado') || description.includes('rechazado')) return 'El permiso de cámara estaba bloqueado o rechazado en el teléfono o navegador.';
+        if (description.includes('otra aplicación') || description.includes('entregarla al navegador')) return 'La cámara estaba ocupada por otra aplicación o el teléfono no pudo entregarla al navegador.';
+        if (description.includes('no encontró una cámara')) return 'El teléfono o navegador no encontró una cámara disponible.';
+        if (description.includes('configuración compatible')) return 'La cámara de este teléfono no pudo iniciar con una configuración compatible.';
+        if (description.includes('interrumpió la apertura')) return 'El teléfono interrumpió la apertura de la cámara antes de mostrar imagen.';
+        if (description.includes('seguridad del navegador')) return 'La configuración de seguridad del navegador bloqueó el acceso a la cámara.';
         if (description.includes('abrirse')) return 'No se pudo abrir la cámara.';
         if (description.includes('pausó')) return 'La cámara se pausó durante la validación.';
         return 'La cámara no pudo obtener una imagen válida para continuar.';

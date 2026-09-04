@@ -33,7 +33,7 @@
   if (!dialog || !resultBox || !submitButton) return;
 
   const MAX_AUTOMATIC_ATTEMPTS = 1;
-  const FLOW_RELEASE = '20260828-attendance-failure-audit-v1';
+  const FLOW_RELEASE = '20260904-camera-diagnostics-v2';
   const ATTENDANCE_FAILURE_QUEUE_KEY = 'lorren-attendance-failure-v1';
   const ATTENDANCE_FAILURE_QUEUE_LIMIT = 40;
   const CLIENT_FAILURE_CODES = Object.freeze({
@@ -50,6 +50,12 @@
     native_bridge_invalid_response: 'client_native_bridge_invalid_response',
     native_bridge_failed: 'client_native_bridge_failed',
     camera_unavailable: 'client_camera_unavailable',
+    camera_permission_denied: 'client_camera_permission_denied',
+    camera_in_use: 'client_camera_in_use',
+    camera_not_found: 'client_camera_not_found',
+    camera_constraints_unsupported: 'client_camera_constraints_unsupported',
+    camera_start_aborted: 'client_camera_start_aborted',
+    camera_security_blocked: 'client_camera_security_blocked',
     camera_stream_unavailable: 'client_camera_stream_unavailable',
     camera_stream_muted: 'client_camera_stream_muted',
     biometric_page_not_visible: 'client_biometric_page_not_visible',
@@ -368,6 +374,12 @@
     const code = errorCode(error);
     const messages = {
       camera_unavailable: 'No fue posible abrir la cámara frontal.',
+      camera_permission_denied: 'El permiso de cámara está bloqueado o fue rechazado en este teléfono o navegador. Autorízalo e intenta nuevamente.',
+      camera_in_use: 'La cámara está ocupada por otra aplicación o el teléfono no pudo entregarla al navegador. Cierra otras aplicaciones que usen la cámara e intenta nuevamente.',
+      camera_not_found: 'El teléfono o navegador no encontró una cámara disponible.',
+      camera_constraints_unsupported: 'La cámara de este teléfono no pudo iniciar con una configuración compatible.',
+      camera_start_aborted: 'El teléfono interrumpió la apertura de la cámara antes de mostrar imagen. Intenta nuevamente.',
+      camera_security_blocked: 'La configuración de seguridad del navegador bloqueó el acceso a la cámara.',
       camera_stream_unavailable: 'La cámara no entregó imagen. Cierra otras aplicaciones que puedan estar usándola.',
       camera_stream_muted: 'La cámara quedó pausada por el teléfono. Vuelve a intentarlo con la pantalla activa.',
       biometric_page_not_visible: 'Mantén esta pantalla visible durante la validación.',
