@@ -161,8 +161,25 @@
   }
 
   function splitCoordinationEntries(entries = [], selectedDay = '') {
-    const result = { pending: [], selected: [], scheduled: [], declined: [] };
+    const result = {
+      pending: [],
+      selected: [],
+      evaluation: [],
+      scheduled: [],
+      noShow: [],
+      declined: []
+    };
     for (const entry of entries) {
+      const attendanceStatus = entry?.attendance?.status || 'PENDING';
+      if (attendanceStatus === 'ATTENDED') {
+        result.evaluation.push(entry);
+        continue;
+      }
+      if (attendanceStatus === 'NO_SHOW') {
+        result.noShow.push(entry);
+        continue;
+      }
+
       const status = entry?.invitation?.status || 'PENDING';
       if (status === 'DECLINED') {
         result.declined.push(entry);
@@ -471,7 +488,12 @@
         });
         status.textContent = 'Asistencia actualizada.';
         status.dataset.kind = 'success';
-        await refresh();
+        const destinationTab = attendance.value === 'ATTENDED'
+          ? 'evaluation'
+          : attendance.value === 'NO_SHOW'
+            ? 'no-show'
+            : 'selected';
+        await refresh(destinationTab);
       } catch (error) {
         status.textContent = friendlyError(error);
         status.dataset.kind = 'error';
@@ -507,7 +529,7 @@
           : 'Escala de 1 a 5. Usa coma o punto decimal.';
         status.textContent = 'Evaluación e información actualizadas.';
         status.dataset.kind = 'success';
-        await refresh();
+        await refresh('interviewed');
       } catch (error) {
         status.textContent = friendlyError(error);
         status.dataset.kind = 'error';
@@ -689,14 +711,21 @@
     board.appendChild(group);
   }
 
-  async function appendManualSelectedDateGroup(board, entries, vacancyId, refresh, activeKey) {
+  async function appendManagedInterviewGroup(
+    board,
+    entries,
+    vacancyId,
+    refresh,
+    activeKey,
+    { tabKey, title, markSelectedDate = false } = {}
+  ) {
     if (!entries.length) return;
 
-    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, 'selected', activeKey);
-    group.dataset.manualInterviewSelectedDate = 'true';
+    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, tabKey, activeKey);
+    if (markSelectedDate) group.dataset.manualInterviewSelectedDate = 'true';
     const head = element('div', 'ic-group-head');
     head.append(
-      element('span', 'ic-group-title', 'Entrevistas manuales — fecha seleccionada'),
+      element('span', 'ic-group-title', title),
       element('span', 'ic-group-count', entries.length)
     );
     group.appendChild(head);
@@ -711,7 +740,7 @@
       } catch (error) {
         const message = error?.status === 404
           ? 'La gestión complementaria de esta entrevista no está disponible.'
-          : 'No fue posible cargar la gestión del día de entrevista.';
+          : 'No fue posible cargar la gestión de entrevista.';
         item.appendChild(element('div', 'ic-empty', message));
       }
       list.appendChild(item);
@@ -758,7 +787,9 @@
     const definitions = [
       ['pending', 'Por gestionar', groups.pending.length],
       ...(groups.selected.length ? [['selected', 'Del día', groups.selected.length]] : []),
+      ...(groups.evaluation.length ? [['evaluation', 'Por evaluar', groups.evaluation.length]] : []),
       ['scheduled', 'Programadas', groups.scheduled.length],
+      ...(groups.noShow.length ? [['no-show', 'No asistieron', groups.noShow.length]] : []),
       ['declined', 'No interesados', groups.declined.length],
       ['interviewed', 'Entrevistados', interviewed.length]
     ];
@@ -827,7 +858,7 @@
     if (remainingRows === 0) found.section.hidden = true;
   }
 
-  async function renderBoard(panel) {
+  async function renderBoard(panel, fallbackActiveKey = null) {
     const vacancyId = String(panel.dataset.vacancyPanel || '').trim();
     if (!vacancyId) return;
 
@@ -850,11 +881,44 @@
 
       const selectedDay = selectedDashboardDate();
       const groups = splitCoordinationEntries(entries, selectedDay);
-      const availableKeys = ['pending', ...(groups.selected.length ? ['selected'] : []), 'scheduled', 'declined', 'interviewed'];
-      const defaultActiveKey = entries.length ? 'pending' : 'interviewed';
+      const visibleCoordinationCount = groups.pending.length
+        + groups.selected.length
+        + groups.evaluation.length
+        + groups.scheduled.length
+        + groups.noShow.length
+        + groups.declined.length;
+      if (!visibleCoordinationCount && !interviewed.length) {
+        current?.remove();
+        return;
+      }
+
+      const availableKeys = [
+        'pending',
+        ...(groups.selected.length ? ['selected'] : []),
+        ...(groups.evaluation.length ? ['evaluation'] : []),
+        'scheduled',
+        ...(groups.noShow.length ? ['no-show'] : []),
+        'declined',
+        'interviewed'
+      ];
+      const defaultActiveKey = groups.pending.length
+        ? 'pending'
+        : groups.selected.length
+          ? 'selected'
+          : groups.evaluation.length
+            ? 'evaluation'
+            : groups.scheduled.length
+              ? 'scheduled'
+              : groups.noShow.length
+                ? 'no-show'
+                : groups.declined.length
+                  ? 'declined'
+                  : 'interviewed';
       const activeKey = previousActiveKey && availableKeys.includes(previousActiveKey)
         ? previousActiveKey
-        : defaultActiveKey;
+        : fallbackActiveKey && availableKeys.includes(fallbackActiveKey)
+          ? fallbackActiveKey
+          : defaultActiveKey;
       board.dataset.activeCoordinationTab = activeKey;
 
       const head = element('div', 'ic-head');
@@ -865,7 +929,7 @@
 
       installTabNavigation(board, vacancyId, groups, interviewed, activeKey);
 
-      const refresh = () => renderBoard(panel);
+      const refresh = (nextFallbackActiveKey = null) => renderBoard(panel, nextFallbackActiveKey);
       appendCoordinationGroup(
         board,
         'Pendientes de respuesta',
@@ -876,7 +940,29 @@
         'pending',
         activeKey
       );
-      await appendManualSelectedDateGroup(board, groups.selected, vacancyId, refresh, activeKey);
+      await appendManagedInterviewGroup(
+        board,
+        groups.selected,
+        vacancyId,
+        refresh,
+        activeKey,
+        {
+          tabKey: 'selected',
+          title: 'Entrevistas manuales — fecha seleccionada',
+          markSelectedDate: true
+        }
+      );
+      await appendManagedInterviewGroup(
+        board,
+        groups.evaluation,
+        vacancyId,
+        refresh,
+        activeKey,
+        {
+          tabKey: 'evaluation',
+          title: 'Pendientes de evaluación'
+        }
+      );
       appendCoordinationGroup(
         board,
         'Entrevistas programadas para la fecha seleccionada',
@@ -886,6 +972,17 @@
         'No hay entrevistas automáticas programadas para la fecha seleccionada.',
         'scheduled',
         activeKey
+      );
+      await appendManagedInterviewGroup(
+        board,
+        groups.noShow,
+        vacancyId,
+        refresh,
+        activeKey,
+        {
+          tabKey: 'no-show',
+          title: 'No asistieron'
+        }
       );
       appendCoordinationGroup(
         board,
