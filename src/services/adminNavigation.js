@@ -205,7 +205,7 @@ function dropdownMenuHrefs(navHtml) {
 }
 
 function attributeValue(attributes, name) {
-  return attributes.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']+)["']`, 'i'))?.[1] || null;
+  return attributes.match(new RegExp(`\\b${name}\\s*=\\s*["']([^"']*)["']`, 'i'))?.[1] || null;
 }
 
 function hasClassToken(attributes, token) {
