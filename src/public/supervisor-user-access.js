@@ -23,12 +23,6 @@
     return payload;
   }
 
-  function roleLabel(role) {
-    if (role === 'COORDINADOR') return 'Coordinador';
-    if (role === 'CONSULTA') return 'Consulta';
-    return role || 'Sin rol';
-  }
-
   function normalizeModuleAccess(value = {}) {
     const attendance = value.attendance === true;
     return {
@@ -51,6 +45,7 @@
     const editable = new Set(editableCapabilities || []);
     return (capabilities || []).filter((item) => (
       item.moduleAccess !== true
+      && item.supervisorOnly !== true
       && item.moduleAccessKey === moduleKey
       && editable.has(item.key)
     ));
@@ -71,7 +66,7 @@
     text.append(strong);
     if (definition.sensitive) {
       const small = document.createElement('small');
-      small.textContent = 'Acción sensible autorizada por DEV';
+      small.textContent = 'Acción sensible';
       text.append(small);
     }
 
@@ -112,7 +107,7 @@
     if (!functions.length) {
       const empty = document.createElement('small');
       empty.className = 'hint';
-      empty.textContent = 'DEV no delegó funciones internas adicionales de este módulo.';
+      empty.textContent = 'Este módulo no tiene funciones internas adicionales configurables.';
       children.append(empty);
     }
     fieldset.append(children);
@@ -178,10 +173,9 @@
   }
 
   function errorMessage(code) {
-    if (code === 'operational_module_access_not_delegable') return 'No tienes autorización para cambiar uno de esos módulos.';
-    if (code === 'operational_access_capability_not_delegable') return 'DEV no autorizó una de las funciones seleccionadas.';
     if (code === 'operational_access_self_forbidden') return 'No puedes modificar tus propios permisos.';
     if (code === 'operational_access_supervisor_target_forbidden') return 'Solo DEV puede modificar otro Supervisor.';
+    if (code === 'operational_role_dev_required') return 'Solo DEV puede cambiar roles.';
     return 'No fue posible guardar los permisos operativos.';
   }
 
@@ -190,7 +184,7 @@
     details.className = 'supervisor-user';
 
     const summary = document.createElement('summary');
-    summary.textContent = `${user.displayName || user.username} · ${roleLabel(user.role)}`;
+    summary.textContent = `${user.displayName || user.username} · Consulta`;
     details.append(summary);
 
     const body = document.createElement('div');
@@ -216,10 +210,10 @@
     save.type = 'button';
     save.className = 'btn btn-primary';
     save.textContent = 'Guardar módulos y funciones';
-    save.disabled = roots.length === 0 && !(payload.editableCapabilities || []).length;
+    save.disabled = roots.length === 0;
     const status = document.createElement('small');
     status.className = 'hint';
-    if (save.disabled) status.textContent = 'DEV no habilitó módulos o funciones para delegar.';
+    if (save.disabled) status.textContent = 'No hay módulos operativos configurables.';
     actions.append(save, status);
     body.append(actions);
 
@@ -261,7 +255,7 @@
       if (!users.length) {
         const empty = document.createElement('div');
         empty.className = 'empty';
-        empty.textContent = 'No hay usuarios Consulta o Coordinador disponibles para administrar.';
+        empty.textContent = 'No hay usuarios Consulta disponibles para administrar.';
         host.append(empty);
         return;
       }

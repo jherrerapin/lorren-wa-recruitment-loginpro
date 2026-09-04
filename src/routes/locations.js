@@ -16,7 +16,8 @@ import {
   listOperationalAccess,
   normalizeOperationalModuleAccess,
   operationalAccessCatalog,
-  setOperationalAccess
+  setOperationalAccess,
+  supervisorAssignableOperationalCapabilities
 } from '../services/operationalAccess.js';
 
 function sessionAuth(req, res, next) {
@@ -97,7 +98,6 @@ function canEditOperationalTarget(req, access) {
   const actorId = req.userId || req.session?.userId || null;
   if (actorId && access.userId === actorId) return false;
   if (!access.configured || access.role === 'SUPERVISOR') return false;
-  if (isProtectedRecruiterProfile(access)) return false;
   return true;
 }
 
@@ -161,18 +161,16 @@ async function moduleAccessForUser(prisma, user) {
 
 function editableOperationalModules(req, catalog) {
   const roots = (catalog.capabilities || []).filter((item) => item.moduleAccess === true && item.moduleAccessKey);
-  if (req.userRole === 'dev') return roots.map((item) => item.moduleAccessKey);
-  const effective = new Set(req.operationalEffectivePermissions || req.session?.operationalEffectivePermissions || []);
-  return roots.filter((item) => effective.has(item.key)).map((item) => item.moduleAccessKey);
+  if (req.userRole === 'dev' || canManageOperationalPermissions(req)) return roots.map((item) => item.moduleAccessKey);
+  return [];
 }
 
 function editableOperationalCapabilities(req, catalog) {
   if (req.userRole === 'dev') return catalog.capabilities.map((item) => item.key);
-  const allowed = new Set(req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || []);
-  const modules = new Set(editableOperationalModules(req, catalog));
+  if (!canManageOperationalPermissions(req)) return [];
+  const assignable = new Set(supervisorAssignableOperationalCapabilities());
   return catalog.capabilities
-    .filter((item) => item.moduleAccess !== true && allowed.has(item.key))
-    .filter((item) => !item.moduleAccessKey || modules.has(item.moduleAccessKey))
+    .filter((item) => item.moduleAccess !== true && item.supervisorOnly !== true && assignable.has(item.key))
     .map((item) => item.key);
 }
 
@@ -221,7 +219,7 @@ function operationalConfigFromExisting(access, moduleAccess) {
   return {
     role: access.role,
     permissions: buildOperationalPermissionStates(access.role, access.effectivePermissions || []),
-    delegablePermissions: access.delegablePermissions || [],
+    delegablePermissions: [],
     moduleAccess
   };
 }
@@ -686,7 +684,7 @@ export function locationsRouter(prisma) {
         roles: catalog.roles,
         capabilities: catalog.capabilities,
         canEditRole: req.userRole === 'dev',
-        canEditDelegation: req.userRole === 'dev',
+        canEditDelegation: false,
         editableCapabilities: editableOperationalCapabilities(req, catalog),
         editableModules: editableOperationalModules(req, catalog)
       });
@@ -715,7 +713,7 @@ export function locationsRouter(prisma) {
       };
       if (req.userRole === 'dev') {
         accessInput.role = req.body?.role;
-        accessInput.delegablePermissions = req.body?.delegablePermissions;
+        accessInput.delegablePermissions = [];
       }
       const result = await setOperationalAccess(prisma, accessInput);
       const user = await loadPayrollPermissionTarget(prisma, req.params.id);

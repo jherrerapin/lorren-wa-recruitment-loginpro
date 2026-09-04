@@ -4,19 +4,9 @@
   const script = document.currentScript;
   const canManageTestWorkspace = script?.dataset?.canManageTestWorkspace === 'true';
   const operationalActorRole = script?.dataset?.operationalActorRole || 'none';
-  const canSuperviseOperationalPermissions = script?.dataset?.canSuperviseOperationalPermissions === 'true';
   const OPERATIONAL_PENDING_KEY = 'lorren-operational-access-after-create';
   const OPERATIONAL_API_BASE = '/admin/locations/users';
 
-  const payrollPermission = {
-    id: 'payroll',
-    apiBase: '/admin/locations/users',
-    accessSuffix: 'payroll-access',
-    pendingKey: 'lorren-payroll-access-after-create',
-    title: 'Asistencia y Gestión de Tiempo',
-    description: 'Permiso independiente para cortes, conceptos y exportaciones de Gestión de Tiempo. No activa Operaciones / Despacho ni Asistencia operativa.',
-    summary: 'Asistencia y Gestión de Tiempo'
-  };
   const testWorkspacePermission = {
     id: 'test-workspace',
     apiBase: '/admin/operaciones/pruebas/api/users',
@@ -139,10 +129,6 @@
     });
   }
 
-  function roleLabel(roles, role) {
-    return roles.find((item) => item.key === role)?.label || role || 'Sin rol';
-  }
-
   function roleBasePermissions(roles, role) {
     return new Set(roles.find((item) => item.key === role)?.basePermissions || []);
   }
@@ -246,13 +232,11 @@
     return normalizeModuleAccess(result);
   }
 
-  function readCapabilityStates(shell, catalog, allowed = null) {
+  function readCapabilityStates(shell, catalog) {
     const states = {};
-    const allowedSet = allowed ? new Set(allowed) : null;
     shell.capabilityHost.querySelectorAll('input[data-operational-capability]').forEach((input) => {
       const key = input.dataset.operationalCapability;
-      if (!key || (allowedSet && !allowedSet.has(key))) return;
-      states[key] = input.checked;
+      if (key) states[key] = input.checked;
     });
     const moduleAccess = readModuleAccess(shell);
     for (const capability of catalog.capabilities || []) {
@@ -260,35 +244,6 @@
       states[capability.key] = moduleAccess[capability.moduleAccessKey] === true;
     }
     return states;
-  }
-
-  function renderChildCapabilityGroups(container, capabilities, effectivePermissions, editableCapabilities = null, moduleAccess = null) {
-    container.replaceChildren();
-    const effective = new Set(effectivePermissions || []);
-    const editable = editableCapabilities ? new Set(editableCapabilities) : null;
-    const roots = normalizeModuleAccess(moduleAccess || { dispatch: true, attendance: true, time: true });
-    for (const [moduleName, items] of groupCapabilities(capabilities)) {
-      if (moduleName === 'Supervisión') continue;
-      const root = moduleDefinition(items);
-      if (root && roots[root.moduleAccessKey] !== true) continue;
-      const children = items.filter((item) => item.moduleAccess !== true);
-      const visible = editable ? children.filter((item) => editable.has(item.key)) : children;
-      if (!visible.length) continue;
-      const group = document.createElement('fieldset');
-      group.style.border = '1px solid rgba(148,163,184,.35)';
-      group.style.borderRadius = '10px';
-      group.style.padding = '10px';
-      group.style.margin = '0';
-      const legend = document.createElement('legend');
-      legend.textContent = root?.moduleLabel || moduleName;
-      legend.style.fontWeight = '700';
-      group.append(legend);
-      for (const capability of visible) {
-        const control = capabilityCheckbox(capability, effective.has(capability.key), false);
-        group.append(control.label);
-      }
-      container.append(group);
-    }
   }
 
   function renderUnifiedModuleGroups(shell, catalog, role, effectivePermissions = [], moduleAccess = {}) {
@@ -335,7 +290,7 @@
       children.style.display = 'grid';
       children.style.gap = '5px';
       children.style.marginTop = '8px';
-      for (const capability of items.filter((item) => item.moduleAccess !== true)) {
+      for (const capability of items.filter((item) => item.moduleAccess !== true && item.supervisorOnly !== true)) {
         const control = capabilityCheckbox(capability, effective.has(capability.key), !role || !parent.checked);
         children.append(control.label);
       }
@@ -374,37 +329,6 @@
     }
   }
 
-  function renderDelegableControls(container, capabilities, selected = []) {
-    container.replaceChildren();
-    const selectedSet = new Set(selected || []);
-    const delegableCapabilities = (capabilities || []).filter((item) => (
-      item.key !== 'SUPERVISE_PERMISSIONS' && item.moduleAccess !== true
-    ));
-    for (const [moduleName, items] of groupCapabilities(delegableCapabilities)) {
-      if (moduleName === 'Supervisión') continue;
-      const group = document.createElement('div');
-      group.style.display = 'grid';
-      group.style.gap = '4px';
-      const heading = document.createElement('small');
-      heading.style.fontWeight = '700';
-      heading.textContent = items[0]?.moduleLabel || moduleName;
-      group.append(heading);
-      for (const capability of items) {
-        const control = capabilityCheckbox(capability, selectedSet.has(capability.key), false);
-        control.checkbox.dataset.delegableCapability = capability.key;
-        delete control.checkbox.dataset.operationalCapability;
-        group.append(control.label);
-      }
-      container.append(group);
-    }
-  }
-
-  function readDelegablePermissions(container) {
-    return [...container.querySelectorAll('input[data-delegable-capability]:checked')]
-      .map((input) => input.dataset.delegableCapability)
-      .filter(Boolean);
-  }
-
   async function operationalCatalog() {
     if (!operationalCatalogPromise) {
       operationalCatalogPromise = request(`${OPERATIONAL_API_BASE}/operational-access/catalog`, { method: 'GET' });
@@ -426,7 +350,7 @@
       'Rol, módulos y funciones',
       createMode
         ? 'DEV asigna el rol. Después habilita únicamente los módulos que verá el usuario y, dentro de cada uno, sus funciones.'
-        : 'Una sola jerarquía controla el acceso al módulo y las funciones que quedan disponibles dentro de él.'
+        : 'DEV asigna el rol y configura módulos y funciones. Los Supervisores podrán administrar estos mismos accesos de usuarios Consulta sin cambiar su rol.'
     ));
 
     const roleRow = document.createElement('label');
@@ -443,24 +367,11 @@
     capabilityHost.style.display = 'grid';
     capabilityHost.style.gap = '8px';
 
-    const delegationBlock = document.createElement('div');
-    delegationBlock.dataset.operationalDelegation = 'true';
-    delegationBlock.style.display = 'none';
-    delegationBlock.style.gap = '8px';
-    delegationBlock.append(operationalSectionTitle(
-      'Funciones internas que este Supervisor puede delegar',
-      'Solo DEV define este techo. El Supervisor no cambia roles ni habilita módulos; únicamente administra funciones internas autorizadas.'
-    ));
-    const delegationHost = document.createElement('div');
-    delegationHost.style.display = 'grid';
-    delegationHost.style.gap = '8px';
-    delegationBlock.append(delegationHost);
-
     const status = document.createElement('small');
     status.className = 'hint';
 
-    section.append(roleRow, capabilityHost, delegationBlock, status);
-    return { form, section, roleSelect, capabilityHost, delegationBlock, delegationHost, status };
+    section.append(roleRow, capabilityHost, status);
+    return { form, section, roleSelect, capabilityHost, status };
   }
 
   function fillRoleSelect(select, roles, selected = null, allowEmpty = true) {
@@ -480,15 +391,11 @@
     }
   }
 
-  function applyRoleDefaults(shell, catalog, role, effectivePermissions = null, delegablePermissions = [], moduleAccess = null) {
+  function applyRoleDefaults(shell, catalog, role, effectivePermissions = null, moduleAccess = null) {
     const base = role ? roleBasePermissions(catalog.roles, role) : new Set();
     const effective = effectivePermissions ? new Set(effectivePermissions) : base;
     const roots = moduleAccess || (shell.capabilityHost.children.length ? readModuleAccess(shell) : moduleAccessFromLegacy(shell.form));
     renderUnifiedModuleGroups(shell, catalog, role, [...effective], roots);
-    const supervisor = role === 'SUPERVISOR';
-    shell.delegationBlock.style.display = supervisor ? 'grid' : 'none';
-    if (supervisor) renderDelegableControls(shell.delegationHost, catalog.capabilities, delegablePermissions);
-    else shell.delegationHost.replaceChildren();
   }
 
   function operationalConfig(shell, catalog) {
@@ -498,7 +405,7 @@
       role,
       moduleAccess: readModuleAccess(shell),
       permissions: readCapabilityStates(shell, catalog),
-      delegablePermissions: role === 'SUPERVISOR' ? readDelegablePermissions(shell.delegationHost) : []
+      delegablePermissions: []
     };
   }
 
@@ -507,7 +414,7 @@
     const hasModule = Object.values(moduleAccess).some(Boolean);
     if (!hasModule || shell.roleSelect.value) return true;
     event?.preventDefault?.();
-    shell.status.textContent = 'Selecciona Consulta, Coordinador o Supervisor antes de habilitar un módulo.';
+    shell.status.textContent = 'Selecciona Consulta o Supervisor antes de habilitar un módulo.';
     return false;
   }
 
@@ -516,12 +423,12 @@
     const catalog = await operationalCatalog();
     const shell = buildOperationalEditorShell(form, true);
     fillRoleSelect(shell.roleSelect, catalog.roles, null, true);
-    applyRoleDefaults(shell, catalog, null, null, [], moduleAccessFromLegacy(form));
+    applyRoleDefaults(shell, catalog, null, null, moduleAccessFromLegacy(form));
     permissionHost(form).append(shell.section);
 
     shell.roleSelect.addEventListener('change', () => {
       const roots = readModuleAccess(shell);
-      applyRoleDefaults(shell, catalog, shell.roleSelect.value || null, null, [], roots);
+      applyRoleDefaults(shell, catalog, shell.roleSelect.value || null, null, roots);
       shell.status.textContent = shell.roleSelect.value
         ? 'Habilita los módulos necesarios y ajusta sus funciones internas.'
         : 'Sin rol no se habilitan módulos operativos para este usuario.';
@@ -551,7 +458,7 @@
     const shell = buildOperationalEditorShell(form, false);
     const currentModuleAccess = payload.moduleAccess || moduleAccessFromLegacy(form);
     fillRoleSelect(shell.roleSelect, catalog.roles, access.role || null, true);
-    applyRoleDefaults(shell, catalog, access.role || null, access.effectivePermissions || [], access.delegablePermissions || [], currentModuleAccess);
+    applyRoleDefaults(shell, catalog, access.role || null, access.effectivePermissions || [], currentModuleAccess);
 
     const hidden = document.createElement('input');
     hidden.type = 'hidden';
@@ -562,7 +469,7 @@
     shell.roleSelect.addEventListener('change', () => {
       const role = shell.roleSelect.value || null;
       const roots = readModuleAccess(shell);
-      applyRoleDefaults(shell, catalog, role, null, role === 'SUPERVISOR' ? access.delegablePermissions || [] : [], roots);
+      applyRoleDefaults(shell, catalog, role, null, roots);
       shell.status.textContent = role
         ? 'Se cargó la base del nuevo rol. Revisa módulos y funciones antes de guardar el formulario.'
         : 'Sin rol no se puede habilitar un módulo operativo.';
@@ -634,119 +541,6 @@
     }
   }
 
-  function supervisorUserEditor(user, capabilities, editableCapabilities) {
-    const details = document.createElement('details');
-    details.style.border = '1px solid rgba(148,163,184,.35)';
-    details.style.borderRadius = '10px';
-    details.style.padding = '8px 10px';
-    const summary = document.createElement('summary');
-    summary.style.cursor = 'pointer';
-    summary.style.fontWeight = '700';
-    summary.textContent = `${user.displayName || user.username} · ${user.role === 'COORDINADOR' ? 'Coordinador' : 'Consulta'}`;
-    details.append(summary);
-
-    const body = document.createElement('div');
-    body.style.display = 'grid';
-    body.style.gap = '8px';
-    body.style.marginTop = '10px';
-    const capabilityHost = document.createElement('div');
-    capabilityHost.style.display = 'grid';
-    capabilityHost.style.gap = '8px';
-    const visibleCapabilities = capabilities.filter((item) => (
-      item.moduleAccess !== true
-      && editableCapabilities.includes(item.key)
-      && (!item.moduleAccessKey || user.moduleAccess?.[item.moduleAccessKey] === true)
-    ));
-    renderChildCapabilityGroups(capabilityHost, visibleCapabilities, user.effectivePermissions || [], editableCapabilities, user.moduleAccess || {});
-    const status = document.createElement('small');
-    status.className = 'hint';
-    const save = document.createElement('button');
-    save.type = 'button';
-    save.className = 'btn btn-secondary';
-    save.textContent = 'Guardar funciones internas';
-    save.disabled = !visibleCapabilities.length;
-    if (!visibleCapabilities.length) status.textContent = 'DEV no habilitó funciones delegables dentro de los módulos permitidos para este usuario.';
-    save.addEventListener('click', async () => {
-      save.disabled = true;
-      status.textContent = 'Guardando permisos…';
-      try {
-        const states = {};
-        capabilityHost.querySelectorAll('input[data-operational-capability]').forEach((input) => {
-          const key = input.dataset.operationalCapability;
-          if (key && editableCapabilities.includes(key)) states[key] = input.checked;
-        });
-        await request(operationalAccessUrl(user.userId), {
-          method: 'POST',
-          body: JSON.stringify({ permissions: states })
-        });
-        status.textContent = 'Funciones internas actualizadas.';
-      } catch (error) {
-        status.textContent = error?.message === 'operational_access_capability_not_delegable'
-          ? 'DEV no autorizó delegar una de estas funciones.'
-          : 'No fue posible actualizar las funciones.';
-      } finally {
-        save.disabled = false;
-      }
-    });
-    body.append(capabilityHost, save, status);
-    details.append(body);
-    return details;
-  }
-
-  async function initializeSupervisorPanel() {
-    if (!canSuperviseOperationalPermissions || operationalActorRole !== 'supervisor') return;
-    const host = document.querySelector('.page') || document.querySelector('main') || document.body;
-    if (document.querySelector('[data-operational-supervision-panel]')) return;
-
-    const panel = document.createElement('section');
-    panel.dataset.operationalSupervisionPanel = 'true';
-    panel.style.display = 'grid';
-    panel.style.gap = '10px';
-    panel.style.marginBottom = '14px';
-    panel.style.padding = '12px';
-    panel.style.border = '1px solid rgba(148,163,184,.45)';
-    panel.style.borderRadius = '12px';
-    panel.append(operationalSectionTitle(
-      'Supervisión de funciones',
-      'Puedes habilitar o restringir funciones internas que DEV autorizó para delegar, solo dentro de módulos ya habilitados. Los roles y accesos a módulos siguen siendo exclusivos de DEV.'
-    ));
-
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'btn btn-secondary';
-    toggle.textContent = 'Administrar permisos del equipo';
-    const content = document.createElement('div');
-    content.hidden = true;
-    content.style.display = 'grid';
-    content.style.gap = '8px';
-    panel.append(toggle, content);
-    host.prepend(panel);
-
-    let loaded = false;
-    toggle.addEventListener('click', async () => {
-      content.hidden = !content.hidden;
-      if (content.hidden || loaded) return;
-      content.textContent = 'Cargando usuarios…';
-      try {
-        const payload = await request(`${OPERATIONAL_API_BASE}/operational-access`, { method: 'GET' });
-        content.replaceChildren();
-        const users = payload.users || [];
-        const editableCapabilities = payload.editableCapabilities || [];
-        if (!users.length) {
-          const empty = document.createElement('small');
-          empty.className = 'hint';
-          empty.textContent = 'No hay usuarios con rol Consulta o Coordinador disponibles para delegación.';
-          content.append(empty);
-        } else {
-          users.forEach((user) => content.append(supervisorUserEditor(user, payload.capabilities || [], editableCapabilities)));
-        }
-        loaded = true;
-      } catch {
-        content.textContent = 'No fue posible cargar los permisos delegables.';
-      }
-    });
-  }
-
   function initialize() {
     const createForm = document.querySelector('form[action="/admin/users/create"]');
     if (createForm) {
@@ -763,7 +557,6 @@
     });
     applyPendingCreatePermissions().catch(() => {});
     applyPendingCreateOperationalAccess().catch(() => {});
-    initializeSupervisorPanel().catch(() => {});
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initialize, { once: true });
