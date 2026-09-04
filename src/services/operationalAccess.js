@@ -53,7 +53,7 @@ export const OPERATIONAL_CAPABILITY_DEFINITIONS = Object.freeze([
   { key: OPERATIONAL_CAPABILITY.ATTENDANCE_MANAGE, module: 'Asistencia', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.ATTENDANCE, label: 'Validar asistencia y resolver incidencias' },
   { key: OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT, module: 'Asistencia', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.ATTENDANCE, label: 'Corregir o registrar marcaciones manuales', sensitive: true },
   { key: OPERATIONAL_CAPABILITY.ATTENDANCE_CONFIG, module: 'Asistencia', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.ATTENDANCE, label: 'Configurar asistencia y cuadrillas' },
-  { key: OPERATIONAL_CAPABILITY.TIME_VIEW, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, moduleAccess: true, moduleLabel: 'Asistencia y Gestión de Tiempo', label: 'Ver Gestión de Tiempo' },
+  { key: OPERATIONAL_CAPABILITY.TIME_VIEW, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, moduleAccess: true, moduleLabel: 'Gestión de Tiempo', label: 'Ver Gestión de Tiempo' },
   { key: OPERATIONAL_CAPABILITY.TIME_EXPORT, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Exportar reportes de tiempo' },
   { key: OPERATIONAL_CAPABILITY.TIME_COMPENSATION, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Gestionar compensatorios' },
   { key: OPERATIONAL_CAPABILITY.TIME_IMPORT, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Importar y aplicar datos de asistencia' },
