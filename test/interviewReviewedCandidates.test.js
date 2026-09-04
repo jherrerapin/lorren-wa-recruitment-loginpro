@@ -6,6 +6,7 @@ import {
   deriveInterviewRatingBand,
   isInterviewedCandidateReview,
   normalizeInterviewRating,
+  saveInterviewComplementaryValues,
   sortInterviewedCandidateEntries
 } from '../src/services/interviewOutreachManagement.js';
 
@@ -19,6 +20,37 @@ function reviewedEntry(candidateId, rating, updatedAt) {
       rating,
       updatedAt,
       band: deriveInterviewRatingBand(rating)
+    }
+  };
+}
+
+function complementaryPrisma(fields) {
+  const fieldWrites = [];
+  const valueWrites = [];
+  return {
+    fieldWrites,
+    valueWrites,
+    prisma: {
+      interviewComplementaryField: {
+        async findMany() {
+          return fields.map((field) => ({ ...field }));
+        },
+        async update(args) {
+          fieldWrites.push(args);
+          const current = fields.find((field) => field.id === args.where.id);
+          return { ...current, ...args.data };
+        }
+      },
+      interviewComplementaryValue: {
+        async upsert(args) {
+          valueWrites.push(args);
+          return {
+            candidateId: args.where.candidateId_fieldId.candidateId,
+            fieldId: args.where.candidateId_fieldId.fieldId,
+            value: args.update.value
+          };
+        }
+      }
     }
   };
 }
@@ -79,6 +111,82 @@ test('el desempate usa actualización de evaluación y luego identificador estab
   );
 });
 
+test('corrige etiqueta global y valor individual conservando el mismo fieldId', async () => {
+  const fieldId = 'field-test-travel';
+  const { prisma, fieldWrites, valueWrites } = complementaryPrisma([
+    { id: fieldId, label: 'Disponiblidad viaje', normalizedLabel: 'disponiblidad viaje' }
+  ]);
+
+  const result = await saveInterviewComplementaryValues(prisma, {
+    candidateId: 'candidate-test-edit',
+    actor: { userId: 'user-test-editor', label: 'Usuario prueba' },
+    values: [{
+      fieldId,
+      label: 'Disponibilidad para viajar',
+      value: 'Sí'
+    }]
+  });
+
+  assert.equal(fieldWrites.length, 1);
+  assert.deepEqual(fieldWrites[0], {
+    where: { id: fieldId },
+    data: {
+      label: 'Disponibilidad para viajar',
+      normalizedLabel: 'disponibilidad para viajar'
+    }
+  });
+  assert.equal(valueWrites.length, 1);
+  assert.deepEqual(valueWrites[0].where, {
+    candidateId_fieldId: { candidateId: 'candidate-test-edit', fieldId }
+  });
+  assert.equal(valueWrites[0].update.value, 'Sí');
+  assert.equal(result[0].fieldId, fieldId);
+});
+
+test('permite corregir presentación de la etiqueta cuando conserva el mismo normalizedLabel', async () => {
+  const fieldId = 'field-test-case';
+  const { prisma, fieldWrites } = complementaryPrisma([
+    { id: fieldId, label: 'Disponibilidad de viaje', normalizedLabel: 'disponibilidad de viaje' }
+  ]);
+
+  await saveInterviewComplementaryValues(prisma, {
+    candidateId: 'candidate-test-case',
+    actor: { label: 'Usuario prueba' },
+    values: [{
+      fieldId,
+      label: 'DISPONIBILIDAD DE VIAJE',
+      value: 'No'
+    }]
+  });
+
+  assert.equal(fieldWrites.length, 1);
+  assert.equal(fieldWrites[0].data.label, 'DISPONIBILIDAD DE VIAJE');
+  assert.equal(fieldWrites[0].data.normalizedLabel, 'disponibilidad de viaje');
+});
+
+test('rechaza renombrar una etiqueta al nombre normalizado de otro campo y no escribe datos', async () => {
+  const { prisma, fieldWrites, valueWrites } = complementaryPrisma([
+    { id: 'field-test-origin', label: 'Disponibilidad viaje', normalizedLabel: 'disponibilidad viaje' },
+    { id: 'field-test-existing', label: 'Disponibilidad de viaje', normalizedLabel: 'disponibilidad de viaje' }
+  ]);
+
+  await assert.rejects(
+    saveInterviewComplementaryValues(prisma, {
+      candidateId: 'candidate-test-conflict',
+      actor: { label: 'Usuario prueba' },
+      values: [{
+        fieldId: 'field-test-origin',
+        label: 'Disponibilidad de viaje',
+        value: 'Sí'
+      }]
+    }),
+    /interview_complementary_label_conflict/
+  );
+
+  assert.equal(fieldWrites.length, 0);
+  assert.equal(valueWrites.length, 0);
+});
+
 test('la gestión de entrevistas es una opción libre del módulo Reclutamiento para usuarios ADMIN y DEV', () => {
   assert.equal(ADMIN_MODULE_PATHS.interviewManagement, '/admin?interviewManagement=1');
 
@@ -93,9 +201,10 @@ test('la gestión de entrevistas es una opción libre del módulo Reclutamiento 
 
   assert.match(recruiterNav, /href="\/admin\?interviewManagement=1">Gestión de entrevistas<\/a>/);
   assert.match(devNav, /href="\/admin\?interviewManagement=1">Gestión de entrevistas<\/a>/);
-  assert.match(routeSource, /router\.use\(apiSessionAuth\)/);
-  assert.match(routeSource, /buildVacancyAccessWhere\(accessContext\)/);
-  assert.match(routeSource, /buildCandidateAccessWhere\(accessContext\)/);
+  assert.match(routeSource, /router\.get\('\/interview-management\/candidates\/:candidateId', apiSessionAuth/);
+  assert.match(routeSource, /router\.get\('\/interview-management\/vacancies\/:vacancyId', apiSessionAuth/);
+  assert.match(routeSource, /buildVacancyAccessWhere\(getRequestAccessContext\(req\)\)/);
+  assert.match(routeSource, /buildCandidateAccessWhere\(getRequestAccessContext\(req\)\)/);
   assert.doesNotMatch(routeSource, /ensureDevRole|canAccessInterviewManagement|canManageInterviewManagement/);
 });
 
@@ -131,6 +240,18 @@ test('el formulario acepta coma o punto y presenta la calificación en formato e
   assert.match(uiSource, /ratingInput\.placeholder = '1,00 a 5,00'/);
   assert.match(uiSource, /formatInterviewRating\(management\.evaluation\?\.rating\)/);
   assert.match(uiSource, /formatInterviewRating\(entry\.evaluation\?\.rating\)/);
+});
+
+test('información complementaria permite editar etiqueta global y valor individual en el mismo formulario', () => {
+  assert.match(uiSource, /managementField\('Etiqueta', labelInput\)/);
+  assert.match(uiSource, /managementField\('Valor', input\)/);
+  assert.match(uiSource, /labelInput\.value = item\.label \|\| ''/);
+  assert.match(uiSource, /input\.value = item\.value \|\| ''/);
+  assert.match(uiSource, /label: labelInput\.value/);
+  assert.match(uiSource, /value: input\.value/);
+  assert.match(uiSource, /Guardar evaluación e información/);
+  assert.match(uiSource, /La etiqueta es global para Reclutamiento; el valor pertenece solo a este candidato\./);
+  assert.match(uiSource, /interview_complementary_label_conflict/);
 });
 
 test('edición reutiliza endpoints canónicos y la decisión reutiliza el cambio de estado administrativo', () => {
