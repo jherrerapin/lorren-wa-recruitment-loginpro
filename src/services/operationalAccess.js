@@ -68,6 +68,11 @@ const MODULE_ACCESS_KEYS = Object.freeze(Object.values(OPERATIONAL_MODULE_ACCESS
 const MODULE_VIEW_CAPABILITY_SET = new Set(
   OPERATIONAL_CAPABILITY_DEFINITIONS.filter((item) => item.moduleAccess === true).map((item) => item.key)
 );
+const MODULE_VIEW_CAPABILITY_BY_ACCESS = Object.freeze(Object.fromEntries(
+  OPERATIONAL_CAPABILITY_DEFINITIONS
+    .filter((item) => item.moduleAccess === true && item.moduleAccessKey)
+    .map((item) => [item.moduleAccessKey, item.key])
+));
 
 const ROLE_BASE_PERMISSIONS = Object.freeze({
   [OPERATIONAL_ROLE.CONSULTA]: Object.freeze([
@@ -178,6 +183,15 @@ function permissionsFromConfig(config = {}) {
   normalizeCapabilities(config.denials).forEach((capability) => permissions.delete(capability));
   if (role !== OPERATIONAL_ROLE.SUPERVISOR) permissions.delete(OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS);
   return CAPABILITY_KEYS.filter((capability) => permissions.has(capability));
+}
+
+function moduleAccessFromConfig(config = {}) {
+  const effective = new Set(permissionsFromConfig(config));
+  return normalizeOperationalModuleAccess({
+    [OPERATIONAL_MODULE_ACCESS.DISPATCH]: effective.has(OPERATIONAL_CAPABILITY.DISPATCH_VIEW),
+    [OPERATIONAL_MODULE_ACCESS.ATTENDANCE]: effective.has(OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW),
+    [OPERATIONAL_MODULE_ACCESS.TIME]: effective.has(OPERATIONAL_CAPABILITY.TIME_VIEW)
+  });
 }
 
 function normalizedConfig(value = {}) {
@@ -383,7 +397,6 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
   const hasModuleAccessInput = Object.prototype.hasOwnProperty.call(input, 'moduleAccess');
   const moduleAccess = hasModuleAccessInput ? normalizeOperationalModuleAccess(input.moduleAccess) : null;
   if (hasModuleAccessInput && !moduleAccess) throw new Error('operational_module_access_invalid');
-  if (!actorIsDev && hasModuleAccessInput) throw new Error('operational_module_access_dev_required');
 
   const targetUserId = normalizeString(input.targetUserId, 120);
   if (!targetUserId) throw new Error('operational_access_target_required');
@@ -408,13 +421,33 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
     if (actor.userId && actor.userId === target.id) throw new Error('operational_access_self_forbidden');
     if (!previous) throw new Error('operational_role_dev_required');
     if (previous.role === OPERATIONAL_ROLE.SUPERVISOR) throw new Error('operational_access_supervisor_target_forbidden');
+    if (Object.prototype.hasOwnProperty.call(input, 'role')) throw new Error('operational_role_dev_required');
+    if (Object.prototype.hasOwnProperty.call(input, 'delegablePermissions')) throw new Error('operational_delegation_dev_required');
 
     const editable = new Set(actor.operationalDelegablePermissions);
     const requestedStates = capabilityStateMap(input.permissions || {});
     for (const capability of requestedStates.keys()) {
+      if (MODULE_VIEW_CAPABILITY_SET.has(capability)) throw new Error('operational_access_capability_not_delegable');
       if (!editable.has(capability)) throw new Error('operational_access_capability_not_delegable');
     }
-    next = configFromPermissionStates(previous.role, input.permissions || {}, previous, [...editable]);
+
+    const editableForUpdate = new Set(editable);
+    let permissionStates = input.permissions || {};
+    if (moduleAccess) {
+      const previousModules = moduleAccessFromConfig(previous);
+      const actorPermissions = new Set(actor.operationalEffectivePermissions);
+      for (const moduleKey of MODULE_ACCESS_KEYS) {
+        if (previousModules?.[moduleKey] === moduleAccess[moduleKey]) continue;
+        const rootCapability = MODULE_VIEW_CAPABILITY_BY_ACCESS[moduleKey];
+        if (!rootCapability || !actorPermissions.has(rootCapability)) {
+          throw new Error('operational_module_access_not_delegable');
+        }
+        editableForUpdate.add(rootCapability);
+      }
+      permissionStates = permissionStatesWithModuleAccess(permissionStates, moduleAccess);
+    }
+
+    next = configFromPermissionStates(previous.role, permissionStates, previous, [...editableForUpdate]);
     next.delegablePermissions = previous.delegablePermissions;
   }
 
@@ -430,7 +463,7 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
       actorUserId: actor.userId,
       actorUsername: actor.username,
       actorRole: actor.userRole,
-      actorSource: actorIsDev ? 'users-admin-dev' : 'operations-supervisor',
+      actorSource: actorIsDev ? 'users-admin-dev' : 'users-supervisor',
       ipAddress: normalizeString(input.ipAddress, 120),
       userAgent: normalizeString(input.userAgent, 500),
       fromValue: previousSnapshot,
@@ -439,7 +472,8 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
         authority: 'operationalAccess',
         roleAssignedByDev: actorIsDev,
         delegatedBySupervisor: actorIsSupervisor && !actorIsDev,
-        moduleAccessSynchronized: Boolean(moduleAccess)
+        moduleAccessSynchronized: Boolean(moduleAccess),
+        modulesDelegatedBySupervisor: Boolean(moduleAccess) && actorIsSupervisor && !actorIsDev
       },
       createdAt: now
     }

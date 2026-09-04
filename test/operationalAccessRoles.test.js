@@ -98,14 +98,19 @@ function devActor() {
   };
 }
 
-function supervisorActor(delegablePermissions) {
+function supervisorActor(delegablePermissions, effectivePermissions = [
+  OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS,
+  OPERATIONAL_CAPABILITY.DISPATCH_VIEW,
+  OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW,
+  OPERATIONAL_CAPABILITY.TIME_VIEW
+]) {
   return {
     actorUserId: 'TEST-USER-SUP',
     actorUsername: 'usuario-supervision',
     actorRole: 'admin',
     actorOperationalRole: 'SUPERVISOR',
     actorOperationalAccessConfigured: true,
-    actorEffectivePermissions: [OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS],
+    actorEffectivePermissions: effectivePermissions,
     actorDelegablePermissions: delegablePermissions
   };
 }
@@ -221,7 +226,7 @@ test('Supervisor inicia con administración sensible no destructiva y deja accio
   assert.equal(base.has(OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE), false);
 });
 
-test('solo DEV define Supervisor, módulos raíz y techo delegable de funciones internas', async () => {
+test('solo DEV define Supervisor y el techo delegable de funciones internas', async () => {
   const prisma = createPrisma();
   const supervisor = await setOperationalAccess(prisma, {
     targetUserId: 'TEST-USER-SUP',
@@ -251,7 +256,7 @@ test('solo DEV define Supervisor, módulos raíz y techo delegable de funciones 
   }), true);
 });
 
-test('Supervisor amplía o restringe únicamente funciones autorizadas y no cambia rol ni módulo', async () => {
+test('Supervisor amplía o restringe funciones y módulos únicamente dentro de su techo', async () => {
   const prisma = createPrisma();
   await setOperationalAccess(prisma, {
     targetUserId: 'TEST-USER-COORD',
@@ -278,6 +283,18 @@ test('Supervisor amplía o restringe únicamente funciones autorizadas y no camb
   assert.equal(delegated.effectivePermissions.includes(OPERATIONAL_CAPABILITY.TIME_EXPORT), true);
   assert.equal(prisma.events.at(-1).metadata.delegatedBySupervisor, true);
 
+  const modulesChanged = await setOperationalAccess(prisma, {
+    targetUserId: 'TEST-USER-COORD',
+    moduleAccess: { dispatch: true, attendance: false, time: false },
+    permissions: { [OPERATIONAL_CAPABILITY.TIME_EXPORT]: false },
+    ...supervisorActor([OPERATIONAL_CAPABILITY.TIME_EXPORT])
+  });
+  assert.deepEqual(modulesChanged.moduleAccess, { dispatch: true, attendance: false, time: false });
+  assert.equal(modulesChanged.role, 'COORDINADOR');
+  assert.equal(modulesChanged.effectivePermissions.includes(OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW), false);
+  assert.equal(modulesChanged.effectivePermissions.includes(OPERATIONAL_CAPABILITY.TIME_VIEW), false);
+  assert.equal(prisma.events.at(-1).metadata.modulesDelegatedBySupervisor, true);
+
   await assert.rejects(
     setOperationalAccess(prisma, {
       targetUserId: 'TEST-USER-COORD',
@@ -290,11 +307,24 @@ test('Supervisor amplía o restringe únicamente funciones autorizadas y no camb
   await assert.rejects(
     setOperationalAccess(prisma, {
       targetUserId: 'TEST-USER-COORD',
-      moduleAccess: { dispatch: false, attendance: false, time: false },
-      permissions: { [OPERATIONAL_CAPABILITY.TIME_EXPORT]: false },
-      ...supervisorActor([OPERATIONAL_CAPABILITY.TIME_EXPORT])
+      role: 'SUPERVISOR',
+      permissions: {},
+      ...supervisorActor([])
     }),
-    /operational_module_access_dev_required/
+    /operational_role_dev_required/
+  );
+
+  await assert.rejects(
+    setOperationalAccess(prisma, {
+      targetUserId: 'TEST-USER-COORD',
+      moduleAccess: { dispatch: true, attendance: false, time: true },
+      permissions: {},
+      ...supervisorActor([], [
+        OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS,
+        OPERATIONAL_CAPABILITY.DISPATCH_VIEW
+      ])
+    }),
+    /operational_module_access_not_delegable/
   );
 
   await assert.rejects(
@@ -442,7 +472,38 @@ test('navegación usa capacidades internas y no muestra Crear solicitud sin su p
   assert.match(enabled, /href="\/admin\/operaciones\/solicitudes">Crear solicitud<\/a>/);
 });
 
-test('API unificada sincroniza módulos legacy, VIEW y Gestión de Tiempo; Supervisor solo cambia funciones internas', async () => {
+test('Supervisor recibe Usuarios en navegación sin adquirir permisos de administración de cuentas', () => {
+  const baseHtml = '<!DOCTYPE html><html><head><title>Operaciones</title></head><body><nav class="navbar"><a href="/admin">Panel</a></nav><main>Contenido</main></body></html>';
+  const request = {
+    originalUrl: '/admin/operaciones',
+    userRole: 'admin',
+    userSource: 'db',
+    username: 'usuario-supervision',
+    userAccessScope: 'ALL',
+    operationalAccessConfigured: true,
+    operationalRole: 'SUPERVISOR',
+    operationalEffectivePermissions: [
+      OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS,
+      OPERATIONAL_CAPABILITY.DISPATCH_VIEW
+    ],
+    session: {
+      userRole: 'admin',
+      userSource: 'db',
+      username: 'usuario-supervision',
+      userAccessScope: 'ALL',
+      operationalAccessConfigured: true,
+      operationalRole: 'SUPERVISOR',
+      operationalEffectivePermissions: [
+        OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS,
+        OPERATIONAL_CAPABILITY.DISPATCH_VIEW
+      ]
+    }
+  };
+  const nav = injectAdminModuleNavigation(baseHtml, request);
+  assert.match(nav, /href="\/admin\/locations\/users"[^>]*data-standalone-link="users"/);
+});
+
+test('API unificada sincroniza módulos legacy, VIEW y Gestión de Tiempo también cuando delega Supervisor', async () => {
   const prisma = createPrisma();
   const app = express();
   app.use(express.json());
@@ -457,7 +518,12 @@ test('API unificada sincroniza módulos legacy, VIEW y Gestión de Tiempo; Super
           userSource: 'db',
           operationalAccessConfigured: true,
           operationalRole: 'SUPERVISOR',
-          operationalEffectivePermissions: [OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS],
+          operationalEffectivePermissions: [
+            OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS,
+            OPERATIONAL_CAPABILITY.DISPATCH_VIEW,
+            OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW,
+            OPERATIONAL_CAPABILITY.TIME_VIEW
+          ],
           operationalDelegablePermissions: [OPERATIONAL_CAPABILITY.TIME_EXPORT]
         };
     next();
@@ -493,22 +559,21 @@ test('API unificada sincroniza módulos legacy, VIEW y Gestión de Tiempo; Super
     const delegated = await fetch(`http://127.0.0.1:${port}/admin/locations/users/TEST-USER-COORD/operational-access`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ permissions: { [OPERATIONAL_CAPABILITY.TIME_EXPORT]: true } })
-    });
-    assert.equal(delegated.status, 200);
-    access = await getOperationalAccessForUser(prisma, 'TEST-USER-COORD');
-    assert.equal(access.role, 'COORDINADOR');
-    assert.equal(access.effectivePermissions.includes(OPERATIONAL_CAPABILITY.TIME_EXPORT), true);
-
-    const rootForbidden = await fetch(`http://127.0.0.1:${port}/admin/locations/users/TEST-USER-COORD/operational-access`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        moduleAccess: { dispatch: false, attendance: false, time: false },
+        moduleAccess: { dispatch: true, attendance: true, time: false },
         permissions: { [OPERATIONAL_CAPABILITY.TIME_EXPORT]: false }
       })
     });
-    assert.equal(rootForbidden.status, 403);
+    assert.equal(delegated.status, 200);
+    const delegatedPayload = await delegated.json();
+    assert.deepEqual(delegatedPayload.moduleAccess, { dispatch: true, attendance: true, time: false });
+    assert.equal(prisma.users.get('TEST-USER-COORD').canAccessDispatch, true);
+    assert.equal(prisma.users.get('TEST-USER-COORD').canAccessAttendance, true);
+    access = await getOperationalAccessForUser(prisma, 'TEST-USER-COORD');
+    assert.equal(access.role, 'COORDINADOR');
+    assert.equal(access.effectivePermissions.includes(OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW), true);
+    assert.equal(access.effectivePermissions.includes(OPERATIONAL_CAPABILITY.TIME_VIEW), false);
+    assert.equal(prisma.events.some((event) => event.action === 'PAYROLL_ACCESS_DISABLED' && event.metadata?.delegatedBySupervisor === true), true);
 
     const forbidden = await fetch(`http://127.0.0.1:${port}/admin/locations/users/TEST-USER-COORD/operational-access`, {
       method: 'POST',
@@ -521,17 +586,20 @@ test('API unificada sincroniza módulos legacy, VIEW y Gestión de Tiempo; Super
   }
 });
 
-test('UI consolida el permiso general dentro del módulo y Supervisor recibe solo funciones internas', () => {
-  const ui = readFileSync(new URL('../src/public/payroll-user-access.js', import.meta.url), 'utf8');
+test('UI de Supervisor vive en Usuarios y expone módulos más funciones sin selector de rol', () => {
+  const ui = readFileSync(new URL('../src/public/supervisor-user-access.js', import.meta.url), 'utf8');
+  const view = readFileSync(new URL('../src/views/supervisor-users.ejs', import.meta.url), 'utf8');
   const middleware = readFileSync(new URL('../src/services/dispatchAuditMiddleware.js', import.meta.url), 'utf8');
 
-  assert.match(ui, /Rol, módulos y funciones/);
-  assert.match(ui, /data\.operationalModuleAccess/);
-  assert.match(ui, /item\.moduleAccess !== true/);
-  assert.match(ui, /Asistencia y Gestión de Tiempo/);
-  assert.match(ui, /Los roles y accesos a módulos siguen siendo exclusivos de DEV/);
-  assert.doesNotMatch(ui, /const payrollPermission\s*=/);
-  assert.match(middleware, /const supervisorPageAllowed = path\.startsWith\('\/admin\/operaciones'\) && canSupervise;/);
+  assert.match(view, /<h1>Usuarios<\/h1>/);
+  assert.match(view, /Permisos operativos del equipo/);
+  assert.match(ui, /data\.supervisorModuleAccess/);
+  assert.match(ui, /Guardar módulos y funciones/);
+  assert.match(ui, /moduleAccess: nextModules, permissions/);
+  assert.doesNotMatch(ui, /operationalRole/);
+  assert.doesNotMatch(ui, /delegablePermissions/);
+  assert.match(middleware, /const usersPageAllowed = path === '\/admin\/users' && canManageUserModulePermissions\(req\);/);
+  assert.doesNotMatch(middleware, /supervisorPageAllowed/);
 });
 
 test('middleware ejecutado refresca permisos, falla cerrado y aplica la guarda antes de continuar', () => {
