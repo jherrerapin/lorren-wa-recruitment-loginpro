@@ -144,6 +144,23 @@ export function deriveInterviewRatingBand(value) {
   return { key: 'OPTIONED', label: 'Opcionado a contratar' };
 }
 
+export function isInterviewedCandidateReview(review = null) {
+  if (!review || review.attendanceStatus !== 'ATTENDED') return false;
+  return normalizeInterviewRating(review.rating) !== null;
+}
+
+export function sortInterviewedCandidateEntries(entries = []) {
+  return [...entries].sort((left, right) => {
+    const ratingDifference = Number(right?.evaluation?.rating || 0) - Number(left?.evaluation?.rating || 0);
+    if (ratingDifference !== 0) return ratingDifference;
+
+    const updatedDifference = timeValue(right?.evaluation?.updatedAt) - timeValue(left?.evaluation?.updatedAt);
+    if (updatedDifference !== 0) return updatedDifference;
+
+    return String(left?.candidateId || '').localeCompare(String(right?.candidateId || ''));
+  });
+}
+
 export function normalizeInterviewObservation({ enabled = false, value = '' } = {}) {
   const observationEnabled = enabled === true || String(enabled).toLowerCase() === 'true' || String(enabled) === '1';
   if (!observationEnabled) return { observationEnabled: false, observation: null };
