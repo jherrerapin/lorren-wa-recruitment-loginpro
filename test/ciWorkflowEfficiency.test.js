@@ -16,8 +16,10 @@ test('CI conserva un único gate rápido para borradores y reserva la suite comp
   const quick = section(workflow, '  quick:', '  full-validation:');
   const full = section(workflow, '  full-validation:');
 
-  assert.match(workflow, /types:\s*\[opened, synchronize, reopened, ready_for_review\]/);
+  assert.match(workflow, /types:\s*\[opened, synchronize, reopened, ready_for_review, closed\]/);
+  assert.match(workflow, /group:\s*ci-\$\{\{ github\.workflow \}\}-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
   assert.match(workflow, /cancel-in-progress:\s*true/);
+  assert.match(quick, /if:\s*\$\{\{ github\.event_name != 'pull_request' \|\| github\.event\.action != 'closed' \}\}/);
 
   assert.match(quick, /Validate state authority manifest/);
   assert.match(quick, /Validate Prisma schema/);
@@ -27,6 +29,7 @@ test('CI conserva un único gate rápido para borradores y reserva la suite comp
   assert.doesNotMatch(quick, /\bnpm test\b/);
   assert.doesNotMatch(quick, /\.ci-baseline/);
 
+  assert.match(full, /github\.event_name != 'pull_request' \|\| github\.event\.action != 'closed'/);
   assert.match(full, /github\.event\.pull_request\.draft == false/);
   assert.match(full, /inputs\.full_suite/);
   assert.match(full, /actions\/cache\/restore@v4/);
