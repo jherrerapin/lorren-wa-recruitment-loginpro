@@ -10,9 +10,11 @@ import {
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { resolvePayrollFeatureAccess, setPayrollFeatureAccess } from '../services/payrollFeatureAccess.js';
 import {
+  buildOperationalPermissionStates,
   canManageOperationalPermissions,
   getOperationalAccessForUser,
   listOperationalAccess,
+  normalizeOperationalModuleAccess,
   operationalAccessCatalog,
   setOperationalAccess
 } from '../services/operationalAccess.js';
@@ -67,7 +69,14 @@ async function loadPayrollPermissionTarget(prisma, userId) {
   if (!userId) return null;
   return prisma.appUser.findUnique({
     where: { id: userId },
-    select: { id: true, username: true, role: true, isActive: true }
+    select: {
+      id: true,
+      username: true,
+      role: true,
+      isActive: true,
+      canAccessDispatch: true,
+      canAccessAttendance: true
+    }
   });
 }
 
@@ -95,9 +104,107 @@ function operationalAccessErrorStatus(error) {
     'operational_access_manager_required',
     'operational_access_self_forbidden',
     'operational_access_supervisor_target_forbidden',
-    'operational_access_capability_not_delegable'
+    'operational_access_capability_not_delegable',
+    'operational_module_access_dev_required'
   ].includes(code)) return 403;
   return 400;
+}
+
+function parseOperationalAccessConfig(value) {
+  if (!value) return null;
+  let parsed = value;
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new Error('operational_access_config_invalid');
+    }
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('operational_access_config_invalid');
+  const moduleAccess = normalizeOperationalModuleAccess(parsed.moduleAccess);
+  if (!moduleAccess) throw new Error('operational_module_access_invalid');
+  return {
+    role: parsed.role,
+    permissions: parsed.permissions || {},
+    delegablePermissions: parsed.delegablePermissions || [],
+    moduleAccess
+  };
+}
+
+async function moduleAccessForUser(prisma, user) {
+  if (!user?.id) return { dispatch: false, attendance: false, time: false };
+  let time = false;
+  try {
+    const access = await resolvePayrollFeatureAccess(prisma, {
+      userRole: 'admin',
+      userId: user.id,
+      username: user.username
+    });
+    time = access.allowed === true;
+  } catch {
+    time = false;
+  }
+  return {
+    dispatch: Boolean(user.canAccessDispatch),
+    attendance: Boolean(user.canAccessAttendance),
+    time
+  };
+}
+
+function editableOperationalCapabilities(req, catalog) {
+  if (req.userRole === 'dev') return catalog.capabilities.map((item) => item.key);
+  const allowed = new Set(req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || []);
+  return catalog.capabilities
+    .filter((item) => item.moduleAccess !== true && allowed.has(item.key))
+    .map((item) => item.key);
+}
+
+async function withOptionalTransaction(prisma, callback) {
+  if (typeof prisma?.$transaction === 'function') return prisma.$transaction((tx) => callback(tx));
+  return callback(prisma);
+}
+
+async function persistUnifiedOperationalAccess(prisma, req, targetUserId, config, { updateModuleFlags = true } = {}) {
+  if (req.userRole !== 'dev') throw new Error('operational_module_access_dev_required');
+  const moduleAccess = normalizeOperationalModuleAccess(config?.moduleAccess);
+  if (!moduleAccess) throw new Error('operational_module_access_invalid');
+
+  const access = await setOperationalAccess(prisma, {
+    targetUserId,
+    role: config.role,
+    permissions: config.permissions,
+    delegablePermissions: config.delegablePermissions,
+    moduleAccess,
+    ...operationalAccessActor(req)
+  });
+
+  if (updateModuleFlags) {
+    await prisma.appUser.update({
+      where: { id: targetUserId },
+      data: {
+        canAccessDispatch: moduleAccess.dispatch,
+        canAccessAttendance: moduleAccess.attendance
+      }
+    });
+  }
+
+  await setPayrollFeatureAccess(prisma, {
+    targetUserId,
+    enabled: moduleAccess.time,
+    ...payrollAccessActor(req)
+  });
+
+  return { ...access, moduleAccess };
+}
+
+function operationalConfigFromExisting(access, moduleAccess) {
+  if (!access?.configured || !access.role) return null;
+  return {
+    role: access.role,
+    permissions: buildOperationalPermissionStates(access.role, access.effectivePermissions || []),
+    delegablePermissions: access.delegablePermissions || [],
+    moduleAccess
+  };
 }
 
 function flash(res, type, msg) {
@@ -493,9 +600,7 @@ export function locationsRouter(prisma) {
       actor: {
         isDev,
         role: isDev ? 'DEV' : req.operationalRole || req.session?.operationalRole || null,
-        delegablePermissions: isDev
-          ? catalog.capabilities.map((item) => item.key).filter((key) => key !== 'SUPERVISE_PERMISSIONS')
-          : req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || []
+        delegablePermissions: editableOperationalCapabilities(req, catalog)
       }
     });
   });
@@ -504,24 +609,35 @@ export function locationsRouter(prisma) {
     if (!canManageOperationalPermissions(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
     const users = await prisma.appUser.findMany({
       where: { role: 'ADMIN', isActive: true },
-      select: { id: true, username: true, displayName: true, role: true, isActive: true },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        role: true,
+        isActive: true,
+        canAccessDispatch: true,
+        canAccessAttendance: true
+      },
       orderBy: [{ displayName: 'asc' }, { username: 'asc' }]
     });
     const accesses = await listOperationalAccess(prisma, users);
+    const usersById = new Map(users.map((user) => [user.id, user]));
+    const withModules = await Promise.all(accesses.map(async (access) => ({
+      ...access,
+      moduleAccess: await moduleAccessForUser(prisma, usersById.get(access.userId))
+    })));
     const isDev = req.userRole === 'dev';
     const actorId = req.userId || req.session?.userId || null;
     const visible = isDev
-      ? accesses
-      : accesses.filter((access) => canEditOperationalTarget(req, access) && access.userId !== actorId);
+      ? withModules
+      : withModules.filter((access) => canEditOperationalTarget(req, access) && access.userId !== actorId);
     const catalog = operationalAccessCatalog();
     return res.json({
       ok: true,
       users: visible,
       roles: catalog.roles,
       capabilities: catalog.capabilities,
-      editableCapabilities: isDev
-        ? catalog.capabilities.map((item) => item.key)
-        : req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || []
+      editableCapabilities: editableOperationalCapabilities(req, catalog)
     });
   });
 
@@ -531,17 +647,17 @@ export function locationsRouter(prisma) {
       const access = await getOperationalAccessForUser(prisma, req.params.id);
       if (!access) return res.status(404).json({ ok: false, error: 'user_not_found' });
       if (!canEditOperationalTarget(req, access)) return res.status(403).json({ ok: false, error: 'forbidden' });
+      const user = await loadPayrollPermissionTarget(prisma, req.params.id);
       const catalog = operationalAccessCatalog();
       return res.json({
         ok: true,
         access,
+        moduleAccess: await moduleAccessForUser(prisma, user),
         roles: catalog.roles,
         capabilities: catalog.capabilities,
         canEditRole: req.userRole === 'dev',
         canEditDelegation: req.userRole === 'dev',
-        editableCapabilities: req.userRole === 'dev'
-          ? catalog.capabilities.map((item) => item.key)
-          : req.operationalDelegablePermissions || req.session?.operationalDelegablePermissions || []
+        editableCapabilities: editableOperationalCapabilities(req, catalog)
       });
     } catch (error) {
       return res.status(operationalAccessErrorStatus(error)).json({ ok: false, error: error?.message || 'operational_access_failed' });
@@ -554,6 +670,14 @@ export function locationsRouter(prisma) {
       const current = await getOperationalAccessForUser(prisma, req.params.id);
       if (!current) return res.status(404).json({ ok: false, error: 'user_not_found' });
       if (!canEditOperationalTarget(req, current)) return res.status(403).json({ ok: false, error: 'forbidden' });
+
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, 'moduleAccess')) {
+        if (req.userRole !== 'dev') return res.status(403).json({ ok: false, error: 'operational_module_access_dev_required' });
+        const config = parseOperationalAccessConfig(req.body);
+        const result = await withOptionalTransaction(prisma, (db) => persistUnifiedOperationalAccess(db, req, req.params.id, config));
+        return res.json({ ok: true, access: result, moduleAccess: result.moduleAccess });
+      }
+
       const result = await setOperationalAccess(prisma, {
         targetUserId: req.params.id,
         role: req.body?.role,
@@ -561,7 +685,8 @@ export function locationsRouter(prisma) {
         delegablePermissions: req.body?.delegablePermissions,
         ...operationalAccessActor(req)
       });
-      return res.json({ ok: true, access: result });
+      const user = await loadPayrollPermissionTarget(prisma, req.params.id);
+      return res.json({ ok: true, access: result, moduleAccess: await moduleAccessForUser(prisma, user) });
     } catch (error) {
       return res.status(operationalAccessErrorStatus(error)).json({ ok: false, error: error?.message || 'operational_access_failed' });
     }
@@ -592,14 +717,24 @@ export function locationsRouter(prisma) {
     if (!canEditPayrollPermissionTarget(req, user)) return res.status(403).json({ ok: false, error: 'forbidden' });
 
     try {
+      const current = await getOperationalAccessForUser(prisma, user.id);
+      if (current?.configured) {
+        if (req.userRole !== 'dev') return res.status(403).json({ ok: false, error: 'operational_module_access_dev_required' });
+        const moduleAccess = await moduleAccessForUser(prisma, user);
+        moduleAccess.time = req.body?.enabled === true;
+        const config = operationalConfigFromExisting(current, normalizeOperationalModuleAccess(moduleAccess));
+        const result = await withOptionalTransaction(prisma, (db) => persistUnifiedOperationalAccess(db, req, user.id, config));
+        return res.json({ ok: true, enabled: result.moduleAccess.time, userId: user.id });
+      }
+
       const result = await setPayrollFeatureAccess(prisma, {
         targetUserId: user.id,
         enabled: req.body?.enabled === true,
         ...payrollAccessActor(req)
       });
       return res.json({ ok: true, ...result });
-    } catch (_error) {
-      return res.status(400).json({ ok: false, error: 'payroll_access_failed' });
+    } catch (error) {
+      return res.status(operationalAccessErrorStatus(error)).json({ ok: false, error: error?.message || 'payroll_access_failed' });
     }
   });
 
@@ -633,6 +768,24 @@ export function locationsRouter(prisma) {
       return res.redirect(usersRedirect('error', accessUpdate.error, user.username));
     }
 
+    let operationalConfig = null;
+    try {
+      operationalConfig = req.userRole === 'dev' ? parseOperationalAccessConfig(req.body.operationalAccessConfig) : null;
+    } catch (error) {
+      return res.redirect(usersRedirect('error', 'La configuración de módulos y funciones no es válida.', user.username));
+    }
+
+    const existingOperational = await getOperationalAccessForUser(prisma, user.id);
+    const currentModuleAccess = await moduleAccessForUser(prisma, user);
+    if (!operationalConfig && req.userRole === 'dev' && existingOperational?.configured) {
+      const legacyModuleAccess = normalizeOperationalModuleAccess({
+        dispatch: isChecked(req.body.canAccessDispatch),
+        attendance: isChecked(req.body.canAccessAttendance),
+        time: currentModuleAccess.time
+      });
+      operationalConfig = operationalConfigFromExisting(existingOperational, legacyModuleAccess);
+    }
+
     const data = {
       accessScope: accessUpdate.accessScope,
       scopeCity: accessUpdate.scopeCity,
@@ -641,17 +794,33 @@ export function locationsRouter(prisma) {
       recoveryEmail: normalize(req.body.recoveryEmail)
     };
     if (canManageUserModulePermissions(req)) {
-      data.canAccessAttendance = isChecked(req.body.canAccessAttendance);
-      data.canAccessDispatch = isChecked(req.body.canAccessDispatch) || data.canAccessAttendance;
+      if (req.userRole === 'dev') {
+        const roots = operationalConfig?.moduleAccess || normalizeOperationalModuleAccess({
+          dispatch: isChecked(req.body.canAccessDispatch),
+          attendance: isChecked(req.body.canAccessAttendance),
+          time: currentModuleAccess.time
+        });
+        data.canAccessDispatch = roots.dispatch;
+        data.canAccessAttendance = roots.attendance;
+      }
       data.canAccessMetaAds = isChecked(req.body.canAccessMetaAds);
       data.canAccessCvAnalysis = isChecked(req.body.canAccessCvAnalysis);
       data.canAccessStatistics = data.canAccessMetaAds || data.canAccessCvAnalysis;
     }
 
-    await prisma.appUser.update({
-      where: { id: user.id },
-      data
-    });
+    try {
+      await withOptionalTransaction(prisma, async (db) => {
+        await db.appUser.update({
+          where: { id: user.id },
+          data
+        });
+        if (operationalConfig) {
+          await persistUnifiedOperationalAccess(db, req, user.id, operationalConfig, { updateModuleFlags: false });
+        }
+      });
+    } catch (error) {
+      return res.redirect(usersRedirect('error', 'No fue posible guardar el rol, los módulos y sus funciones.', user.username));
+    }
 
     const accessDescription = accessUpdate.accessScope === 'ALL'
       ? 'todas las sucursales y vacantes'

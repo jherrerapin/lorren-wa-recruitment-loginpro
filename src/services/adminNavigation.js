@@ -1,4 +1,5 @@
 import { canCreateRecruiterUsers } from './appUsers.js';
+import { hasOperationalCapability, OPERATIONAL_CAPABILITY } from './operationalAccess.js';
 
 const RECRUITMENT_PATH = '/admin';
 const PROFILE_PATH = '/account/profile';
@@ -52,14 +53,33 @@ function activeModule(path) {
 function moduleAccess(req = {}) {
   const role = requestRole(req);
   const isDev = role === 'dev';
+  const dispatch = isDev || requestCapability(req, 'canAccessDispatch');
+  const attendance = isDev || requestCapability(req, 'canAccessAttendance');
+  const payroll = isDev || requestCapability(req, 'canAccessPayroll');
+  const operational = (featureEnabled, capability) => featureEnabled && hasOperationalCapability(req, capability);
+  const dispatchView = operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_VIEW);
   return {
     isDev,
-    dispatch: isDev || requestCapability(req, 'canAccessDispatch'),
-    attendance: isDev || requestCapability(req, 'canAccessAttendance'),
-    payroll: isDev || requestCapability(req, 'canAccessPayroll'),
+    dispatch,
+    attendance,
+    payroll,
     testWorkspace: isDev || requestCapability(req, 'canAccessTestWorkspace'),
     statistics: isDev || requestCapability(req, 'canAccessStatistics'),
-    users: canCreateRecruiterUsers(req)
+    users: canCreateRecruiterUsers(req),
+    dispatchView,
+    clientsAccess: dispatchView
+      || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE)
+      || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE),
+    requestManage: operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE),
+    assignmentManage: operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_ASSIGNMENT_MANAGE),
+    personnelAccess: dispatchView
+      || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE)
+      || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_STATUS)
+      || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE),
+    whatsappAccess: dispatchView || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_WHATSAPP_SEND),
+    attendanceView: operational(attendance, OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW),
+    attendanceConfig: operational(attendance, OPERATIONAL_CAPABILITY.ATTENDANCE_CONFIG),
+    timeView: operational(payroll, OPERATIONAL_CAPABILITY.TIME_VIEW)
   };
 }
 
@@ -79,26 +99,20 @@ function recruitmentMenuItems(access) {
 
 function operationsMenuItems(access) {
   const items = [];
-  if (access.dispatch) {
-    items.push(
-      menuLink(OPERATIONS_PATH, 'Panel operativo'),
-      menuLink('/admin/operaciones/clientes', 'Clientes'),
-      menuLink('/admin/operaciones/solicitudes', 'Crear solicitud'),
-      menuLink('/admin/operaciones/asignaciones', 'Asignación de auxiliares'),
-      menuLink('/admin/operaciones/personal', 'Personal operativo')
-    );
-    if (access.attendance) {
-      items.push(menuLink(WORKER_PORTAL_ACTIVATION_PATH, 'Activar portal del auxiliar'));
-      items.push(menuLink(ATTENDANCE_PATH, 'Asistencia'));
-    }
-    items.push(menuLink('/admin/operaciones/whatsapp', 'WhatsApp despacho'));
-  }
+  if (access.dispatchView) items.push(menuLink(OPERATIONS_PATH, 'Panel operativo'));
+  if (access.clientsAccess) items.push(menuLink('/admin/operaciones/clientes', 'Clientes'));
+  if (access.requestManage) items.push(menuLink('/admin/operaciones/solicitudes', 'Crear solicitud'));
+  if (access.assignmentManage) items.push(menuLink('/admin/operaciones/asignaciones', 'Asignación de auxiliares'));
+  if (access.personnelAccess) items.push(menuLink('/admin/operaciones/personal', 'Personal operativo'));
+  if (access.attendanceConfig) items.push(menuLink(WORKER_PORTAL_ACTIVATION_PATH, 'Activar portal del auxiliar'));
+  if (access.attendanceView) items.push(menuLink(ATTENDANCE_PATH, 'Asistencia'));
+  if (access.whatsappAccess) items.push(menuLink('/admin/operaciones/whatsapp', 'WhatsApp despacho'));
   if (access.testWorkspace) items.push(menuLink(TEST_WORKSPACE_PATH, 'Entorno de pruebas'));
   return items;
 }
 
 function payrollMenuItems(access) {
-  if (!access.payroll) return [];
+  if (!access.timeView) return [];
   return [menuLink(PAYROLL_PATH, 'Gestión de Tiempo')];
 }
 
