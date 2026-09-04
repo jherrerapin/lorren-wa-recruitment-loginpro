@@ -1,10 +1,15 @@
 import { canCreateRecruiterUsers } from './appUsers.js';
-import { hasOperationalCapability, OPERATIONAL_CAPABILITY } from './operationalAccess.js';
+import {
+  canManageOperationalPermissions,
+  hasOperationalCapability,
+  OPERATIONAL_CAPABILITY
+} from './operationalAccess.js';
 
 const RECRUITMENT_PATH = '/admin';
 const PROFILE_PATH = '/account/profile';
 const BRANCHES_PATH = '/admin/locations';
 const USERS_PATH = '/admin/users';
+const SUPERVISOR_USERS_PATH = '/admin/locations/users';
 const OPERATIONS_PATH = '/admin/operaciones';
 const ATTENDANCE_PATH = '/admin/operaciones/asistencia';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';
@@ -44,7 +49,7 @@ function escapeHtml(value) {
 }
 
 function activeModule(path) {
-  if (path.startsWith(USERS_PATH) || path.startsWith(BRANCHES_PATH)) return null;
+  if (path.startsWith(USERS_PATH) || path.startsWith(SUPERVISOR_USERS_PATH) || path.startsWith(BRANCHES_PATH)) return null;
   if (path.startsWith(PAYROLL_PATH) || path.startsWith(LEGACY_PAYROLL_PATH)) return 'payroll';
   if (path.startsWith(OPERATIONS_PATH)) return 'operations';
   return 'recruitment';
@@ -58,6 +63,8 @@ function moduleAccess(req = {}) {
   const payroll = isDev || requestCapability(req, 'canAccessPayroll');
   const operational = (featureEnabled, capability) => featureEnabled && hasOperationalCapability(req, capability);
   const dispatchView = operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_VIEW);
+  const accountUserManager = canCreateRecruiterUsers(req);
+  const operationalUserManager = canManageOperationalPermissions(req);
   return {
     isDev,
     dispatch,
@@ -65,7 +72,8 @@ function moduleAccess(req = {}) {
     payroll,
     testWorkspace: isDev || requestCapability(req, 'canAccessTestWorkspace'),
     statistics: isDev || requestCapability(req, 'canAccessStatistics'),
-    users: canCreateRecruiterUsers(req),
+    users: accountUserManager || operationalUserManager,
+    usersPath: accountUserManager ? USERS_PATH : SUPERVISOR_USERS_PATH,
     dispatchView,
     clientsAccess: dispatchView
       || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE)
@@ -138,9 +146,10 @@ function standaloneBranchesLink(path) {
 
 function standaloneUsersLink(access, path) {
   if (!access.users) return '';
+  const href = access.usersPath || USERS_PATH;
   const classes = ['admin-module-standalone-link'];
-  if (path.startsWith(USERS_PATH)) classes.push('is-active');
-  return `<a class="${classes.join(' ')}" href="${USERS_PATH}" data-standalone-link="users" style="gap:7px;">${standaloneIcon(USERS_ICON)}<span>Usuarios</span></a>`;
+  if (path.startsWith(USERS_PATH) || path.startsWith(SUPERVISOR_USERS_PATH)) classes.push('is-active');
+  return `<a class="${classes.join(' ')}" href="${href}" data-standalone-link="users" style="gap:7px;">${standaloneIcon(USERS_ICON)}<span>Usuarios</span></a>`;
 }
 
 function sessionIdentity(req = {}) {
@@ -348,6 +357,8 @@ export function injectAdminModuleNavigation(html, req = {}) {
 export const ADMIN_MODULE_PATHS = Object.freeze({
   recruitment: RECRUITMENT_PATH,
   branches: BRANCHES_PATH,
+  users: USERS_PATH,
+  supervisorUsers: SUPERVISOR_USERS_PATH,
   operations: OPERATIONS_PATH,
   attendance: ATTENDANCE_PATH,
   payroll: PAYROLL_PATH,
