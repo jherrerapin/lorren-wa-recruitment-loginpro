@@ -1,4 +1,9 @@
 import { canManageUserModulePermissions } from './appUsers.js';
+import {
+  canManageOperationalPermissions,
+  hasOperationalCapability,
+  OPERATIONAL_CAPABILITY
+} from './operationalAccess.js';
 
 export const PAYROLL_ACCESS_ENTITY_TYPE = 'APP_USER_PAYROLL_ACCESS';
 export const PAYROLL_ACCESS_ACTION = Object.freeze({
@@ -64,13 +69,22 @@ export async function setPayrollFeatureAccess(prisma, input = {}, options = {}) 
   const actorUsername = normalizeString(input.actorUsername, 160);
   const actorSource = normalizeString(input.actorSource, 80);
   const actorAccessScope = normalizeString(input.actorAccessScope, 80);
-  const canManage = canManageUserModulePermissions({
+  const accountPermissionManager = canManageUserModulePermissions({
     userRole: actorRole,
     userSource: actorSource,
     username: actorUsername,
     userAccessScope: actorAccessScope
   });
-  if (!canManage) throw new Error('payroll_access_dev_required');
+  const operationalActor = {
+    userRole: actorRole,
+    operationalRole: input.actorOperationalRole,
+    operationalAccessConfigured: input.actorOperationalAccessConfigured === true,
+    operationalEffectivePermissions: input.actorEffectivePermissions || [],
+    operationalDelegablePermissions: input.actorDelegablePermissions || []
+  };
+  const supervisorPermissionManager = canManageOperationalPermissions(operationalActor)
+    && hasOperationalCapability(operationalActor, OPERATIONAL_CAPABILITY.TIME_VIEW);
+  if (!accountPermissionManager && !supervisorPermissionManager) throw new Error('payroll_access_manager_required');
 
   const targetUserId = normalizeString(input.targetUserId, 120);
   if (!targetUserId) throw new Error('payroll_access_target_required');
@@ -99,15 +113,16 @@ export async function setPayrollFeatureAccess(prisma, input = {}, options = {}) 
       action: enabled ? PAYROLL_ACCESS_ACTION.ENABLED : PAYROLL_ACCESS_ACTION.DISABLED,
       actorUsername,
       actorRole,
-      actorSource: 'users-admin',
+      actorSource: supervisorPermissionManager && !accountPermissionManager ? 'users-supervisor' : 'users-admin',
       ipAddress: normalizeString(input.ipAddress, 120),
       userAgent: normalizeString(input.userAgent, 500),
       fromValue: { enabled: previousEnabled },
       toValue: { enabled },
       metadata: {
-        permission: 'PAYROLL',
+        permission: 'TIME_MANAGEMENT',
         independentPermission: true,
-        parentPermissionsChanged: false
+        parentPermissionsChanged: false,
+        delegatedBySupervisor: supervisorPermissionManager && !accountPermissionManager
       },
       createdAt: now
     }
