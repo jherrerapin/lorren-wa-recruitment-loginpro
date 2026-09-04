@@ -70,7 +70,7 @@ export function requiredOperationalCapability(req = {}) {
   }
 
   if (path.startsWith('/admin/operaciones/solicitudes')) {
-    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+    return OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE;
   }
 
   if (path.startsWith('/admin/operaciones/asignaciones')) {
