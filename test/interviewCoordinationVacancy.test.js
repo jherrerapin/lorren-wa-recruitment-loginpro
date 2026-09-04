@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
 import { sortInterviewCoordinationEntries } from '../src/routes/interviewOutreachManagement.js';
 
 const routeSource = readFileSync(new URL('../src/routes/interviewOutreachManagement.js', import.meta.url), 'utf8');
@@ -10,6 +11,27 @@ const migrationSource = readFileSync(
   new URL('../prisma/migrations/20260903163000_manual_interview_booking_without_slot/migration.sql', import.meta.url),
   'utf8'
 );
+
+function loadCoordinationGroupingHarness() {
+  const marker = "  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });\n  else start();\n})();";
+  assert.ok(uiSource.includes(marker), 'No se encontró el cierre esperado del cliente de coordinación');
+  const instrumented = uiSource.replace(
+    marker,
+    "  globalThis.__coordinationHarness = { bogotaDay, isManualBooking, splitCoordinationEntries };\n})();"
+  );
+  const sandbox = {
+    console,
+    Date,
+    Intl,
+    URL,
+    encodeURIComponent,
+    decodeURIComponent,
+    setTimeout,
+    clearTimeout
+  };
+  vm.runInNewContext(instrumented, sandbox, { filename: 'interview-outreach-management.js' });
+  return sandbox.__coordinationHarness;
+}
 
 test('coordinación por vacante prioriza pendientes, luego entrevistas confirmadas y al final no interesados', () => {
   const entries = sortInterviewCoordinationEntries([
@@ -86,7 +108,7 @@ test('guardar una confirmación mueve visualmente la persona de pendientes a ent
   assert.match(uiSource, /function splitCoordinationEntries/);
   assert.match(uiSource, /status === 'CONFIRMED' && entry\?\.booking\?\.scheduledAt/);
   assert.match(uiSource, /'Pendientes de respuesta'/);
-  assert.match(uiSource, /'Entrevistas programadas'/);
+  assert.match(uiSource, /'Entrevistas programadas para la fecha seleccionada'/);
   assert.match(uiSource, /'No interesados'/);
   assert.match(uiSource, /await refresh\(\)/);
 });
@@ -103,23 +125,66 @@ test('la coordinación usa pestañas compactas y conserva la sección activa al 
   assert.match(uiSource, /previousActiveKey = current\?\.dataset\.activeCoordinationTab \|\| 'pending'/);
   assert.match(uiSource, /panel\.hidden = panel\.dataset\.interviewCoordinationPanel !== activeKey/);
   assert.match(uiSource, /\['pending', 'Por gestionar'/);
+  assert.match(uiSource, /\['selected', 'Del día'/);
   assert.match(uiSource, /\['scheduled', 'Programadas'/);
   assert.match(uiSource, /\['declined', 'No interesados'/);
   assert.match(uiSource, /overflow-x:auto/);
   assert.doesNotMatch(uiSource, /\.scrollIntoView\s*\(/);
 });
 
-test('el proceso manual tiene gestión propia del día sin depender de habilitar agenda automática', () => {
-  assert.match(uiSource, /function bogotaToday/);
+test('el proceso manual permite gestión completa para la fecha seleccionada, incluso si es pasada', () => {
+  assert.match(uiSource, /selectedDashboardDate/);
   assert.match(uiSource, /timeZone: 'America\/Bogota'/);
-  assert.match(uiSource, /isTodayDashboard/);
   assert.match(uiSource, /isManualBooking/);
   assert.match(uiSource, /entry\?\.booking\?\.slotId == null/);
-  assert.match(uiSource, /'Entrevistas manuales — Hoy'/);
-  assert.match(uiSource, /appendManualTodayGroup/);
+  assert.match(uiSource, /'Entrevistas manuales — fecha seleccionada'/);
+  assert.match(uiSource, /appendManualSelectedDateGroup/);
   assert.match(uiSource, /Gestión del día de entrevista/);
-  assert.match(uiSource, /no requiere activar “Habilitar entrevistas”/);
+  assert.match(uiSource, /Información complementaria/);
+  assert.doesNotMatch(uiSource, /isTodayDashboard/);
+  assert.doesNotMatch(uiSource, /Entrevistas manuales — Hoy/);
   assert.doesNotMatch(uiSource, /schedulingEnabled/);
+});
+
+test('fecha seleccionada filtra confirmadas y mantiene pendientes/no interesados globales', () => {
+  const { splitCoordinationEntries } = loadCoordinationGroupingHarness();
+  const entries = [
+    {
+      candidateId: 'TEST-PENDING',
+      invitation: { status: 'PENDING' }
+    },
+    {
+      candidateId: 'TEST-DECLINED',
+      invitation: { status: 'DECLINED' }
+    },
+    {
+      candidateId: 'TEST-MANUAL-SEP03',
+      invitation: { status: 'CONFIRMED' },
+      booking: { scheduledAt: '2026-09-03T20:00:00.000Z', slotId: null }
+    },
+    {
+      candidateId: 'TEST-MANUAL-SEP04',
+      invitation: { status: 'CONFIRMED' },
+      booking: { scheduledAt: '2026-09-04T20:00:00.000Z', slotId: null }
+    },
+    {
+      candidateId: 'TEST-AUTO-SEP03',
+      invitation: { status: 'CONFIRMED' },
+      booking: { scheduledAt: '2026-09-03T21:00:00.000Z', slotId: 'TEST-SLOT-SEP03' }
+    }
+  ];
+
+  const sep03 = splitCoordinationEntries(entries, '2026-09-03');
+  assert.deepEqual(Array.from(sep03.pending, (entry) => entry.candidateId), ['TEST-PENDING']);
+  assert.deepEqual(Array.from(sep03.declined, (entry) => entry.candidateId), ['TEST-DECLINED']);
+  assert.deepEqual(Array.from(sep03.selected, (entry) => entry.candidateId), ['TEST-MANUAL-SEP03']);
+  assert.deepEqual(Array.from(sep03.scheduled, (entry) => entry.candidateId), ['TEST-AUTO-SEP03']);
+
+  const sep04 = splitCoordinationEntries(entries, '2026-09-04');
+  assert.deepEqual(Array.from(sep04.pending, (entry) => entry.candidateId), ['TEST-PENDING']);
+  assert.deepEqual(Array.from(sep04.declined, (entry) => entry.candidateId), ['TEST-DECLINED']);
+  assert.deepEqual(Array.from(sep04.selected, (entry) => entry.candidateId), ['TEST-MANUAL-SEP04']);
+  assert.deepEqual(Array.from(sep04.scheduled, (entry) => entry.candidateId), []);
 });
 
 test('manual y automático coexisten sin duplicar la misma cita en el visualizador automático', () => {
