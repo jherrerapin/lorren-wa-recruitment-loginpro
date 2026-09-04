@@ -30,6 +30,15 @@ test('solo asistencia real ATTENDED con calificación persistida entra a Entrevi
   assert.equal(isInterviewedCandidateReview(null), false);
 });
 
+test('los rangos visibles reutilizan exactamente los cortes canónicos', () => {
+  assert.deepEqual(deriveInterviewRatingBand(1), { key: 'DISQUALIFIED', label: 'Descalificado' });
+  assert.deepEqual(deriveInterviewRatingBand(2.99), { key: 'DISQUALIFIED', label: 'Descalificado' });
+  assert.deepEqual(deriveInterviewRatingBand(3), { key: 'RESERVE', label: 'Reserva' });
+  assert.deepEqual(deriveInterviewRatingBand(3.59), { key: 'RESERVE', label: 'Reserva' });
+  assert.deepEqual(deriveInterviewRatingBand(3.6), { key: 'OPTIONED', label: 'Opcionado a contratar' });
+  assert.deepEqual(deriveInterviewRatingBand(5), { key: 'OPTIONED', label: 'Opcionado a contratar' });
+});
+
 test('Entrevistados se ordena por calificación descendente respetando los cortes canónicos', () => {
   const entries = [
     reviewedEntry('candidate-test-low', 2.99, '2026-09-01T13:00:00.000Z'),
