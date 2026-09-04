@@ -95,8 +95,15 @@ export function requiredOperationalCapability(req = {}) {
     return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
   }
 
+  if (path.startsWith('/operaciones/admin-delete/clientes')) return OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE;
+  if (path.startsWith('/operaciones/admin-delete/personal')) return OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE;
+  if (path.startsWith('/operaciones/admin-delete/solicitudes')) return OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE;
+  if (path.startsWith('/operaciones/admin-clientes')) {
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+  if (path.startsWith('/operaciones/admin-worker')) return OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE;
   if (path.startsWith('/operaciones/admin-')) {
-    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
   }
 
   return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
@@ -269,6 +276,15 @@ function applyOperationalAccess(req, access = {}) {
   req.operationalDelegablePermissions = delegablePermissions;
 }
 
+function denyOperationalAccess(req) {
+  applyOperationalAccess(req, {
+    configured: true,
+    role: null,
+    effectivePermissions: [],
+    delegablePermissions: []
+  });
+}
+
 function clearSessionPermissions(req) {
   req.session.userRole = null;
   req.session.userId = null;
@@ -331,7 +347,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     req.session.canAccessTestWorkspace = false;
     req.canAccessPayroll = false;
     req.canAccessTestWorkspace = false;
-    clearOperationalAccess(req);
+    denyOperationalAccess(req);
     return;
   }
   if (!user || !user.isActive) {
@@ -378,6 +394,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     });
   } catch (error) {
     console.warn('No fue posible refrescar el rol operativo.', error);
+    operationalAccess = { configured: true, role: null, effectivePermissions: [], delegablePermissions: [] };
   }
 
   req.session.userAccessScope = accessScope;
@@ -500,7 +517,7 @@ export function dispatchAuditMiddleware(prisma) {
       req.canAccessPayroll = isDev;
       req.canAccessTestWorkspace = isDev;
       if (isDev) applyOperationalAccess(req, await resolveOperationalAccess(prisma, { userRole: 'dev' }));
-      else clearOperationalAccess(req);
+      else denyOperationalAccess(req);
     }
 
     if (!enforceOperationalCapability(req, res)) return;
