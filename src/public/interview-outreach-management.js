@@ -38,7 +38,7 @@
       .ic-save{min-height:36px;border:0;border-radius:7px;padding:7px 12px;background:#1d4f7a;color:#fff;font-weight:800;cursor:pointer}.ic-save:disabled{opacity:.6;cursor:default}.ic-save-secondary{background:#475569}
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
-      .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-complementary-create{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;align-items:end;margin-top:9px}.ic-complementary-create .ic-day-status{grid-column:1/-1}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
+      .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}.ic-complementary-item{display:grid;gap:8px;border:1px solid #dbe5ef;border-radius:9px;background:#f8fbff;padding:9px}.ic-complementary-create{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;align-items:end;margin-top:9px}.ic-complementary-create .ic-day-status{grid-column:1/-1}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
       .ic-reviewed-legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.ic-reviewed-legend-item{display:inline-flex;align-items:center;gap:6px;border:1px solid #dbe5ef;border-radius:999px;background:#fff;padding:6px 9px;font-size:11px;font-weight:850;color:#334155}.ic-reviewed-dot{width:10px;height:10px;border-radius:999px}.ic-reviewed-legend-item[data-band="OPTIONED"] .ic-reviewed-dot{background:#16a34a}.ic-reviewed-legend-item[data-band="RESERVE"] .ic-reviewed-dot{background:#d97706}.ic-reviewed-legend-item[data-band="DISQUALIFIED"] .ic-reviewed-dot{background:#dc2626}
       .ic-reviewed-list{display:grid;gap:9px}.ic-reviewed-card{border:1px solid #dbe5ef;border-left-width:5px;border-radius:10px;background:#fff;padding:12px 13px;display:grid;gap:10px}.ic-reviewed-card[data-band="OPTIONED"]{border-left-color:#16a34a;background:#f8fff9}.ic-reviewed-card[data-band="RESERVE"]{border-left-color:#d97706;background:#fffdf5}.ic-reviewed-card[data-band="DISQUALIFIED"]{border-left-color:#dc2626;background:#fffafa}.ic-reviewed-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.ic-reviewed-score{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.ic-reviewed-rating{font-size:19px;font-weight:950;color:#1f2937}.ic-reviewed-band,.ic-reviewed-decision{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900}.ic-reviewed-band[data-band="OPTIONED"]{background:#dcfce7;color:#166534}.ic-reviewed-band[data-band="RESERVE"]{background:#fef3c7;color:#92400e}.ic-reviewed-band[data-band="DISQUALIFIED"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="CONTRATADO"]{background:#dcfce7;color:#166534}.ic-reviewed-decision[data-status="RECHAZADO"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="PENDING"]{background:#e2e8f0;color:#475569}.ic-reviewed-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.ic-reviewed-summary-item{border:1px solid #e2e8f0;border-radius:8px;background:rgba(255,255,255,.8);padding:8px 9px}.ic-reviewed-summary-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.035em;color:#64748b}.ic-reviewed-summary-value{margin-top:3px;font-size:12px;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere}.ic-reviewed-actions{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.ic-reviewed-actions .ic-field{min-width:190px;flex:1}.ic-reviewed-editor{display:grid;gap:8px}.ic-reviewed-feedback{min-height:15px;color:#64748b;font-size:11px;font-weight:700}.ic-reviewed-feedback[data-kind="error"]{color:#b91c1c}.ic-reviewed-feedback[data-kind="success"]{color:#15803d}
       @media(max-width:900px){.ic-row{grid-template-columns:1fr 1fr}.ic-save{width:100%}.ic-day-grid{grid-template-columns:1fr 1fr}}
@@ -193,6 +193,9 @@
     }
     if (error?.message === 'interview_complementary_label_too_long') {
       return 'El nombre del campo complementario es demasiado largo.';
+    }
+    if (error?.message === 'interview_complementary_label_conflict') {
+      return 'Ya existe otro campo complementario con ese nombre. Usa un nombre diferente.';
     }
     if (error?.message === 'candidate_status_not_confirmed') {
       return 'El estado no cambió. Revisa si existe una gestión o envío pendiente antes de intentarlo de nuevo.';
@@ -386,12 +389,24 @@
     if (complementaryFields.length) {
       const complementary = element('div', 'ic-complementary');
       for (const item of complementaryFields) {
+        const wrapper = element('div', 'ic-complementary-item');
+        const labelInput = element('input', 'ic-control');
+        labelInput.type = 'text';
+        labelInput.maxLength = 80;
+        labelInput.value = item.label || '';
+        labelInput.placeholder = 'Nombre del campo';
         const input = element('input', 'ic-control');
         input.type = 'text';
+        input.maxLength = 2000;
         input.value = item.value || '';
         input.placeholder = `Valor para ${item.label}`;
-        complementaryInputs.push({ fieldId: item.id, input });
-        complementary.appendChild(managementField(item.label, input));
+        complementaryInputs.push({ fieldId: item.id, labelInput, input });
+        wrapper.append(
+          managementField('Etiqueta', labelInput),
+          managementField('Valor', input),
+          element('div', 'ic-meta', 'La etiqueta es global para Reclutamiento; el valor pertenece solo a este candidato.')
+        );
+        complementary.appendChild(wrapper);
       }
       panel.appendChild(complementary);
     } else {
@@ -414,7 +429,7 @@
     const actions = element('div', 'ic-day-actions');
     const saveAttendance = element('button', 'ic-save ic-save-secondary', 'Guardar asistencia');
     saveAttendance.type = 'button';
-    const saveEvaluation = element('button', 'ic-save', 'Guardar evaluación');
+    const saveEvaluation = element('button', 'ic-save', 'Guardar evaluación e información');
     saveEvaluation.type = 'button';
     const status = element('div', 'ic-day-status');
     actions.append(saveAttendance, saveEvaluation, status);
@@ -475,13 +490,17 @@
 
     saveEvaluation.addEventListener('click', async () => {
       saveEvaluation.disabled = true;
-      status.textContent = 'Guardando evaluación...';
+      status.textContent = 'Guardando evaluación e información...';
       delete status.dataset.kind;
       const payload = {
         rating: ratingInput.value === '' ? null : ratingInput.value,
         observationEnabled: observationCheckbox.checked,
         observation: observationCheckbox.checked ? observationArea.value : '',
-        values: complementaryInputs.map(({ fieldId, input }) => ({ fieldId, value: input.value }))
+        values: complementaryInputs.map(({ fieldId, labelInput, input }) => ({
+          fieldId,
+          label: labelInput.value,
+          value: input.value
+        }))
       };
       try {
         const result = await api(`/candidates/${encodeURIComponent(candidateId)}/evaluation`, {
@@ -493,7 +512,7 @@
         ratingField.querySelector('.ic-meta').textContent = nextBand
           ? `Clasificación actual: ${nextBand}`
           : 'Escala de 1 a 5. Usa coma o punto decimal.';
-        status.textContent = 'Evaluación actualizada.';
+        status.textContent = 'Evaluación e información actualizadas.';
         status.dataset.kind = 'success';
         await refresh();
       } catch (error) {
