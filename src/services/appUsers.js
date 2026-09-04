@@ -157,22 +157,14 @@ export function generateRecoveryCode() {
 }
 
 /**
- * El módulo Usuarios administra cuentas de terceros y por eso usa una sola
- * autoridad restrictiva: DEV o la cuenta histórica reclutador-general.
- * El displayName no participa en autorización y puede cambiar libremente.
+ * Crear cuentas, recuperar credenciales y cambiar permisos generales de cuenta
+ * son responsabilidades exclusivas de DEV. Los Supervisores administran módulos
+ * y funciones operativas mediante operationalAccess.js, sin heredar autoridad
+ * por username, alcance o nombre visible.
  */
 export function canCreateRecruiterUsers(source = {}) {
   const role = sourceValue(source, 'userRole') || sourceValue(source, 'role');
-  if (role === 'dev') return true;
-
-  const userSource = sourceValue(source, 'userSource');
-  const username = sourceValue(source, 'username');
-  const accessScope = normalizeUserAccessScope(sourceValue(source, 'userAccessScope') || 'ALL');
-
-  return userSource === 'db'
-    && role === 'admin'
-    && username === 'reclutador-general'
-    && accessScope === 'ALL';
+  return role === 'dev';
 }
 
 export function canManageUserModulePermissions(source = {}) {
