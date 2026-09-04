@@ -358,13 +358,16 @@ export function locationsRouter(prisma) {
     }
 
     try {
-      await prisma.operation.update({ where: { id: operation.id }, data: { name } });
-      flash(res, 'success', `Vacante renombrada a "${name}".`);
+      await prisma.city.update({
+        where: { id: city.id },
+        data: { name, ...unifiedBranchCompatibilityData() }
+      });
+      flash(res, 'success', `Sucursal "${name}" actualizada correctamente.`);
     } catch (error) {
       if (error.code === 'P2002') {
-        flash(res, 'error', 'Ya existe una vacante con ese nombre en la misma sucursal.');
+        flash(res, 'error', `Ya existe una sucursal con el nombre "${name}".`);
       } else {
-        flash(res, 'error', 'Error al renombrar la vacante.');
+        flash(res, 'error', 'Error al actualizar la sucursal.');
       }
     }
     return res.redirect('/admin/locations');
@@ -475,7 +478,7 @@ export function locationsRouter(prisma) {
       await prisma.operation.delete({ where: { id: operation.id } });
       flash(res, 'success', `Vacante "${operation.name}" eliminada.`);
     } catch (_error) {
-      flash(res, 'error', 'Error al eliminar la sucursal.');
+      flash(res, 'error', 'Error al eliminar la vacante.');
     }
     return res.redirect('/admin/locations');
   });
