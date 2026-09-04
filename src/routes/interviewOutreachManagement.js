@@ -27,6 +27,16 @@ import {
 
 const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
 const MANAGEMENT_SCRIPT = '<script src="/public/interview-outreach-management.js" defer data-interview-outreach-management></script>';
+const INTERVIEW_INVITATION_AUDIT_LABELS = Object.freeze({
+  PENDING: 'Pendiente de respuesta',
+  CONFIRMED: 'Confirmó entrevista',
+  DECLINED: 'No interesado'
+});
+const INTERVIEW_ATTENDANCE_AUDIT_LABELS = Object.freeze({
+  PENDING: 'Pendiente',
+  ATTENDED: 'Asistió',
+  NO_SHOW: 'No asistió'
+});
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -149,6 +159,138 @@ function serializeBooking(booking = null) {
     status: booking.status,
     label: booking.scheduledAt ? formatInterviewDate(new Date(booking.scheduledAt)) : null
   };
+}
+
+function auditBookingLabel(booking = null) {
+  if (!booking?.scheduledAt) return null;
+  return formatInterviewDate(new Date(booking.scheduledAt));
+}
+
+function auditRatingLabel(value) {
+  if (value === null || value === undefined || String(value).trim() === '') return 'Sin calificación';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 'Sin calificación';
+  return numeric.toFixed(2).replace('.', ',');
+}
+
+function evaluationAuditState(snapshot = null) {
+  const evaluation = snapshot?.evaluation || {};
+  const complementaryFields = Array.isArray(snapshot?.complementaryFields)
+    ? snapshot.complementaryFields
+    : [];
+  return JSON.stringify({
+    rating: evaluation.rating ?? null,
+    observationEnabled: Boolean(evaluation.observationEnabled),
+    observation: evaluation.observation || null,
+    complementaryFields: complementaryFields
+      .map((field) => ({
+        id: String(field?.id || ''),
+        label: String(field?.label || ''),
+        value: String(field?.value || '')
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id))
+  });
+}
+
+export function buildInterviewAdminAuditEvents({
+  action,
+  beforeSnapshot = null,
+  afterSnapshot = null,
+  beforeBooking = null,
+  afterBooking = null,
+  complementaryField = null
+} = {}) {
+  const events = [];
+
+  if (action === 'coordination' || action === 'invitation') {
+    const beforeStatus = beforeSnapshot?.invitation?.status || 'PENDING';
+    const afterStatus = afterSnapshot?.invitation?.status || 'PENDING';
+    if (beforeStatus !== afterStatus) {
+      events.push({
+        eventType: 'INTERVIEW_INVITATION_STATUS_CHANGED',
+        eventLabel: 'Actualizó gestión de entrevista',
+        fromValue: INTERVIEW_INVITATION_AUDIT_LABELS[beforeStatus] || beforeStatus,
+        toValue: INTERVIEW_INVITATION_AUDIT_LABELS[afterStatus] || afterStatus,
+        note: afterStatus === 'CONFIRMED' && auditBookingLabel(afterBooking)
+          ? `Horario: ${auditBookingLabel(afterBooking)}`
+          : null
+      });
+    } else if (
+      action === 'coordination'
+      && afterStatus === 'CONFIRMED'
+      && auditBookingLabel(beforeBooking) !== auditBookingLabel(afterBooking)
+    ) {
+      events.push({
+        eventType: 'INTERVIEW_SCHEDULE_CHANGED',
+        eventLabel: 'Actualizó fecha de entrevista',
+        fromValue: auditBookingLabel(beforeBooking),
+        toValue: auditBookingLabel(afterBooking),
+        note: null
+      });
+    }
+  }
+
+  if (action === 'attendance') {
+    const beforeStatus = beforeSnapshot?.attendance?.status || 'PENDING';
+    const afterStatus = afterSnapshot?.attendance?.status || 'PENDING';
+    if (beforeStatus !== afterStatus) {
+      events.push({
+        eventType: 'INTERVIEW_ATTENDANCE_STATUS_CHANGED',
+        eventLabel: 'Actualizó asistencia de entrevista',
+        fromValue: INTERVIEW_ATTENDANCE_AUDIT_LABELS[beforeStatus] || beforeStatus,
+        toValue: INTERVIEW_ATTENDANCE_AUDIT_LABELS[afterStatus] || afterStatus,
+        note: null
+      });
+    }
+  }
+
+  if (action === 'evaluation' && evaluationAuditState(beforeSnapshot) !== evaluationAuditState(afterSnapshot)) {
+    const beforeRating = auditRatingLabel(beforeSnapshot?.evaluation?.rating);
+    const afterRating = auditRatingLabel(afterSnapshot?.evaluation?.rating);
+    const ratingChanged = beforeRating !== afterRating;
+    events.push({
+      eventType: 'INTERVIEW_EVALUATION_UPDATED',
+      eventLabel: 'Actualizó evaluación de entrevista',
+      fromValue: ratingChanged ? beforeRating : null,
+      toValue: ratingChanged ? afterRating : null,
+      note: ratingChanged ? null : 'Actualizó observación o información complementaria.'
+    });
+  }
+
+  if (action === 'complementary-field' && complementaryField?.created) {
+    events.push({
+      eventType: 'INTERVIEW_COMPLEMENTARY_FIELD_CREATED',
+      eventLabel: 'Creó campo complementario de entrevista',
+      fromValue: null,
+      toValue: normalizeString(complementaryField.label),
+      note: null
+    });
+  }
+
+  return events;
+}
+
+async function persistInterviewAdminAuditEvents(prisma, req, candidateId, actor, events = []) {
+  if (!candidateId || typeof prisma?.candidateAdminEvent?.create !== 'function' || !events.length) return;
+  const actorRole = normalizeString(req.userRole || req.session?.userRole) || 'admin';
+  for (const event of events) {
+    try {
+      await prisma.candidateAdminEvent.create({
+        data: {
+          candidateId,
+          actorUserId: normalizeString(actor?.userId),
+          actorRole,
+          eventType: event.eventType,
+          eventLabel: event.eventLabel,
+          fromValue: normalizeString(event.fromValue),
+          toValue: normalizeString(event.toValue),
+          note: normalizeString(event.note)
+        }
+      });
+    } catch (error) {
+      console.error('[interview-management][audit]', error?.message || error);
+    }
+  }
 }
 
 async function loadAuthorizedCandidate(prisma, req, candidateId) {
@@ -445,6 +587,19 @@ export function interviewOutreachManagementRouter(prisma) {
       }
 
       const updated = await loadCandidateManagementData(prisma, req, data.candidate.id);
+      await persistInterviewAdminAuditEvents(
+        prisma,
+        req,
+        data.candidate.id,
+        actor,
+        buildInterviewAdminAuditEvents({
+          action: 'coordination',
+          beforeSnapshot: data.snapshot,
+          afterSnapshot: updated?.snapshot,
+          beforeBooking: data.booking,
+          afterBooking: updated?.booking
+        })
+      );
       return res.json({
         ok: true,
         booking: serializeBooking(updated?.booking || null),
@@ -467,6 +622,19 @@ export function interviewOutreachManagementRouter(prisma) {
         actor
       });
       const updated = await loadCandidateManagementData(prisma, req, data.candidate.id);
+      await persistInterviewAdminAuditEvents(
+        prisma,
+        req,
+        data.candidate.id,
+        actor,
+        buildInterviewAdminAuditEvents({
+          action: 'invitation',
+          beforeSnapshot: data.snapshot,
+          afterSnapshot: updated?.snapshot,
+          beforeBooking: data.booking,
+          afterBooking: updated?.booking
+        })
+      );
       return res.json({ ok: true, management: updated.snapshot });
     } catch (error) {
       return sendManagementError(res, error);
@@ -485,6 +653,17 @@ export function interviewOutreachManagementRouter(prisma) {
         actor
       });
       const updated = await loadCandidateManagementData(prisma, req, data.candidate.id);
+      await persistInterviewAdminAuditEvents(
+        prisma,
+        req,
+        data.candidate.id,
+        actor,
+        buildInterviewAdminAuditEvents({
+          action: 'attendance',
+          beforeSnapshot: data.snapshot,
+          afterSnapshot: updated?.snapshot
+        })
+      );
       return res.json({ ok: true, management: updated.snapshot });
     } catch (error) {
       return sendManagementError(res, error);
@@ -507,6 +686,17 @@ export function interviewOutreachManagementRouter(prisma) {
         actor
       });
       const updated = await loadCandidateManagementData(prisma, req, data.candidate.id);
+      await persistInterviewAdminAuditEvents(
+        prisma,
+        req,
+        data.candidate.id,
+        actor,
+        buildInterviewAdminAuditEvents({
+          action: 'evaluation',
+          beforeSnapshot: data.snapshot,
+          afterSnapshot: updated?.snapshot
+        })
+      );
       return res.json({ ok: true, management: updated.snapshot });
     } catch (error) {
       return sendManagementError(res, error);
@@ -523,6 +713,19 @@ export function interviewOutreachManagementRouter(prisma) {
         actor
       });
       const updated = await loadCandidateManagementData(prisma, req, data.candidate.id);
+      await persistInterviewAdminAuditEvents(
+        prisma,
+        req,
+        data.candidate.id,
+        actor,
+        buildInterviewAdminAuditEvents({
+          action: 'complementary-field',
+          complementaryField: {
+            created: result.created,
+            label: result.field.label
+          }
+        })
+      );
       return res.status(result.created ? 201 : 200).json({
         ok: true,
         created: result.created,
