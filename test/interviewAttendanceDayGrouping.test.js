@@ -48,7 +48,7 @@ test('Del día conserva solo asistencia pendiente y saca inmediatamente estados 
   const groups = splitCoordinationEntries(entries, '2026-09-04');
 
   assert.deepEqual(Array.from(groups.selected, (item) => item.candidateId), ['TEST-PENDING']);
-  assert.deepEqual(Array.from(groups.evaluation, (item) => item.candidateId), ['TEST-ATTENDED']);
+  assert.deepEqual(Array.from(groups.attendedPending, (item) => item.candidateId), ['TEST-ATTENDED']);
   assert.deepEqual(Array.from(groups.noShow, (item) => item.candidateId), ['TEST-NO-SHOW']);
 });
 
@@ -61,22 +61,32 @@ test('asistencia resuelta no vuelve a Programadas aunque la reserva sea automát
   ], '2026-09-04');
 
   assert.deepEqual(Array.from(groups.scheduled, (item) => item.candidateId), ['TEST-AUTO-PENDING']);
-  assert.deepEqual(Array.from(groups.evaluation, (item) => item.candidateId), ['TEST-AUTO-ATTENDED']);
+  assert.deepEqual(Array.from(groups.attendedPending, (item) => item.candidateId), ['TEST-AUTO-ATTENDED']);
   assert.deepEqual(Array.from(groups.noShow, (item) => item.candidateId), ['TEST-AUTO-NO-SHOW']);
 });
 
-test('Asistió sin calificación permanece operable y solo con calificación entra a Entrevistados', () => {
+test('el ranking canónico sigue exigiendo calificación aunque Asistió ya se muestre en Entrevistados', () => {
   assert.equal(isInterviewedCandidateReview({ attendanceStatus: 'ATTENDED', rating: null }), false);
   assert.equal(isInterviewedCandidateReview({ attendanceStatus: 'ATTENDED', rating: '4,20' }), true);
   assert.equal(isInterviewedCandidateReview({ attendanceStatus: 'NO_SHOW', rating: '4,20' }), false);
 });
 
-test('la UI conserva acceso para corregir asistencia y usa destinos coherentes después del refresh', () => {
-  assert.match(uiSource, /\['evaluation', 'Por evaluar', groups\.evaluation\.length\]/);
-  assert.match(uiSource, /\['no-show', 'No asistieron', groups\.noShow\.length\]/);
-  assert.match(uiSource, /attendance\.value === 'ATTENDED'[\s\S]*\? 'evaluation'/);
+test('Asistió va a Entrevistados con alerta visual hasta recibir calificación', () => {
+  assert.doesNotMatch(uiSource, /'Por evaluar'/);
+  assert.match(uiSource, /\['interviewed', 'Entrevistados', interviewed\.length \+ groups\.attendedPending\.length\]/);
+  assert.match(uiSource, /attendance\.value === 'ATTENDED'[\s\S]*\? 'interviewed'/);
   assert.match(uiSource, /attendance\.value === 'NO_SHOW'[\s\S]*\? 'no-show'/);
   assert.match(uiSource, /await refresh\(destinationTab\)/);
-  assert.match(uiSource, /await refresh\('interviewed'\)/);
+  assert.match(uiSource, /Pendiente de calificación/);
+  assert.match(uiSource, /ic-attended-pending/);
+  assert.match(uiSource, /#f59e0b/);
+  assert.match(uiSource, /#fffbeb/);
+  assert.match(uiSource, /appendReviewedGroup\(board, interviewed, groups\.attendedPending/);
+});
+
+test('No asistió conserva una bandeja propia para trazabilidad y corrección', () => {
+  assert.match(uiSource, /\['no-show', 'No asistieron', groups\.noShow\.length\]/);
+  assert.match(uiSource, /tabKey: 'no-show'/);
+  assert.match(uiSource, /title: 'No asistieron'/);
   assert.match(uiSource, /appendManagedInterviewGroup/);
 });
