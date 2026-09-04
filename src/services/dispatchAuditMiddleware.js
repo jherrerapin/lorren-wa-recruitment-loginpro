@@ -374,7 +374,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     });
     canAccessPayroll = payrollAccess.allowed === true;
   } catch (error) {
-    console.warn('No fue posible refrescar el permiso de Nómina.', error);
+    console.warn('No fue posible refrescar el permiso de Gestión de Tiempo.', error);
   }
   try {
     const testAccess = await resolveTestWorkspaceFeatureAccess(prisma, {
@@ -441,9 +441,9 @@ function injectPayrollUsersScript(html, req) {
   const path = requestPath(req);
   const isDev = (req.session?.userRole || req.userRole) === 'dev';
   const canSupervise = canManageOperationalPermissions(req) && !isDev;
-  const usersPageAllowed = path === '/admin/users' && canManageUserModulePermissions(req);
-  const supervisorPageAllowed = path.startsWith('/admin/operaciones') && canSupervise;
-  if ((!usersPageAllowed && !supervisorPageAllowed) || html.includes(PAYROLL_USERS_SCRIPT)) return html;
+  const devUsersPage = path === '/admin/users' && canManageUserModulePermissions(req);
+  const supervisorUsersPage = path === '/admin/locations/users' && canSupervise;
+  if ((!devUsersPage && !supervisorUsersPage) || html.includes(PAYROLL_USERS_SCRIPT)) return html;
   const canManageTestWorkspace = isDev;
   const operationalActorRole = isDev ? 'dev' : canSupervise ? 'supervisor' : 'none';
   return html.replace(
