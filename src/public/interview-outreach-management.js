@@ -12,6 +12,11 @@
     ['ATTENDED', 'Asistió'],
     ['NO_SHOW', 'No asistió']
   ];
+  const DECISION_OPTIONS = [
+    ['', 'Seleccionar decisión'],
+    ['CONTRATADO', 'Contratado'],
+    ['RECHAZADO', 'Rechazado']
+  ];
 
   function addStyles() {
     if (document.getElementById('interview-coordination-styles')) return;
@@ -34,8 +39,10 @@
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
       .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px}.ic-complementary-create{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;align-items:end;margin-top:9px}.ic-complementary-create .ic-day-status{grid-column:1/-1}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
+      .ic-reviewed-legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.ic-reviewed-legend-item{display:inline-flex;align-items:center;gap:6px;border:1px solid #dbe5ef;border-radius:999px;background:#fff;padding:6px 9px;font-size:11px;font-weight:850;color:#334155}.ic-reviewed-dot{width:10px;height:10px;border-radius:999px}.ic-reviewed-legend-item[data-band="OPTIONED"] .ic-reviewed-dot{background:#16a34a}.ic-reviewed-legend-item[data-band="RESERVE"] .ic-reviewed-dot{background:#d97706}.ic-reviewed-legend-item[data-band="DISQUALIFIED"] .ic-reviewed-dot{background:#dc2626}
+      .ic-reviewed-list{display:grid;gap:9px}.ic-reviewed-card{border:1px solid #dbe5ef;border-left-width:5px;border-radius:10px;background:#fff;padding:12px 13px;display:grid;gap:10px}.ic-reviewed-card[data-band="OPTIONED"]{border-left-color:#16a34a;background:#f8fff9}.ic-reviewed-card[data-band="RESERVE"]{border-left-color:#d97706;background:#fffdf5}.ic-reviewed-card[data-band="DISQUALIFIED"]{border-left-color:#dc2626;background:#fffafa}.ic-reviewed-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.ic-reviewed-score{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.ic-reviewed-rating{font-size:19px;font-weight:950;color:#1f2937}.ic-reviewed-band,.ic-reviewed-decision{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900}.ic-reviewed-band[data-band="OPTIONED"]{background:#dcfce7;color:#166534}.ic-reviewed-band[data-band="RESERVE"]{background:#fef3c7;color:#92400e}.ic-reviewed-band[data-band="DISQUALIFIED"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="CONTRATADO"]{background:#dcfce7;color:#166534}.ic-reviewed-decision[data-status="RECHAZADO"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="PENDING"]{background:#e2e8f0;color:#475569}.ic-reviewed-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.ic-reviewed-summary-item{border:1px solid #e2e8f0;border-radius:8px;background:rgba(255,255,255,.8);padding:8px 9px}.ic-reviewed-summary-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.035em;color:#64748b}.ic-reviewed-summary-value{margin-top:3px;font-size:12px;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere}.ic-reviewed-actions{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.ic-reviewed-actions .ic-field{min-width:190px;flex:1}.ic-reviewed-editor{display:grid;gap:8px}.ic-reviewed-feedback{min-height:15px;color:#64748b;font-size:11px;font-weight:700}.ic-reviewed-feedback[data-kind="error"]{color:#b91c1c}.ic-reviewed-feedback[data-kind="success"]{color:#15803d}
       @media(max-width:900px){.ic-row{grid-template-columns:1fr 1fr}.ic-save{width:100%}.ic-day-grid{grid-template-columns:1fr 1fr}}
-      @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}.ic-complementary-create{grid-template-columns:1fr}.ic-tabs{margin-left:-2px;margin-right:-2px}.ic-tab{min-height:40px}}
+      @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}.ic-complementary-create{grid-template-columns:1fr}.ic-tabs{margin-left:-2px;margin-right:-2px}.ic-tab{min-height:40px}.ic-reviewed-actions{align-items:stretch}.ic-reviewed-actions .ic-field{min-width:0}.ic-reviewed-actions .ic-save{width:100%}}
     `;
     document.head.appendChild(style);
   }
@@ -60,6 +67,13 @@
       minute: '2-digit',
       hour12: true
     }).format(date);
+  }
+
+  function formatInterviewRating(value) {
+    if (value === null || value === undefined || String(value).trim() === '') return '';
+    const numeric = Number(String(value).trim().replace(',', '.'));
+    if (!Number.isFinite(numeric)) return String(value).trim();
+    return numeric.toFixed(2).replace('.', ',');
   }
 
   function bogotaDay(value = new Date()) {
@@ -169,7 +183,7 @@
       return 'Selecciona el día y la hora acordados para confirmar la entrevista.';
     }
     if (error?.message === 'interview_rating_out_of_range') {
-      return 'La calificación debe estar entre 1 y 5.';
+      return 'La calificación debe estar entre 1,00 y 5,00. Puedes usar coma o punto decimal.';
     }
     if (error?.message === 'interview_observation_required_when_enabled') {
       return 'Escribe la observación o desmarca la opción.';
@@ -179,6 +193,9 @@
     }
     if (error?.message === 'interview_complementary_label_too_long') {
       return 'El nombre del campo complementario es demasiado largo.';
+    }
+    if (error?.message === 'candidate_status_not_confirmed') {
+      return 'El estado no cambió. Revisa si existe una gestión o envío pendiente antes de intentarlo de nuevo.';
     }
     return 'No fue posible guardar la gestión. Intenta nuevamente.';
   }
@@ -303,7 +320,7 @@
 
     const title = element('div', 'ic-day-title');
     title.append(
-      element('strong', '', 'Gestión del día de entrevista'),
+      element('strong', '', 'Gestión de entrevista'),
       element('span', 'ic-meta', 'Asistencia real, evaluación e información complementaria')
     );
     panel.appendChild(title);
@@ -322,16 +339,20 @@
     }
 
     const ratingInput = element('input', 'ic-control');
-    ratingInput.type = 'number';
-    ratingInput.min = '1';
-    ratingInput.max = '5';
-    ratingInput.step = '0.01';
+    ratingInput.type = 'text';
     ratingInput.inputMode = 'decimal';
-    ratingInput.placeholder = '1.00 a 5.00';
-    ratingInput.value = management.evaluation?.rating ?? '';
+    ratingInput.pattern = '[1-5](?:[.,][0-9]{1,2})?';
+    ratingInput.maxLength = 4;
+    ratingInput.autocomplete = 'off';
+    ratingInput.placeholder = '1,00 a 5,00';
+    ratingInput.value = formatInterviewRating(management.evaluation?.rating);
+    ratingInput.addEventListener('blur', () => {
+      const formatted = formatInterviewRating(ratingInput.value);
+      if (formatted) ratingInput.value = formatted;
+    });
     const ratingField = managementField('Calificación', ratingInput);
     const band = management.evaluation?.band?.label;
-    ratingField.appendChild(element('div', 'ic-meta', band ? `Clasificación actual: ${band}` : 'Escala de 1 a 5.'));
+    ratingField.appendChild(element('div', 'ic-meta', band ? `Clasificación actual: ${band}` : 'Escala de 1 a 5. Usa coma o punto decimal.'));
 
     const evaluation = element('div', 'ic-day-evaluation');
     const observationToggle = element('label', 'ic-observation-toggle');
@@ -442,6 +463,7 @@
         });
         status.textContent = 'Asistencia actualizada.';
         status.dataset.kind = 'success';
+        await refresh();
       } catch (error) {
         status.textContent = friendlyError(error);
         status.dataset.kind = 'error';
@@ -467,11 +489,13 @@
           body: JSON.stringify(payload)
         });
         const nextBand = result.management?.evaluation?.band?.label;
+        ratingInput.value = formatInterviewRating(result.management?.evaluation?.rating);
         ratingField.querySelector('.ic-meta').textContent = nextBand
           ? `Clasificación actual: ${nextBand}`
-          : 'Escala de 1 a 5.';
+          : 'Escala de 1 a 5. Usa coma o punto decimal.';
         status.textContent = 'Evaluación actualizada.';
         status.dataset.kind = 'success';
+        await refresh();
       } catch (error) {
         status.textContent = friendlyError(error);
         status.dataset.kind = 'error';
@@ -481,6 +505,176 @@
     });
 
     return panel;
+  }
+
+  function reviewedDecision(entry) {
+    const status = String(entry?.candidateStatus || '').toUpperCase();
+    if (status === 'CONTRATADO') return { key: 'CONTRATADO', label: 'Contratado' };
+    if (status === 'RECHAZADO') return { key: 'RECHAZADO', label: 'Rechazado' };
+    return { key: 'PENDING', label: 'Pendiente de decisión' };
+  }
+
+  function appendReviewedLegend(group) {
+    const legend = element('div', 'ic-reviewed-legend');
+    const definitions = [
+      ['OPTIONED', '3,60–5,00 · Opcionado a contratar'],
+      ['RESERVE', '3,00–3,59 · Reserva'],
+      ['DISQUALIFIED', '1,00–2,99 · Descalificado']
+    ];
+    for (const [key, label] of definitions) {
+      const item = element('span', 'ic-reviewed-legend-item');
+      item.dataset.band = key;
+      item.append(element('span', 'ic-reviewed-dot'), document.createTextNode(label));
+      legend.appendChild(item);
+    }
+    group.appendChild(legend);
+  }
+
+  function appendReviewedSummary(card, entry) {
+    const summary = element('div', 'ic-reviewed-summary');
+    if (entry?.evaluation?.observation) {
+      const item = element('div', 'ic-reviewed-summary-item');
+      item.append(
+        element('div', 'ic-reviewed-summary-label', 'Observación'),
+        element('div', 'ic-reviewed-summary-value', entry.evaluation.observation)
+      );
+      summary.appendChild(item);
+    }
+    for (const complementary of entry?.complementary || []) {
+      const item = element('div', 'ic-reviewed-summary-item');
+      item.append(
+        element('div', 'ic-reviewed-summary-label', complementary.label || 'Información complementaria'),
+        element('div', 'ic-reviewed-summary-value', complementary.value || '—')
+      );
+      summary.appendChild(item);
+    }
+    if (summary.childElementCount) card.appendChild(summary);
+  }
+
+  async function persistCandidateDecision(entry, vacancyId, nextStatus) {
+    const returnTo = `${window.location.pathname}${window.location.search}#vacancy-${vacancyId}`;
+    const response = await fetch(`/admin/candidates/${encodeURIComponent(entry.candidateId)}/status`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: new URLSearchParams({ status: nextStatus, returnTo })
+    });
+    if (!response.ok) throw new Error(`candidate_status_request_failed_${response.status}`);
+
+    const refreshed = await api(`/vacancies/${encodeURIComponent(vacancyId)}`);
+    const stored = (refreshed.interviewed || []).find((candidate) => candidate.candidateId === entry.candidateId);
+    if (!stored || stored.candidateStatus !== nextStatus) throw new Error('candidate_status_not_confirmed');
+  }
+
+  function appendReviewedGroup(board, entries, vacancyId, refresh, activeKey) {
+    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, 'interviewed', activeKey);
+    const head = element('div', 'ic-group-head');
+    head.append(
+      element('span', 'ic-group-title', 'Entrevistados'),
+      element('span', 'ic-group-count', entries.length)
+    );
+    group.appendChild(head);
+    appendReviewedLegend(group);
+
+    if (!entries.length) {
+      group.appendChild(element('div', 'ic-empty', 'Aún no hay candidatos con asistencia y calificación registradas.'));
+      board.appendChild(group);
+      return;
+    }
+
+    const list = element('div', 'ic-reviewed-list');
+    for (const entry of entries) {
+      const card = element('article', 'ic-reviewed-card');
+      const bandKey = entry?.evaluation?.band?.key || 'DISQUALIFIED';
+      card.dataset.band = bandKey;
+
+      const cardHead = element('div', 'ic-reviewed-head');
+      const person = element('div', 'ic-person');
+      const link = element('a', 'ic-name', entry.fullName || 'Candidato sin nombre');
+      link.href = `/admin/candidates/${encodeURIComponent(entry.candidateId)}?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}#vacancy-${vacancyId}`)}`;
+      person.appendChild(link);
+      if (entry.phone) person.appendChild(element('div', 'ic-meta', `WhatsApp: ${entry.phone}`));
+      if (entry.evaluation?.updatedAt) person.appendChild(element('div', 'ic-meta', `Evaluación: ${formatDate(entry.evaluation.updatedAt)}`));
+
+      const score = element('div', 'ic-reviewed-score');
+      score.appendChild(element('span', 'ic-reviewed-rating', formatInterviewRating(entry.evaluation?.rating)));
+      const band = element('span', 'ic-reviewed-band', entry?.evaluation?.band?.label || 'Sin clasificación');
+      band.dataset.band = bandKey;
+      score.appendChild(band);
+      const currentDecision = reviewedDecision(entry);
+      const decisionBadge = element('span', 'ic-reviewed-decision', currentDecision.label);
+      decisionBadge.dataset.status = currentDecision.key;
+      score.appendChild(decisionBadge);
+      cardHead.append(person, score);
+      card.appendChild(cardHead);
+      appendReviewedSummary(card, entry);
+
+      const actions = element('div', 'ic-reviewed-actions');
+      const edit = element('button', 'ic-save ic-save-secondary', 'Editar entrevista');
+      edit.type = 'button';
+      const decisionSelect = selectFor(
+        DECISION_OPTIONS,
+        currentDecision.key === 'PENDING' ? '' : currentDecision.key
+      );
+      const decisionField = managementField('Decisión final', decisionSelect);
+      const saveDecision = element('button', 'ic-save', 'Guardar decisión');
+      saveDecision.type = 'button';
+      const feedback = element('div', 'ic-reviewed-feedback');
+      actions.append(edit, decisionField, saveDecision, feedback);
+      card.appendChild(actions);
+
+      edit.addEventListener('click', async () => {
+        const currentEditor = card.querySelector('[data-interview-reviewed-editor]');
+        if (currentEditor) {
+          currentEditor.remove();
+          return;
+        }
+        edit.disabled = true;
+        feedback.textContent = 'Cargando entrevista...';
+        delete feedback.dataset.kind;
+        try {
+          const response = await api(`/candidates/${encodeURIComponent(entry.candidateId)}`);
+          const editor = element('div', 'ic-reviewed-editor');
+          editor.dataset.interviewReviewedEditor = 'true';
+          editor.appendChild(buildDayManagementPanel(entry.candidateId, response, refresh));
+          card.appendChild(editor);
+          feedback.textContent = '';
+        } catch (error) {
+          feedback.textContent = friendlyError(error);
+          feedback.dataset.kind = 'error';
+        } finally {
+          edit.disabled = false;
+        }
+      });
+
+      saveDecision.addEventListener('click', async () => {
+        const nextStatus = decisionSelect.value;
+        if (!nextStatus) {
+          feedback.textContent = 'Selecciona Contratado o Rechazado.';
+          feedback.dataset.kind = 'error';
+          return;
+        }
+        saveDecision.disabled = true;
+        decisionSelect.disabled = true;
+        feedback.textContent = 'Guardando decisión...';
+        delete feedback.dataset.kind;
+        try {
+          await persistCandidateDecision(entry, vacancyId, nextStatus);
+          feedback.textContent = 'Decisión actualizada.';
+          feedback.dataset.kind = 'success';
+          await refresh();
+        } catch (error) {
+          feedback.textContent = friendlyError(error);
+          feedback.dataset.kind = 'error';
+          saveDecision.disabled = false;
+          decisionSelect.disabled = false;
+        }
+      });
+
+      list.appendChild(card);
+    }
+    group.appendChild(list);
+    board.appendChild(group);
   }
 
   async function appendManualSelectedDateGroup(board, entries, vacancyId, refresh, activeKey) {
@@ -544,16 +738,17 @@
     if (focus) target.focus();
   }
 
-  function installTabNavigation(board, vacancyId, groups, activeKey) {
+  function installTabNavigation(board, vacancyId, groups, interviewed, activeKey) {
     const tabs = element('div', 'ic-tabs');
     tabs.setAttribute('role', 'tablist');
-    tabs.setAttribute('aria-label', 'Secciones de coordinación manual');
+    tabs.setAttribute('aria-label', 'Secciones de coordinación y gestión de entrevistas');
 
     const definitions = [
       ['pending', 'Por gestionar', groups.pending.length],
       ...(groups.selected.length ? [['selected', 'Del día', groups.selected.length]] : []),
       ['scheduled', 'Programadas', groups.scheduled.length],
-      ['declined', 'No interesados', groups.declined.length]
+      ['declined', 'No interesados', groups.declined.length],
+      ['interviewed', 'Entrevistados', interviewed.length]
     ];
 
     for (const [key, label, count] of definitions) {
@@ -625,13 +820,14 @@
     if (!vacancyId) return;
 
     const current = panel.querySelector('[data-interview-coordination-board]');
-    const previousActiveKey = current?.dataset.activeCoordinationTab || 'pending';
+    const previousActiveKey = current?.dataset.activeCoordinationTab || null;
     try {
       const response = await api(`/vacancies/${encodeURIComponent(vacancyId)}`);
       const entries = response.entries || [];
-      separateAutomaticInterviews(panel, entries);
+      const interviewed = response.interviewed || [];
+      separateAutomaticInterviews(panel, [...entries, ...interviewed]);
 
-      if (!entries.length) {
+      if (!entries.length && !interviewed.length) {
         current?.remove();
         return;
       }
@@ -642,20 +838,23 @@
 
       const selectedDay = selectedDashboardDate();
       const groups = splitCoordinationEntries(entries, selectedDay);
-      const availableKeys = ['pending', ...(groups.selected.length ? ['selected'] : []), 'scheduled', 'declined'];
-      const activeKey = availableKeys.includes(previousActiveKey) ? previousActiveKey : 'pending';
+      const availableKeys = ['pending', ...(groups.selected.length ? ['selected'] : []), 'scheduled', 'declined', 'interviewed'];
+      const defaultActiveKey = entries.length ? 'pending' : 'interviewed';
+      const activeKey = previousActiveKey && availableKeys.includes(previousActiveKey)
+        ? previousActiveKey
+        : defaultActiveKey;
       board.dataset.activeCoordinationTab = activeKey;
 
       const head = element('div', 'ic-head');
       const titleGroup = element('div');
       titleGroup.append(
-        element('h3', 'ic-title', 'Coordinación manual de entrevistas'),
-        element('p', 'ic-subtitle', 'Las entrevistas confirmadas respetan la fecha seleccionada arriba. Pendientes y no interesados permanecen como bandejas globales.')
+        element('h3', 'ic-title', 'Gestión de entrevistas'),
+        element('p', 'ic-subtitle', 'Coordina entrevistas y consulta el histórico evaluado sin mezclar invitación, asistencia, calificación y decisión laboral.')
       );
       head.appendChild(titleGroup);
       board.appendChild(head);
 
-      installTabNavigation(board, vacancyId, groups, activeKey);
+      installTabNavigation(board, vacancyId, groups, interviewed, activeKey);
 
       const refresh = () => renderBoard(panel);
       appendCoordinationGroup(
@@ -689,6 +888,7 @@
         'declined',
         activeKey
       );
+      appendReviewedGroup(board, interviewed, vacancyId, refresh, activeKey);
       activateCoordinationTab(board, activeKey);
 
       if (!current) {
@@ -698,7 +898,7 @@
       }
     } catch (_error) {
       if (current) {
-        current.replaceChildren(element('div', 'ic-empty', 'No fue posible cargar la coordinación de entrevistas.'));
+        current.replaceChildren(element('div', 'ic-empty', 'No fue posible cargar la gestión de entrevistas.'));
       }
     }
   }

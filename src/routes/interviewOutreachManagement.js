@@ -8,11 +8,13 @@ import { INTERVIEW_COORDINATION_HANDOFF_MODE } from './admin.js';
 import {
   buildInterviewManagementSnapshot,
   createInterviewComplementaryField,
+  isInterviewedCandidateReview,
   normalizeInterviewInvitationStatus,
   saveInterviewComplementaryValues,
   saveInterviewEvaluation,
   setInterviewAttendanceStatus,
-  setInterviewInvitationStatus
+  setInterviewInvitationStatus,
+  sortInterviewedCandidateEntries
 } from '../services/interviewOutreachManagement.js';
 import {
   cancelCandidateBookings,
@@ -263,7 +265,22 @@ async function runEvaluationTransaction(prisma, input) {
   });
 }
 
-async function loadVacancyCoordinationEntries(prisma, req, vacancyId) {
+function serializeComplementaryValues(values = []) {
+  return [...values]
+    .filter((item) => String(item?.value || '').trim())
+    .sort((left, right) => {
+      const sortDifference = Number(left?.field?.sortOrder || 0) - Number(right?.field?.sortOrder || 0);
+      if (sortDifference !== 0) return sortDifference;
+      return String(left?.field?.label || '').localeCompare(String(right?.field?.label || ''));
+    })
+    .map((item) => ({
+      fieldId: item.fieldId,
+      label: item.field?.label || '',
+      value: item.value || ''
+    }));
+}
+
+async function loadVacancyManagementEntries(prisma, req, vacancyId) {
   const candidates = await prisma.candidate.findMany({
     where: {
       AND: [
@@ -281,11 +298,19 @@ async function loadVacancyCoordinationEntries(prisma, req, vacancyId) {
       id: true,
       fullName: true,
       phone: true,
+      status: true,
       botPausedAt: true,
       botResumeMode: true,
       interviewCandidateReviews: {
         where: { vacancyId },
         take: 1
+      },
+      interviewComplementaryValues: {
+        select: {
+          fieldId: true,
+          value: true,
+          field: { select: { label: true, sortOrder: true } }
+        }
       },
       interviewBookings: {
         where: {
@@ -299,20 +324,32 @@ async function loadVacancyCoordinationEntries(prisma, req, vacancyId) {
     }
   });
 
-  return sortInterviewCoordinationEntries(candidates.map((candidate) => {
+  const classified = candidates.map((candidate) => {
     const review = candidate.interviewCandidateReviews?.[0] || null;
     const snapshot = buildInterviewManagementSnapshot({ review });
-    return {
+    const entry = {
       candidateId: candidate.id,
       fullName: candidate.fullName,
       phone: candidate.phone,
+      candidateStatus: candidate.status,
       contactedAt: candidate.botPausedAt || null,
       invitation: snapshot.invitation,
       attendance: snapshot.attendance,
       evaluation: snapshot.evaluation,
+      complementary: serializeComplementaryValues(candidate.interviewComplementaryValues),
       booking: serializeBooking(candidate.interviewBookings?.[0] || null)
     };
-  }));
+    return { entry, interviewed: isInterviewedCandidateReview(review) };
+  });
+
+  return {
+    entries: sortInterviewCoordinationEntries(
+      classified.filter(({ interviewed }) => !interviewed).map(({ entry }) => entry)
+    ),
+    interviewed: sortInterviewedCandidateEntries(
+      classified.filter(({ interviewed }) => interviewed).map(({ entry }) => entry)
+    )
+  };
 }
 
 async function runCoordinationTransaction(prisma, callback) {
@@ -339,6 +376,7 @@ export function interviewOutreachManagementRouter(prisma) {
         fullName: data.candidate.fullName,
         phone: data.candidate.phone,
         vacancyId: data.candidate.vacancyId,
+        status: data.candidate.status,
         vacancy: data.candidate.vacancy,
         citedAt: data.citedAt
       },
@@ -356,8 +394,8 @@ export function interviewOutreachManagementRouter(prisma) {
       return res.status(404).json({ ok: false, error: 'interview_management_vacancy_not_found' });
     }
 
-    const entries = await loadVacancyCoordinationEntries(prisma, req, vacancyId);
-    return res.json({ ok: true, vacancyId, entries });
+    const { entries, interviewed } = await loadVacancyManagementEntries(prisma, req, vacancyId);
+    return res.json({ ok: true, vacancyId, entries, interviewed });
   });
 
   router.post('/interview-management/candidates/:candidateId/coordination', apiSessionAuth, async (req, res) => {
