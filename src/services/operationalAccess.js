@@ -7,6 +7,12 @@ export const OPERATIONAL_ROLE = Object.freeze({
   SUPERVISOR: 'SUPERVISOR'
 });
 
+export const OPERATIONAL_MODULE_ACCESS = Object.freeze({
+  DISPATCH: 'dispatch',
+  ATTENDANCE: 'attendance',
+  TIME: 'time'
+});
+
 export const OPERATIONAL_CAPABILITY = Object.freeze({
   DISPATCH_VIEW: 'DISPATCH_VIEW',
   DISPATCH_REQUEST_MANAGE: 'DISPATCH_REQUEST_MANAGE',
@@ -32,32 +38,36 @@ export const OPERATIONAL_CAPABILITY = Object.freeze({
 });
 
 export const OPERATIONAL_CAPABILITY_DEFINITIONS = Object.freeze([
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_VIEW, module: 'Despacho', label: 'Ver Operaciones / Despacho' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE, module: 'Despacho', label: 'Crear y gestionar solicitudes' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_ASSIGNMENT_MANAGE, module: 'Despacho', label: 'Asignar, reemplazar y confirmar personal' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_INCIDENT_MANAGE, module: 'Despacho', label: 'Gestionar novedades operativas' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_REST_MANAGE, module: 'Despacho', label: 'Gestionar descansos' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_WHATSAPP_SEND, module: 'Despacho', label: 'Enviar comunicaciones operativas' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE, module: 'Despacho', label: 'Crear, editar e importar personal' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_STATUS, module: 'Despacho', label: 'Activar o desactivar personal' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE, module: 'Despacho', label: 'Eliminar personal permanentemente', sensitive: true },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE, module: 'Despacho', label: 'Administrar clientes, puntos y servicios' },
-  { key: OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE, module: 'Despacho', label: 'Eliminar clientes, puntos o servicios', sensitive: true },
-  { key: OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW, module: 'Asistencia', label: 'Ver asistencia y evidencia' },
-  { key: OPERATIONAL_CAPABILITY.ATTENDANCE_MANAGE, module: 'Asistencia', label: 'Validar asistencia y resolver incidencias' },
-  { key: OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT, module: 'Asistencia', label: 'Corregir o registrar marcaciones manuales', sensitive: true },
-  { key: OPERATIONAL_CAPABILITY.ATTENDANCE_CONFIG, module: 'Asistencia', label: 'Configurar asistencia y cuadrillas' },
-  { key: OPERATIONAL_CAPABILITY.TIME_VIEW, module: 'Gestión de Tiempo', label: 'Ver Gestión de Tiempo' },
-  { key: OPERATIONAL_CAPABILITY.TIME_EXPORT, module: 'Gestión de Tiempo', label: 'Exportar reportes de tiempo' },
-  { key: OPERATIONAL_CAPABILITY.TIME_COMPENSATION, module: 'Gestión de Tiempo', label: 'Gestionar compensatorios' },
-  { key: OPERATIONAL_CAPABILITY.TIME_IMPORT, module: 'Gestión de Tiempo', label: 'Importar y aplicar datos de asistencia' },
-  { key: OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE, module: 'Gestión de Tiempo', label: 'Reversar importaciones', sensitive: true },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_VIEW, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, moduleAccess: true, moduleLabel: 'Operaciones / Despacho', label: 'Ver Operaciones / Despacho' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Crear y gestionar solicitudes' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_ASSIGNMENT_MANAGE, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Asignar, reemplazar y confirmar personal' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_INCIDENT_MANAGE, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Gestionar novedades operativas' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_REST_MANAGE, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Gestionar descansos' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_WHATSAPP_SEND, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Enviar comunicaciones operativas' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Crear, editar e importar personal' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_STATUS, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Activar o desactivar personal' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Eliminar personal permanentemente', sensitive: true },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Administrar clientes, puntos y servicios' },
+  { key: OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE, module: 'Despacho', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.DISPATCH, label: 'Eliminar clientes, puntos o servicios', sensitive: true },
+  { key: OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW, module: 'Asistencia', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.ATTENDANCE, moduleAccess: true, moduleLabel: 'Asistencia', label: 'Ver asistencia y evidencia' },
+  { key: OPERATIONAL_CAPABILITY.ATTENDANCE_MANAGE, module: 'Asistencia', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.ATTENDANCE, label: 'Validar asistencia y resolver incidencias' },
+  { key: OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT, module: 'Asistencia', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.ATTENDANCE, label: 'Corregir o registrar marcaciones manuales', sensitive: true },
+  { key: OPERATIONAL_CAPABILITY.ATTENDANCE_CONFIG, module: 'Asistencia', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.ATTENDANCE, label: 'Configurar asistencia y cuadrillas' },
+  { key: OPERATIONAL_CAPABILITY.TIME_VIEW, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, moduleAccess: true, moduleLabel: 'Asistencia y Gestión de Tiempo', label: 'Ver Gestión de Tiempo' },
+  { key: OPERATIONAL_CAPABILITY.TIME_EXPORT, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Exportar reportes de tiempo' },
+  { key: OPERATIONAL_CAPABILITY.TIME_COMPENSATION, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Gestionar compensatorios' },
+  { key: OPERATIONAL_CAPABILITY.TIME_IMPORT, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Importar y aplicar datos de asistencia' },
+  { key: OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Reversar importaciones', sensitive: true },
   { key: OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS, module: 'Supervisión', label: 'Administrar permisos delegables de otros usuarios', supervisorOnly: true }
 ]);
 
 const CAPABILITY_KEYS = Object.freeze(OPERATIONAL_CAPABILITY_DEFINITIONS.map((item) => item.key));
 const CAPABILITY_SET = new Set(CAPABILITY_KEYS);
 const ROLE_SET = new Set(Object.values(OPERATIONAL_ROLE));
+const MODULE_ACCESS_KEYS = Object.freeze(Object.values(OPERATIONAL_MODULE_ACCESS));
+const MODULE_VIEW_CAPABILITY_SET = new Set(
+  OPERATIONAL_CAPABILITY_DEFINITIONS.filter((item) => item.moduleAccess === true).map((item) => item.key)
+);
 
 const ROLE_BASE_PERMISSIONS = Object.freeze({
   [OPERATIONAL_ROLE.CONSULTA]: Object.freeze([
@@ -115,6 +125,24 @@ function normalizeCapabilities(values = []) {
   return [...new Set(list.map((value) => normalizeString(value, 80)?.toUpperCase()).filter((value) => value && CAPABILITY_SET.has(value)))];
 }
 
+function normalizeDelegableCapabilities(values = []) {
+  return normalizeCapabilities(values).filter((capability) => (
+    capability !== OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS
+    && !MODULE_VIEW_CAPABILITY_SET.has(capability)
+  ));
+}
+
+export function normalizeOperationalModuleAccess(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  if (!MODULE_ACCESS_KEYS.every((key) => typeof value[key] === 'boolean')) return null;
+  const attendance = value[OPERATIONAL_MODULE_ACCESS.ATTENDANCE] === true;
+  return {
+    [OPERATIONAL_MODULE_ACCESS.DISPATCH]: value[OPERATIONAL_MODULE_ACCESS.DISPATCH] === true || attendance,
+    [OPERATIONAL_MODULE_ACCESS.ATTENDANCE]: attendance,
+    [OPERATIONAL_MODULE_ACCESS.TIME]: value[OPERATIONAL_MODULE_ACCESS.TIME] === true
+  };
+}
+
 export function operationalRoleBasePermissions(role) {
   const normalized = normalizeOperationalRole(role);
   return normalized ? [...ROLE_BASE_PERMISSIONS[normalized]] : [];
@@ -127,6 +155,17 @@ function capabilityStateMap(value = {}) {
     const key = normalizeString(rawKey, 80)?.toUpperCase();
     if (!key || !CAPABILITY_SET.has(key)) continue;
     if (rawValue === true || rawValue === false || rawValue === null || rawValue === 'inherit') states.set(key, rawValue);
+  }
+  return states;
+}
+
+function permissionStatesWithModuleAccess(permissionStates = {}, moduleAccess = null) {
+  const normalizedModuleAccess = normalizeOperationalModuleAccess(moduleAccess);
+  if (!normalizedModuleAccess) return permissionStates;
+  const states = Object.fromEntries(capabilityStateMap(permissionStates));
+  for (const definition of OPERATIONAL_CAPABILITY_DEFINITIONS) {
+    if (definition.moduleAccess !== true || !definition.moduleAccessKey) continue;
+    states[definition.key] = normalizedModuleAccess[definition.moduleAccessKey] === true;
   }
   return states;
 }
@@ -150,7 +189,7 @@ function normalizedConfig(value = {}) {
     .filter((capability) => !denied.has(capability))
     .filter((capability) => role === OPERATIONAL_ROLE.SUPERVISOR || capability !== OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS);
   const delegablePermissions = role === OPERATIONAL_ROLE.SUPERVISOR
-    ? normalizeCapabilities(value?.delegablePermissions).filter((capability) => capability !== OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS)
+    ? normalizeDelegableCapabilities(value?.delegablePermissions)
     : [];
   return { role, grants, denials, delegablePermissions };
 }
@@ -184,7 +223,7 @@ function configFromPermissionStates(role, permissionStates, previous = null, edi
     grants: CAPABILITY_KEYS.filter((capability) => grants.has(capability) && !denials.has(capability)),
     denials: CAPABILITY_KEYS.filter((capability) => denials.has(capability)),
     delegablePermissions: normalizedRole === OPERATIONAL_ROLE.SUPERVISOR
-      ? normalizeCapabilities(previous?.delegablePermissions).filter((capability) => capability !== OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS)
+      ? normalizeDelegableCapabilities(previous?.delegablePermissions)
       : []
   };
 }
@@ -267,7 +306,7 @@ export async function resolveOperationalAccess(prisma, source = {}) {
       configured: true,
       role: 'DEV',
       effectivePermissions: [...CAPABILITY_KEYS],
-      delegablePermissions: CAPABILITY_KEYS.filter((capability) => capability !== OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS),
+      delegablePermissions: normalizeDelegableCapabilities(CAPABILITY_KEYS),
       grants: [],
       denials: [],
       userId: sourceValue(source, 'userId') || null,
@@ -323,7 +362,7 @@ function actorContext(input = {}) {
     operationalRole: normalizeOperationalRole(input.actorOperationalRole),
     operationalAccessConfigured: input.actorOperationalAccessConfigured === true,
     operationalEffectivePermissions: normalizeCapabilities(input.actorEffectivePermissions),
-    operationalDelegablePermissions: normalizeCapabilities(input.actorDelegablePermissions)
+    operationalDelegablePermissions: normalizeDelegableCapabilities(input.actorDelegablePermissions)
   };
 }
 
@@ -341,6 +380,11 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
   const actorIsSupervisor = canManageOperationalPermissions(actor);
   if (!actorIsDev && !actorIsSupervisor) throw new Error('operational_access_manager_required');
 
+  const hasModuleAccessInput = Object.prototype.hasOwnProperty.call(input, 'moduleAccess');
+  const moduleAccess = hasModuleAccessInput ? normalizeOperationalModuleAccess(input.moduleAccess) : null;
+  if (hasModuleAccessInput && !moduleAccess) throw new Error('operational_module_access_invalid');
+  if (!actorIsDev && hasModuleAccessInput) throw new Error('operational_module_access_dev_required');
+
   const targetUserId = normalizeString(input.targetUserId, 120);
   if (!targetUserId) throw new Error('operational_access_target_required');
   const target = await loadUser(prisma, { userId: targetUserId });
@@ -353,9 +397,12 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
   if (actorIsDev) {
     const role = normalizeOperationalRole(input.role);
     if (!role) throw new Error('operational_role_invalid');
-    next = configFromPermissionStates(role, input.permissions || {}, null, CAPABILITY_KEYS);
+    const permissionStates = moduleAccess
+      ? permissionStatesWithModuleAccess(input.permissions || {}, moduleAccess)
+      : input.permissions || {};
+    next = configFromPermissionStates(role, permissionStates, null, CAPABILITY_KEYS);
     next.delegablePermissions = role === OPERATIONAL_ROLE.SUPERVISOR
-      ? normalizeCapabilities(input.delegablePermissions).filter((capability) => capability !== OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS)
+      ? normalizeDelegableCapabilities(input.delegablePermissions)
       : [];
   } else {
     if (actor.userId && actor.userId === target.id) throw new Error('operational_access_self_forbidden');
@@ -391,7 +438,8 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
       metadata: {
         authority: 'operationalAccess',
         roleAssignedByDev: actorIsDev,
-        delegatedBySupervisor: actorIsSupervisor && !actorIsDev
+        delegatedBySupervisor: actorIsSupervisor && !actorIsDev,
+        moduleAccessSynchronized: Boolean(moduleAccess)
       },
       createdAt: now
     }
@@ -403,7 +451,8 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
     displayName: target.displayName,
     configured: true,
     ...next,
-    effectivePermissions: permissionsFromConfig(next)
+    effectivePermissions: permissionsFromConfig(next),
+    ...(moduleAccess ? { moduleAccess } : {})
   };
 }
 
