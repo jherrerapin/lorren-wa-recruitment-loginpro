@@ -6,6 +6,7 @@ import {
 } from './operationalAccess.js';
 
 const RECRUITMENT_PATH = '/admin';
+const INTERVIEW_MANAGEMENT_PATH = '/admin?interviewManagement=1';
 const PROFILE_PATH = '/account/profile';
 const BRANCHES_PATH = '/admin/locations';
 const USERS_PATH = '/admin/users';
@@ -96,7 +97,10 @@ function menuLink(href, label) {
 }
 
 function recruitmentMenuItems(access) {
-  const items = [menuLink(RECRUITMENT_PATH, 'Panel de candidatos')];
+  const items = [
+    menuLink(RECRUITMENT_PATH, 'Panel de candidatos'),
+    menuLink(INTERVIEW_MANAGEMENT_PATH, 'Gestión de entrevistas')
+  ];
   if (access.statistics) items.push(menuLink('/admin/estadisticas', 'Estadísticas'));
   if (access.isDev) {
     items.push(menuLink('/admin/monitor', 'Monitor bot'));
@@ -356,6 +360,7 @@ export function injectAdminModuleNavigation(html, req = {}) {
 
 export const ADMIN_MODULE_PATHS = Object.freeze({
   recruitment: RECRUITMENT_PATH,
+  interviewManagement: INTERVIEW_MANAGEMENT_PATH,
   branches: BRANCHES_PATH,
   users: USERS_PATH,
   supervisorUsers: SUPERVISOR_USERS_PATH,
