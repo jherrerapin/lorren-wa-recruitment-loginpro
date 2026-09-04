@@ -1,9 +1,5 @@
 import { canManageUserModulePermissions } from './appUsers.js';
-import {
-  canManageOperationalPermissions,
-  hasOperationalCapability,
-  OPERATIONAL_CAPABILITY
-} from './operationalAccess.js';
+import { canManageOperationalPermissions } from './operationalAccess.js';
 
 export const PAYROLL_ACCESS_ENTITY_TYPE = 'APP_USER_PAYROLL_ACCESS';
 export const PAYROLL_ACCESS_ACTION = Object.freeze({
@@ -82,8 +78,7 @@ export async function setPayrollFeatureAccess(prisma, input = {}, options = {}) 
     operationalEffectivePermissions: input.actorEffectivePermissions || [],
     operationalDelegablePermissions: input.actorDelegablePermissions || []
   };
-  const supervisorPermissionManager = canManageOperationalPermissions(operationalActor)
-    && hasOperationalCapability(operationalActor, OPERATIONAL_CAPABILITY.TIME_VIEW);
+  const supervisorPermissionManager = canManageOperationalPermissions(operationalActor);
   if (!accountPermissionManager && !supervisorPermissionManager) throw new Error('payroll_access_manager_required');
 
   const targetUserId = normalizeString(input.targetUserId, 120);
