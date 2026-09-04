@@ -3,6 +3,12 @@ import { canManageUserModulePermissions } from './appUsers.js';
 import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.js';
 import { injectAdminModuleNavigation } from './adminNavigation.js';
+import {
+  canManageOperationalPermissions,
+  hasOperationalCapability,
+  OPERATIONAL_CAPABILITY,
+  resolveOperationalAccess
+} from './operationalAccess.js';
 
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
 const PROGRAMMING_CONTACTS_SCRIPT = '/public/dispatch-programming-contacts.js';
@@ -15,6 +21,100 @@ function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function requestPath(req = {}) {
+  return String(req.originalUrl || req.url || req.path || '').split('?')[0];
+}
+
+export function requiredOperationalCapability(req = {}) {
+  const path = requestPath(req);
+  const method = String(req.method || 'GET').toUpperCase();
+  const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  if (!path.startsWith('/admin/operaciones') && !path.startsWith('/operaciones/admin-')) return null;
+  if (path.startsWith('/admin/operaciones/pruebas')) return null;
+
+  if (path.startsWith('/admin/operaciones/asistencia/gestion-tiempo') || path.startsWith('/admin/operaciones/asistencia/nomina')) {
+    if (isWrite && /\/policy\/?$/.test(path)) return null;
+    if (isWrite && /\/imports\/[^/]+\/reverse\/?$/.test(path)) return OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE;
+    if (isWrite && /\/imports\/(?:preview|commit)\/?$/.test(path)) return OPERATIONAL_CAPABILITY.TIME_IMPORT;
+    if (isWrite && /\/compensation\/?$/.test(path)) return OPERATIONAL_CAPABILITY.TIME_COMPENSATION;
+    if (/\/export\.(?:csv|xlsx)\/?$/.test(path)) return OPERATIONAL_CAPABILITY.TIME_EXPORT;
+    return OPERATIONAL_CAPABILITY.TIME_VIEW;
+  }
+
+  if (/^\/admin\/operaciones\/clientes\/[^/]+\/operaciones\/[^/]+\/asistencia(?:\/|$)/.test(path)) {
+    return OPERATIONAL_CAPABILITY.ATTENDANCE_CONFIG;
+  }
+
+  if (path.startsWith('/admin/operaciones/asistencia')) {
+    if (/\/cuadrillas(?:\/|$)/.test(path)) return OPERATIONAL_CAPABILITY.ATTENDANCE_CONFIG;
+    if (isWrite && /\/sessions\/[^/]+\/review\/?$/.test(path)) {
+      const action = normalizeString(req.body?.action)?.toUpperCase();
+      return ['DELETE_MARK', 'ADD_MARK', 'CLEAR'].includes(action)
+        ? OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT
+        : OPERATIONAL_CAPABILITY.ATTENDANCE_MANAGE;
+    }
+    if (isWrite && /\/assignments\/[^/]+\/manual\/?$/.test(path)) return OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT;
+    if (isWrite && /\/failures\/[^/]+\/decision\/?$/.test(path)) return OPERATIONAL_CAPABILITY.ATTENDANCE_MANAGE;
+    return OPERATIONAL_CAPABILITY.ATTENDANCE_VIEW;
+  }
+
+  if (path.startsWith('/admin/operaciones/personal')) {
+    if (isWrite && (/\/eliminar\/?$/.test(path) || /\/eliminar-bulk\/?$/.test(path))) return OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE;
+    if (isWrite && /\/toggle\/?$/.test(path)) return OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_STATUS;
+    if (path.includes('/importar-excel') || path.includes('/nuevo') || path.includes('/editar')) {
+      return OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE;
+    }
+    return OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+
+  if (path.startsWith('/admin/operaciones/solicitudes')) {
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+
+  if (path.startsWith('/admin/operaciones/asignaciones')) {
+    if (isWrite && path.includes('/descansos')) return OPERATIONAL_CAPABILITY.DISPATCH_REST_MANAGE;
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_ASSIGNMENT_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+
+  if (path.startsWith('/admin/operaciones/novedades')) {
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_INCIDENT_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+
+  if (path.startsWith('/admin/operaciones/whatsapp')) {
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_WHATSAPP_SEND : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+
+  if (path.startsWith('/admin/operaciones/clientes')) {
+    if (isWrite && /\/eliminar\/?$/.test(path)) return OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE;
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+
+  if (path.startsWith('/admin/operaciones/programacion')) {
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+
+  if (path.startsWith('/operaciones/admin-delete/clientes')) return OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE;
+  if (path.startsWith('/operaciones/admin-delete/personal')) return OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE;
+  if (path.startsWith('/operaciones/admin-delete/solicitudes')) return OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE;
+  if (path.startsWith('/operaciones/admin-clientes')) {
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+  if (path.startsWith('/operaciones/admin-worker')) return OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE;
+  if (path.startsWith('/operaciones/admin-')) {
+    return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+  }
+
+  return isWrite ? OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE : OPERATIONAL_CAPABILITY.DISPATCH_VIEW;
+}
+
+function enforceOperationalCapability(req, res) {
+  const required = requiredOperationalCapability(req);
+  if (!required) return true;
+  if (hasOperationalCapability(req, required)) return true;
+  res.status(403).send('No tienes permiso para realizar esta función operativa.');
+  return false;
 }
 
 function auditFingerprint(value, namespace = 'entity') {
@@ -150,6 +250,41 @@ function installDevTestAssignmentGuard(prisma) {
   GUARDED_PRISMA_CLIENTS.add(prisma);
 }
 
+function clearOperationalAccess(req) {
+  req.session.operationalAccessConfigured = false;
+  req.session.operationalRole = null;
+  req.session.operationalEffectivePermissions = [];
+  req.session.operationalDelegablePermissions = [];
+  req.operationalAccessConfigured = false;
+  req.operationalRole = null;
+  req.operationalEffectivePermissions = [];
+  req.operationalDelegablePermissions = [];
+}
+
+function applyOperationalAccess(req, access = {}) {
+  const configured = access.configured === true;
+  const role = normalizeString(access.role);
+  const effectivePermissions = Array.isArray(access.effectivePermissions) ? access.effectivePermissions : [];
+  const delegablePermissions = Array.isArray(access.delegablePermissions) ? access.delegablePermissions : [];
+  req.session.operationalAccessConfigured = configured;
+  req.session.operationalRole = role;
+  req.session.operationalEffectivePermissions = effectivePermissions;
+  req.session.operationalDelegablePermissions = delegablePermissions;
+  req.operationalAccessConfigured = configured;
+  req.operationalRole = role;
+  req.operationalEffectivePermissions = effectivePermissions;
+  req.operationalDelegablePermissions = delegablePermissions;
+}
+
+function denyOperationalAccess(req) {
+  applyOperationalAccess(req, {
+    configured: true,
+    role: null,
+    effectivePermissions: [],
+    delegablePermissions: []
+  });
+}
+
 function clearSessionPermissions(req) {
   req.session.userRole = null;
   req.session.userId = null;
@@ -169,6 +304,7 @@ function clearSessionPermissions(req) {
   req.canAccessStatistics = false;
   req.canAccessMetaAds = false;
   req.canAccessCvAnalysis = false;
+  clearOperationalAccess(req);
 }
 
 async function refreshDatabaseUserPermissions(prisma, req) {
@@ -184,6 +320,8 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     req.session.canAccessTestWorkspace = isDev;
     req.canAccessPayroll = isDev;
     req.canAccessTestWorkspace = isDev;
+    if (isDev) applyOperationalAccess(req, await resolveOperationalAccess(prisma, { userRole: 'dev', userId: req.session?.userId, username: req.session?.username }));
+    else clearOperationalAccess(req);
     return;
   }
 
@@ -209,6 +347,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     req.session.canAccessTestWorkspace = false;
     req.canAccessPayroll = false;
     req.canAccessTestWorkspace = false;
+    denyOperationalAccess(req);
     return;
   }
   if (!user || !user.isActive) {
@@ -226,6 +365,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
   let canAccessPayroll = false;
   let canAccessTestWorkspace = false;
+  let operationalAccess = { configured: false, role: null, effectivePermissions: [], delegablePermissions: [] };
   try {
     const payrollAccess = await resolvePayrollFeatureAccess(prisma, {
       userRole: req.session?.userRole || req.userRole,
@@ -246,6 +386,16 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   } catch (error) {
     console.warn('No fue posible refrescar el permiso del entorno de pruebas.', error);
   }
+  try {
+    operationalAccess = await resolveOperationalAccess(prisma, {
+      userRole: req.session?.userRole || req.userRole,
+      userId: user.id,
+      username: user.username
+    });
+  } catch (error) {
+    console.warn('No fue posible refrescar el rol operativo.', error);
+    operationalAccess = { configured: true, role: null, effectivePermissions: [], delegablePermissions: [] };
+  }
 
   req.session.userAccessScope = accessScope;
   req.session.userAccessCity = accessCity;
@@ -257,6 +407,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.session.canAccessStatistics = canAccessStatistics;
   req.session.canAccessMetaAds = canAccessMetaAds;
   req.session.canAccessCvAnalysis = canAccessCvAnalysis;
+  applyOperationalAccess(req, operationalAccess);
   if (isEnvironmentAdmin) req.session.userId = user.id;
 
   req.userId = isEnvironmentAdmin ? user.id : req.userId;
@@ -287,12 +438,17 @@ export function sanitizeUsersPermissionCopy(html) {
 }
 
 function injectPayrollUsersScript(html, req) {
-  const path = String(req.originalUrl || '').split('?')[0];
-  if (path !== '/admin/users' || !canManageUserModulePermissions(req) || html.includes(PAYROLL_USERS_SCRIPT)) return html;
-  const canManageTestWorkspace = (req.session?.userRole || req.userRole) === 'dev';
+  const path = requestPath(req);
+  const isDev = (req.session?.userRole || req.userRole) === 'dev';
+  const canSupervise = canManageOperationalPermissions(req) && !isDev;
+  const usersPageAllowed = path === '/admin/users' && canManageUserModulePermissions(req);
+  const supervisorPageAllowed = path === '/admin/operaciones' && canSupervise;
+  if ((!usersPageAllowed && !supervisorPageAllowed) || html.includes(PAYROLL_USERS_SCRIPT)) return html;
+  const canManageTestWorkspace = isDev;
+  const operationalActorRole = isDev ? 'dev' : canSupervise ? 'supervisor' : 'none';
   return html.replace(
     /<\/body>/i,
-    `  <script src="${PAYROLL_USERS_SCRIPT}" data-can-manage-test-workspace="${canManageTestWorkspace ? 'true' : 'false'}"></script>\n</body>`
+    `  <script src="${PAYROLL_USERS_SCRIPT}" data-can-manage-test-workspace="${canManageTestWorkspace ? 'true' : 'false'}" data-operational-actor-role="${operationalActorRole}" data-can-supervise-operational-permissions="${canSupervise ? 'true' : 'false'}"></script>\n</body>`
   );
 }
 
@@ -360,8 +516,11 @@ export function dispatchAuditMiddleware(prisma) {
       req.session.canAccessTestWorkspace = isDev;
       req.canAccessPayroll = isDev;
       req.canAccessTestWorkspace = isDev;
+      if (isDev) applyOperationalAccess(req, await resolveOperationalAccess(prisma, { userRole: 'dev' }));
+      else denyOperationalAccess(req);
     }
 
+    if (!enforceOperationalCapability(req, res)) return;
     installAdminHtmlBridge(req, res);
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
     const startedAt = Date.now();
