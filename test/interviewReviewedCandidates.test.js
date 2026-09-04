@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { ADMIN_MODULE_PATHS, buildAdminModuleNavbar } from '../src/services/adminNavigation.js';
 import {
   deriveInterviewRatingBand,
   isInterviewedCandidateReview,
@@ -76,6 +77,26 @@ test('el desempate usa actualización de evaluación y luego identificador estab
     sortInterviewedCandidateEntries(entries).map((entry) => entry.candidateId),
     ['candidate-test-c', 'candidate-test-a', 'candidate-test-b']
   );
+});
+
+test('la gestión de entrevistas es una opción libre del módulo Reclutamiento para usuarios ADMIN y DEV', () => {
+  assert.equal(ADMIN_MODULE_PATHS.interviewManagement, '/admin?interviewManagement=1');
+
+  const recruiterNav = buildAdminModuleNavbar({
+    session: {
+      userRole: 'admin',
+      userAccessScope: 'VACANCY',
+      userAccessVacancyId: 'vacancy-test-scope'
+    }
+  });
+  const devNav = buildAdminModuleNavbar({ session: { userRole: 'dev' } });
+
+  assert.match(recruiterNav, /href="\/admin\?interviewManagement=1">Gestión de entrevistas<\/a>/);
+  assert.match(devNav, /href="\/admin\?interviewManagement=1">Gestión de entrevistas<\/a>/);
+  assert.match(routeSource, /router\.use\(apiSessionAuth\)/);
+  assert.match(routeSource, /buildVacancyAccessWhere\(accessContext\)/);
+  assert.match(routeSource, /buildCandidateAccessWhere\(accessContext\)/);
+  assert.doesNotMatch(routeSource, /ensureDevRole|canAccessInterviewManagement|canManageInterviewManagement/);
 });
 
 test('la ruta deriva el histórico y conserva un único script de gestión de entrevistas', () => {
