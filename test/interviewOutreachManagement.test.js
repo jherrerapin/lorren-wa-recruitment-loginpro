@@ -13,6 +13,14 @@ import {
   setInterviewInvitationStatus
 } from '../src/services/interviewOutreachManagement.js';
 
+const routeSource = readFileSync(new URL('../src/routes/interviewOutreachManagement.js', import.meta.url), 'utf8');
+const uiSource = readFileSync(new URL('../src/public/interview-outreach-management.js', import.meta.url), 'utf8');
+const schemaSource = readFileSync(new URL('../prisma/schema.prisma', import.meta.url), 'utf8');
+const globalComplementaryMigrationSource = readFileSync(
+  new URL('../prisma/migrations/20260904154500_global_interview_complementary_fields/migration.sql', import.meta.url),
+  'utf8'
+);
+
 function createPrismaMock() {
   const reviews = new Map();
   const fields = [];
@@ -42,16 +50,14 @@ function createPrismaMock() {
     },
     interviewComplementaryField: {
       async findUnique({ where }) {
-        const { vacancyId, normalizedLabel } = where.vacancyId_normalizedLabel;
-        const found = fields.find((field) => field.vacancyId === vacancyId && field.normalizedLabel === normalizedLabel);
+        const found = fields.find((field) => field.normalizedLabel === where.normalizedLabel);
         return found ? structuredClone(found) : null;
       },
-      async count({ where }) {
-        return fields.filter((field) => field.vacancyId === where.vacancyId).length;
+      async count() {
+        return fields.length;
       },
       async upsert({ where, create }) {
-        const { vacancyId, normalizedLabel } = where.vacancyId_normalizedLabel;
-        let field = fields.find((item) => item.vacancyId === vacancyId && item.normalizedLabel === normalizedLabel);
+        let field = fields.find((item) => item.normalizedLabel === where.normalizedLabel);
         if (!field) {
           field = { id: `field-${++fieldSequence}`, ...create };
           fields.push(field);
@@ -61,7 +67,7 @@ function createPrismaMock() {
       async findMany({ where }) {
         const ids = new Set(where.id.in);
         return fields
-          .filter((field) => field.vacancyId === where.vacancyId && ids.has(field.id))
+          .filter((field) => ids.has(field.id))
           .map(({ id }) => ({ id }));
       }
     },
@@ -209,17 +215,14 @@ test('desactivar observación elimina el texto previo de la revisión', async ()
   assert.equal(stored.observation, null);
 });
 
-test('una etiqueta complementaria se comparte por vacante y cada candidato conserva su valor', async () => {
+test('una etiqueta complementaria es global y cada candidato conserva su propio valor', async () => {
   const { prisma, fields, values } = createPrismaMock();
-  const vacancyId = 'vacancy-test-c';
 
   const first = await createInterviewComplementaryField(prisma, {
-    vacancyId,
     label: 'Disponibilidad de viaje',
     actor
   });
   const repeated = await createInterviewComplementaryField(prisma, {
-    vacancyId,
     label: '  disponibilidad de VIAJE  ',
     actor
   });
@@ -227,16 +230,15 @@ test('una etiqueta complementaria se comparte por vacante y cada candidato conse
   assert.equal(first.created, true);
   assert.equal(repeated.created, false);
   assert.equal(fields.length, 1);
+  assert.equal(Object.hasOwn(first.field, 'vacancyId'), false);
 
   await saveInterviewComplementaryValues(prisma, {
     candidateId: 'candidate-test-c1',
-    vacancyId,
     actor,
     values: [{ fieldId: first.field.id, value: 'Sí' }]
   });
   await saveInterviewComplementaryValues(prisma, {
     candidateId: 'candidate-test-c2',
-    vacancyId,
     actor,
     values: [{ fieldId: first.field.id, value: 'No' }]
   });
@@ -245,22 +247,34 @@ test('una etiqueta complementaria se comparte por vacante y cada candidato conse
   assert.equal(values.get(`candidate-test-c2:${first.field.id}`).value, 'No');
 });
 
-test('un campo de otra vacante no puede recibir un valor para este candidato', async () => {
-  const { prisma } = createPrismaMock();
-  const other = await createInterviewComplementaryField(prisma, {
-    vacancyId: 'vacancy-other',
-    label: 'Campo de otra vacante',
+test('un campo global existente puede usarse desde cualquier candidato y un id inexistente se rechaza', async () => {
+  const { prisma, values } = createPrismaMock();
+  const globalField = await createInterviewComplementaryField(prisma, {
+    label: 'Certificación complementaria',
     actor
   });
 
+  await saveInterviewComplementaryValues(prisma, {
+    candidateId: 'candidate-test-global-a',
+    actor,
+    values: [{ fieldId: globalField.field.id, value: 'Dato A' }]
+  });
+  await saveInterviewComplementaryValues(prisma, {
+    candidateId: 'candidate-test-global-b',
+    actor,
+    values: [{ fieldId: globalField.field.id, value: 'Dato B' }]
+  });
+
+  assert.equal(values.get(`candidate-test-global-a:${globalField.field.id}`).value, 'Dato A');
+  assert.equal(values.get(`candidate-test-global-b:${globalField.field.id}`).value, 'Dato B');
+
   await assert.rejects(
     saveInterviewComplementaryValues(prisma, {
-      candidateId: 'candidate-test-scope',
-      vacancyId: 'vacancy-current',
+      candidateId: 'candidate-test-global-c',
       actor,
-      values: [{ fieldId: other.field.id, value: 'No permitido' }]
+      values: [{ fieldId: 'field-does-not-exist', value: 'Dato inválido' }]
     }),
-    /interview_complementary_field_scope_invalid/
+    /interview_complementary_field_invalid/
   );
 });
 
@@ -289,16 +303,50 @@ test('snapshot conserva confirmación, asistencia, clasificación y autoría sin
   assert.equal(snapshot.complementaryFields[0].value, 'Valor Prueba');
 });
 
-test('la ruta deriva actor de sesión/AppUser, preserva alcance y activa una única UI por vacante', () => {
-  const source = readFileSync(new URL('../src/routes/interviewOutreachManagement.js', import.meta.url), 'utf8');
-  assert.match(source, /req\.userId \|\| req\.session\?\.userId/);
-  assert.match(source, /displayName:\s*true/);
-  assert.match(source, /buildCandidateAccessWhere\(getRequestAccessContext\(req\)\)/);
-  assert.match(source, /interviewCandidateReviews:\s*\{\s*some:/);
-  assert.doesNotMatch(source, /req\.body\??\.?actor|req\.body\??\.?updatedBy|req\.body\??\.?userId/);
-  assert.match(source, /interview-outreach-management\.js/);
-  assert.match(source, /data-interview-outreach-management/);
-  assert.doesNotMatch(source, /direction:\s*'INBOUND'/);
+test('la ruta deriva actor de sesión/AppUser, preserva alcance y carga complementarios globales', () => {
+  assert.match(routeSource, /req\.userId \|\| req\.session\?\.userId/);
+  assert.match(routeSource, /displayName:\s*true/);
+  assert.match(routeSource, /buildCandidateAccessWhere\(getRequestAccessContext\(req\)\)/);
+  assert.match(routeSource, /interviewCandidateReviews:\s*\{\s*some:/);
+  assert.doesNotMatch(routeSource, /req\.body\??\.?actor|req\.body\??\.?updatedBy|req\.body\??\.?userId/);
+  assert.match(routeSource, /interview-outreach-management\.js/);
+  assert.match(routeSource, /data-interview-outreach-management/);
+  assert.match(routeSource, /interviewComplementaryField\.findMany\(\{\s*orderBy:/);
+  assert.doesNotMatch(routeSource, /interviewComplementaryField\.findMany\(\{\s*where:\s*\{\s*vacancyId:/);
+  assert.match(routeSource, /createInterviewComplementaryField\(prisma,\s*\{\s*label:/);
+  assert.doesNotMatch(routeSource, /direction:\s*'INBOUND'/);
+});
+
+test('esquema y migración eliminan el alcance por vacante sin perder valores históricos', () => {
+  const fieldModel = /model InterviewComplementaryField \{([\s\S]*?)\n\}/.exec(schemaSource)?.[1] || '';
+  assert.ok(fieldModel);
+  assert.doesNotMatch(fieldModel, /vacancyId|vacancy\s+Vacancy/);
+  assert.match(fieldModel, /normalizedLabel\s+String\s+@unique/);
+  assert.match(fieldModel, /@@index\(\[sortOrder\]\)/);
+  assert.doesNotMatch(schemaSource, /interviewComplementaryFields\s+InterviewComplementaryField\[\]/);
+
+  assert.match(globalComplementaryMigrationSource, /_InterviewComplementaryFieldMap/);
+  assert.match(globalComplementaryMigrationSource, /_InterviewComplementaryValueKeep/);
+  assert.match(globalComplementaryMigrationSource, /NULLIF\(BTRIM\(v\."value"\), ''\) IS NOT NULL/);
+  assert.match(globalComplementaryMigrationSource, /DROP COLUMN "vacancyId"/);
+  assert.match(globalComplementaryMigrationSource, /InterviewComplementaryField_normalizedLabel_key/);
+});
+
+test('la UI crea campos globales y el check controla realmente el textarea de observación', () => {
+  assert.match(uiSource, /Información complementaria/);
+  assert.match(uiSource, /Nuevo campo complementario/);
+  assert.match(uiSource, /disponible para todas las vacantes/);
+  assert.match(uiSource, /\/complementary-fields/);
+  assert.match(uiSource, /body:\s*JSON\.stringify\(\{ label \}\)/);
+  assert.match(uiSource, /function buildDayManagementPanel\(candidateId, response, refresh\)/);
+  assert.match(uiSource, /await refresh\(\)/);
+  assert.match(uiSource, /const syncObservationField/);
+  assert.match(uiSource, /observationField\.hidden = !enabled/);
+  assert.match(uiSource, /observationArea\.disabled = !enabled/);
+  assert.match(uiSource, /syncObservationField\(\{ clear: true \}\)/);
+  assert.match(uiSource, /\.ic-field\[hidden\]\{display:none!important\}/);
+  assert.match(uiSource, /observation:\s*observationCheckbox\.checked \? observationArea\.value : ''/);
+  assert.doesNotMatch(uiSource, /(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
 });
 
 test('las tres entidades nuevas declaran una única autoridad canónica', () => {
@@ -313,6 +361,7 @@ test('las tres entidades nuevas declaran una única autoridad canónica', () => 
       reason: contract.writers[0].reason
     }]);
   }
+  assert.match(manifest.models.interviewComplementaryField.writers[0].reason, /globales/);
 });
 
 test('server monta la autoridad antes del router administrativo y webhook permanece fuera del cambio', () => {
