@@ -302,7 +302,7 @@ export async function createInterviewComplementaryField(prisma, input = {}) {
 }
 
 export async function saveInterviewComplementaryValues(prisma, input = {}) {
-  requireManagementClient(prisma, 'interviewComplementaryField', ['findMany', 'update']);
+  requireManagementClient(prisma, 'interviewComplementaryField', ['findMany']);
   requireManagementClient(prisma, 'interviewComplementaryValue', ['upsert']);
   const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
   const actor = normalizeActor(input.actor);
@@ -321,50 +321,62 @@ export async function saveInterviewComplementaryValues(prisma, input = {}) {
   const values = [...unique.values()];
   if (!values.length) return [];
 
+  const hasLabelEdits = values.some(({ label }) => Boolean(label));
+  if (hasLabelEdits) {
+    requireManagementClient(prisma, 'interviewComplementaryField', ['findMany', 'update']);
+  }
+
   const fieldIds = values.map(({ fieldId }) => fieldId);
   const targetNormalizedLabels = values
     .map(({ label }) => label?.normalizedLabel || null)
     .filter(Boolean);
-  const fields = await prisma.interviewComplementaryField.findMany({
-    where: targetNormalizedLabels.length
-      ? {
+  const fields = await prisma.interviewComplementaryField.findMany(hasLabelEdits
+    ? {
+        where: {
           OR: [
             { id: { in: fieldIds } },
             { normalizedLabel: { in: targetNormalizedLabels } }
           ]
-        }
-      : { id: { in: fieldIds } },
-    select: { id: true, label: true, normalizedLabel: true }
-  });
+        },
+        select: { id: true, label: true, normalizedLabel: true }
+      }
+    : {
+        where: { id: { in: fieldIds } },
+        select: { id: true }
+      });
   const fieldById = new Map(fields.map((field) => [field.id, field]));
   if (values.some(({ fieldId }) => !fieldById.has(fieldId))) {
     throw new TypeError('interview_complementary_field_invalid');
   }
 
-  for (const item of values) {
-    if (!item.label) continue;
-    const conflict = fields.find((field) => (
-      field.id !== item.fieldId
-      && field.normalizedLabel === item.label.normalizedLabel
-    ));
-    if (conflict) throw new TypeError('interview_complementary_label_conflict');
+  if (hasLabelEdits) {
+    for (const item of values) {
+      if (!item.label) continue;
+      const conflict = fields.find((field) => (
+        field.id !== item.fieldId
+        && field.normalizedLabel === item.label.normalizedLabel
+      ));
+      if (conflict) throw new TypeError('interview_complementary_label_conflict');
+    }
   }
 
-  const fieldUpdates = values.flatMap((item) => {
-    if (!item.label) return [];
-    const current = fieldById.get(item.fieldId);
-    if (
-      current.label === item.label.label
-      && current.normalizedLabel === item.label.normalizedLabel
-    ) return [];
-    return [prisma.interviewComplementaryField.update({
-      where: { id: item.fieldId },
-      data: {
-        label: item.label.label,
-        normalizedLabel: item.label.normalizedLabel
-      }
-    })];
-  });
+  const fieldUpdates = hasLabelEdits
+    ? values.flatMap((item) => {
+        if (!item.label) return [];
+        const current = fieldById.get(item.fieldId);
+        if (
+          current.label === item.label.label
+          && current.normalizedLabel === item.label.normalizedLabel
+        ) return [];
+        return [prisma.interviewComplementaryField.update({
+          where: { id: item.fieldId },
+          data: {
+            label: item.label.label,
+            normalizedLabel: item.label.normalizedLabel
+          }
+        })];
+      })
+    : [];
 
   const valueOperations = values.map(({ fieldId, value }) => prisma.interviewComplementaryValue.upsert({
     where: { candidateId_fieldId: { candidateId, fieldId } },
