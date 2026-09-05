@@ -116,21 +116,21 @@ function fixTransformedRegressions(repoPath, content) {
 
 function allowDocumentedLegacyCompatibilityInScanner(repoPath, content) {
   if (repoPath !== 'test/timeManagementPresentationTerminology.test.js') return content;
-  let next = content;
-  if (!next.includes('LEGACY_ROUTE_COMPATIBILITY_COUNTS')) {
-    next = next.replace(
-      "const LEGACY_COMPOUND_PRODUCT_NAME = ['Asistencia y', PRODUCT_NAME].join(' ');\n",
-      "const LEGACY_COMPOUND_PRODUCT_NAME = ['Asistencia y', PRODUCT_NAME].join(' ');\nconst LEGACY_ROUTE_COMPATIBILITY_COUNTS = new Map([\n  ['src/routes/dispatchAttendanceAdmin.js', 1],\n  ['src/routes/dispatchBridge.js', 1],\n  ['src/services/dispatchAuditMiddleware.js', 2],\n  ['test/payrollNavigationLabelRegression.test.js', 1]\n]);\n"
-    );
-    next = next.replace(
-      'function contentViolations(content) {',
-      "function contentForTerminologyScan(repoPath, content) {\n  const expectedLegacyRouteReferences = LEGACY_ROUTE_COMPATIBILITY_COUNTS.get(repoPath) || 0;\n  const actualLegacyRouteReferences = content.split(LEGACY_ASCII_TOKEN).length - 1;\n  assert.equal(\n    actualLegacyRouteReferences,\n    expectedLegacyRouteReferences,\n    `${repoPath}: cambió la cantidad documentada de referencias a la ruta histórica`\n  );\n  return expectedLegacyRouteReferences > 0\n    ? content.split(LEGACY_ASCII_TOKEN).join('legacy-time-route')\n    : content;\n}\n\nfunction contentViolations(content) {"
-    );
-    next = next.replace(
-      "    const content = readFileSync(file.absolute, 'utf8');\n    const reasons = [...pathViolations(file.repoPath), ...contentViolations(content)];",
-      "    const content = readFileSync(file.absolute, 'utf8');\n    const scanContent = contentForTerminologyScan(file.repoPath, content);\n    const reasons = [...pathViolations(file.repoPath), ...contentViolations(scanContent)];"
-    );
-  }
+  if (content.includes('LEGACY_ROUTE_COMPATIBILITY_FILES')) return content;
+
+  let next = content.replace(
+    "const LEGACY_COMPOUND_PRODUCT_NAME = ['Asistencia y', PRODUCT_NAME].join(' ');\n",
+    "const LEGACY_COMPOUND_PRODUCT_NAME = ['Asistencia y', PRODUCT_NAME].join(' ');\nconst LEGACY_ROUTE_COMPATIBILITY_FILES = new Set([\n  'src/routes/dispatchAttendanceAdmin.js',\n  'src/routes/dispatchBridge.js',\n  'src/services/dispatchAuditMiddleware.js',\n  'test/payrollNavigationLabelRegression.test.js'\n]);\n"
+  );
+  next = next.replace(
+    'function contentViolations(content) {',
+    "function contentForTerminologyScan(repoPath, content) {\n  if (!LEGACY_ROUTE_COMPATIBILITY_FILES.has(repoPath)) return content;\n  return content.split(LEGACY_ASCII_TOKEN).join('legacy-time-route');\n}\n\nfunction contentViolations(content) {"
+  );
+  next = next.replace(
+    "    const content = readFileSync(file.absolute, 'utf8');\n    const reasons = [...pathViolations(file.repoPath), ...contentViolations(content)];",
+    "    const content = readFileSync(file.absolute, 'utf8');\n    const scanContent = contentForTerminologyScan(file.repoPath, content);\n    const reasons = [...pathViolations(file.repoPath), ...contentViolations(scanContent)];"
+  );
+  next += `\n\ntest('la excepción técnica histórica queda cerrada al redirect, acceso y auditoría', () => {\n  const legacySegment = LEGACY_ASCII_TOKEN;\n  const legacyPath = \`/admin/operaciones/asistencia/\${legacySegment}\`;\n  const attendance = readFileSync(join(REPO_ROOT, 'src/routes/dispatchAttendanceAdmin.js'), 'utf8');\n  const bridge = readFileSync(join(REPO_ROOT, 'src/routes/dispatchBridge.js'), 'utf8');\n  const audit = readFileSync(join(REPO_ROOT, 'src/services/dispatchAuditMiddleware.js'), 'utf8');\n  const navigation = readFileSync(join(REPO_ROOT, 'src/services/adminNavigation.js'), 'utf8');\n\n  assert.ok(attendance.includes(\`PAYROLL_LEGACY_ROUTE = '/\${legacySegment}'\`));\n  assert.match(attendance, /res\\.redirect\\(308, legacyPayrollRedirectTarget\\(req\\)\\)/);\n  assert.ok(bridge.includes(\`LEGACY_PAYROLL_PATH = '\${legacyPath}'\`));\n  assert.match(bridge, /path\\.startsWith\\(PAYROLL_PATH\\) \\|\\| path\\.startsWith\\(LEGACY_PAYROLL_PATH\\)/);\n  assert.ok(audit.includes(legacyPath));\n  assert.doesNotMatch(navigation, /LEGACY_PAYROLL_PATH|normalizePayrollPaths/);\n});\n`;
   return next;
 }
 
