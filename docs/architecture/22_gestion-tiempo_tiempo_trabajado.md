@@ -1,19 +1,19 @@
-# Nómina y tiempo trabajado
+# Gestión de Tiempo y tiempo trabajado
 
 ## Objetivo
 
-El módulo transforma las marcaciones validadas de Asistencia en horas acumuladas por auxiliar y en conceptos compatibles con el proceso de nómina. La fuente de verdad continúa siendo el tiempo en minutos; la conversión a horas decimales ocurre solamente al mostrar o exportar.
+El módulo transforma las marcaciones validadas de Asistencia en horas acumuladas por auxiliar y en conceptos compatibles con el proceso de Gestión de Tiempo. La fuente de verdad continúa siendo el tiempo en minutos; la conversión a horas decimales ocurre solamente al mostrar o exportar.
 
 ## Acceso
 
 - DEV puede entrar siempre.
 - Los demás usuarios no reciben acceso por defecto.
 - DEV concede o retira el permiso desde la configuración de usuarios.
-- Conceder Nómina activa también Operaciones / Despacho y Asistencia operativa, porque el reporte depende de esos módulos.
-- Retirar Nómina no elimina automáticamente otros permisos que el usuario ya tenga.
+- Conceder Gestión de Tiempo activa también Operaciones / Despacho y Asistencia operativa, porque el reporte depende de esos módulos.
+- Retirar Gestión de Tiempo no elimina automáticamente otros permisos que el usuario ya tenga.
 - El permiso queda registrado como evento auditado `APP_USER_PAYROLL_ACCESS`.
-- El enlace de Nómina se inyecta únicamente cuando el permiso efectivo está activo.
-- La ruta está anidada bajo `/admin/operaciones/asistencia/nomina`, por lo que también atraviesa la autorización del módulo de Asistencia.
+- El enlace de Gestión de Tiempo se inyecta únicamente cuando el permiso efectivo está activo.
+- La ruta está anidada bajo `/admin/operaciones/asistencia/gestion-tiempo`, por lo que también atraviesa la autorización del módulo de Asistencia.
 
 ## Unidad de cálculo
 
@@ -28,7 +28,7 @@ No se redondea cada jornada antes de consolidar. Primero se suman los minutos de
 
 ## Periodos
 
-Nómina combina dos ventanas independientes en un único resultado.
+Gestión de Tiempo combina dos ventanas independientes en un único resultado.
 
 El **periodo general** ofrece:
 
@@ -43,11 +43,11 @@ El **periodo de horas extras** ofrece:
 
 Cambiar una ventana no modifica la otra. La fila final por auxiliar conserva días remunerados/no remunerados, permisos, incapacidades, turnos, domingos, festivos, total trabajado y ordinarias del periodo general. El periodo de horas extras aporta `Horas extra` y todos los conceptos calculados para su propio rango: `HEDO`, `HENO`, `HEDD`, `HEND`, `HEDF`, `HENF` y los recargos `R*`. Un auxiliar con actividad relevante solo en la ventana de extras —incluso si su única señal es un recargo `R*`— puede aparecer una vez con métricas generales en cero y los conceptos de ese segundo rango.
 
-La semana de Nómina es una regla fija de lunes a domingo. Las políticas históricas que hayan guardado domingo como inicio se normalizan a lunes al leerse, sin migración de datos.
+La semana de Gestión de Tiempo es una regla fija de lunes a domingo. Las políticas históricas que hayan guardado domingo como inicio se normalizan a lunes al leerse, sin migración de datos.
 
 Para conciliar correctamente cada una de las dos ventanas, `loadPayrollReport()` carga la semana completa de lunes a domingo que toque cada extremo del rango solicitado. Los días fuera de la ventana visible no se muestran ni se exportan como parte de esa ventana, pero sí participan en el balance entre excesos diarios y faltantes diarios de la misma semana. La semana es una **ventana de conciliación**; no existe un umbral de 42 horas que por sí solo cree o elimine horas extra.
 
-La composición de ambos resultados no reclasifica minutos. El motor canónico se ejecuta con cada rango y el adaptador de Nómina toma del periodo general las métricas base del corte y sustituye `Horas extra`, `H*` y `R*` por los calculados para la ventana independiente de extras. Los días y contadores generales permanecen en su corte original. Las novedades del periodo de extras también se conservan para no ocultar un bloqueo real de esa ventana.
+La composición de ambos resultados no reclasifica minutos. El motor canónico se ejecuta con cada rango y el adaptador de Gestión de Tiempo toma del periodo general las métricas base del corte y sustituye `Horas extra`, `H*` y `R*` por los calculados para la ventana independiente de extras. Los días y contadores generales permanecen en su corte original. Las novedades del periodo de extras también se conservan para no ocultar un bloqueo real de esa ventana.
 
 El detalle diario sigue exactamente la misma propiedad de métricas que la fila consolidada. Una fecha del periodo general conserva total, ordinarias, descansos y marcaciones del corte general, pero sus conceptos `H*` y `R*` se muestran únicamente si esa fecha participa en el resultado del filtro de extras. Si una fecha es relevante solo por hora extra o recargo, puede incorporarse al detalle para explicar esos conceptos y su trazabilidad, con las métricas generales en cero. Si una fecha aparece en ambas ventanas se fusiona una sola vez: la base viene del periodo general y los conceptos `H*`/`R*` del periodo de extras. Esta composición ocurre después de que cada rango fue calculado por la autoridad canónica; no vuelve a clasificar minutos.
 
@@ -186,4 +186,4 @@ La exportación usa exactamente el mismo resultado combinado que la tabla: rango
 
 ## Alcance de esta entrega
 
-La entrega calcula y exporta cantidades de horas. No liquida dinero ni aplica el salario del auxiliar. La aplicación de porcentajes y valores monetarios queda fuera del motor hasta conocer el formato definitivo del proveedor de nómina.
+La entrega calcula y exporta cantidades de horas. No liquida dinero ni aplica el salario del auxiliar. La aplicación de porcentajes y valores monetarios queda fuera del motor hasta conocer el formato definitivo del proveedor de Gestión de Tiempo.

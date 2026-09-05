@@ -58,20 +58,20 @@ function payrollPrisma({ targetUsername = 'user-payroll-target' } = {}) {
   return { prisma, events };
 }
 
-test('Nómina conserva su ruta operativa pero atraviesa las guardas con permiso propio', async () => {
+test('Gestión de Tiempo conserva su ruta operativa pero atraviesa las guardas con permiso propio', async () => {
   const bridge = await read('src/routes/dispatchBridge.js');
   const attendance = await read('src/routes/dispatchAttendanceAdmin.js');
-  assert.match(attendance, /router\.use\('\/nomina', dispatchPayrollRouter\(prisma\)\);/);
+  assert.match(attendance, /router\.use\('\/gestion-tiempo', dispatchPayrollRouter\(prisma\)\);/);
   assert.match(bridge, /isPayrollRequest/);
   assert.match(bridge, /req\.canAccessPayrollFeature/);
   assert.match(bridge, /resolvePayrollFeatureAccess/);
 });
 
-test('Nómina operativa conserva exclusivamente su permiso propio', async () => {
+test('Gestión de Tiempo operativa conserva exclusivamente su permiso propio', async () => {
   const source = await read('src/routes/dispatchPayroll.js');
   assert.match(source, /resolvePayrollFeatureAccess/);
   assert.doesNotMatch(source, /resolveTestWorkspaceFeatureAccess/);
-  assert.match(source, /No tienes permiso para acceder a Nómina y tiempo trabajado/);
+  assert.match(source, /No tienes permiso para acceder a Gestión de Tiempo y tiempo trabajado/);
   assert.match(source, /router\.get\('\/export\.csv'/);
   assert.match(source, /router\.get\('\/export\.xlsx'/);
 });
@@ -83,7 +83,7 @@ test('el entorno de pruebas valida su permiso y calcula dentro de su propia ruta
   assert.match(route, /No tienes permiso para acceder al entorno de pruebas/);
 });
 
-test('Usuarios inyecta Nómina para la autoridad canónica y mantiene DEV_TEST solo para DEV', async () => {
+test('Usuarios inyecta Gestión de Tiempo para la autoridad canónica y mantiene DEV_TEST solo para DEV', async () => {
   const middleware = await read('src/services/dispatchAuditMiddleware.js');
   const client = await read('src/public/payroll-user-access.js');
   assert.match(middleware, /canManageUserModulePermissions\(req\)/);
@@ -106,7 +106,7 @@ test('el HTML de Usuarios no expone nombres de roles internos en ayudas de permi
   assert.doesNotMatch(output, /Solo DEV y reclutador-general|DEV o reclutador-general/);
 });
 
-test('reclutador-general puede conceder Nómina sin recibir permisos parentales', async () => {
+test('reclutador-general puede conceder Gestión de Tiempo sin recibir permisos parentales', async () => {
   const { prisma, events } = payrollPrisma();
   const result = await setPayrollFeatureAccess(prisma, {
     targetUserId: 'user-payroll-target',
@@ -126,7 +126,7 @@ test('reclutador-general puede conceder Nómina sin recibir permisos parentales'
   assert.equal(events[0].data.metadata.parentPermissionsChanged, false);
 });
 
-test('un admin ordinario y el antiguo admin de entorno no pueden conceder Nómina', async () => {
+test('un admin ordinario y el antiguo admin de entorno no pueden conceder Gestión de Tiempo', async () => {
   for (const actor of [
     {
       actorRole: 'admin',
@@ -154,7 +154,7 @@ test('un admin ordinario y el antiguo admin de entorno no pueden conceder Nómin
   }
 });
 
-test('la API canónica de Usuarios permite a reclutador-general activar y retirar Nómina', async () => {
+test('la API canónica de Usuarios permite a reclutador-general activar y retirar Gestión de Tiempo', async () => {
   const { prisma, events } = payrollPrisma();
   const app = express();
   app.use(express.json());
@@ -221,7 +221,7 @@ test('la API canónica de Usuarios rechaza un admin ordinario', async () => {
   }
 });
 
-test('conceder Nómina mantiene una sola autoridad persistente y no cambia módulos padre', async () => {
+test('conceder Gestión de Tiempo mantiene una sola autoridad persistente y no cambia módulos padre', async () => {
   const service = await read('src/services/payrollFeatureAccess.js');
   const locations = await read('src/routes/locations.js');
   assert.match(service, /canManageUserModulePermissions/);

@@ -125,7 +125,7 @@ test('domingo conserva recargo dominical sin depender de restDay ni generar comp
 });
 
 test('la vista DEV oculta cliente, máximos de extra y día de descanso de la configuración', async () => {
-  const partial = await readFile('src/views/partials/operacionesNominaTabla.ejs', 'utf8');
+  const partial = await readFile('src/views/partials/operacionesGestionTiempoTabla.ejs', 'utf8');
   assert.doesNotMatch(partial, /<label>Cliente<\/label>/);
   assert.doesNotMatch(partial, /name="maxDailyOvertimeHours"/);
   assert.doesNotMatch(partial, /name="maxWeeklyOvertimeHours"/);
@@ -135,9 +135,9 @@ test('la vista DEV oculta cliente, máximos de extra y día de descanso de la co
 });
 
 test('la política nocturna se muestra como 19:00 y 06:00, no como números aislados', async () => {
-  const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
+  const template = await readFile('src/views/operacionesGestionTiempo.ejs', 'utf8');
   const html = ejs.render(template, {
-    pageTitle: 'Nómina y tiempo trabajado',
+    pageTitle: 'Gestión de Tiempo y tiempo trabajado',
     role: 'dev',
     report: {
       period: { periodType: 'CUSTOM', from: '2026-07-27', to: '2026-07-27', anchor: '2026-07-27' },

@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('Nómina global excluye pruebas por defecto y solo DEV puede solicitar su inclusión', async () => {
+test('Gestión de Tiempo global excluye pruebas por defecto y solo DEV puede solicitar su inclusión', async () => {
   const report = await read('src/modules/dispatch-payroll/application/payrollReport.js');
   const route = await read('src/routes/dispatchPayroll.js');
   assert.match(report, /DEV_TEST_REQUEST_SOURCE/);
@@ -16,7 +16,7 @@ test('Nómina global excluye pruebas por defecto y solo DEV puede solicitar su i
 });
 
 test('el entorno autorizado crea solicitudes aisladas sin depender del módulo operativo', async () => {
-  const view = await read('src/views/operacionesPruebasNomina.ejs');
+  const view = await read('src/views/operacionesPruebasGestionTiempo.ejs');
   const bridge = await read('src/routes/dispatchBridge.js');
   const route = await read('src/routes/dispatchDevPayrollTest.js');
   assert.match(view, /Nueva solicitud de prueba/);

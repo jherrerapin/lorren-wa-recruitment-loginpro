@@ -33,13 +33,13 @@ function prismaMock({ latestAction = null } = {}) {
   return { prisma, calls };
 }
 
-test('DEV siempre puede abrir Nómina sin consultar permisos de usuario', async () => {
+test('DEV siempre puede abrir Gestión de Tiempo sin consultar permisos de usuario', async () => {
   const access = await resolvePayrollFeatureAccess(null, { userRole: 'dev' });
   assert.equal(access.allowed, true);
   assert.equal(access.reason, 'dev');
 });
 
-test('un usuario administrador no recibe Nómina por defecto', async () => {
+test('un usuario administrador no recibe Gestión de Tiempo por defecto', async () => {
   const { prisma } = prismaMock();
   const access = await resolvePayrollFeatureAccess(prisma, {
     userRole: 'admin',
@@ -59,7 +59,7 @@ test('solo DEV puede conceder el permiso', async () => {
   }), /payroll_access_dev_required/);
 });
 
-test('conceder Nómina no modifica Operaciones ni Asistencia', async () => {
+test('conceder Gestión de Tiempo no modifica Operaciones ni Asistencia', async () => {
   const { prisma, calls } = prismaMock();
   const result = await setPayrollFeatureAccess(prisma, {
     targetUserId: 'user-1',
@@ -77,7 +77,7 @@ test('conceder Nómina no modifica Operaciones ni Asistencia', async () => {
   assert.equal(calls.events[0].data.metadata.parentPermissionsChanged, false);
 });
 
-test('retirar Nómina conserva los demás permisos', async () => {
+test('retirar Gestión de Tiempo conserva los demás permisos', async () => {
   const { prisma, calls } = prismaMock({ latestAction: PAYROLL_ACCESS_ACTION.ENABLED });
   const result = await setPayrollFeatureAccess(prisma, {
     targetUserId: 'user-1',

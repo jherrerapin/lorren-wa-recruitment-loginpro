@@ -207,7 +207,7 @@ function redirectToPayroll(res, source, { success = null, error = null } = {}) {
   const params = safeQuery(source);
   if (success) params.set('success', success);
   if (error) params.set('error', error);
-  return res.redirect(`/admin/operaciones/asistencia/nomina?${params.toString()}`);
+  return res.redirect(`/admin/operaciones/asistencia/gestion-tiempo?${params.toString()}`);
 }
 
 function publicError(error) {
@@ -225,7 +225,7 @@ function publicError(error) {
     payroll_export_columns_required: 'Selecciona al menos una columna para descargar el Excel.',
     payroll_export_workers_required: 'Selecciona al menos un auxiliar para descargar el Excel.'
   };
-  return messages[code] || payrollAttendanceImportErrorMessage(code) || 'No fue posible completar la operación de Asistencia y Gestión de Tiempo.';
+  return messages[code] || payrollAttendanceImportErrorMessage(code) || 'No fue posible completar la operación de Gestión de Tiempo.';
 }
 
 function multerUploadHandler(upload) {
@@ -310,11 +310,11 @@ export function buildPayrollExcelWorkbook(report, options = {}) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Lórren · LoginPro';
   workbook.company = 'LoginPro Service';
-  workbook.title = 'Asistencia y Gestión de Tiempo';
+  workbook.title = 'Gestión de Tiempo';
   workbook.subject = `Corte ${report.period.from} a ${report.period.to}`;
   workbook.created = report.generatedAt instanceof Date ? report.generatedAt : new Date();
 
-  const sheet = workbook.addWorksheet('Asistencia y Gestión de Tiempo');
+  const sheet = workbook.addWorksheet('Gestión de Tiempo');
   sheet.properties.defaultRowHeight = 20;
   sheet.columns = headers.map((header) => ({ key: header, width: payrollExcelColumnWidth(header) }));
 
@@ -323,7 +323,7 @@ export function buildPayrollExcelWorkbook(report, options = {}) {
   sheet.mergeCells(`A2:${lastColumnLetter}2`);
 
   const titleCell = sheet.getCell('A1');
-  titleCell.value = 'Asistencia y Gestión de Tiempo';
+  titleCell.value = 'Gestión de Tiempo';
   titleCell.font = { bold: true, size: 16, color: { argb: PAYROLL_EXCEL_COLORS.white } };
   titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: PAYROLL_EXCEL_COLORS.navy } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'left' };
@@ -399,7 +399,7 @@ export function buildPayrollExcelWorkbook(report, options = {}) {
     orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
     margins: { left: 0.25, right: 0.25, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 }
   };
-  sheet.headerFooter.oddFooter = '&LLoginPro Service&C&P de &N&RReporte de Asistencia y Gestión de Tiempo';
+  sheet.headerFooter.oddFooter = '&LLoginPro Service&C&P de &N&RReporte de Gestión de Tiempo';
   return workbook;
 }
 
@@ -759,8 +759,8 @@ function renderPayrollExcelCustomizer(res, req, report, options = {}) {
   const selectedColumns = options.selectedColumns ?? PAYROLL_EXCEL_COLUMNS.map((column) => column.key);
   const selectedWorkerIds = options.selectedWorkerIds ?? (report.rows || []).map((row) => row.workerId);
   const exportSource = options.exportSource ?? req.query ?? {};
-  return res.render('operacionesNominaExport', {
-    pageTitle: 'Personalizar Excel · Asistencia y Gestión de Tiempo',
+  return res.render('operacionesGestionTiempoExport', {
+    pageTitle: 'Personalizar Excel · Gestión de Tiempo',
     role: roleFromRequest(req),
     report,
     payrollExcelColumnGroups: PAYROLL_EXCEL_COLUMN_GROUPS,
@@ -815,12 +815,12 @@ export function dispatchPayrollRouter(prisma) {
     noStore(res);
     try {
       const access = await loadAccess(prisma, req);
-      if (!access.allowed) return res.status(403).send('No tienes permiso para acceder a Asistencia y Gestión de Tiempo.');
+      if (!access.allowed) return res.status(403).send('No tienes permiso para acceder a Gestión de Tiempo.');
       res.locals.canAccessPayroll = true;
       return next();
     } catch (error) {
       console.error('[PAYROLL_ACCESS_FAILED]', error);
-      return res.status(503).send('No fue posible comprobar el permiso de Asistencia y Gestión de Tiempo.');
+      return res.status(503).send('No fue posible comprobar el permiso de Gestión de Tiempo.');
     }
   });
 
@@ -872,15 +872,15 @@ export function dispatchPayrollRouter(prisma) {
       const selectedClientId = report.filters.clientId || report.clients[0]?.id || '';
       const selectedPolicies = await loadPayrollPolicies(prisma, selectedClientId ? [selectedClientId] : []);
       const selectedPolicy = selectedPolicies.get(selectedClientId) || DEFAULT_PAYROLL_POLICY;
-      return res.render('operacionesNomina', {
-        pageTitle: 'Asistencia y Gestión de Tiempo', role: roleFromRequest(req), report, recentImports, selectedPolicy,
+      return res.render('operacionesGestionTiempo', {
+        pageTitle: 'Gestión de Tiempo', role: roleFromRequest(req), report, recentImports, selectedPolicy,
         conceptCodes: PAYROLL_CONCEPT_CODES, formatPayrollMinutes,
         success: normalizeString(req.query?.success, 300), error: normalizeString(req.query?.error, 300)
       });
     } catch (error) {
       console.error('[PAYROLL_REPORT_FAILED]', error);
-      return res.status(500).render('operacionesNomina', {
-        pageTitle: 'Asistencia y Gestión de Tiempo', role: roleFromRequest(req), recentImports: [],
+      return res.status(500).render('operacionesGestionTiempo', {
+        pageTitle: 'Gestión de Tiempo', role: roleFromRequest(req), recentImports: [],
         report: {
           period: { periodType: 'BIWEEKLY', from: '', to: '', anchor: '' },
           overtimePeriod: { periodType: 'CUSTOM', from: '', to: '', anchor: '' },

@@ -43,7 +43,7 @@ function prismaFixture(sessions) {
   };
 }
 
-test('Nómina usa las marcaciones vigentes aunque workedMinutes histórico sea distinto', () => {
+test('Gestión de Tiempo usa las marcaciones vigentes aunque workedMinutes histórico sea distinto', () => {
   const report = calculatePayrollConceptReport({
     sessions: [sessionFixture({ workedMinutes: 420 })],
     range: { from: '2026-08-10', to: '2026-08-10' }
@@ -88,8 +88,8 @@ test('la corrección manual conserva su justificación como observación del det
 
 test('la interfaz agrupa filtros y usa un desplegable con checks para auxiliares', async () => {
   const [view, detail, engine] = await Promise.all([
-    readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8'),
-    readFile(new URL('../src/views/partials/operacionesNominaTabla.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/operacionesGestionTiempo.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/partials/operacionesGestionTiempoTabla.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/modules/dispatch-payroll/domain/payrollConceptEngine.js', import.meta.url), 'utf8')
   ]);
   assert.match(view, /payroll-filter-stack/);

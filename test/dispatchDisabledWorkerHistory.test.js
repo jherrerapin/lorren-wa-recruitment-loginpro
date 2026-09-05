@@ -93,7 +93,7 @@ test('historial consulta todas las asignaciones aunque el auxiliar esté desacti
   assert.doesNotMatch(historyRoute, /status:\s*\{\s*in:\s*ACTIVE_ASSIGNMENT_STATUSES/);
 });
 
-test('nómina conserva auxiliares desactivados y sus sesiones causadas', () => {
+test('Gestión de Tiempo conserva auxiliares desactivados y sus sesiones causadas', () => {
   const payroll = source('src/modules/dispatch-payroll/application/payrollReport.js');
   const report = functionBlock(
     payroll,

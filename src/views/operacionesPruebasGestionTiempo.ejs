@@ -15,7 +15,7 @@
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
     <a href="/admin/operaciones/pruebas" class="nav-active">Entorno de pruebas</a>
-    <% if (canOpenOperationalPayroll) { %><a href="/admin/operaciones/asistencia/nomina?includeTest=true">Gestión de Tiempo con pruebas</a><% } %>
+    <% if (canOpenOperationalPayroll) { %><a href="/admin/operaciones/asistencia/gestion-tiempo?includeTest=true">Gestión de Tiempo con pruebas</a><% } %>
     <span class="spacer"></span>
     <form method="post" action="/logout"><button type="submit" class="btn-logout">Cerrar sesión</button></form>
   </nav>
@@ -29,7 +29,7 @@
       </div>
       <div class="actions">
         <% if (canUseTestWhatsapp) { %><a class="btn wa-link" href="/admin/operaciones/pruebas/whatsapp">WhatsApp de pruebas</a><% } %>
-        <% if (canOpenOperationalPayroll) { %><a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?includeTest=true">Abrir Gestión de Tiempo con pruebas</a><% } else { %><a class="btn payroll-link" href="#resultado-prueba">Ver cálculo aislado</a><% } %>
+        <% if (canOpenOperationalPayroll) { %><a class="btn payroll-link" href="/admin/operaciones/asistencia/gestion-tiempo?includeTest=true">Abrir Gestión de Tiempo con pruebas</a><% } else { %><a class="btn payroll-link" href="#resultado-prueba">Ver cálculo aislado</a><% } %>
       </div>
     </section>
 
@@ -90,7 +90,7 @@
             <div class="card-body">
               <div class="assignment-head">
                 <div><span class="test-badge">SOLICITUD AISLADA</span><h2 style="margin-top:8px"><%= selected.clientName %> · <%= selected.operationPointName || 'Sin operación' %></h2><p class="muted"><%= selectedDate %> · <%= selected.startTime || '—' %><%= selected.endTime ? ` - ${selected.endTime}` : '' %> · <%= selected.requiredWorkers %> auxiliar(es)</p></div>
-                <% if (canOpenOperationalPayroll) { %><a class="btn payroll-link" href="/admin/operaciones/asistencia/nomina?periodType=CUSTOM&from=<%= selectedDate %>&to=<%= selectedDate %>&clientId=<%= selected.operationPoint?.clientId || '' %>&includeTest=true">Abrir cálculo completo</a><% } else { %><a class="btn payroll-link" href="#resultado-prueba">Ver cálculo aislado</a><% } %>
+                <% if (canOpenOperationalPayroll) { %><a class="btn payroll-link" href="/admin/operaciones/asistencia/gestion-tiempo?periodType=CUSTOM&from=<%= selectedDate %>&to=<%= selectedDate %>&clientId=<%= selected.operationPoint?.clientId || '' %>&includeTest=true">Abrir cálculo completo</a><% } else { %><a class="btn payroll-link" href="#resultado-prueba">Ver cálculo aislado</a><% } %>
               </div>
 
               <form class="assign-row" method="post" action="/admin/operaciones/pruebas/solicitudes/<%= selected.id %>/asignar" style="margin-top:14px">

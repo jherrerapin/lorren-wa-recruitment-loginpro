@@ -1,4 +1,4 @@
-# Entorno DEV para probar asistencia y nómina
+# Entorno DEV para probar asistencia y Gestión de Tiempo
 
 ## Objetivo
 
@@ -37,7 +37,7 @@ La sesión se guarda como `DEV_TEST_MANUAL` y `MANUAL_VALIDATED`. Las marcas ant
 
 Dejar ambos campos de almuerzo vacíos prueba una jornada sin almuerzo. Dejar solamente el regreso vacío prueba un almuerzo abierto y el descuento configurado.
 
-## Aislamiento de Nómina
+## Aislamiento de Gestión de Tiempo
 
 Los datos se excluyen de los reportes y exportaciones normales cuando se cumple cualquiera de estas condiciones:
 
@@ -45,16 +45,16 @@ Los datos se excluyen de los reportes y exportaciones normales cuando se cumple 
 - auxiliar con `isTestProfile = true`;
 - sesión con `source = DEV_TEST_MANUAL`.
 
-Solo DEV puede incluirlos usando `includeTest=true`, normalmente desde el botón **Abrir Nómina con pruebas**.
+Solo DEV puede incluirlos usando `includeTest=true`, normalmente desde el botón **Abrir Gestión de Tiempo con pruebas**.
 
 ## Permiso independiente
 
-El permiso **Nómina y tiempo trabajado** se concede o retira por usuario desde DEV y se almacena mediante eventos auditados.
+El permiso **Gestión de Tiempo y tiempo trabajado** se concede o retira por usuario desde DEV y se almacena mediante eventos auditados.
 
-Activar Nómina:
+Activar Gestión de Tiempo:
 
 - no activa Operaciones / Despacho;
 - no activa Asistencia;
 - no modifica permisos existentes.
 
-Activar Operaciones o Asistencia tampoco concede Nómina. La ruta conserva su URL histórica, pero las guardas reconocen el permiso propio de Nómina antes de evaluar los módulos operativos.
+Activar Operaciones o Asistencia tampoco concede Gestión de Tiempo. La ruta conserva su URL histórica, pero las guardas reconocen el permiso propio de Gestión de Tiempo antes de evaluar los módulos operativos.

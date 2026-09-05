@@ -273,7 +273,7 @@ test('no permite agregar una marcación ausente si no fue eliminada previamente 
   );
 });
 
-test('eliminar inicio de almuerzo conserva fin y salida pero deja la sesión fuera de nómina hasta reponer la marca', async () => {
+test('eliminar inicio de almuerzo conserva fin y salida pero deja la sesión fuera de Gestión de Tiempo hasta reponer la marca', async () => {
   const { prisma, session } = attendanceFixture();
   const result = await reviewAttendanceWorkdaySession(prisma, {
     sessionId: session.id,

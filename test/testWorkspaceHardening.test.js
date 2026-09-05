@@ -70,7 +70,7 @@ test('una asignación con estado operativo no puede recibir jornada manual de pr
   assert.equal(transactionCalled, false);
 });
 
-test('la Nómina completa y el WhatsApp secundario permanecen exclusivamente para DEV', async () => {
+test('la Gestión de Tiempo completa y el WhatsApp secundario permanecen exclusivamente para DEV', async () => {
   const route = await readFile('src/routes/dispatchDevPayrollTest.js', 'utf8');
   assert.match(route, /canOpenOperationalPayroll: role === 'dev'/);
   assert.match(route, /canUseTestWhatsapp: role === 'dev'/);

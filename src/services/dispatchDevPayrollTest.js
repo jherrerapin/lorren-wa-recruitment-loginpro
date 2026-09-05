@@ -319,7 +319,7 @@ export async function saveDevTestAttendance(prisma, input = {}, actor = {}) {
         newAttendanceStatus: 'COMPLETED',
         previousValidationStatus: null,
         newValidationStatus: 'MANUAL_VALIDATED',
-        reason: 'Jornada manual aislada para validar cálculos de nómina.',
+        reason: 'Jornada manual aislada para validar cálculos de Gestión de Tiempo.',
         notes: normalizeString(input.notes),
         actorUsername: normalizeString(actor.actorUsername, 160) || 'TEST-WORKSPACE',
         actorRole: actorRole(actor),

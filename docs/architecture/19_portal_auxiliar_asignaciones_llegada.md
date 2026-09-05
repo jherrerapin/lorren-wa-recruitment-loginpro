@@ -66,7 +66,7 @@ Esta entrega no implementa:
 - marcación de salida;
 - seguimiento continuo de ubicación;
 - reconocimiento facial;
-- liquidación de jornada o nómina;
+- liquidación de jornada o Gestión de Tiempo;
 - panel administrativo de revisión;
 - funcionamiento offline confirmado;
 - instalación PWA.

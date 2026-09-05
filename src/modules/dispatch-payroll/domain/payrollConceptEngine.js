@@ -201,7 +201,7 @@ function sessionMinuteRecords(session, policy, novelties) {
 
   const validationStatus = String(session?.validationStatus || '').toUpperCase();
   if (!['AUTO_VALIDATED', 'MANUAL_VALIDATED'].includes(validationStatus)) {
-    pushNovelty(novelties, 'SESSION_NOT_VALIDATED', 'La jornada todavía no ha sido validada para nómina.', {
+    pushNovelty(novelties, 'SESSION_NOT_VALIDATED', 'La jornada todavía no ha sido validada para Gestión de Tiempo.', {
       sessionId: session.id,
       dateKey: bogotaDateKey(arrivalAt),
       blocking: true

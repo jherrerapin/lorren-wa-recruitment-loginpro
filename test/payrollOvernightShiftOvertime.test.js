@@ -161,8 +161,8 @@ test('una sesión superpuesta que comienza dentro del almuerzo tampoco puede rel
   assert.equal(row.exportable, false);
 });
 
-test('la política de nómina no muestra bloques explicativos heredados de semana ni festivo', async () => {
-  const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
+test('la política de Gestión de Tiempo no muestra bloques explicativos heredados de semana ni festivo', async () => {
+  const template = await readFile('src/views/operacionesGestionTiempo.ejs', 'utf8');
   assert.doesNotMatch(template, /El acumulado semanal ya no es configurable desde domingo/);
   assert.doesNotMatch(template, /Indicativo Festivo/);
   assert.doesNotMatch(template, /El festivo conserva su concepto y no abre compensatorio/);

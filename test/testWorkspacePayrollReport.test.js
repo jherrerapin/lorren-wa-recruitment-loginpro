@@ -70,7 +70,7 @@ test('calcula únicamente la jornada DEV_TEST_MANUAL y reconoce su exceso diario
   assert.equal(report.totals.workers, 1);
 });
 
-test('sin sesiones manuales devuelve un reporte vacío y no consulta nómina operativa', async () => {
+test('sin sesiones manuales devuelve un reporte vacío y no consulta Gestión de Tiempo operativa', async () => {
   let policyQueries = 0;
   const prisma = {
     devAuditEvent: { findMany: async () => { policyQueries += 1; return []; } }

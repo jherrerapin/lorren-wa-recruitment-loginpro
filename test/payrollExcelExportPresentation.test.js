@@ -85,10 +85,10 @@ async function withServer(app, run) {
   }
 }
 
-test('Nómina conserva un solo acceso Excel y separa personalizador GET de descarga POST', async () => {
+test('Gestión de Tiempo conserva un solo acceso Excel y separa personalizador GET de descarga POST', async () => {
   const [view, exportView, route] = await Promise.all([
-    readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8'),
-    readFile(new URL('../src/views/operacionesNominaExport.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/operacionesGestionTiempo.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/operacionesGestionTiempoExport.ejs', import.meta.url), 'utf8'),
     readFile(new URL('../src/routes/dispatchPayroll.js', import.meta.url), 'utf8')
   ]);
 
@@ -129,22 +129,22 @@ test('la descarga POST conserva columnas repetidas del formulario hasta el XLSX'
 
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type') || '', /application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet/);
-    assert.match(response.headers.get('content-disposition') || '', /attachment; filename="nomina-2026-08-01-2026-08-01\.xlsx"/);
+    assert.match(response.headers.get('content-disposition') || '', /attachment; filename="gestion-tiempo-2026-08-01-2026-08-01\.xlsx"/);
 
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(Buffer.from(await response.arrayBuffer()));
-    const sheet = workbook.getWorksheet('Nómina');
+    const sheet = workbook.getWorksheet('Gestión de Tiempo');
     assert.ok(sheet);
     assert.deepEqual(sheet.getRow(4).values.slice(1), ['Nombre', 'HEDO']);
   });
 });
 
-test('el Excel de Nómina conserva datos y aplica formato profesional sin exponer Estado ni Novedades', async () => {
+test('el Excel de Gestión de Tiempo conserva datos y aplica formato profesional sin exponer Estado ni Novedades', async () => {
   const workbook = buildPayrollExcelWorkbook(syntheticReport());
-  const sheet = workbook.getWorksheet('Nómina');
+  const sheet = workbook.getWorksheet('Gestión de Tiempo');
   assert.ok(sheet);
 
-  assert.equal(sheet.getCell('A1').value, 'Nómina y tiempo trabajado');
+  assert.equal(sheet.getCell('A1').value, 'Gestión de Tiempo y tiempo trabajado');
   assert.equal(sheet.getCell('A2').value, 'Corte 2026-08-01 a 2026-08-15 · Extras 2026-08-10 a 2026-08-16 · 1 auxiliar(es)');
   assert.equal(sheet.getRow(4).height, 32);
   assert.equal(sheet.views[0].state, 'frozen');
@@ -184,7 +184,7 @@ test('el Excel personalizado incluye únicamente columnas permitidas y conserva 
   const workbook = buildPayrollExcelWorkbook(syntheticReport(), {
     columns: ['HEDO', 'Nombre', 'Documento', 'Estado', 'columna_inyectada']
   });
-  const sheet = workbook.getWorksheet('Nómina');
+  const sheet = workbook.getWorksheet('Gestión de Tiempo');
   assert.deepEqual(sheet.getRow(4).values.slice(1), ['Documento', 'Nombre', 'HEDO']);
   assert.equal(sheet.getCell('A5').value, 'TEST-DOC-001');
   assert.equal(sheet.getCell('B5').value, 'TEST Auxiliar Uno');
@@ -210,7 +210,7 @@ test('la selección de datos permite descargar solo los auxiliares elegidos dent
   assert.equal(selectedReport.rows[0].workerId, 'TEST-WORKER-002');
 
   const workbook = buildPayrollExcelWorkbook(selectedReport, { columns: ['Nombre', 'TotalTrabajado'] });
-  const sheet = workbook.getWorksheet('Nómina');
+  const sheet = workbook.getWorksheet('Gestión de Tiempo');
   assert.deepEqual(sheet.getRow(4).values.slice(1), ['Nombre', 'TotalTrabajado']);
   assert.equal(sheet.getCell('A5').value, 'TEST Auxiliar Dos');
   assert.equal(sheet.getCell('B5').value, 75.5);

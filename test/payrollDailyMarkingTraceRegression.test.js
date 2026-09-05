@@ -132,17 +132,17 @@ test('selecciona varios auxiliares desde las filas reales del corte y recompone 
 
 test('la vista limita el selector a auxiliares reales y compacta novedades y marcaciones sin duplicarlas en el resumen', async () => {
   const [view, detail, css] = await Promise.all([
-    readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8'),
-    readFile(new URL('../src/views/partials/operacionesNominaTabla.ejs', import.meta.url), 'utf8'),
-    readFile(new URL('../src/public/operaciones-nomina.css', import.meta.url), 'utf8')
+    readFile(new URL('../src/views/operacionesGestionTiempo.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/views/partials/operacionesGestionTiempoTabla.ejs', import.meta.url), 'utf8'),
+    readFile(new URL('../src/public/operaciones-gestion-tiempo.css', import.meta.url), 'utf8')
   ]);
   assert.match(view, /<label>Auxiliares<\/label>/);
   assert.match(view, /type="checkbox" name="workerId"/);
   assert.match(view, /Si no marcas ninguno, se analizan todos los que tienen información en este corte/);
   assert.doesNotMatch(view, /name="workerId" multiple/);
-  assert.match(view, /partials\/operacionesNominaTabla/);
-  assert.match(view, /operaciones-nomina\.css/);
-  assert.doesNotMatch(view, /operaciones-nomina\.js/);
+  assert.match(view, /partials\/operacionesGestionTiempoTabla/);
+  assert.match(view, /operaciones-gestion-tiempo\.css/);
+  assert.doesNotMatch(view, /operaciones-gestion-tiempo\.js/);
 
   assert.match(detail, /Marcaciones del día/);
   assert.match(detail, /marking-inline/);

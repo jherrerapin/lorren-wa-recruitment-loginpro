@@ -202,10 +202,10 @@ test('el backend rechaza guardar compensatorio en una fecha festiva', async () =
 });
 
 test('la interfaz usa calendario propio de lunes a domingo y muestra festivo sin formulario compensatorio', async () => {
-  const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
+  const template = await readFile('src/views/operacionesGestionTiempo.ejs', 'utf8');
   const emptyConcepts = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, 0]));
   const html = ejs.render(template, {
-    pageTitle: 'Nómina y tiempo trabajado',
+    pageTitle: 'Gestión de Tiempo y tiempo trabajado',
     role: 'admin',
     report: {
       period: { periodType: 'WEEKLY', from: '2026-08-17', to: '2026-08-23', anchor: '2026-08-17' },
@@ -261,6 +261,6 @@ test('la interfaz usa calendario propio de lunes a domingo y muestra festivo sin
   assert.doesNotMatch(html, /type="date"/);
   assert.match(html, /mondayOffset = \(firstOfMonth\.getUTCDay\(\) \+ 6\) % 7/);
   assert.match(html, />Festivo<\/span>/);
-  assert.doesNotMatch(html, /action="\/admin\/operaciones\/asistencia\/nomina\/compensation"/);
+  assert.doesNotMatch(html, /action="\/admin\/operaciones\/asistencia\/gestion-tiempo\/compensation"/);
   assert.doesNotMatch(html, /RDFC|RNFC/);
 });

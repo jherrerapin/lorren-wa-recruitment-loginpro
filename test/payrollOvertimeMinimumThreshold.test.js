@@ -138,8 +138,8 @@ test('un solo minuto de cualquiera de los siete recargos se suma sin umbral mín
 
 test('la pantalla oculta Bajo umbral y la fecha de referencia en corte personalizado', async () => {
   const [template, testTemplate] = await Promise.all([
-    readFile('src/views/operacionesNomina.ejs', 'utf8'),
-    readFile('src/views/operacionesPruebasNomina.ejs', 'utf8')
+    readFile('src/views/operacionesGestionTiempo.ejs', 'utf8'),
+    readFile('src/views/operacionesPruebasGestionTiempo.ejs', 'utf8')
   ]);
   for (const source of [template, testTemplate]) {
     assert.doesNotMatch(source, /Bajo umbral|Extra bajo umbral/i);

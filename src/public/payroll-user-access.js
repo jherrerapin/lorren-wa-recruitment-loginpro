@@ -12,7 +12,7 @@
     apiBase: '/admin/operaciones/pruebas/api/users',
     accessSuffix: 'access',
     pendingKey: 'lorren-test-workspace-access-after-create',
-    title: 'Entorno de pruebas de Asistencia y Gestión de Tiempo',
+    title: 'Entorno de pruebas de Gestión de Tiempo',
     description: 'Permite usar auxiliares, clientes y operaciones existentes dentro de registros DEV_TEST aislados. No modifica la operación real.',
     summary: 'Entorno de pruebas'
   };

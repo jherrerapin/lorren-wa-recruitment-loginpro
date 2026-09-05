@@ -265,7 +265,7 @@ async function replaceWorkerRelations(prisma, workerId, body) {
  * cancelWorkerActiveAssignments
  *
  * Al desactivar un auxiliar, libera únicamente compromisos que todavía son operativos.
- * Las asignaciones ya causadas o con sesión de asistencia se conservan para historial y nómina.
+ * Las asignaciones ya causadas o con sesión de asistencia se conservan para historial y Gestión de Tiempo.
  */
 async function cancelWorkerActiveAssignments(prisma, workerId) {
   const candidates = await prisma.dispatchAssignment.findMany({

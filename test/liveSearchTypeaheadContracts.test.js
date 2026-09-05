@@ -59,10 +59,10 @@ test('el autocompletado común cubre los buscadores de texto ejecutados y conser
 test('el inventario de buscadores no crea una segunda autoridad de negocio', () => {
   const recruitment = source('src/views/list.ejs');
   const assignments = source('src/views/operacionesAsignacionesConfirmacion.ejs');
-  const payroll = source('src/views/operacionesNomina.ejs');
+  const payroll = source('src/views/operacionesGestionTiempo.ejs');
   const whatsapp = source('src/views/operacionesWhatsappMonitor.ejs');
   const attendance = source('src/public/attendance-map-reliability.js');
-  const payrollExport = source('src/views/operacionesNominaExport.ejs');
+  const payrollExport = source('src/views/operacionesGestionTiempoExport.ejs');
   const server = source('src/server.js');
 
   assert.match(recruitment, /name="searchText"/);

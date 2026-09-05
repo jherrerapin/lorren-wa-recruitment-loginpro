@@ -109,11 +109,11 @@ test('cada desplegable conserva opciones y permisos de Operaciones y Gestión de
   assert.match(payroll, /data-module-menu="payroll"/);
   assert.match(payroll, /data-module-menu="payroll"[\s\S]*<span>Gestión de Tiempo<\/span>/);
   assert.match(payroll, /href="\/admin\/operaciones\/asistencia\/gestion-tiempo">Gestión de Tiempo<\/a>/);
-  assert.doesNotMatch(payroll, /\/admin\/operaciones\/asistencia\/nomina/);
-  assert.doesNotMatch(payroll, />Nómina<|>Nómina y tiempo trabajado</);
+  assert.doesNotMatch(payroll, /\/admin\/operaciones\/asistencia\/gestion-tiempo/);
+  assert.doesNotMatch(payroll, />Gestión de Tiempo<|>Gestión de Tiempo y tiempo trabajado</);
   assert.match(payroll, /href="\/admin\/operaciones\/pruebas">Entorno de pruebas<\/a>/);
 
-  const legacyRequest = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/nomina', { canAccessPayroll: true })));
+  const legacyRequest = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/gestion-tiempo', { canAccessPayroll: true })));
   assert.match(legacyRequest, /admin-module-menu is-active/);
   assert.match(legacyRequest, /href="\/admin\/operaciones\/asistencia\/gestion-tiempo">Gestión de Tiempo<\/a>/);
 });
@@ -256,5 +256,5 @@ test('inyeccion sigue siendo idempotente y evita APIs de Gestión de Tiempo', ()
   const once = injectAdminModuleNavigation(baseHtml, request);
   assert.equal(injectAdminModuleNavigation(once, request), once);
   assert.equal(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/gestion-tiempo/api/users/sample', { canAccessPayroll: true })), baseHtml);
-  assert.equal(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/nomina/api/users/sample', { canAccessPayroll: true })), baseHtml);
+  assert.equal(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/gestion-tiempo/api/users/sample', { canAccessPayroll: true })), baseHtml);
 });

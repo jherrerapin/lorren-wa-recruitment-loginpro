@@ -66,7 +66,7 @@ La tarjeta comprimida muestra llegada, salida y tiempo neto. Al desplegarla mues
 
 ## Alcance laboral
 
-El módulo calcula tiempo operativo neto. No determina por sí solo horas extra, recargos nocturnos, dominicales o festivos, porque esos conceptos requieren reglas legales y contractuales adicionales, acumulados semanales, calendario y autoridad de nómina.
+El módulo calcula tiempo operativo neto. No determina por sí solo horas extra, recargos nocturnos, dominicales o festivos, porque esos conceptos requieren reglas legales y contractuales adicionales, acumulados semanales, calendario y autoridad de Gestión de Tiempo.
 
 ## Fase posterior
 
@@ -74,5 +74,5 @@ El módulo calcula tiempo operativo neto. No determina por sí solo horas extra,
 - marcas `BREAK_START` y `BREAK_END`;
 - alertas por salida faltante;
 - corrección administrativa de salida;
-- cierre de periodos y exportación a nómina;
+- cierre de periodos y exportación a Gestión de Tiempo;
 - aplicación Android con reloj monotónico y firma del dispositivo.

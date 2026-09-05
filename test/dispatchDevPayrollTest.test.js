@@ -149,7 +149,7 @@ test('los turnos nocturnos terminan al día siguiente y el almuerzo inicia vací
 
 test('la vista DEV conserva el flujo aislado y usa el transporte oficial sin patch de confirmación', async () => {
   const [template, route, cloudService] = await Promise.all([
-    readFile('src/views/operacionesPruebasNomina.ejs', 'utf8'),
+    readFile('src/views/operacionesPruebasGestionTiempo.ejs', 'utf8'),
     readFile('src/routes/dispatchDevPayrollTest.js', 'utf8'),
     readFile('src/services/dispatchWhatsappTestService.js', 'utf8')
   ]);
@@ -179,7 +179,7 @@ test('la vista DEV conserva el flujo aislado y usa el transporte oficial sin pat
   assert.match(html, /Cliente existente/);
   assert.match(html, /Auxiliar existente/);
   assert.match(html, /AUXILIAR REAL USADO COMO REFERENCIA/);
-  assert.match(html, /Resultado aislado de nómina/);
+  assert.match(html, /Resultado aislado de Gestión de Tiempo/);
   assert.match(html, /name="breakStartAt" value=""/);
   assert.match(html, /name="breakEndAt" value=""/);
   assert.match(route, /dispatchWhatsappTestService\.js/);
@@ -194,7 +194,7 @@ test('la vista DEV conserva el flujo aislado y usa el transporte oficial sin pat
   });
   assert.doesNotMatch(adminHtml, /Enviar desde WhatsApp de pruebas/);
   assert.doesNotMatch(adminHtml, /href="\/admin\/operaciones\/pruebas\/whatsapp"/);
-  assert.doesNotMatch(adminHtml, /href="\/admin\/operaciones\/asistencia\/nomina\?includeTest=true"/);
+  assert.doesNotMatch(adminHtml, /href="\/admin\/operaciones\/asistencia\/gestion-tiempo\?includeTest=true"/);
   assert.match(adminHtml, /Ver cálculo aislado/);
 });
 

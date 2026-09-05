@@ -98,5 +98,5 @@ Si la migración ya fue aplicada, no ejecutar automáticamente `DROP TABLE` o `D
 - Revisión desde dashboard.
 - Detección de ausencias.
 - Reemplazos.
-- Cálculo de horas o nómina.
+- Cálculo de horas o Gestión de Tiempo.
 - Reconocimiento facial.

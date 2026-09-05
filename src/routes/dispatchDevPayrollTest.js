@@ -112,7 +112,7 @@ function publicError(error) {
     dev_test_break_start_outside_shift: 'El inicio del almuerzo debe estar dentro del turno.',
     dev_test_break_end_invalid: 'El regreso del almuerzo debe ser posterior al inicio y anterior a la salida.'
   };
-  return messages[error?.message] || 'No fue posible completar la prueba de Asistencia y Gestión de Tiempo.';
+  return messages[error?.message] || 'No fue posible completar la prueba de Gestión de Tiempo.';
 }
 
 function normalizeWorkspaceAvailability(workspace) {
@@ -191,8 +191,8 @@ export function dispatchDevPayrollTestRouter(prisma) {
       const workspace = normalizeWorkspaceAvailability(await loadDevTestWorkspace(prisma, req.query || {}));
       workspace.testReport = await loadTestWorkspacePayrollReport(prisma, workspace.selectedRequest);
       const role = roleFromRequest(req);
-      return res.render('operacionesPruebasNomina', {
-        pageTitle: 'Entorno de pruebas de Asistencia y Gestión de Tiempo',
+      return res.render('operacionesPruebasGestionTiempo', {
+        pageTitle: 'Entorno de pruebas de Gestión de Tiempo',
         role,
         canUseTestWhatsapp: role === 'dev',
         canOpenOperationalPayroll: role === 'dev',

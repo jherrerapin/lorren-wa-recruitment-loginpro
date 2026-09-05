@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title><%= pageTitle %> — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg"/>
-  <link rel="stylesheet" href="/public/operaciones-nomina.css"/>
+  <link rel="stylesheet" href="/public/operaciones-gestion-tiempo.css"/>
   <style>
     .export-layout{display:grid;grid-template-columns:minmax(260px,.8fr) minmax(420px,1.4fr);gap:16px;align-items:start}.export-panel{display:grid;gap:12px}.export-panel h2{margin:0}.export-panel p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}.export-toolbar{display:flex;gap:8px;flex-wrap:wrap}.export-toolbar .btn{padding:7px 10px;font-size:11px}.export-counter{font-size:11px;font-weight:800;color:var(--teal)}.export-workers{max-height:430px;overflow:auto;border:1px solid var(--border);border-radius:9px;background:#fff}.export-worker{display:flex;align-items:flex-start;gap:8px;padding:9px 10px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer}.export-worker:last-child{border-bottom:0}.export-worker:hover{background:var(--soft)}.export-worker input,.export-column input{width:auto;margin:1px 0 0;flex:0 0 auto}.export-worker strong{display:block;color:var(--navy)}.export-worker small{display:block;margin-top:2px;color:var(--muted)}.export-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.export-group{border:1px solid var(--border);border-radius:9px;padding:10px;background:#fff}.export-group h3{margin:0 0 8px;font-size:12px;color:var(--navy)}.export-column{display:flex;gap:8px;align-items:flex-start;padding:6px 4px;font-size:12px;cursor:pointer;border-radius:6px}.export-column:hover{background:var(--soft)}.export-column span{display:grid;gap:1px}.export-column small{color:var(--muted);font-size:9px}.export-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:16px}.export-error{margin:0 0 14px;padding:10px 12px;border-radius:8px;background:#fff1f2;color:#9f1239;font-size:12px;font-weight:700}.export-empty{padding:18px;color:var(--muted);font-size:12px;text-align:center}.export-search{display:grid;gap:5px}.export-search label{font-size:11px;font-weight:800;color:var(--navy)}.export-search input{width:100%}.export-summary{padding:10px 12px;border-radius:8px;background:var(--teal2);color:#14574f;font-size:12px;line-height:1.45}.export-summary strong{color:var(--navy)}
     @media(max-width:900px){.export-layout{grid-template-columns:1fr}.export-groups{grid-template-columns:1fr}}
@@ -13,11 +13,11 @@
 </head>
 <body>
 <% const overtimePeriod=report.overtimePeriod||report.period; const returnParams=new URLSearchParams(exportParams); %>
-<nav class="navbar"><a href="/admin" class="brand"><img src="/public/loginpro.png" alt="LoginPro"/></a><a href="/admin">Panel</a><a href="/admin/operaciones">Operaciones / Despacho</a><a href="/admin/operaciones/asistencia">Asistencia</a><a href="/admin/operaciones/asistencia/nomina?<%= returnParams.toString() %>" class="active">Gestión de Tiempo</a><span class="spacer"></span><a href="/logout">Cerrar sesión</a></nav>
+<nav class="navbar"><a href="/admin" class="brand"><img src="/public/loginpro.png" alt="LoginPro"/></a><a href="/admin">Panel</a><a href="/admin/operaciones">Operaciones / Despacho</a><a href="/admin/operaciones/asistencia">Asistencia</a><a href="/admin/operaciones/asistencia/gestion-tiempo?<%= returnParams.toString() %>" class="active">Gestión de Tiempo</a><span class="spacer"></span><a href="/logout">Cerrar sesión</a></nav>
 <main class="page">
   <header class="header">
     <div><h1><%= pageTitle %></h1><p class="sub">General <%= report.period.from||'—' %> a <%= report.period.to||'—' %> · Extras <%= overtimePeriod.from||'—' %> a <%= overtimePeriod.to||'—' %></p></div>
-    <div class="actions"><a class="btn" href="/admin/operaciones/asistencia/nomina?<%= returnParams.toString() %>">Volver a Gestión de Tiempo</a></div>
+    <div class="actions"><a class="btn" href="/admin/operaciones/asistencia/gestion-tiempo?<%= returnParams.toString() %>">Volver a Gestión de Tiempo</a></div>
   </header>
 
   <% if(error){ %><div class="export-error" id="server-export-error"><%= error %></div><% } %>
@@ -30,7 +30,7 @@
       <section class="panel export-panel">
         <div>
           <h2>Auxiliares</h2>
-          <p>Escoge qué filas del cálculo actual quieres incluir. Esta selección no cambia el cálculo de Asistencia y Gestión de Tiempo.</p>
+          <p>Escoge qué filas del cálculo actual quieres incluir. Esta selección no cambia el cálculo de Gestión de Tiempo.</p>
         </div>
         <div class="export-toolbar"><button class="btn" type="button" data-workers-action="all">Seleccionar todos</button><button class="btn" type="button" data-workers-action="none">Limpiar</button><span class="export-counter" id="worker-counter"></span></div>
         <% if((report.rows||[]).length){ %>
@@ -54,7 +54,7 @@
     </div>
 
     <div class="export-summary"><strong>Descarga personalizada:</strong> el XLSX conservará el formato del módulo, el corte general y el periodo de horas extra, pero solo llevará los auxiliares y columnas que dejes marcados.</div>
-    <div class="export-actions"><a class="btn" href="/admin/operaciones/asistencia/nomina?<%= returnParams.toString() %>">Cancelar</a><button class="btn btn-primary" type="submit">Descargar Excel</button></div>
+    <div class="export-actions"><a class="btn" href="/admin/operaciones/asistencia/gestion-tiempo?<%= returnParams.toString() %>">Cancelar</a><button class="btn btn-primary" type="submit">Descargar Excel</button></div>
   </form>
 </main>
 <script>

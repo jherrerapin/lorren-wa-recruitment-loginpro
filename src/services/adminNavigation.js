@@ -14,7 +14,6 @@ const SUPERVISOR_USERS_PATH = '/admin/locations/users';
 const OPERATIONS_PATH = '/admin/operaciones';
 const ATTENDANCE_PATH = '/admin/operaciones/asistencia';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';
-const LEGACY_PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const WORKER_PORTAL_ACTIVATION_PATH = '/admin/operaciones/portal-activaciones';
 const TEST_WORKSPACE_PATH = '/admin/operaciones/pruebas';
 const NAVIGATION_STYLESHEET = '/public/admin-module-navigation.css';
@@ -52,7 +51,7 @@ function escapeHtml(value) {
 
 function activeModule(path) {
   if (path.startsWith(USERS_PATH) || path.startsWith(SUPERVISOR_USERS_PATH) || path.startsWith(BRANCHES_PATH)) return null;
-  if (path.startsWith(PAYROLL_PATH) || path.startsWith(LEGACY_PAYROLL_PATH)) return 'payroll';
+  if (path.startsWith(PAYROLL_PATH)) return 'payroll';
   if (path.startsWith(OPERATIONS_PATH)) return 'operations';
   return 'recruitment';
 }
@@ -326,18 +325,6 @@ function ensureLiveSearchScript(html) {
   return html.replace(/<\/body>/i, `  <script src="${LIVE_SEARCH_SCRIPT}" defer></script>\n</body>`);
 }
 
-function normalizePayrollPresentation(html) {
-  return html
-    .replace(/<title>\s*Nómina y tiempo trabajado\s*—\s*LoginPro<\/title>/gi, '<title>Asistencia y Gestión de Tiempo — LoginPro</title>')
-    .replace(/<title>\s*Personalizar Excel de nómina\s*—\s*LoginPro<\/title>/gi, '<title>Personalizar Excel · Asistencia y Gestión de Tiempo — LoginPro</title>')
-    .replace(/<h1>\s*Nómina y tiempo trabajado\s*<\/h1>/gi, '<h1>Asistencia y Gestión de Tiempo</h1>')
-    .replace(/>\s*Nómina\s*</gi, '>Asistencia y Gestión de Tiempo<')
-    .replace(/cálculo de nómina/gi, 'cálculo de Asistencia y Gestión de Tiempo');
-}
-
-function normalizePayrollPaths(html) {
-  return normalizePayrollPresentation(html.split(LEGACY_PAYROLL_PATH).join(PAYROLL_PATH));
-}
 
 function isPayrollApiPath(path) {
   return path.startsWith(`${PAYROLL_PATH}/api/`) || path.startsWith(`${LEGACY_PAYROLL_PATH}/api/`);
@@ -348,7 +335,7 @@ export function injectAdminModuleNavigation(html, req = {}) {
   const path = requestPath(req);
   if (!path.startsWith('/admin') || isPayrollApiPath(path) || path.startsWith('/admin/operaciones/pruebas/api/')) return html;
 
-  const normalizedHtml = normalizePayrollPaths(html);
+  const normalizedHtml = html;
   if (normalizedHtml.includes('data-module-navigation="true"')) return ensureLiveSearchScript(normalizedHtml);
 
   const navPattern = /<nav\b[^>]*class=["'][^"']*\bnavbar\b[^"']*["'][^>]*>[\s\S]*?<\/nav>/i;

@@ -330,9 +330,9 @@ test('un solo resultado conserva métricas generales y toma H* y R* del periodo 
 
 test('la vista usa dos filtros independientes y un solo calendario reutilizable, sin Desde/Hasta visibles', async () => {
   const [view, route, table] = await Promise.all([
-    readFile('src/views/operacionesNomina.ejs', 'utf8'),
+    readFile('src/views/operacionesGestionTiempo.ejs', 'utf8'),
     readFile('src/routes/dispatchPayroll.js', 'utf8'),
-    readFile('src/views/partials/operacionesNominaTabla.ejs', 'utf8')
+    readFile('src/views/partials/operacionesGestionTiempoTabla.ejs', 'utf8')
   ]);
 
   assert.match(view, /Periodo general/);
@@ -349,7 +349,7 @@ test('la vista usa dos filtros independientes y un solo calendario reutilizable,
   assert.match(view, /name="extraFrom"/);
   assert.match(view, /name="extraTo"/);
   assert.match(view, /name="extraAnchor"/);
-  assert.equal((view.match(/include\('partials\/operacionesNominaTabla'\)/g) || []).length, 1);
+  assert.equal((view.match(/include\('partials\/operacionesGestionTiempoTabla'\)/g) || []).length, 1);
 
   assert.match(route, /combinePayrollPeriodReports\(generalReport, overtimeReport\)/);
   assert.match(route, /const generalReport = await loadPayrollReport/);

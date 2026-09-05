@@ -2,15 +2,15 @@
 
 ## Objetivo
 
-Permitir que DEV y usuarios ADMIN autorizados reproduzcan escenarios de asistencia y nómina utilizando auxiliares, clientes y operaciones existentes, sin modificar la operación real.
+Permitir que DEV y usuarios ADMIN autorizados reproduzcan escenarios de asistencia y Gestión de Tiempo utilizando auxiliares, clientes y operaciones existentes, sin modificar la operación real.
 
 ## Permiso
 
-El permiso **Entorno de pruebas de asistencia y nómina** es independiente de:
+El permiso **Entorno de pruebas de asistencia y Gestión de Tiempo** es independiente de:
 
 - Operaciones / Despacho;
 - Asistencia;
-- Nómina y tiempo trabajado.
+- Gestión de Tiempo y tiempo trabajado.
 
 DEV tiene acceso automático. Solo DEV puede concederlo o retirarlo desde la administración de usuarios. Cada cambio se guarda en `DevAuditEvent` con `entityType = APP_USER_TEST_WORKSPACE_ACCESS`.
 
@@ -48,7 +48,7 @@ La barrera Prisma permite un auxiliar real en una solicitud `DEV_TEST` únicamen
 
 ## Cálculo
 
-El resultado se calcula dentro del propio entorno usando únicamente las sesiones `DEV_TEST_MANUAL` de la solicitud seleccionada. Un usuario con solo este permiso no necesita abrir Nómina operativa.
+El resultado se calcula dentro del propio entorno usando únicamente las sesiones `DEV_TEST_MANUAL` de la solicitud seleccionada. Un usuario con solo este permiso no necesita abrir Gestión de Tiempo operativa.
 
 El cálculo reutiliza:
 

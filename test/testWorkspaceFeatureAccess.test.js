@@ -116,20 +116,20 @@ test('una jornada sobre auxiliar real solo escribe fuentes DEV_TEST aisladas', a
 
 test('la interfaz de usuarios incluye ambos permisos independientes', async () => {
   const script = await readFile('src/public/payroll-user-access.js', 'utf8');
-  assert.match(script, /Nómina y tiempo trabajado/);
-  assert.match(script, /Entorno de pruebas de asistencia y nómina/);
+  assert.match(script, /Gestión de Tiempo y tiempo trabajado/);
+  assert.match(script, /Entorno de pruebas de asistencia y Gestión de Tiempo/);
   assert.match(script, /\/admin\/operaciones\/pruebas\/api\/users/);
   assert.match(script, /lorren-test-workspace-access-after-create/);
 });
 
-test('el permiso de pruebas no reemplaza ni amplía la ruta de Nómina operativa', async () => {
+test('el permiso de pruebas no reemplaza ni amplía la ruta de Gestión de Tiempo operativa', async () => {
   const [payrollRoute, workspaceRoute, isolatedReport] = await Promise.all([
     readFile('src/routes/dispatchPayroll.js', 'utf8'),
     readFile('src/routes/dispatchDevPayrollTest.js', 'utf8'),
     readFile('src/services/testWorkspacePayrollReport.js', 'utf8')
   ]);
   assert.doesNotMatch(payrollRoute, /resolveTestWorkspaceFeatureAccess/);
-  assert.match(payrollRoute, /No tienes permiso para acceder a Nómina y tiempo trabajado/);
+  assert.match(payrollRoute, /No tienes permiso para acceder a Gestión de Tiempo y tiempo trabajado/);
   assert.match(workspaceRoute, /loadTestWorkspacePayrollReport/);
   assert.match(isolatedReport, /attendanceSession\?\.source === 'DEV_TEST_MANUAL'/);
 });

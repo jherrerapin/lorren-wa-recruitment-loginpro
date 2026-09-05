@@ -242,7 +242,7 @@ test('horas persistidas sin marcas detalladas también pueden sustituirse', asyn
 });
 
 test('la vista muestra y confirma cuántas jornadas existentes se reemplazarán', async () => {
-  const view = await readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8');
+  const view = await readFile(new URL('../src/views/operacionesGestionTiempo.ejs', import.meta.url), 'utf8');
 
   assert.match(view, /metric\('A reemplazar',values\.replacements\|\|0\)/);
   assert.match(view, /Se reemplazarán \${replacements} jornada\(s\) existente\(s\)/);

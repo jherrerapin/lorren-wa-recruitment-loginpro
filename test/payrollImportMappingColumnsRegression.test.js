@@ -82,7 +82,7 @@ test('si las marcas no se reconocen, el mapeo diario usa posiciones y distingue 
 });
 
 test('la interfaz usa los campos del modo detectado y conserva la posición real de cada columna', async () => {
-  const view = await readFile(new URL('../src/views/operacionesNomina.ejs', import.meta.url), 'utf8');
+  const view = await readFile(new URL('../src/views/operacionesGestionTiempo.ejs', import.meta.url), 'utf8');
 
   assert.match(view, /const mappingLabels=/);
   assert.match(view, /Array\.isArray\(data\.mappingFields\)/);

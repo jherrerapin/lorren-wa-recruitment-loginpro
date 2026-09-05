@@ -770,7 +770,7 @@ Incluye:
 
 - cálculo de recargos;
 - cierre de periodos;
-- prenómina;
+- preGestión de Tiempo;
 - API externa;
 - webhooks;
 - portal de clientes;
@@ -973,7 +973,7 @@ Los datos biométricos son sensibles. En el MVP:
 - obtener autorización expresa cuando corresponda;
 - definir eliminación y consulta.
 
-Para horas y nómina futuras, el modelo debe soportar:
+Para horas y Gestión de Tiempo futuras, el modelo debe soportar:
 
 - nombre del trabajador;
 - actividad;
@@ -997,7 +997,7 @@ Antes de cerrar el piloto solicitar:
 5. funciones realmente utilizadas;
 6. entrada, salida y descansos;
 7. selfie o reconocimiento facial;
-8. integración con nómina;
+8. integración con Gestión de Tiempo;
 9. reportes entregados a clientes;
 10. proceso actual de corrección;
 11. frecuencia de cambios de celular;

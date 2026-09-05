@@ -77,7 +77,7 @@ function payrollPrisma(session) {
   };
 }
 
-test('Nómina calcula una jornada manual DEV cuando includeTest=true', async () => {
+test('Gestión de Tiempo calcula una jornada manual DEV cuando includeTest=true', async () => {
   const report = await loadPayrollReport(
     payrollPrisma(devTestSession()),
     {
@@ -98,7 +98,7 @@ test('Nómina calcula una jornada manual DEV cuando includeTest=true', async () 
   assert.equal(report.totals.totalMinutes, 420);
 });
 
-test('Nómina normal sigue ocultando el sujeto y la jornada de prueba', async () => {
+test('Gestión de Tiempo normal sigue ocultando el sujeto y la jornada de prueba', async () => {
   const report = await loadPayrollReport(
     payrollPrisma(devTestSession()),
     { periodType: 'CUSTOM', from: '2026-07-29', to: '2026-07-29' },
@@ -171,8 +171,8 @@ test('la confirmación recibida por la línea DEV solo cambia estados DEV_TEST y
 
 test('las vistas modificadas conservan sintaxis EJS válida', async () => {
   const viewPaths = [
-    new URL('../src/views/operacionesNomina.ejs', import.meta.url),
-    new URL('../src/views/operacionesPruebasNomina.ejs', import.meta.url),
+    new URL('../src/views/operacionesGestionTiempo.ejs', import.meta.url),
+    new URL('../src/views/operacionesPruebasGestionTiempo.ejs', import.meta.url),
     new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url)
   ];
 

@@ -86,7 +86,7 @@ test('domingo diurno no suma TurnosDiurnos y 21:00→05:00 no crea diurno por la
   assert.equal(report.totals.nightShiftCount, 1);
 
   const workbook = buildPayrollExcelWorkbook(report, { columns: ['TurnosDiurnos', 'TurnosNocturnos'] });
-  const sheet = workbook.getWorksheet('Nómina');
+  const sheet = workbook.getWorksheet('Gestión de Tiempo');
   assert.deepEqual(sheet.getRow(4).values.slice(1), ['TurnosDiurnos', 'TurnosNocturnos']);
   assert.deepEqual(sheet.getRow(5).values.slice(1), [1, 1]);
 });

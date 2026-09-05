@@ -22,14 +22,14 @@ function req(path = '/admin') {
 }
 
 test('la inyección admin garantiza viewport, shell común y stylesheet responsive una sola vez', () => {
-  const html = injectAdminModuleNavigation(sourceWithoutViewport, req('/admin/operaciones/asistencia/nomina'));
+  const html = injectAdminModuleNavigation(sourceWithoutViewport, req('/admin/operaciones/asistencia/gestion-tiempo'));
 
   assert.equal((html.match(/name="viewport"/g) || []).length, 1);
   assert.match(html, /<meta name="viewport" content="width=device-width, initial-scale=1\.0" \/>/);
   assert.match(html, /href="\/public\/admin-module-shell\.css"/);
   assert.match(html, /<main class="page payroll-page admin-module-page-shell">/);
 
-  const reinjected = injectAdminModuleNavigation(html, req('/admin/operaciones/asistencia/nomina'));
+  const reinjected = injectAdminModuleNavigation(html, req('/admin/operaciones/asistencia/gestion-tiempo'));
   assert.equal(reinjected, html, 'la inyección completa debe seguir siendo idempotente');
 });
 

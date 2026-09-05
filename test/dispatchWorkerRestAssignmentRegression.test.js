@@ -505,7 +505,7 @@ test('un POST manual no puede volver a crear autoridad de compensatorio en domin
   assert.equal(workerLookupCalled, false);
 });
 
-test('Nómina conserva los contadores internos de compatibilidad de días', async () => {
+test('Gestión de Tiempo conserva los contadores internos de compatibilidad de días', async () => {
   const mondaySession = payrollSession({
     id: 'TEST-MONDAY-WORKDAY',
     arrivalAt: '2026-08-03T13:00:00.000Z',
@@ -628,11 +628,11 @@ test('Asignaciones usa la política canónica de fecha para motivo, compensatori
   assert.doesNotMatch(confirmUi, /window\.confirm\s*=/);
 });
 
-test('la vista de Nómina muestra nuevos contadores, descanso y domingo sin selector manual', async () => {
-  const template = await readFile('src/views/operacionesNomina.ejs', 'utf8');
+test('la vista de Gestión de Tiempo muestra nuevos contadores, descanso y domingo sin selector manual', async () => {
+  const template = await readFile('src/views/operacionesGestionTiempo.ejs', 'utf8');
   const emptyConcepts = Object.fromEntries(PAYROLL_CONCEPT_CODES.map((code) => [code, 0]));
   const html = ejs.render(template, {
-    pageTitle: 'Nómina y tiempo trabajado',
+    pageTitle: 'Gestión de Tiempo y tiempo trabajado',
     role: 'admin',
     report: {
       period: { periodType: 'WEEKLY', from: '2026-08-17', to: '2026-08-23', anchor: '2026-08-17' },
@@ -683,5 +683,5 @@ test('la vista de Nómina muestra nuevos contadores, descanso y domingo sin sele
   assert.match(html, /Descuenta 1 día laborado/);
   assert.match(html, /No compensado · sin descanso compensatorio asignado/);
   assert.match(html, />Festivo<\/span>/);
-  assert.doesNotMatch(html, /action="\/admin\/operaciones\/asistencia\/nomina\/compensation"/);
+  assert.doesNotMatch(html, /action="\/admin\/operaciones\/asistencia\/gestion-tiempo\/compensation"/);
 });

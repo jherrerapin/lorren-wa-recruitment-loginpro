@@ -411,7 +411,7 @@ test('usuarios sin rol operativo mantienen compatibilidad histórica hasta que D
   }, OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE), false);
 });
 
-test('guardas centrales distinguen acciones sensibles de Despacho, Asistencia y Gestión de Tiempo', () => {
+test('guardas centrales distinguen acciones sensibles de Despacho, Gestión de Tiempo', () => {
   assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/admin/operaciones/personal/TEST-WORKER/eliminar' }), OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_DELETE);
   assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/admin/operaciones/clientes/TEST-CLIENT/eliminar' }), OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE);
   assert.equal(requiredOperationalCapability({ method: 'POST', originalUrl: '/admin/operaciones/asistencia/sessions/TEST-SESSION/review', body: { action: 'DELETE_MARK' } }), OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT);

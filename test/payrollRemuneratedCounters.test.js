@@ -158,7 +158,7 @@ test('el legado REMUNERADO con domingo asociado se interpreta como COMPENSATORIO
   assert.equal(paidPermission.originSundayDate, null);
 });
 
-test('Nómina separa días remunerados de permisos e incapacidades y conserva jornadas especiales', async () => {
+test('Gestión de Tiempo separa días remunerados de permisos e incapacidades y conserva jornadas especiales', async () => {
   const report = await loadPayrollReport(makePrisma(), {
     periodType: 'CUSTOM',
     from: '2026-08-11',
@@ -235,7 +235,7 @@ test('el XLSX usa los contadores reconciliados, elimina Días netos y el CSV her
   assert.equal(Object.hasOwn(legacyRow, 'DiasRemunerados'), false);
 
   const workbook = buildPayrollExcelWorkbook(report);
-  const sheet = workbook.getWorksheet('Nómina');
+  const sheet = workbook.getWorksheet('Gestión de Tiempo');
   const headers = sheet.getRow(4).values.slice(1);
   assert.ok(headers.includes('DiasRemunerados'));
   assert.ok(headers.includes('DiasNoRemunerados'));

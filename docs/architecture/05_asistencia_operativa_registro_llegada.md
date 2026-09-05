@@ -108,7 +108,7 @@ La misma instalación vinculada a otro auxiliar genera una señal de dispositivo
 - No aplica migraciones ni despliega en Railway.
 - No sube fotografías.
 - No crea revisiones manuales.
-- No marca salidas ni calcula nómina.
+- No marca salidas ni calcula Gestión de Tiempo.
 
 ## Pruebas
 
