@@ -63,7 +63,7 @@ function reportWithRests() {
   };
 }
 
-test('Resumen del día desglosa descansos por justificación sin mostrar nombres', () => {
+test('Resumen del día muestra la justificación y usa Descansando solo cuando falta motivo', () => {
   const report = reportWithRests();
   report.workerAbsences.push({
     workerId: 'TEST-WORKER-REST-D',
@@ -79,11 +79,14 @@ test('Resumen del día desglosa descansos por justificación sin mostrar nombres
   assert.match(text, /Auxiliares requeridos: 3/);
   assert.match(text, /Asignados: 3/);
   assert.match(text, /Confirmados: 2/);
-  assert.match(text, /Descansando: 3\n- Descanso no remunerado: 2\n- Sin justificación: 1\nIncapacitados: 1/);
+  assert.match(text, /Descanso no remunerado: 2\nDescansando: 1\nIncapacitados: 1/);
+  assert.doesNotMatch(text, /Descansando: 3/);
+  assert.doesNotMatch(text, /Sin justificación/);
   assert.doesNotMatch(text, /Auxiliar Prueba Descanso/);
   assert.doesNotMatch(text, /Auxiliar Prueba Incapacidad/);
   assert.doesNotMatch(text, /Novedades de descanso/);
   assert.doesNotMatch(text, /Descansos\/incapacidades/);
+  assert.doesNotMatch(text, /\n- /);
 });
 
 test('Resumen del día omite Incapacitados cuando no hay ninguno', () => {
@@ -91,32 +94,41 @@ test('Resumen del día omite Incapacitados cuando no hay ninguno', () => {
   report.workerAbsences = report.workerAbsences.filter((absence) => !String(absence.reason || '').startsWith('INCAPACIDAD_'));
   const text = buildProgrammingSummaryText(report);
 
-  assert.match(text, /Descansando: 2/);
-  assert.match(text, /- Descanso no remunerado: 1/);
-  assert.match(text, /- Sin justificación: 1/);
+  assert.match(text, /Descanso no remunerado: 1\nDescansando: 1/);
   assert.doesNotMatch(text, /Incapacitados:/);
+  assert.doesNotMatch(text, /Sin justificación/);
   assert.doesNotMatch(text, /Auxiliar Prueba Descanso/);
 });
 
-test('Resumen del día conserva Descansando en cero cuando solo hay incapacidad', () => {
+test('Resumen del día no muestra Descansando cuando todos los descansos tienen justificación', () => {
+  const report = reportWithRests();
+  report.workerAbsences = report.workerAbsences.filter((absence) => Boolean(absence.reason) && !String(absence.reason).startsWith('INCAPACIDAD_'));
+  const text = buildProgrammingSummaryText(report);
+
+  assert.match(text, /Descanso no remunerado: 1/);
+  assert.doesNotMatch(text, /Descansando:/);
+  assert.doesNotMatch(text, /Incapacitados:/);
+});
+
+test('Resumen del día no muestra Descansando cuando solo hay incapacidad', () => {
   const report = reportWithRests();
   report.workerAbsences = report.workerAbsences.filter((absence) => String(absence.reason || '').startsWith('INCAPACIDAD_'));
   const text = buildProgrammingSummaryText(report);
 
-  assert.match(text, /Descansando: 0/);
+  assert.doesNotMatch(text, /Descansando:/);
   assert.match(text, /Incapacitados: 1/);
-  assert.doesNotMatch(text, /\n- /);
+  assert.doesNotMatch(text, /Descanso no remunerado:/);
   assert.doesNotMatch(text, /Auxiliar Prueba Incapacidad/);
 });
 
-test('Resumen del día sin novedades muestra Descansando en cero y omite Incapacitados', () => {
+test('Resumen del día sin novedades omite Descansando e Incapacitados', () => {
   const report = reportWithRests();
   report.workerAbsences = [];
   const text = buildProgrammingSummaryText(report);
 
-  assert.match(text, /Descansando: 0/);
+  assert.doesNotMatch(text, /Descansando:/);
   assert.doesNotMatch(text, /Incapacitados:/);
-  assert.doesNotMatch(text, /\n- /);
+  assert.doesNotMatch(text, /Descanso no remunerado:/);
 });
 
 test('el envío de Resumen reutiliza loadProgrammingReportData y no crea una lectura paralela de descansos', async () => {
