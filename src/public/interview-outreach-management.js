@@ -92,6 +92,37 @@
     return String(document.getElementById('datePicker')?.value || '').trim();
   }
 
+  function valueBogotaDay(value) {
+    return value ? bogotaDay(value) : '';
+  }
+
+  function resolveInterviewEntryDay(entry) {
+    const bookingDay = valueBogotaDay(entry?.booking?.scheduledAt);
+    if (bookingDay) return bookingDay;
+
+    const attendanceStatus = entry?.attendance?.status || 'PENDING';
+    if (attendanceStatus !== 'PENDING') {
+      const attendanceDay = valueBogotaDay(entry?.attendance?.updatedAt);
+      if (attendanceDay) return attendanceDay;
+    }
+
+    const invitationStatus = entry?.invitation?.status || 'PENDING';
+    if (invitationStatus === 'DECLINED') {
+      const invitationDay = valueBogotaDay(entry?.invitation?.updatedAt);
+      if (invitationDay) return invitationDay;
+    }
+
+    const contactedDay = valueBogotaDay(entry?.contactedAt);
+    if (contactedDay) return contactedDay;
+
+    return valueBogotaDay(entry?.invitation?.updatedAt);
+  }
+
+  function filterInterviewEntriesBySelectedDay(entries = [], selectedDay = '') {
+    if (!selectedDay) return [...entries];
+    return entries.filter((entry) => resolveInterviewEntryDay(entry) === selectedDay);
+  }
+
   function toBogotaDateTimeLocal(value) {
     if (!value) return '';
     const date = new Date(value);
@@ -916,9 +947,12 @@
       const response = await api(`/vacancies/${encodeURIComponent(vacancyId)}`);
       const entries = response.entries || [];
       const interviewed = response.interviewed || [];
-      separateAutomaticInterviews(panel, [...entries, ...interviewed]);
+      const selectedDay = selectedDashboardDate();
+      const visibleEntries = filterInterviewEntriesBySelectedDay(entries, selectedDay);
+      const visibleInterviewed = filterInterviewEntriesBySelectedDay(interviewed, selectedDay);
+      separateAutomaticInterviews(panel, [...visibleEntries, ...visibleInterviewed]);
 
-      if (!entries.length && !interviewed.length) {
+      if (!visibleEntries.length && !visibleInterviewed.length) {
         current?.remove();
         return;
       }
@@ -927,15 +961,14 @@
       board.dataset.interviewCoordinationBoard = vacancyId;
       board.replaceChildren();
 
-      const selectedDay = selectedDashboardDate();
-      const groups = splitCoordinationEntries(entries, selectedDay);
+      const groups = splitCoordinationEntries(visibleEntries, selectedDay);
       const visibleCoordinationCount = groups.pending.length
         + groups.selected.length
         + groups.attendedPending.length
         + groups.scheduled.length
         + groups.noShow.length
         + groups.declined.length;
-      if (!visibleCoordinationCount && !interviewed.length) {
+      if (!visibleCoordinationCount && !visibleInterviewed.length) {
         current?.remove();
         return;
       }
@@ -974,7 +1007,7 @@
       head.appendChild(titleGroup);
       board.appendChild(head);
 
-      installTabNavigation(board, vacancyId, groups, interviewed, activeKey);
+      installTabNavigation(board, vacancyId, groups, visibleInterviewed, activeKey);
 
       const refresh = (nextFallbackActiveKey = null) => renderBoard(panel, nextFallbackActiveKey);
       appendCoordinationGroup(
@@ -1030,7 +1063,7 @@
         'declined',
         activeKey
       );
-      await appendReviewedGroup(board, interviewed, groups.attendedPending, vacancyId, refresh, activeKey);
+      await appendReviewedGroup(board, visibleInterviewed, groups.attendedPending, vacancyId, refresh, activeKey);
       activateCoordinationTab(board, activeKey);
 
       if (!current) {
