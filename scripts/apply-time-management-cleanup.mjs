@@ -40,15 +40,25 @@ function filesUnder(dir) {
   return out;
 }
 
-function transformText(source) {
-  const protectedNames = [];
-  let text = source.replace(/Nominatim/gi, (match) => {
-    const marker = `__LORREN_GEOCODER_${protectedNames.length}__`;
-    protectedNames.push([marker, match]);
+function protectProvider(source) {
+  const values = [];
+  const text = source.replace(/Nominatim/gi, (match) => {
+    const marker = `__LORREN_GEOCODER_${values.length}__`;
+    values.push([marker, match]);
     return marker;
   });
+  return { text, values };
+}
 
-  text = text
+function restoreProvider(source, values) {
+  let text = source;
+  for (const [marker, original] of values) text = text.replaceAll(marker, original);
+  return text;
+}
+
+function transformText(source) {
+  const protectedProvider = protectProvider(source);
+  let text = protectedProvider.text
     .replace(/Asistencia y Gestión de Tiempo/g, 'Gestión de Tiempo')
     .replace(/asistencia y gestión de tiempo/g, 'gestión de tiempo')
     .replace(/Nómina y tiempo trabajado/g, 'Gestión de Tiempo')
@@ -62,20 +72,14 @@ function transformText(source) {
     .replace(/\bNOMINA\b/g, 'GESTION_TIEMPO')
     .replace(/\bNomina\b/g, 'GestionTiempo')
     .replace(/\bnomina\b/g, 'gestion-tiempo');
-
-  for (const [marker, original] of protectedNames) text = text.replaceAll(marker, original);
-  return text;
+  return restoreProvider(text, protectedProvider.values);
 }
 
 for (const file of filesUnder(root)) {
   const rel = path.relative(root, file).replaceAll('\\', '/');
   if (tempFiles.includes(rel)) continue;
   let source;
-  try {
-    source = fs.readFileSync(file, 'utf8');
-  } catch {
-    continue;
-  }
+  try { source = fs.readFileSync(file, 'utf8'); } catch { continue; }
   if (source.includes('\u0000')) continue;
   const next = transformText(source);
   if (next !== source) fs.writeFileSync(file, next, 'utf8');
@@ -114,7 +118,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const forbiddenWord = String.fromCharCode(110, 243, 109, 105, 110, 97);
+const forbiddenAccent = String.fromCharCode(110, 243, 109, 105, 110, 97);
 const forbiddenAscii = String.fromCharCode(110, 111, 109, 105, 110, 97);
 const canonicalName = 'Gestión de Tiempo';
 const canonicalRoute = '/admin/operaciones/asistencia/gestion-tiempo';
@@ -137,19 +141,20 @@ function searchableText(file) {
   }
 }
 
+function hasRemovedTerm(value) {
+  const clean = String(value).replace(/Nominatim/gi, '');
+  return new RegExp('\\\\b' + forbiddenAccent + '\\\\b', 'i').test(clean)
+    || new RegExp('\\\\b' + forbiddenAscii + '\\\\b', 'i').test(clean)
+    || clean.includes('Nomina')
+    || clean.includes('NOMINA');
+}
+
 test('el repositorio versionado no conserva la terminología española retirada', () => {
   const offenders = [];
   for (const file of repoFiles()) {
     const rel = path.relative(root, file).replaceAll('\\\\', '/');
-    if (/Nominatim/i.test(rel)) continue;
     const text = searchableText(file);
-    if (text == null) continue;
-    const withoutProvider = text.replace(/Nominatim/gi, '');
-    const pathHasLegacy = new RegExp(forbiddenAscii, 'i').test(rel);
-    const textHasLegacy = new RegExp(forbiddenWord, 'i').test(withoutProvider)
-      || new RegExp('(?:^|[\\/_.-])' + forbiddenAscii + '(?:$|[\\/_.?-])', 'i').test(withoutProvider)
-      || /operacionesGestionTiempo/i.test('') && false;
-    if (pathHasLegacy || textHasLegacy) offenders.push(rel);
+    if (hasRemovedTerm(rel) || (text != null && hasRemovedTerm(text))) offenders.push(rel);
   }
   assert.deepEqual(offenders, []);
 });
@@ -158,8 +163,8 @@ test('las superficies canónicas usan únicamente Gestión de Tiempo', () => {
   const navigation = readFileSync(path.join(root, 'src/services/adminNavigation.js'), 'utf8');
   const attendance = readFileSync(path.join(root, 'src/routes/dispatchAttendanceAdmin.js'), 'utf8');
   const payroll = readFileSync(path.join(root, 'src/routes/dispatchPayroll.js'), 'utf8');
-  assert.match(navigation, new RegExp(canonicalName));
-  assert.match(navigation, new RegExp(canonicalRoute.replace(/[.*+?^\\${}()|[\\]\\\\]/g, '\\\\$&')));
+  assert.ok(navigation.includes(canonicalName));
+  assert.ok(navigation.includes(canonicalRoute));
   assert.match(attendance, /PAYROLL_CANONICAL_ROUTE = '\\/gestion-tiempo'/);
   assert.doesNotMatch(attendance, /PAYROLL_LEGACY_ROUTE|legacyPayrollRedirectTarget/);
   assert.match(payroll, /operacionesGestionTiempo/);
@@ -183,7 +188,6 @@ test('Gestión de Tiempo tiene una sola ruta y autoridad de navegación', () => 
   assert.doesNotMatch(navigationSource, /LEGACY_PAYROLL_PATH/);
   assert.match(navigationSource, /menuLink\\(PAYROLL_PATH, 'Gestión de Tiempo'\\)/);
   assert.match(payrollSource, /operacionesGestionTiempo/);
-  assert.doesNotMatch(payrollSource, /operacionesNomina/);
 });
 `;
 fs.writeFileSync(path.join(root, 'test/payrollNavigationLabelRegression.test.js'), navRegression, 'utf8');
@@ -191,10 +195,10 @@ fs.writeFileSync(path.join(root, 'test/payrollNavigationLabelRegression.test.js'
 const ciPath = path.join(root, '.github/workflows/ci.yml');
 let ci = fs.readFileSync(ciPath, 'utf8');
 if (!ci.includes('test/timeManagementPresentationTerminology.test.js')) {
-  ci = ci.replace(
-    'node --test test/adminSession.test.js test/liveSearchTypeaheadContracts.test.js',
-    'node --test test/adminSession.test.js test/liveSearchTypeaheadContracts.test.js test/timeManagementPresentationTerminology.test.js'
-  );
+  const before = 'node --test test/adminSession.test.js test/liveSearchTypeaheadContracts.test.js';
+  const after = before + ' test/timeManagementPresentationTerminology.test.js';
+  if (!ci.includes(before)) throw new Error('No se encontró el quick job esperado de CI');
+  ci = ci.replace(before, after);
   fs.writeFileSync(ciPath, ci, 'utf8');
 }
 
@@ -203,19 +207,22 @@ for (const rel of tempFiles) {
   if (fs.existsSync(file)) fs.rmSync(file);
 }
 
-const forbidden = new RegExp(forbiddenAsciiForScan(), 'i');
-function forbiddenAsciiForScan() {
-  return String.fromCharCode(110, 111, 109, 105, 110, 97);
+const forbiddenAccent = String.fromCharCode(110, 243, 109, 105, 110, 97);
+const forbiddenAscii = String.fromCharCode(110, 111, 109, 105, 110, 97);
+function hasRemovedTerm(value) {
+  const clean = String(value).replace(/Nominatim/gi, '');
+  return new RegExp(`\\b${forbiddenAccent}\\b`, 'i').test(clean)
+    || new RegExp(`\\b${forbiddenAscii}\\b`, 'i').test(clean)
+    || clean.includes('Nomina')
+    || clean.includes('NOMINA');
 }
 const leftovers = [];
 for (const file of filesUnder(root)) {
   const rel = path.relative(root, file).replaceAll('\\', '/');
-  if (/Nominatim/i.test(rel)) continue;
   let text;
   try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
   if (text.includes('\u0000')) continue;
-  const cleaned = text.replace(/Nominatim/gi, '');
-  if (/nómina/i.test(cleaned) || forbidden.test(cleaned) || forbidden.test(rel)) leftovers.push(rel);
+  if (hasRemovedTerm(rel) || hasRemovedTerm(text)) leftovers.push(rel);
 }
 if (leftovers.length) {
   console.error('Terminología heredada restante:', [...new Set(leftovers)].sort());
