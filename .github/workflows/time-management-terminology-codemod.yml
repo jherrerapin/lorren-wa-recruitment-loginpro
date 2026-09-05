@@ -23,6 +23,9 @@ jobs:
       - name: Apply repository-wide terminology codemod
         run: node scripts/apply-time-management-terminology.mjs
 
+      - name: Validate repository-wide terminology
+        run: node --test test/timeManagementPresentationTerminology.test.js
+
       - name: Commit codemod result
         shell: bash
         run: |
