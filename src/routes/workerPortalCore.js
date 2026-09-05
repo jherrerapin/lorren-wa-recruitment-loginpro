@@ -39,6 +39,10 @@ import {
   storeAttendanceArrivalEvidence,
   storeAttendanceDepartureEvidence
 } from '../services/attendanceEvidenceStorage.js';
+import {
+  isWorkerPortalServiceEnabled,
+  isWorkerPortalServiceEnabledAt
+} from '../services/workerPortalServiceState.js';
 
 export const WORKER_PORTAL_HOME_PATH = '/operaciones/portal';
 export const WORKER_PORTAL_ACTIVATION_PATH = '/operaciones/portal/activar';
@@ -440,7 +444,7 @@ function renewWorkerPortalPersistence(req, res, now) {
 }
 
 function renderPortal(res, mode, nonce, options = {}) {
-  res.set('X-Lorren-Worker-Portal-Mode', mode);
+  res.set('X-Lorren-Worker-Portal-Mode', options.headerMode || mode);
   return res.render('workerPortal', {
     mode,
     nonce,
@@ -499,6 +503,8 @@ export function workerPortalRouter(prisma, options = {}) {
   const discardArrivalEvidenceFn = options.discardArrivalEvidenceFn || discardAttendanceArrivalEvidence;
   const storeDepartureEvidenceFn = options.storeDepartureEvidenceFn || storeAttendanceDepartureEvidence;
   const discardDepartureEvidenceFn = options.discardDepartureEvidenceFn || discardAttendanceDepartureEvidence;
+  const portalServiceEnabledFn = options.portalServiceEnabledFn || (() => isWorkerPortalServiceEnabled(prisma));
+  const portalServiceEnabledAtFn = options.portalServiceEnabledAtFn || ((at) => isWorkerPortalServiceEnabledAt(prisma, at));
   const installationPepper = options.installationPepper ?? process.env.ATTENDANCE_INSTALLATION_PEPPER;
   const sessionTtlMinutes = optionalInteger(options.sessionTtlMinutes ?? process.env.ATTENDANCE_PORTAL_SESSION_TTL_MINUTES);
   const randomUUIDFn = options.randomUUIDFn || randomUUID;
@@ -554,6 +560,9 @@ export function workerPortalRouter(prisma, options = {}) {
       const clientCapturedAt = optionalBodyDate(req.body?.clientCapturedAt, 'attendance_client_captured_at');
       if (captureMode === OFFLINE_WEB_CAPTURE_MODE && !clientCapturedAt) {
         throw new Error('attendance_client_captured_at_required');
+      }
+      if (captureMode === OFFLINE_WEB_CAPTURE_MODE && !(await portalServiceEnabledAtFn(clientCapturedAt))) {
+        return res.status(400).json({ ok: false, error: 'portal_service_disabled_at_capture' });
       }
 
       const assignment = await loadAssignment(prisma, {
@@ -712,6 +721,29 @@ export function workerPortalRouter(prisma, options = {}) {
 
   router.use(cookieParser());
   router.use(redactWorkerPortalActivationUrlForLogging);
+  router.use(async (req, res, next) => {
+    const publicAssets = new Set(['/service-worker.js', '/offline.js', '/manifest.webmanifest', '/icon.svg']);
+    if (publicAssets.has(req.path)) return next();
+    try {
+      if (await portalServiceEnabledFn()) return next();
+      if (req.method === 'GET' && (req.path === '/' || req.path === '/activar')) {
+        const nonce = createNonce(nonceBytesFn);
+        applyWorkerPortalSecurityHeaders(res, nonce);
+        return renderPortal(res, 'unavailable', nonce, { headerMode: 'inactive' });
+      }
+      applyWorkerPortalSecurityHeaders(res);
+      return res.status(503).json({ ok: false, error: 'portal_service_disabled' });
+    } catch (error) {
+      console.error('[WORKER_PORTAL_SERVICE_GATE_FAILED]', { code: errorCode(error) });
+      if (req.method === 'GET' && (req.path === '/' || req.path === '/activar')) {
+        const nonce = createNonce(nonceBytesFn);
+        applyWorkerPortalSecurityHeaders(res, nonce);
+        return renderPortal(res, 'unavailable', nonce, { headerMode: 'inactive' });
+      }
+      applyWorkerPortalSecurityHeaders(res);
+      return res.status(503).json({ ok: false, error: 'portal_temporarily_unavailable' });
+    }
+  });
   router.get('/service-worker.js', (_req, res) => {
     res.set('Content-Type', 'application/javascript; charset=utf-8');
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
