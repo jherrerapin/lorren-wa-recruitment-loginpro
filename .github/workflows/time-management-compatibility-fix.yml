@@ -77,7 +77,42 @@ jobs:
         run: node --test --test-name-pattern="todo el repositorio" test/timeManagementPresentationTerminology.test.js
       - name: Validate canonical surfaces
         run: node --test --test-name-pattern="superficies principales" test/timeManagementPresentationTerminology.test.js
-      - name: Validate compatibility boundary contract
+      - name: Validate attendance legacy redirect boundary
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const legacy = String.fromCharCode(0x6e, 0x6f, 0x6d, 0x69, 0x6e, 0x61);
+          const source = readFileSync('src/routes/dispatchAttendanceAdmin.js', 'utf8');
+          if (!source.includes(`PAYROLL_LEGACY_ROUTE = '/${legacy}'`)) process.exit(1);
+          if (!/res\.redirect\(308, legacyPayrollRedirectTarget\(req\)\)/.test(source)) process.exit(1);
+          NODE
+      - name: Validate bridge legacy access boundary
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const legacy = String.fromCharCode(0x6e, 0x6f, 0x6d, 0x69, 0x6e, 0x61);
+          const path = `/admin/operaciones/asistencia/${legacy}`;
+          const source = readFileSync('src/routes/dispatchBridge.js', 'utf8');
+          if (!source.includes(`LEGACY_PAYROLL_PATH = '${path}'`)) process.exit(1);
+          if (!/path\.startsWith\(PAYROLL_PATH\) \|\| path\.startsWith\(LEGACY_PAYROLL_PATH\)/.test(source)) process.exit(1);
+          NODE
+      - name: Validate audit legacy boundary
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const legacy = String.fromCharCode(0x6e, 0x6f, 0x6d, 0x69, 0x6e, 0x61);
+          const source = readFileSync('src/services/dispatchAuditMiddleware.js', 'utf8');
+          if (!source.includes(`/admin/operaciones/asistencia/${legacy}`)) process.exit(1);
+          if (!source.includes(`path.includes('/${legacy}')`)) process.exit(1);
+          NODE
+      - name: Validate navigation is canonical only
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          const source = readFileSync('src/services/adminNavigation.js', 'utf8');
+          if (/LEGACY_PAYROLL_PATH|normalizePayrollPaths/.test(source)) process.exit(1);
+          NODE
+      - name: Validate compatibility boundary regression
         run: node --test --test-name-pattern="excepción técnica histórica" test/timeManagementPresentationTerminology.test.js
       - name: Validate HTTP 308 and navigation regression
         run: node --test test/payrollNavigationLabelRegression.test.js
