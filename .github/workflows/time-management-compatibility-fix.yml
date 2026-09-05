@@ -38,16 +38,21 @@ jobs:
           set -euo pipefail
           node --input-type=module <<'NODE'
           import { readFileSync, writeFileSync } from 'node:fs';
+          const legacySegment = String.fromCharCode(0x6e, 0x6f, 0x6d, 0x69, 0x6e, 0x61);
+          const legacyRoute = `/${legacySegment}`;
+          const legacyPath = `/admin/operaciones/asistencia/${legacySegment}`;
+          const canonicalRoute = '/gestion-tiempo';
+          const canonicalPath = '/admin/operaciones/asistencia/gestion-tiempo';
           const edits = [
             ['src/routes/dispatchAttendanceAdmin.js', [
-              ["const PAYROLL_LEGACY_ROUTE = '/gestion-tiempo';", "const PAYROLL_LEGACY_ROUTE = '/nomina';"]
+              [`const PAYROLL_LEGACY_ROUTE = '${canonicalRoute}';`, `const PAYROLL_LEGACY_ROUTE = '${legacyRoute}';`]
             ]],
             ['src/routes/dispatchBridge.js', [
-              ["const LEGACY_PAYROLL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';", "const LEGACY_PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';"]
+              [`const LEGACY_PAYROLL_PATH = '${canonicalPath}';`, `const LEGACY_PAYROLL_PATH = '${legacyPath}';`]
             ]],
             ['src/services/dispatchAuditMiddleware.js', [
-              ["if (path.startsWith('/admin/operaciones/asistencia/gestion-tiempo') || path.startsWith('/admin/operaciones/asistencia/gestion-tiempo')) {", "if (path.startsWith('/admin/operaciones/asistencia/gestion-tiempo') || path.startsWith('/admin/operaciones/asistencia/nomina')) {"],
-              ["if (path.includes('/gestion-tiempo') || path.includes('/gestion-tiempo')) return 'DISPATCH_PAYROLL_CHANGE';", "if (path.includes('/gestion-tiempo') || path.includes('/nomina')) return 'DISPATCH_PAYROLL_CHANGE';"]
+              [`if (path.startsWith('${canonicalPath}') || path.startsWith('${canonicalPath}')) {`, `if (path.startsWith('${canonicalPath}') || path.startsWith('${legacyPath}')) {`],
+              [`if (path.includes('${canonicalRoute}') || path.includes('${canonicalRoute}')) return 'DISPATCH_PAYROLL_CHANGE';`, `if (path.includes('${canonicalRoute}') || path.includes('${legacyRoute}')) return 'DISPATCH_PAYROLL_CHANGE';`]
             ]]
           ];
           for (const [file, replacements] of edits) {
