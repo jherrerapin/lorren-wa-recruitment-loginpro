@@ -266,31 +266,31 @@ model InterviewBooking {
 }
 
 model InterviewCandidateReview {
-  id                           String                      @id @default(cuid())
-  candidateId                  String
-  candidate                    Candidate                   @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  vacancyId                    String
-  vacancy                      Vacancy                     @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-  invitationStatusOverride     InterviewInvitationStatus?
-  invitationUpdatedByUserId    String?
-  invitationUpdatedByLabel     String?
-  invitationUpdatedAt          DateTime?
-  attendanceStatus             InterviewAttendanceStatus   @default(PENDING)
-  attendanceUpdatedByUserId    String?
-  attendanceUpdatedByLabel     String?
-  attendanceUpdatedAt          DateTime?
-  continuationStatus           InterviewContinuationStatus @default(CONTINUES)
-  continuationUpdatedByUserId  String?
-  continuationUpdatedByLabel   String?
-  continuationUpdatedAt        DateTime?
-  rating                        Decimal?                    @db.Decimal(3, 2)
-  observationEnabled            Boolean                     @default(false)
-  observation                   String?
-  reviewUpdatedByUserId         String?
-  reviewUpdatedByLabel          String?
-  reviewUpdatedAt               DateTime?
-  createdAt                     DateTime                    @default(now())
-  updatedAt                     DateTime                    @updatedAt
+  id                        String                    @id @default(cuid())
+  candidateId               String
+  candidate                 Candidate                 @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  vacancyId                 String
+  vacancy                   Vacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  invitationStatusOverride  InterviewInvitationStatus?
+  invitationUpdatedByUserId String?
+  invitationUpdatedByLabel  String?
+  invitationUpdatedAt       DateTime?
+  attendanceStatus          InterviewAttendanceStatus @default(PENDING)
+  attendanceUpdatedByUserId String?
+  attendanceUpdatedByLabel  String?
+  attendanceUpdatedAt       DateTime?
+  continuationStatus          InterviewContinuationStatus @default(CONTINUES)
+  continuationUpdatedByUserId String?
+  continuationUpdatedByLabel  String?
+  continuationUpdatedAt       DateTime?
+  rating                     Decimal?                  @db.Decimal(3, 2)
+  observationEnabled         Boolean                   @default(false)
+  observation                String?
+  reviewUpdatedByUserId      String?
+  reviewUpdatedByLabel       String?
+  reviewUpdatedAt            DateTime?
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
 
   @@unique([candidateId, vacancyId])
   @@index([vacancyId, attendanceStatus])
@@ -849,7 +849,7 @@ model DispatchWorkerDevice {
   userAgent            String?
   platform             String?
   createdAt            DateTime                 @default(now())
-  updatedAt            DateTime                 @updatedAt
+  updatedAt             DateTime                 @updatedAt
   attendanceMarks      DispatchAttendanceMark[]
   consumedActivations  DispatchWorkerActivation[]
   portalSessions       DispatchWorkerPortalSession[]
@@ -903,7 +903,7 @@ model DispatchWorkerPortalSession {
   revocationReason    String?
   ipAddress           String?
   userAgent           String?
-  platform             String?
+  platform            String?
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
 
