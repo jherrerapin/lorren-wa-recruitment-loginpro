@@ -6,6 +6,10 @@ import {
   loadWorkerBiometricStatusMap,
   revokeWorkerBiometric
 } from '../services/workerBiometricService.js';
+import {
+  loadWorkerPortalServiceState,
+  setWorkerPortalServiceState
+} from '../services/workerPortalServiceState.js';
 
 const ACTIVE_DISPATCH_WORKER_STATUS = 'CONTRATADO';
 const DEFAULT_ACTIVATION_TTL_MINUTES = 30;
@@ -48,6 +52,12 @@ function requireAttendancePermission(req, res, next) {
     }
     return res.status(403).json({ ok: false, error: 'forbidden' });
   }
+  return next();
+}
+
+function requireDevOnly(req, res, next) {
+  setNoStore(res);
+  if (currentRole(req) !== 'dev') return res.status(404).json({ ok: false, error: 'not_found' });
   return next();
 }
 
@@ -166,6 +176,10 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
   ));
   const revokeBiometricFn = options.revokeBiometricFn
     || ((input, revocationOptions) => revokeWorkerBiometric(prisma, input, revocationOptions));
+  const loadPortalServiceStateFn = options.loadPortalServiceStateFn
+    || (() => loadWorkerPortalServiceState(prisma));
+  const setPortalServiceStateFn = options.setPortalServiceStateFn
+    || ((input) => setWorkerPortalServiceState(prisma, input));
   const nowFn = options.nowFn || (() => new Date());
   const ttlMinutes = options.ttlMinutes ?? activationTtlMinutes(options.env || process.env);
   const adminJson = express.json({ limit: ADMIN_BODY_LIMIT, strict: true, type: 'application/json' });
@@ -176,6 +190,47 @@ export function dispatchWorkerPortalActivationAdminRouter(prisma, options = {}) 
     if (!repository) throw new Error('activation_repository_unavailable');
     return repository;
   }
+
+  router.get('/service-state', requireDevOnly, async (_req, res) => {
+    try {
+      const state = await loadPortalServiceStateFn();
+      return res.status(200).json({
+        ok: true,
+        enabled: state.enabled === true,
+        changedAt: state.changedAt instanceof Date ? state.changedAt.toISOString() : null,
+        changedBy: state.changedBy || null
+      });
+    } catch (error) {
+      console.error('[WORKER_PORTAL_SERVICE_STATE_LOAD_FAILED]', { code: safeErrorCode(error) });
+      return res.status(503).json({ ok: false, error: 'portal_service_state_unavailable' });
+    }
+  });
+
+  router.post('/service-state', requireDevOnly, requireAdminJson, adminJson, async (req, res) => {
+    if (typeof req.body?.enabled !== 'boolean') {
+      return res.status(400).json({ ok: false, error: 'portal_service_state_invalid' });
+    }
+    try {
+      const state = await setPortalServiceStateFn({
+        enabled: req.body.enabled,
+        actorUserId: normalizeString(req.session?.userId || req.userId, 180),
+        actorUsername: currentUsername(req),
+        actorRole: currentRole(req),
+        ipAddress: requestIp(req),
+        userAgent: requestUserAgent(req)
+      });
+      return res.status(200).json({
+        ok: true,
+        enabled: state.enabled === true,
+        changed: state.changed === true,
+        changedAt: state.changedAt instanceof Date ? state.changedAt.toISOString() : null,
+        changedBy: state.changedBy || currentUsername(req) || null
+      });
+    } catch (error) {
+      console.error('[WORKER_PORTAL_SERVICE_STATE_SAVE_FAILED]', { code: safeErrorCode(error) });
+      return res.status(503).json({ ok: false, error: 'portal_service_state_unavailable' });
+    }
+  });
 
   router.get('/', requireAttendancePermission, async (req, res) => {
     try {
