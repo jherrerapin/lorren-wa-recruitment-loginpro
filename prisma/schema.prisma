@@ -109,6 +109,11 @@ enum InterviewAttendanceStatus {
   NO_SHOW
 }
 
+enum InterviewContinuationStatus {
+  CONTINUES
+  WITHDREW
+}
+
 enum JobStatus {
   PENDING
   RUNNING
@@ -274,6 +279,10 @@ model InterviewCandidateReview {
   attendanceUpdatedByUserId String?
   attendanceUpdatedByLabel  String?
   attendanceUpdatedAt       DateTime?
+  continuationStatus          InterviewContinuationStatus @default(CONTINUES)
+  continuationUpdatedByUserId String?
+  continuationUpdatedByLabel  String?
+  continuationUpdatedAt       DateTime?
   rating                     Decimal?                  @db.Decimal(3, 2)
   observationEnabled         Boolean                   @default(false)
   observation                String?
@@ -285,6 +294,7 @@ model InterviewCandidateReview {
 
   @@unique([candidateId, vacancyId])
   @@index([vacancyId, attendanceStatus])
+  @@index([vacancyId, continuationStatus])
   @@index([vacancyId, rating])
 }
 
@@ -839,7 +849,7 @@ model DispatchWorkerDevice {
   userAgent            String?
   platform             String?
   createdAt            DateTime                 @default(now())
-  updatedAt            DateTime                 @updatedAt
+  updatedAt             DateTime                 @updatedAt
   attendanceMarks      DispatchAttendanceMark[]
   consumedActivations  DispatchWorkerActivation[]
   portalSessions       DispatchWorkerPortalSession[]
