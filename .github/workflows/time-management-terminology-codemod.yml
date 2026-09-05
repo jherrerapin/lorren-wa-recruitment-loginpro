@@ -1,0 +1,38 @@
+name: One-shot time management terminology codemod
+
+on:
+  push:
+    branches:
+      - refactor/time-management-terminology
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out terminology branch
+        uses: actions/checkout@v5
+        with:
+          ref: refactor/time-management-terminology
+          fetch-depth: 0
+
+      - name: Apply repository-wide terminology codemod
+        run: node scripts/apply-time-management-terminology.mjs
+
+      - name: Commit codemod result
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "No terminology changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor: consolidate Gestión de Tiempo terminology"
+          git push origin HEAD:refactor/time-management-terminology
