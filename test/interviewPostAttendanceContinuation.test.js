@@ -256,3 +256,25 @@ test('UI separa No interesado previo de Desistió posterior y no deja decisión 
   assert.match(uiSource, /Editar \/ reactivar/);
   assert.doesNotMatch(uiSource, /Por evaluar/);
 });
+
+test('seleccionar Desistió oculta calificación e información de inmediato sin guardar ni refrescar', () => {
+  const start = uiSource.indexOf('const syncEvaluationVisibility = () => {');
+  const end = uiSource.indexOf("addComplementaryField.addEventListener('click'", start);
+  assert.ok(start >= 0 && end > start, 'No se encontró la sincronización visual de continuidad');
+  const visibilityContract = uiSource.slice(start, end);
+
+  assert.match(visibilityContract, /const withdrew = continuation\.value === 'WITHDREW'/);
+  assert.match(
+    visibilityContract,
+    /\[ratingField, evaluation, complementaryTitle, complementaryContent, complementaryCreate, saveEvaluation\]/
+  );
+  assert.match(visibilityContract, /node\.hidden = withdrew/);
+  assert.match(visibilityContract, /continuation\.addEventListener\('change', syncEvaluationVisibility\)/);
+  assert.match(visibilityContract, /syncEvaluationVisibility\(\)/);
+  assert.doesNotMatch(visibilityContract, /refresh\s*\(/);
+  assert.doesNotMatch(visibilityContract, /(?:ratingInput|observationArea|complementaryLabelInput)\.value\s*=/);
+  assert.doesNotMatch(visibilityContract, /saveContinuation\.hidden\s*=\s*withdrew/);
+
+  assert.match(uiSource, /Guardar calificación e información/);
+  assert.doesNotMatch(uiSource, /Guardar evaluación e información/);
+});
