@@ -34,7 +34,7 @@ export function requiredOperationalCapability(req = {}) {
   if (!path.startsWith('/admin/operaciones') && !path.startsWith('/operaciones/admin-')) return null;
   if (path.startsWith('/admin/operaciones/pruebas')) return null;
 
-  if (path.startsWith('/admin/operaciones/asistencia/gestion-tiempo') || path.startsWith('/admin/operaciones/asistencia/nomina')) {
+  if (path.startsWith('/admin/operaciones/asistencia/gestion-tiempo') || path.startsWith('/admin/operaciones/asistencia/gestion-tiempo')) {
     if (isWrite && /\/policy\/?$/.test(path)) return null;
     if (isWrite && /\/imports\/[^/]+\/reverse\/?$/.test(path)) return OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE;
     if (isWrite && /\/imports\/(?:preview|commit)\/?$/.test(path)) return OPERATIONAL_CAPABILITY.TIME_IMPORT;
@@ -157,7 +157,7 @@ function normalizedRouteName(req) {
 
 function inferAction(req) {
   const path = req.path || '';
-  if (path.includes('/gestion-tiempo') || path.includes('/nomina')) return 'DISPATCH_PAYROLL_CHANGE';
+  if (path.includes('/gestion-tiempo') || path.includes('/gestion-tiempo')) return 'DISPATCH_PAYROLL_CHANGE';
   if (path.includes('/pruebas')) return 'DISPATCH_DEV_TEST_CHANGE';
   if (path.includes('/whatsapp/enviar')) return 'DISPATCH_WHATSAPP_SEND';
   if (path.includes('/asignaciones/assign')) return 'DISPATCH_ASSIGNMENT_CREATE';

@@ -24,7 +24,7 @@ const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'q']);
 const CORRECTION_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
 const PAYROLL_CANONICAL_ROUTE = '/gestion-tiempo';
-const PAYROLL_LEGACY_ROUTE = '/nomina';
+const PAYROLL_LEGACY_ROUTE = '/gestion-tiempo';
 const PAYROLL_CANONICAL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';
 
 function normalizeString(value) {
