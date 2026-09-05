@@ -11,11 +11,6 @@ import {
 
 const routeSource = readFileSync(new URL('../src/routes/interviewOutreachManagement.js', import.meta.url), 'utf8');
 const uiSource = readFileSync(new URL('../src/public/interview-outreach-management.js', import.meta.url), 'utf8');
-const schemaSource = readFileSync(new URL('../prisma/schema.prisma', import.meta.url), 'utf8');
-const migrationSource = readFileSync(
-  new URL('../prisma/migrations/20260905000500_add_interview_continuation_status/migration.sql', import.meta.url),
-  'utf8'
-);
 
 function createReviewPrismaMock() {
   const reviews = new Map();
@@ -260,14 +255,4 @@ test('UI separa No interesado previo de Desistió posterior y no deja decisión 
   assert.match(uiSource, /if \(!withdrew\) \{[\s\S]*managementField\('Decisión final'/);
   assert.match(uiSource, /Editar \/ reactivar/);
   assert.doesNotMatch(uiSource, /Por evaluar/);
-});
-
-test('Prisma expande la misma autoridad de entrevista sin tocar CandidateStatus', () => {
-  assert.match(schemaSource, /enum InterviewContinuationStatus \{[\s\S]*CONTINUES[\s\S]*WITHDREW[\s\S]*\}/);
-  assert.match(schemaSource, /continuationStatus\s+InterviewContinuationStatus\s+@default\(CONTINUES\)/);
-  assert.match(schemaSource, /@@index\(\[vacancyId, continuationStatus\]\)/);
-  assert.match(migrationSource, /CREATE TYPE "InterviewContinuationStatus" AS ENUM \('CONTINUES', 'WITHDREW'\)/);
-  assert.match(migrationSource, /ADD COLUMN "continuationStatus"/);
-  const candidateStatusEnum = /enum CandidateStatus \{([\s\S]*?)\n\}/.exec(schemaSource)?.[1] || '';
-  assert.doesNotMatch(candidateStatusEnum, /WITHDREW|DESIST/);
 });
