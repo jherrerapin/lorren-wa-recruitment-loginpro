@@ -38,7 +38,7 @@
       .ic-tabpanel[hidden]{display:none!important}.ic-group{margin-top:0}.ic-group-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:7px}.ic-group-title{font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.045em;color:#526477}.ic-group-count{font-size:11px;font-weight:800;color:#64748b;background:#eef2f7;border-radius:999px;padding:2px 7px}
       .ic-list{display:grid;gap:8px}.ic-row{display:grid;grid-template-columns:minmax(180px,1.25fr) minmax(190px,.9fr) minmax(220px,1.05fr) auto;gap:10px;align-items:center;padding:10px 12px;background:#fff;border:1px solid #dbe5ef;border-radius:10px}
       .ic-person{min-width:0}.ic-name{display:block;color:var(--navy,#243b53);font-weight:800;text-decoration:none;overflow-wrap:anywhere}.ic-meta{margin-top:3px;color:var(--text-muted,#64748b);font-size:11px;line-height:1.35}
-      .ic-field{display:flex;flex-direction:column;gap:4px}.ic-field[hidden]{display:none!important}.ic-field label{font-size:11px;font-weight:800;color:#526477}.ic-control{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 8px;color:#1f2937;font:inherit;font-size:12px;box-sizing:border-box}.ic-textarea{min-height:76px;resize:vertical}
+      .ic-field{display:flex;flex-direction:column;gap:4px}.ic-field[hidden],.ic-day-evaluation[hidden],.ic-group-title[hidden],.ic-complementary[hidden],.ic-complementary-create[hidden],.ic-save[hidden],.ic-empty[hidden]{display:none!important}.ic-field label{font-size:11px;font-weight:800;color:#526477}.ic-control{width:100%;min-height:36px;border:1px solid #cbd5e1;border-radius:7px;background:#fff;padding:6px 8px;color:#1f2937;font:inherit;font-size:12px;box-sizing:border-box}.ic-textarea{min-height:76px;resize:vertical}
       .ic-save{min-height:36px;border:0;border-radius:7px;padding:7px 12px;background:#1d4f7a;color:#fff;font-weight:800;cursor:pointer}.ic-save:disabled{opacity:.6;cursor:default}.ic-save-secondary{background:#475569}
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
@@ -450,6 +450,7 @@
     const complementaryTitle = element('div', 'ic-group-title', 'Información complementaria');
     complementaryTitle.style.marginTop = '12px';
     panel.appendChild(complementaryTitle);
+    let complementaryContent = null;
     if (complementaryFields.length) {
       const complementary = element('div', 'ic-complementary');
       for (const item of complementaryFields) {
@@ -471,9 +472,11 @@
         );
         complementary.appendChild(wrapper);
       }
-      panel.appendChild(complementary);
+      complementaryContent = complementary;
+      panel.appendChild(complementaryContent);
     } else {
-      panel.appendChild(element('div', 'ic-empty', 'Todavía no hay campos complementarios definidos para entrevistas.'));
+      complementaryContent = element('div', 'ic-empty', 'Todavía no hay campos complementarios definidos para entrevistas.');
+      panel.appendChild(complementaryContent);
     }
 
     const complementaryCreate = element('div', 'ic-complementary-create');
@@ -493,7 +496,7 @@
     saveAttendance.type = 'button';
     const saveContinuation = element('button', 'ic-save ic-save-secondary', 'Guardar continuidad');
     saveContinuation.type = 'button';
-    const saveEvaluation = element('button', 'ic-save', 'Guardar evaluación e información');
+    const saveEvaluation = element('button', 'ic-save', 'Guardar calificación e información');
     saveEvaluation.type = 'button';
     const status = element('div', 'ic-day-status');
     actions.append(saveAttendance, saveContinuation, saveEvaluation, status);
@@ -507,8 +510,16 @@
       saveContinuation.hidden = !attended || finalDecisionExists;
       continuation.disabled = !attended || finalDecisionExists;
     };
+    const syncEvaluationVisibility = () => {
+      const withdrew = continuation.value === 'WITHDREW';
+      for (const node of [ratingField, evaluation, complementaryTitle, complementaryContent, complementaryCreate, saveEvaluation]) {
+        node.hidden = withdrew;
+      }
+    };
     attendance.addEventListener('change', syncContinuationVisibility);
+    continuation.addEventListener('change', syncEvaluationVisibility);
     syncContinuationVisibility();
+    syncEvaluationVisibility();
 
     addComplementaryField.addEventListener('click', async () => {
       const label = String(complementaryLabelInput.value || '').trim();
@@ -579,6 +590,7 @@
           body: JSON.stringify({ status: continuation.value })
         });
         continuation.value = result.management?.continuation?.status || continuation.value;
+        syncEvaluationVisibility();
         status.textContent = continuation.value === 'WITHDREW'
           ? 'Desistimiento registrado.'
           : 'El candidato continúa en proceso.';
@@ -595,7 +607,7 @@
 
     saveEvaluation.addEventListener('click', async () => {
       saveEvaluation.disabled = true;
-      status.textContent = 'Guardando evaluación e información...';
+      status.textContent = 'Guardando calificación e información...';
       delete status.dataset.kind;
       const payload = {
         rating: ratingInput.value === '' ? null : ratingInput.value,
@@ -617,7 +629,7 @@
         ratingField.querySelector('.ic-meta').textContent = nextBand
           ? `Clasificación actual: ${nextBand}`
           : 'Escala de 1 a 5. Usa coma o punto decimal.';
-        status.textContent = 'Evaluación e información actualizadas.';
+        status.textContent = 'Calificación e información actualizadas.';
         status.dataset.kind = 'success';
         await refresh('interviewed');
       } catch (error) {

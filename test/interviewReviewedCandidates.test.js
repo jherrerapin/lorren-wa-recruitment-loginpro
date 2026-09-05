@@ -260,7 +260,8 @@ test('información complementaria permite editar etiqueta global y valor individ
   assert.match(uiSource, /input\.value = item\.value \|\| ''/);
   assert.match(uiSource, /label: labelInput\.value/);
   assert.match(uiSource, /value: input\.value/);
-  assert.match(uiSource, /Guardar evaluación e información/);
+  assert.match(uiSource, /Guardar calificación e información/);
+  assert.doesNotMatch(uiSource, /Guardar evaluación e información/);
   assert.match(uiSource, /interview_complementary_label_conflict/);
 });
 
