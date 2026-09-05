@@ -167,12 +167,16 @@ export function buildProgrammingSummaryText(report = {}) {
   );
   const restingAbsences = workerAbsences.filter((absence) => !isIncapacitated(absence));
   const incapacitatedCount = workerAbsences.length - restingAbsences.length;
-  const restingCount = restingAbsences.length;
+  const genericRestReasons = new Set(['REMUNERADO', 'NO_REMUNERADA']);
   const restReasonCounts = new Map();
   for (const absence of restingAbsences) {
-    const reason = String(absence?.reason || '').trim();
+    const reason = String(absence?.reason || '').trim().toUpperCase();
     const reasonLabel = String(absence?.reasonLabel || '').trim();
-    const label = reason ? (reasonLabel || reason.replaceAll('_', ' ')) : 'Sin justificación';
+    const label = reason === 'COMPENSATORIO'
+      ? 'Compensatorio'
+      : (!reason || genericRestReasons.has(reason))
+        ? 'Descansando'
+        : (reasonLabel || reason.replaceAll('_', ' '));
     restReasonCounts.set(label, (restReasonCounts.get(label) || 0) + 1);
   }
   const confirmedWorkers = requests.reduce((sum, request) => sum + confirmedOperationalAssignments(request).length, 0);
@@ -184,11 +188,20 @@ export function buildProgrammingSummaryText(report = {}) {
     `Pendientes: ${pendingRequests}`,
     `Auxiliares requeridos: ${Number(summary.requiredWorkers || 0)}`,
     `Asignados: ${Number(summary.assignedWorkers || 0)}`,
-    `Confirmados: ${confirmedWorkers}`,
-    `Descansando: ${restingCount}`
+    `Confirmados: ${confirmedWorkers}`
   ];
-  for (const [label, count] of [...restReasonCounts.entries()].sort(([left], [right]) => left.localeCompare(right, 'es'))) {
-    lines.push(`- ${label}: ${count}`);
+  const restReasonPriority = new Map([
+    ['Descansando', 0],
+    ['Compensatorio', 1]
+  ]);
+  const restReasonEntries = [...restReasonCounts.entries()].sort(([left], [right]) => {
+    const leftPriority = restReasonPriority.get(left) ?? 2;
+    const rightPriority = restReasonPriority.get(right) ?? 2;
+    if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+    return left.localeCompare(right, 'es');
+  });
+  for (const [label, count] of restReasonEntries) {
+    lines.push(`${label}: ${count}`);
   }
   if (incapacitatedCount > 0) lines.push(`Incapacitados: ${incapacitatedCount}`);
   return lines.join('\n');
