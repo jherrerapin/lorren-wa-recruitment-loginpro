@@ -284,3 +284,25 @@ test('solo Asistió + Continúa muestra calificación e información y el cambio
   assert.match(uiSource, /Guardar calificación e información/);
   assert.doesNotMatch(uiSource, /Guardar evaluación e información/);
 });
+
+test('Del día muestra solo asistencia y reserva la evaluación completa para Entrevistados', () => {
+  const panelStart = uiSource.indexOf('function buildDayManagementPanel(');
+  const attendanceOnlyStart = uiSource.indexOf('if (attendanceOnly) {', panelStart);
+  const continuationStart = uiSource.indexOf('const continuation =', attendanceOnlyStart);
+  assert.ok(panelStart >= 0 && attendanceOnlyStart > panelStart && continuationStart > attendanceOnlyStart);
+
+  const attendanceOnlyContract = uiSource.slice(attendanceOnlyStart, continuationStart);
+  assert.match(attendanceOnlyContract, /grid\.append\(attendanceField\)/);
+  assert.match(attendanceOnlyContract, /actions\.append\(saveAttendance, status\)/);
+  assert.match(attendanceOnlyContract, /return panel/);
+  assert.doesNotMatch(attendanceOnlyContract, /Calificación|Continuidad|Información complementaria|saveEvaluation|saveContinuation/);
+
+  assert.match(
+    uiSource,
+    /buildDayManagementPanel\(entry\.candidateId, response, refresh, \{ attendanceOnly \}\)/
+  );
+  const selectedCallStart = uiSource.indexOf("tabKey: 'selected'");
+  const selectedCall = uiSource.slice(selectedCallStart, selectedCallStart + 240);
+  assert.match(selectedCall, /markSelectedDate:\s*true/);
+  assert.match(selectedCall, /attendanceOnly:\s*true/);
+});
