@@ -28,6 +28,35 @@ import {
 
 const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
 const MANAGEMENT_SCRIPT = '<script src="/public/interview-outreach-management.js" defer data-interview-outreach-management></script>';
+const MANAGEMENT_LOADING_SHELL = `<script data-interview-outreach-loading-shell>
+(() => {
+  for (const panel of document.querySelectorAll('[data-vacancy-panel]')) {
+    if (panel.querySelector('[data-interview-coordination-board]')) continue;
+    const vacancyId = String(panel.dataset.vacancyPanel || '').trim();
+    if (!vacancyId) continue;
+
+    const board = document.createElement('section');
+    board.className = 'ic-board';
+    board.dataset.interviewCoordinationBoard = vacancyId;
+
+    const head = document.createElement('div');
+    head.className = 'ic-head';
+    const title = document.createElement('h3');
+    title.className = 'ic-title';
+    title.textContent = 'Gestión de entrevistas';
+    head.appendChild(title);
+
+    const loading = document.createElement('div');
+    loading.className = 'ic-empty';
+    loading.textContent = 'Cargando…';
+    board.append(head, loading);
+
+    const header = panel.querySelector('.vacancy-header');
+    if (header) header.insertAdjacentElement('afterend', board);
+    else panel.prepend(board);
+  }
+})();
+</script>`;
 const INTERVIEW_INVITATION_AUDIT_LABELS = Object.freeze({
   PENDING: 'Pendiente de respuesta',
   CONFIRMED: 'Confirmó entrevista',
@@ -116,7 +145,10 @@ function installManagementScriptInjection(router) {
         && body.includes('</body>')
         && !body.includes('data-interview-outreach-management')
       ) {
-        return originalSend(body.replace('</body>', `${MANAGEMENT_SCRIPT}\n</body>`));
+        return originalSend(body.replace(
+          '</body>',
+          `${MANAGEMENT_LOADING_SHELL}\n${MANAGEMENT_SCRIPT}\n</body>`
+        ));
       }
       return originalSend(body);
     };
