@@ -45,7 +45,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # El GITHUB_TOKEN no debe autopublicar cambios en workflows. CI se versiona luego explícitamente.
           git restore -- .github/workflows/ci.yml
           if git diff --quiet && git diff --cached --quiet; then
             echo "No terminology changes required."
@@ -71,8 +70,14 @@ jobs:
             node --check "$file"
           done < <(find src test -type f -name '*.js' -print0)
 
-      - name: Validate repository-wide terminology
-        run: node --test test/timeManagementPresentationTerminology.test.js
+      - name: Validate repository-wide terminology inventory
+        run: node --test --test-name-pattern="todo el repositorio" test/timeManagementPresentationTerminology.test.js
+
+      - name: Validate canonical presentation surfaces
+        run: node --test --test-name-pattern="superficies principales" test/timeManagementPresentationTerminology.test.js
+
+      - name: Validate legacy route compatibility boundary
+        run: node --test --test-name-pattern="excepción técnica histórica" test/timeManagementPresentationTerminology.test.js
 
       - name: Run Gestión de Tiempo focal regressions
         shell: bash
