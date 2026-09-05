@@ -162,10 +162,19 @@ export function buildProgrammingSummaryText(report = {}) {
   const requests = Array.isArray(report.requests) ? report.requests : [];
   const summary = report.summary || {};
   const workerAbsences = Array.isArray(report.workerAbsences) ? report.workerAbsences : [];
-  const incapacitatedCount = workerAbsences.filter((absence) => (
+  const isIncapacitated = (absence) => (
     ['INCAPACIDAD_EPS', 'INCAPACIDAD_ARL'].includes(String(absence?.reason || '').trim().toUpperCase())
-  )).length;
-  const restingCount = workerAbsences.length - incapacitatedCount;
+  );
+  const restingAbsences = workerAbsences.filter((absence) => !isIncapacitated(absence));
+  const incapacitatedCount = workerAbsences.length - restingAbsences.length;
+  const restingCount = restingAbsences.length;
+  const restReasonCounts = new Map();
+  for (const absence of restingAbsences) {
+    const reason = String(absence?.reason || '').trim();
+    const reasonLabel = String(absence?.reasonLabel || '').trim();
+    const label = reason ? (reasonLabel || reason.replaceAll('_', ' ')) : 'Sin justificación';
+    restReasonCounts.set(label, (restReasonCounts.get(label) || 0) + 1);
+  }
   const confirmedWorkers = requests.reduce((sum, request) => sum + confirmedOperationalAssignments(request).length, 0);
   const pendingRequests = requests.filter((request) => PENDING_PROGRAMMING_STATUSES.has(deriveDispatchRequestOperationalState(request).status)).length;
   const lines = [
@@ -178,6 +187,9 @@ export function buildProgrammingSummaryText(report = {}) {
     `Confirmados: ${confirmedWorkers}`,
     `Descansando: ${restingCount}`
   ];
+  for (const [label, count] of [...restReasonCounts.entries()].sort(([left], [right]) => left.localeCompare(right, 'es'))) {
+    lines.push(`- ${label}: ${count}`);
+  }
   if (incapacitatedCount > 0) lines.push(`Incapacitados: ${incapacitatedCount}`);
   return lines.join('\n');
 }
