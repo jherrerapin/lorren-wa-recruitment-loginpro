@@ -1,0 +1,96 @@
+name: One-shot time management compatibility fix
+
+on:
+  push:
+    branches:
+      - refactor/time-management-terminology
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-validate:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      CI: "true"
+      NODE_ENV: test
+      TZ: UTC
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/lorren_ci?schema=public
+      SESSION_SECRET: ci-only-placeholder-not-for-production
+      OPENAI_ENABLED: "false"
+      FF_RESPONSES_EXTRACTOR: "false"
+      USE_CONVERSATION_ENGINE: "false"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: refactor/time-management-terminology
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - name: Restore documented legacy route boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const edits = [
+            ['src/routes/dispatchAttendanceAdmin.js', [
+              ["const PAYROLL_LEGACY_ROUTE = '/gestion-tiempo';", "const PAYROLL_LEGACY_ROUTE = '/nomina';"]
+            ]],
+            ['src/routes/dispatchBridge.js', [
+              ["const LEGACY_PAYROLL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';", "const LEGACY_PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';"]
+            ]],
+            ['src/services/dispatchAuditMiddleware.js', [
+              ["if (path.startsWith('/admin/operaciones/asistencia/gestion-tiempo') || path.startsWith('/admin/operaciones/asistencia/gestion-tiempo')) {", "if (path.startsWith('/admin/operaciones/asistencia/gestion-tiempo') || path.startsWith('/admin/operaciones/asistencia/nomina')) {"],
+              ["if (path.includes('/gestion-tiempo') || path.includes('/gestion-tiempo')) return 'DISPATCH_PAYROLL_CHANGE';", "if (path.includes('/gestion-tiempo') || path.includes('/nomina')) return 'DISPATCH_PAYROLL_CHANGE';"]
+            ]]
+          ];
+          for (const [file, replacements] of edits) {
+            let content = readFileSync(file, 'utf8');
+            for (const [from, to] of replacements) {
+              if (!content.includes(from)) throw new Error(`${file}: expected source fragment not found`);
+              content = content.replace(from, to);
+            }
+            writeFileSync(file, content, 'utf8');
+          }
+          NODE
+      - name: Validate Prisma
+        run: npx prisma validate
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+      - name: Validate JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do node --check "$file"; done < <(find src test -type f -name '*.js' -print0)
+      - name: Validate terminology and compatibility contracts
+        run: node --test test/timeManagementPresentationTerminology.test.js test/payrollNavigationLabelRegression.test.js
+      - name: Run Gestión de Tiempo focal regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t focal < <(find test -maxdepth 1 -type f \( -name 'payroll*.test.js' -o -name 'dispatchDevPayroll*.test.js' -o -name 'testWorkspace*.test.js' \) | sort)
+          node --test \
+            test/adminModuleNavigation.test.js \
+            test/adminResponsiveShellRegression.test.js \
+            test/attendanceClearMarks.test.js \
+            test/dispatchDisabledWorkerHistory.test.js \
+            test/dispatchWorkerRestAssignmentRegression.test.js \
+            test/liveSearchTypeaheadContracts.test.js \
+            test/operationalAccessRoles.test.js \
+            "${focal[@]}"
+      - name: Commit validated compatibility fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/routes/dispatchAttendanceAdmin.js src/routes/dispatchBridge.js src/services/dispatchAuditMiddleware.js
+          git diff --cached --quiet && exit 0
+          git commit -m "fix(time): preservar alias histórico hacia Gestión de Tiempo"
+          git push origin HEAD:refactor/time-management-terminology
