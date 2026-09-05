@@ -174,9 +174,11 @@ export function buildProgrammingSummaryText(report = {}) {
     const reasonLabel = String(absence?.reasonLabel || '').trim();
     const label = reason === 'COMPENSATORIO'
       ? 'Compensatorio'
-      : (!reason || genericRestReasons.has(reason))
-        ? 'Descansando'
-        : (reasonLabel || reason.replaceAll('_', ' '));
+      : reason === 'SUSPENSION'
+        ? 'Suspendidos'
+        : (!reason || genericRestReasons.has(reason))
+          ? 'Descansando'
+          : (reasonLabel || reason.replaceAll('_', ' '));
     restReasonCounts.set(label, (restReasonCounts.get(label) || 0) + 1);
   }
   const confirmedWorkers = requests.reduce((sum, request) => sum + confirmedOperationalAssignments(request).length, 0);

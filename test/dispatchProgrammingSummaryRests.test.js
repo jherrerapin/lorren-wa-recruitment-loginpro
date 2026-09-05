@@ -138,17 +138,27 @@ test('Resumen del día muestra Compensatorio sin mezclarlo con Descansando', () 
   assert.doesNotMatch(text, /Incapacitados:/);
 });
 
-test('Resumen del día conserva otras novedades justificadas fuera de Descansando', () => {
+test('Resumen del día conserva Vacaciones y muestra SUSPENSION como Suspendidos', () => {
   const report = reportWithRests();
-  report.workerAbsences = [{
-    workerId: 'TEST-WORKER-REST-I',
-    workerName: 'Auxiliar Prueba Vacaciones I',
-    reason: 'VACACIONES',
-    reasonLabel: 'Vacaciones'
-  }];
+  report.workerAbsences = [
+    {
+      workerId: 'TEST-WORKER-REST-I',
+      workerName: 'Auxiliar Prueba Vacaciones I',
+      reason: 'VACACIONES',
+      reasonLabel: 'Vacaciones'
+    },
+    {
+      workerId: 'TEST-WORKER-REST-J',
+      workerName: 'Auxiliar Prueba Suspendido J',
+      reason: 'SUSPENSION',
+      reasonLabel: 'Suspensión'
+    }
+  ];
   const text = buildProgrammingSummaryText(report);
 
+  assert.match(text, /Suspendidos: 1/);
   assert.match(text, /Vacaciones: 1/);
+  assert.doesNotMatch(text, /Suspensión:/);
   assert.doesNotMatch(text, /Descansando:/);
   assert.doesNotMatch(text, /Compensatorio:/);
   assert.doesNotMatch(text, /Incapacitados:/);
@@ -186,6 +196,7 @@ test('el envío de Resumen reutiliza loadProgrammingReportData y no crea una lec
   assert.match(source, /INCAPACIDAD_EPS/);
   assert.match(source, /INCAPACIDAD_ARL/);
   assert.match(source, /COMPENSATORIO/);
+  assert.match(source, /SUSPENSION/);
   assert.match(source, /REMUNERADO/);
   assert.match(source, /NO_REMUNERADA/);
   assert.doesNotMatch(source, /loadWorkerRestAssignments/);
