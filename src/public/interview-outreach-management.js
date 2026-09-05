@@ -39,6 +39,7 @@
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
       .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}.ic-complementary-item{display:grid;gap:8px;border:1px solid #dbe5ef;border-radius:9px;background:#f8fbff;padding:9px}.ic-complementary-create{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;align-items:end;margin-top:9px}.ic-complementary-create .ic-day-status{grid-column:1/-1}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
+      .ic-attended-pending{display:grid;gap:9px;border:2px solid #f59e0b;border-radius:10px;background:#fffbeb;padding:11px 12px}.ic-attended-pending-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}.ic-attended-pending-badge{display:inline-flex;align-items:center;border-radius:999px;background:#fef3c7;color:#92400e;padding:5px 9px;font-size:10px;font-weight:900}.ic-attended-pending .ic-day-panel{border-color:#f59e0b;background:#fffdf5}
       .ic-reviewed-legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.ic-reviewed-legend-item{display:inline-flex;align-items:center;gap:6px;border:1px solid #dbe5ef;border-radius:999px;background:#fff;padding:6px 9px;font-size:11px;font-weight:850;color:#334155}.ic-reviewed-dot{width:10px;height:10px;border-radius:999px}.ic-reviewed-legend-item[data-band="OPTIONED"] .ic-reviewed-dot{background:#16a34a}.ic-reviewed-legend-item[data-band="RESERVE"] .ic-reviewed-dot{background:#d97706}.ic-reviewed-legend-item[data-band="DISQUALIFIED"] .ic-reviewed-dot{background:#dc2626}
       .ic-reviewed-list{display:grid;gap:9px}.ic-reviewed-card{border:1px solid #dbe5ef;border-left-width:5px;border-radius:10px;background:#fff;padding:12px 13px;display:grid;gap:10px}.ic-reviewed-card[data-band="OPTIONED"]{border-left-color:#16a34a;background:#f8fff9}.ic-reviewed-card[data-band="RESERVE"]{border-left-color:#d97706;background:#fffdf5}.ic-reviewed-card[data-band="DISQUALIFIED"]{border-left-color:#dc2626;background:#fffafa}.ic-reviewed-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.ic-reviewed-score{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.ic-reviewed-rating{font-size:19px;font-weight:950;color:#1f2937}.ic-reviewed-band,.ic-reviewed-decision{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900}.ic-reviewed-band[data-band="OPTIONED"]{background:#dcfce7;color:#166534}.ic-reviewed-band[data-band="RESERVE"]{background:#fef3c7;color:#92400e}.ic-reviewed-band[data-band="DISQUALIFIED"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="CONTRATADO"]{background:#dcfce7;color:#166534}.ic-reviewed-decision[data-status="RECHAZADO"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="PENDING"]{background:#e2e8f0;color:#475569}.ic-reviewed-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.ic-reviewed-summary-item{border:1px solid #e2e8f0;border-radius:8px;background:rgba(255,255,255,.8);padding:8px 9px}.ic-reviewed-summary-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.035em;color:#64748b}.ic-reviewed-summary-value{margin-top:3px;font-size:12px;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere}.ic-reviewed-actions{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.ic-reviewed-actions .ic-field{min-width:190px;flex:1}.ic-reviewed-editor{display:grid;gap:8px}.ic-reviewed-feedback{min-height:15px;color:#64748b;font-size:11px;font-weight:700}.ic-reviewed-feedback[data-kind="error"]{color:#b91c1c}.ic-reviewed-feedback[data-kind="success"]{color:#15803d}
       @media(max-width:900px){.ic-row{grid-template-columns:1fr 1fr}.ic-save{width:100%}.ic-day-grid{grid-template-columns:1fr 1fr}}
@@ -161,8 +162,25 @@
   }
 
   function splitCoordinationEntries(entries = [], selectedDay = '') {
-    const result = { pending: [], selected: [], scheduled: [], declined: [] };
+    const result = {
+      pending: [],
+      selected: [],
+      attendedPending: [],
+      scheduled: [],
+      noShow: [],
+      declined: []
+    };
     for (const entry of entries) {
+      const attendanceStatus = entry?.attendance?.status || 'PENDING';
+      if (attendanceStatus === 'ATTENDED') {
+        result.attendedPending.push(entry);
+        continue;
+      }
+      if (attendanceStatus === 'NO_SHOW') {
+        result.noShow.push(entry);
+        continue;
+      }
+
       const status = entry?.invitation?.status || 'PENDING';
       if (status === 'DECLINED') {
         result.declined.push(entry);
@@ -471,7 +489,12 @@
         });
         status.textContent = 'Asistencia actualizada.';
         status.dataset.kind = 'success';
-        await refresh();
+        const destinationTab = attendance.value === 'ATTENDED'
+          ? 'interviewed'
+          : attendance.value === 'NO_SHOW'
+            ? 'no-show'
+            : 'selected';
+        await refresh(destinationTab);
       } catch (error) {
         status.textContent = friendlyError(error);
         status.dataset.kind = 'error';
@@ -507,7 +530,7 @@
           : 'Escala de 1 a 5. Usa coma o punto decimal.';
         status.textContent = 'Evaluación e información actualizadas.';
         status.dataset.kind = 'success';
-        await refresh();
+        await refresh('interviewed');
       } catch (error) {
         status.textContent = friendlyError(error);
         status.dataset.kind = 'error';
@@ -578,22 +601,70 @@
     if (!stored || stored.candidateStatus !== nextStatus) throw new Error('candidate_status_not_confirmed');
   }
 
-  function appendReviewedGroup(board, entries, vacancyId, refresh, activeKey) {
+  async function appendAttendedPending(group, entries, vacancyId, refresh) {
+    if (!entries.length) return;
+
+    const pendingHead = element('div', 'ic-group-head');
+    pendingHead.append(
+      element('span', 'ic-group-title', 'Pendientes de calificación'),
+      element('span', 'ic-group-count', entries.length)
+    );
+    group.appendChild(pendingHead);
+
+    const list = element('div', 'ic-list');
+    for (const entry of entries) {
+      const card = element('article', 'ic-attended-pending');
+      card.dataset.interviewAttendedPending = entry.candidateId;
+      const cardHead = element('div', 'ic-attended-pending-head');
+      const person = element('div', 'ic-person');
+      const link = element('a', 'ic-name', entry.fullName || 'Candidato sin nombre');
+      link.href = `/admin/candidates/${encodeURIComponent(entry.candidateId)}?returnTo=${encodeURIComponent(`${window.location.pathname}${window.location.search}#vacancy-${vacancyId}`)}`;
+      person.appendChild(link);
+      if (entry.phone) person.appendChild(element('div', 'ic-meta', `WhatsApp: ${entry.phone}`));
+      if (entry.booking?.scheduledAt) {
+        person.appendChild(element('div', 'ic-meta ic-booking', `Entrevista: ${entry.booking.label || formatDate(entry.booking.scheduledAt)}`));
+      }
+      cardHead.append(person, element('span', 'ic-attended-pending-badge', 'Pendiente de calificación'));
+      card.appendChild(cardHead);
+
+      try {
+        const response = await api(`/candidates/${encodeURIComponent(entry.candidateId)}`);
+        card.appendChild(buildDayManagementPanel(entry.candidateId, response, refresh));
+      } catch (error) {
+        const message = error?.status === 404
+          ? 'La gestión complementaria de esta entrevista no está disponible.'
+          : 'No fue posible cargar la gestión de entrevista.';
+        card.appendChild(element('div', 'ic-empty', message));
+      }
+      list.appendChild(card);
+    }
+    group.appendChild(list);
+  }
+
+  async function appendReviewedGroup(board, entries, attendedPending, vacancyId, refresh, activeKey) {
     const group = configureTabPanel(element('section', 'ic-group'), vacancyId, 'interviewed', activeKey);
+    const total = entries.length + attendedPending.length;
     const head = element('div', 'ic-group-head');
     head.append(
       element('span', 'ic-group-title', 'Entrevistados'),
-      element('span', 'ic-group-count', entries.length)
+      element('span', 'ic-group-count', total)
     );
     group.appendChild(head);
-    appendReviewedLegend(group);
 
-    if (!entries.length) {
-      group.appendChild(element('div', 'ic-empty', 'Aún no hay candidatos con asistencia y calificación registradas.'));
+    if (!total) {
+      group.appendChild(element('div', 'ic-empty', 'Aún no hay candidatos que hayan asistido a entrevista.'));
       board.appendChild(group);
       return;
     }
 
+    await appendAttendedPending(group, attendedPending, vacancyId, refresh);
+
+    if (!entries.length) {
+      board.appendChild(group);
+      return;
+    }
+
+    appendReviewedLegend(group);
     const list = element('div', 'ic-reviewed-list');
     for (const entry of entries) {
       const card = element('article', 'ic-reviewed-card');
@@ -689,14 +760,21 @@
     board.appendChild(group);
   }
 
-  async function appendManualSelectedDateGroup(board, entries, vacancyId, refresh, activeKey) {
+  async function appendManagedInterviewGroup(
+    board,
+    entries,
+    vacancyId,
+    refresh,
+    activeKey,
+    { tabKey, title, markSelectedDate = false } = {}
+  ) {
     if (!entries.length) return;
 
-    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, 'selected', activeKey);
-    group.dataset.manualInterviewSelectedDate = 'true';
+    const group = configureTabPanel(element('section', 'ic-group'), vacancyId, tabKey, activeKey);
+    if (markSelectedDate) group.dataset.manualInterviewSelectedDate = 'true';
     const head = element('div', 'ic-group-head');
     head.append(
-      element('span', 'ic-group-title', 'Entrevistas manuales — fecha seleccionada'),
+      element('span', 'ic-group-title', title),
       element('span', 'ic-group-count', entries.length)
     );
     group.appendChild(head);
@@ -711,7 +789,7 @@
       } catch (error) {
         const message = error?.status === 404
           ? 'La gestión complementaria de esta entrevista no está disponible.'
-          : 'No fue posible cargar la gestión del día de entrevista.';
+          : 'No fue posible cargar la gestión de entrevista.';
         item.appendChild(element('div', 'ic-empty', message));
       }
       list.appendChild(item);
@@ -759,8 +837,9 @@
       ['pending', 'Por gestionar', groups.pending.length],
       ...(groups.selected.length ? [['selected', 'Del día', groups.selected.length]] : []),
       ['scheduled', 'Programadas', groups.scheduled.length],
+      ...(groups.noShow.length ? [['no-show', 'No asistieron', groups.noShow.length]] : []),
       ['declined', 'No interesados', groups.declined.length],
-      ['interviewed', 'Entrevistados', interviewed.length]
+      ['interviewed', 'Entrevistados', interviewed.length + groups.attendedPending.length]
     ];
 
     for (const [key, label, count] of definitions) {
@@ -827,7 +906,7 @@
     if (remainingRows === 0) found.section.hidden = true;
   }
 
-  async function renderBoard(panel) {
+  async function renderBoard(panel, fallbackActiveKey = null) {
     const vacancyId = String(panel.dataset.vacancyPanel || '').trim();
     if (!vacancyId) return;
 
@@ -850,11 +929,43 @@
 
       const selectedDay = selectedDashboardDate();
       const groups = splitCoordinationEntries(entries, selectedDay);
-      const availableKeys = ['pending', ...(groups.selected.length ? ['selected'] : []), 'scheduled', 'declined', 'interviewed'];
-      const defaultActiveKey = entries.length ? 'pending' : 'interviewed';
+      const visibleCoordinationCount = groups.pending.length
+        + groups.selected.length
+        + groups.attendedPending.length
+        + groups.scheduled.length
+        + groups.noShow.length
+        + groups.declined.length;
+      if (!visibleCoordinationCount && !interviewed.length) {
+        current?.remove();
+        return;
+      }
+
+      const availableKeys = [
+        'pending',
+        ...(groups.selected.length ? ['selected'] : []),
+        'scheduled',
+        ...(groups.noShow.length ? ['no-show'] : []),
+        'declined',
+        'interviewed'
+      ];
+      const defaultActiveKey = groups.pending.length
+        ? 'pending'
+        : groups.selected.length
+          ? 'selected'
+          : groups.attendedPending.length
+            ? 'interviewed'
+            : groups.scheduled.length
+              ? 'scheduled'
+              : groups.noShow.length
+                ? 'no-show'
+                : groups.declined.length
+                  ? 'declined'
+                  : 'interviewed';
       const activeKey = previousActiveKey && availableKeys.includes(previousActiveKey)
         ? previousActiveKey
-        : defaultActiveKey;
+        : fallbackActiveKey && availableKeys.includes(fallbackActiveKey)
+          ? fallbackActiveKey
+          : defaultActiveKey;
       board.dataset.activeCoordinationTab = activeKey;
 
       const head = element('div', 'ic-head');
@@ -865,7 +976,7 @@
 
       installTabNavigation(board, vacancyId, groups, interviewed, activeKey);
 
-      const refresh = () => renderBoard(panel);
+      const refresh = (nextFallbackActiveKey = null) => renderBoard(panel, nextFallbackActiveKey);
       appendCoordinationGroup(
         board,
         'Pendientes de respuesta',
@@ -876,7 +987,18 @@
         'pending',
         activeKey
       );
-      await appendManualSelectedDateGroup(board, groups.selected, vacancyId, refresh, activeKey);
+      await appendManagedInterviewGroup(
+        board,
+        groups.selected,
+        vacancyId,
+        refresh,
+        activeKey,
+        {
+          tabKey: 'selected',
+          title: 'Entrevistas manuales — fecha seleccionada',
+          markSelectedDate: true
+        }
+      );
       appendCoordinationGroup(
         board,
         'Entrevistas programadas para la fecha seleccionada',
@@ -886,6 +1008,17 @@
         'No hay entrevistas automáticas programadas para la fecha seleccionada.',
         'scheduled',
         activeKey
+      );
+      await appendManagedInterviewGroup(
+        board,
+        groups.noShow,
+        vacancyId,
+        refresh,
+        activeKey,
+        {
+          tabKey: 'no-show',
+          title: 'No asistieron'
+        }
       );
       appendCoordinationGroup(
         board,
@@ -897,7 +1030,7 @@
         'declined',
         activeKey
       );
-      appendReviewedGroup(board, interviewed, vacancyId, refresh, activeKey);
+      await appendReviewedGroup(board, interviewed, groups.attendedPending, vacancyId, refresh, activeKey);
       activateCoordinationTab(board, activeKey);
 
       if (!current) {

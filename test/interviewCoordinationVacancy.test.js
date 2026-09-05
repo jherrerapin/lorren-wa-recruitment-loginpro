@@ -138,8 +138,8 @@ test('el proceso manual permite gestión completa para la fecha seleccionada, in
   assert.match(uiSource, /isManualBooking/);
   assert.match(uiSource, /entry\?\.booking\?\.slotId == null/);
   assert.match(uiSource, /'Entrevistas manuales — fecha seleccionada'/);
-  assert.match(uiSource, /appendManualSelectedDateGroup/);
-  assert.match(uiSource, /Gestión del día de entrevista/);
+  assert.match(uiSource, /appendManagedInterviewGroup/);
+  assert.match(uiSource, /Gestión de entrevista/);
   assert.match(uiSource, /Información complementaria/);
   assert.doesNotMatch(uiSource, /isTodayDashboard/);
   assert.doesNotMatch(uiSource, /Entrevistas manuales — Hoy/);
