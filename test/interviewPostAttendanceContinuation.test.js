@@ -257,23 +257,29 @@ test('UI separa No interesado previo de Desistió posterior y no deja decisión 
   assert.doesNotMatch(uiSource, /Por evaluar/);
 });
 
-test('seleccionar Desistió oculta calificación e información de inmediato sin guardar ni refrescar', () => {
+test('solo Asistió + Continúa muestra calificación e información y el cambio es inmediato', () => {
   const start = uiSource.indexOf('const syncEvaluationVisibility = () => {');
   const end = uiSource.indexOf("addComplementaryField.addEventListener('click'", start);
-  assert.ok(start >= 0 && end > start, 'No se encontró la sincronización visual de continuidad');
+  assert.ok(start >= 0 && end > start, 'No se encontró la sincronización visual de evaluación');
   const visibilityContract = uiSource.slice(start, end);
 
+  assert.match(visibilityContract, /const attended = attendance\.value === 'ATTENDED'/);
   assert.match(visibilityContract, /const withdrew = continuation\.value === 'WITHDREW'/);
+  assert.match(visibilityContract, /const canEvaluate = attended && !withdrew/);
   assert.match(
     visibilityContract,
     /\[ratingField, evaluation, complementaryTitle, complementaryContent, complementaryCreate, saveEvaluation\]/
   );
-  assert.match(visibilityContract, /node\.hidden = withdrew/);
+  assert.match(visibilityContract, /node\.hidden = !canEvaluate/);
+  assert.match(
+    visibilityContract,
+    /attendance\.addEventListener\('change', \(\) => \{\s*syncContinuationVisibility\(\);\s*syncEvaluationVisibility\(\);\s*\}\)/
+  );
   assert.match(visibilityContract, /continuation\.addEventListener\('change', syncEvaluationVisibility\)/);
   assert.match(visibilityContract, /syncEvaluationVisibility\(\)/);
   assert.doesNotMatch(visibilityContract, /refresh\s*\(/);
   assert.doesNotMatch(visibilityContract, /(?:ratingInput|observationArea|complementaryLabelInput)\.value\s*=/);
-  assert.doesNotMatch(visibilityContract, /saveContinuation\.hidden\s*=\s*withdrew/);
+  assert.doesNotMatch(visibilityContract, /saveContinuation\.hidden\s*=\s*!canEvaluate/);
 
   assert.match(uiSource, /Guardar calificación e información/);
   assert.doesNotMatch(uiSource, /Guardar evaluación e información/);
