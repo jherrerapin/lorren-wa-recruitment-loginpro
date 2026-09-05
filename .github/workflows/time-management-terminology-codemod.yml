@@ -45,6 +45,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # El GITHUB_TOKEN no debe autopublicar cambios en workflows. CI se versiona luego explícitamente.
+          git restore -- .github/workflows/ci.yml
           if git diff --quiet && git diff --cached --quiet; then
             echo "No terminology changes required."
             exit 0
