@@ -63,8 +63,15 @@ function reportWithRests() {
   };
 }
 
-test('Resumen del día muestra solo cantidades de descansando e incapacitados, sin nombres', () => {
-  const text = buildProgrammingSummaryText(reportWithRests());
+test('Resumen del día desglosa descansos por justificación sin mostrar nombres', () => {
+  const report = reportWithRests();
+  report.workerAbsences.push({
+    workerId: 'TEST-WORKER-REST-D',
+    workerName: 'Auxiliar Prueba Descanso D',
+    reason: 'NO_REMUNERADA',
+    reasonLabel: 'Descanso no remunerado'
+  });
+  const text = buildProgrammingSummaryText(report);
 
   assert.match(text, /Solicitudes: 2/);
   assert.match(text, /Completas: 1/);
@@ -72,8 +79,7 @@ test('Resumen del día muestra solo cantidades de descansando e incapacitados, s
   assert.match(text, /Auxiliares requeridos: 3/);
   assert.match(text, /Asignados: 3/);
   assert.match(text, /Confirmados: 2/);
-  assert.match(text, /Descansando: 2/);
-  assert.match(text, /Incapacitados: 1/);
+  assert.match(text, /Descansando: 3\n- Descanso no remunerado: 2\n- Sin justificación: 1\nIncapacitados: 1/);
   assert.doesNotMatch(text, /Auxiliar Prueba Descanso/);
   assert.doesNotMatch(text, /Auxiliar Prueba Incapacidad/);
   assert.doesNotMatch(text, /Novedades de descanso/);
@@ -86,6 +92,8 @@ test('Resumen del día omite Incapacitados cuando no hay ninguno', () => {
   const text = buildProgrammingSummaryText(report);
 
   assert.match(text, /Descansando: 2/);
+  assert.match(text, /- Descanso no remunerado: 1/);
+  assert.match(text, /- Sin justificación: 1/);
   assert.doesNotMatch(text, /Incapacitados:/);
   assert.doesNotMatch(text, /Auxiliar Prueba Descanso/);
 });
@@ -97,6 +105,7 @@ test('Resumen del día conserva Descansando en cero cuando solo hay incapacidad'
 
   assert.match(text, /Descansando: 0/);
   assert.match(text, /Incapacitados: 1/);
+  assert.doesNotMatch(text, /\n- /);
   assert.doesNotMatch(text, /Auxiliar Prueba Incapacidad/);
 });
 
@@ -107,6 +116,7 @@ test('Resumen del día sin novedades muestra Descansando en cero y omite Incapac
 
   assert.match(text, /Descansando: 0/);
   assert.doesNotMatch(text, /Incapacitados:/);
+  assert.doesNotMatch(text, /\n- /);
 });
 
 test('el envío de Resumen reutiliza loadProgrammingReportData y no crea una lectura paralela de descansos', async () => {
