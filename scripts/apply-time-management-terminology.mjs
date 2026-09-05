@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
 
 const root = process.cwd();
@@ -85,6 +85,13 @@ function replaceNavigationRegression(repoPath, content) {
   return `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { readFileSync } from 'node:fs';\n\nfunction source(path) {\n  return readFileSync(new URL(\`../\${path}\`, import.meta.url), 'utf8');\n}\n\ntest('Gestión de Tiempo conserva una sola ruta canónica sin redirect heredado', () => {\n  const attendanceRoute = source('src/routes/dispatchAttendanceAdmin.js');\n  const navigation = source('src/services/adminNavigation.js');\n  const bridge = source('src/routes/dispatchBridge.js');\n  const audit = source('src/services/dispatchAuditMiddleware.js');\n\n  assert.match(attendanceRoute, /PAYROLL_CANONICAL_ROUTE = '\\/gestion-tiempo'/);\n  assert.doesNotMatch(attendanceRoute, /legacyPayrollRedirectTarget|PAYROLL_LEGACY_ROUTE/);\n  assert.doesNotMatch(navigation, /LEGACY_PAYROLL_PATH|normalizePayrollPaths/);\n  assert.doesNotMatch(bridge, /LEGACY_PAYROLL_PATH/);\n  assert.match(audit, /asistencia\\/gestion-tiempo/);\n});\n\ntest('las vistas y exportaciones usan el nombre canónico del módulo', () => {\n  const mainView = source('src/views/operacionesGestionTiempo.ejs');\n  const exportView = source('src/views/operacionesGestionTiempoExport.ejs');\n  const testView = source('src/views/operacionesPruebasGestionTiempo.ejs');\n\n  for (const content of [mainView, exportView, testView]) {\n    assert.match(content, /Gestión de Tiempo|gestion-tiempo/);\n  }\n});\n`;
 }
 
+function wireTerminologyRegressionIntoCi(repoPath, content) {
+  if (repoPath !== '.github/workflows/ci.yml') return content;
+  const current = 'node --test test/adminSession.test.js test/liveSearchTypeaheadContracts.test.js';
+  const desired = `${current} test/timeManagementPresentationTerminology.test.js`;
+  return content.includes(desired) ? content : content.replace(current, desired);
+}
+
 const originalFiles = trackedFiles();
 const renames = originalFiles
   .map((repoPath) => [repoPath, renamedPath(repoPath)])
@@ -93,7 +100,6 @@ const renames = originalFiles
 
 for (const [from, to] of renames) {
   const fromAbs = resolve(root, from);
-  const toAbs = resolve(root, to);
   if (!existsSync(fromAbs)) continue;
   execFileSync('git', ['mv', '--', from, to], { cwd: root, stdio: 'inherit' });
   console.log(`renamed ${from} -> ${to}`);
@@ -107,6 +113,7 @@ for (const repoPath of trackedFiles()) {
   let next = replaceProductTerminology(original);
   next = removeLegacyRouteAuthority(repoPath, next);
   next = replaceNavigationRegression(repoPath, next);
+  next = wireTerminologyRegressionIntoCi(repoPath, next);
   if (next !== original) {
     writeFileSync(absolute, next, 'utf8');
     console.log(`updated ${repoPath}`);
