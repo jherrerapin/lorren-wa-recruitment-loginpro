@@ -511,12 +511,17 @@
       continuation.disabled = !attended || finalDecisionExists;
     };
     const syncEvaluationVisibility = () => {
+      const attended = attendance.value === 'ATTENDED';
       const withdrew = continuation.value === 'WITHDREW';
+      const canEvaluate = attended && !withdrew;
       for (const node of [ratingField, evaluation, complementaryTitle, complementaryContent, complementaryCreate, saveEvaluation]) {
-        node.hidden = withdrew;
+        node.hidden = !canEvaluate;
       }
     };
-    attendance.addEventListener('change', syncContinuationVisibility);
+    attendance.addEventListener('change', () => {
+      syncContinuationVisibility();
+      syncEvaluationVisibility();
+    });
     continuation.addEventListener('change', syncEvaluationVisibility);
     syncContinuationVisibility();
     syncEvaluationVisibility();
