@@ -12,6 +12,10 @@
     ['ATTENDED', 'Asistió'],
     ['NO_SHOW', 'No asistió']
   ];
+  const CONTINUATION_OPTIONS = [
+    ['CONTINUES', 'Continúa en proceso'],
+    ['WITHDREW', 'Desistió del proceso']
+  ];
   const DECISION_OPTIONS = [
     ['', 'Seleccionar decisión'],
     ['CONTRATADO', 'Contratado'],
@@ -41,7 +45,7 @@
       .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}.ic-complementary-item{display:grid;gap:8px;border:1px solid #dbe5ef;border-radius:9px;background:#f8fbff;padding:9px}.ic-complementary-create{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;align-items:end;margin-top:9px}.ic-complementary-create .ic-day-status{grid-column:1/-1}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
       .ic-attended-pending{display:grid;gap:9px;border:2px solid #f59e0b;border-radius:10px;background:#fffbeb;padding:11px 12px}.ic-attended-pending-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}.ic-attended-pending-badge{display:inline-flex;align-items:center;border-radius:999px;background:#fef3c7;color:#92400e;padding:5px 9px;font-size:10px;font-weight:900}.ic-attended-pending .ic-day-panel{border-color:#f59e0b;background:#fffdf5}
       .ic-reviewed-legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.ic-reviewed-legend-item{display:inline-flex;align-items:center;gap:6px;border:1px solid #dbe5ef;border-radius:999px;background:#fff;padding:6px 9px;font-size:11px;font-weight:850;color:#334155}.ic-reviewed-dot{width:10px;height:10px;border-radius:999px}.ic-reviewed-legend-item[data-band="OPTIONED"] .ic-reviewed-dot{background:#16a34a}.ic-reviewed-legend-item[data-band="RESERVE"] .ic-reviewed-dot{background:#d97706}.ic-reviewed-legend-item[data-band="DISQUALIFIED"] .ic-reviewed-dot{background:#dc2626}
-      .ic-reviewed-list{display:grid;gap:9px}.ic-reviewed-card{border:1px solid #dbe5ef;border-left-width:5px;border-radius:10px;background:#fff;padding:12px 13px;display:grid;gap:10px}.ic-reviewed-card[data-band="OPTIONED"]{border-left-color:#16a34a;background:#f8fff9}.ic-reviewed-card[data-band="RESERVE"]{border-left-color:#d97706;background:#fffdf5}.ic-reviewed-card[data-band="DISQUALIFIED"]{border-left-color:#dc2626;background:#fffafa}.ic-reviewed-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.ic-reviewed-score{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.ic-reviewed-rating{font-size:19px;font-weight:950;color:#1f2937}.ic-reviewed-band,.ic-reviewed-decision{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900}.ic-reviewed-band[data-band="OPTIONED"]{background:#dcfce7;color:#166534}.ic-reviewed-band[data-band="RESERVE"]{background:#fef3c7;color:#92400e}.ic-reviewed-band[data-band="DISQUALIFIED"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="CONTRATADO"]{background:#dcfce7;color:#166534}.ic-reviewed-decision[data-status="RECHAZADO"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="PENDING"]{background:#e2e8f0;color:#475569}.ic-reviewed-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.ic-reviewed-summary-item{border:1px solid #e2e8f0;border-radius:8px;background:rgba(255,255,255,.8);padding:8px 9px}.ic-reviewed-summary-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.035em;color:#64748b}.ic-reviewed-summary-value{margin-top:3px;font-size:12px;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere}.ic-reviewed-actions{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.ic-reviewed-actions .ic-field{min-width:190px;flex:1}.ic-reviewed-editor{display:grid;gap:8px}.ic-reviewed-feedback{min-height:15px;color:#64748b;font-size:11px;font-weight:700}.ic-reviewed-feedback[data-kind="error"]{color:#b91c1c}.ic-reviewed-feedback[data-kind="success"]{color:#15803d}
+      .ic-reviewed-list{display:grid;gap:9px}.ic-reviewed-card{border:1px solid #dbe5ef;border-left-width:5px;border-radius:10px;background:#fff;padding:12px 13px;display:grid;gap:10px}.ic-reviewed-card[data-band="OPTIONED"]{border-left-color:#16a34a;background:#f8fff9}.ic-reviewed-card[data-band="RESERVE"]{border-left-color:#d97706;background:#fffdf5}.ic-reviewed-card[data-band="DISQUALIFIED"]{border-left-color:#dc2626;background:#fffafa}.ic-reviewed-card[data-continuation="WITHDREW"]{border-color:#94a3b8;border-left-color:#64748b;background:#f8fafc}.ic-reviewed-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.ic-reviewed-score{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.ic-reviewed-rating{font-size:19px;font-weight:950;color:#1f2937}.ic-reviewed-band,.ic-reviewed-decision,.ic-continuation-badge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900}.ic-reviewed-band[data-band="OPTIONED"]{background:#dcfce7;color:#166534}.ic-reviewed-band[data-band="RESERVE"]{background:#fef3c7;color:#92400e}.ic-reviewed-band[data-band="DISQUALIFIED"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="CONTRATADO"]{background:#dcfce7;color:#166534}.ic-reviewed-decision[data-status="RECHAZADO"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="PENDING"]{background:#e2e8f0;color:#475569}.ic-continuation-badge[data-status="WITHDREW"]{background:#e2e8f0;color:#334155}.ic-reviewed-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.ic-reviewed-summary-item{border:1px solid #e2e8f0;border-radius:8px;background:rgba(255,255,255,.8);padding:8px 9px}.ic-reviewed-summary-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.035em;color:#64748b}.ic-reviewed-summary-value{margin-top:3px;font-size:12px;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere}.ic-reviewed-actions{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.ic-reviewed-actions .ic-field{min-width:190px;flex:1}.ic-reviewed-editor{display:grid;gap:8px}.ic-reviewed-feedback{min-height:15px;color:#64748b;font-size:11px;font-weight:700}.ic-reviewed-feedback[data-kind="error"]{color:#b91c1c}.ic-reviewed-feedback[data-kind="success"]{color:#15803d}
       @media(max-width:900px){.ic-row{grid-template-columns:1fr 1fr}.ic-save{width:100%}.ic-day-grid{grid-template-columns:1fr 1fr}}
       @media(max-width:620px){.ic-row{grid-template-columns:1fr}.ic-board{padding-left:12px;padding-right:12px}.ic-day-grid{grid-template-columns:1fr}.ic-complementary-create{grid-template-columns:1fr}.ic-tabs{margin-left:-2px;margin-right:-2px}.ic-tab{min-height:40px}.ic-reviewed-actions{align-items:stretch}.ic-reviewed-actions .ic-field{min-width:0}.ic-reviewed-actions .ic-save{width:100%}}
     `;
@@ -215,6 +219,12 @@
     if (error?.message === 'interview_complementary_label_conflict') {
       return 'Ya existe otro campo complementario con ese nombre. Usa un nombre diferente.';
     }
+    if (error?.message === 'interview_continuation_requires_attendance') {
+      return 'Solo puedes cambiar la continuidad después de registrar que asistió.';
+    }
+    if (error?.message === 'interview_continuation_final_decision_exists') {
+      return 'La continuidad ya no puede cambiar porque existe una decisión laboral final.';
+    }
     if (error?.message === 'candidate_status_not_confirmed') {
       return 'El estado no cambió. Revisa si existe una gestión o envío pendiente antes de intentarlo de nuevo.';
     }
@@ -354,6 +364,16 @@
       ));
     }
 
+    const continuation = selectFor(CONTINUATION_OPTIONS, management.continuation?.status || 'CONTINUES');
+    const continuationField = managementField('Continuidad', continuation);
+    if (management.continuation?.updatedAt) {
+      continuationField.appendChild(element(
+        'div',
+        'ic-meta',
+        `${management.continuation.updatedByLabel ? `Por ${management.continuation.updatedByLabel}` : 'Actualizado'} · ${formatDate(management.continuation.updatedAt)}`
+      ));
+    }
+
     const ratingInput = element('input', 'ic-control');
     ratingInput.type = 'text';
     ratingInput.inputMode = 'decimal';
@@ -391,7 +411,7 @@
     syncObservationField();
     evaluation.append(observationToggle, observationField);
 
-    grid.append(attendanceField, ratingField, evaluation);
+    grid.append(attendanceField, continuationField, ratingField, evaluation);
     panel.appendChild(grid);
 
     const complementaryFields = management.complementaryFields || [];
@@ -440,11 +460,24 @@
     const actions = element('div', 'ic-day-actions');
     const saveAttendance = element('button', 'ic-save ic-save-secondary', 'Guardar asistencia');
     saveAttendance.type = 'button';
+    const saveContinuation = element('button', 'ic-save ic-save-secondary', 'Guardar continuidad');
+    saveContinuation.type = 'button';
     const saveEvaluation = element('button', 'ic-save', 'Guardar evaluación e información');
     saveEvaluation.type = 'button';
     const status = element('div', 'ic-day-status');
-    actions.append(saveAttendance, saveEvaluation, status);
+    actions.append(saveAttendance, saveContinuation, saveEvaluation, status);
     panel.appendChild(actions);
+
+    const candidateStatus = String(response.candidate?.status || '').toUpperCase();
+    const finalDecisionExists = ['CONTRATADO', 'RECHAZADO'].includes(candidateStatus);
+    const syncContinuationVisibility = () => {
+      const attended = attendance.value === 'ATTENDED';
+      continuationField.hidden = !attended;
+      saveContinuation.hidden = !attended || finalDecisionExists;
+      continuation.disabled = !attended || finalDecisionExists;
+    };
+    attendance.addEventListener('change', syncContinuationVisibility);
+    syncContinuationVisibility();
 
     addComplementaryField.addEventListener('click', async () => {
       const label = String(complementaryLabelInput.value || '').trim();
@@ -501,6 +534,31 @@
       } finally {
         saveAttendance.disabled = false;
         attendance.disabled = false;
+      }
+    });
+
+    saveContinuation.addEventListener('click', async () => {
+      saveContinuation.disabled = true;
+      continuation.disabled = true;
+      status.textContent = 'Guardando continuidad...';
+      delete status.dataset.kind;
+      try {
+        const result = await api(`/candidates/${encodeURIComponent(candidateId)}/continuation`, {
+          method: 'POST',
+          body: JSON.stringify({ status: continuation.value })
+        });
+        continuation.value = result.management?.continuation?.status || continuation.value;
+        status.textContent = continuation.value === 'WITHDREW'
+          ? 'Desistimiento registrado.'
+          : 'El candidato continúa en proceso.';
+        status.dataset.kind = 'success';
+        await refresh('interviewed');
+      } catch (error) {
+        status.textContent = friendlyError(error);
+        status.dataset.kind = 'error';
+      } finally {
+        saveContinuation.disabled = false;
+        continuation.disabled = finalDecisionExists;
       }
     });
 
@@ -664,12 +722,14 @@
       return;
     }
 
-    appendReviewedLegend(group);
+    if (entries.some((entry) => entry?.evaluation?.band?.key)) appendReviewedLegend(group);
     const list = element('div', 'ic-reviewed-list');
     for (const entry of entries) {
+      const withdrew = (entry?.continuation?.status || 'CONTINUES') === 'WITHDREW';
       const card = element('article', 'ic-reviewed-card');
-      const bandKey = entry?.evaluation?.band?.key || 'DISQUALIFIED';
-      card.dataset.band = bandKey;
+      const bandKey = entry?.evaluation?.band?.key || '';
+      if (bandKey) card.dataset.band = bandKey;
+      card.dataset.continuation = withdrew ? 'WITHDREW' : 'CONTINUES';
 
       const cardHead = element('div', 'ic-reviewed-head');
       const person = element('div', 'ic-person');
@@ -680,30 +740,47 @@
       if (entry.evaluation?.updatedAt) person.appendChild(element('div', 'ic-meta', `Evaluación: ${formatDate(entry.evaluation.updatedAt)}`));
 
       const score = element('div', 'ic-reviewed-score');
-      score.appendChild(element('span', 'ic-reviewed-rating', formatInterviewRating(entry.evaluation?.rating)));
-      const band = element('span', 'ic-reviewed-band', entry?.evaluation?.band?.label || 'Sin clasificación');
-      band.dataset.band = bandKey;
-      score.appendChild(band);
+      if (entry.evaluation?.rating !== null && entry.evaluation?.rating !== undefined) {
+        score.appendChild(element('span', 'ic-reviewed-rating', formatInterviewRating(entry.evaluation.rating)));
+      }
+      if (bandKey) {
+        const band = element('span', 'ic-reviewed-band', entry.evaluation.band.label);
+        band.dataset.band = bandKey;
+        score.appendChild(band);
+      }
       const currentDecision = reviewedDecision(entry);
-      const decisionBadge = element('span', 'ic-reviewed-decision', currentDecision.label);
-      decisionBadge.dataset.status = currentDecision.key;
-      score.appendChild(decisionBadge);
+      if (withdrew) {
+        const continuationBadge = element('span', 'ic-continuation-badge', 'Desistió del proceso');
+        continuationBadge.dataset.status = 'WITHDREW';
+        score.appendChild(continuationBadge);
+      } else {
+        const decisionBadge = element('span', 'ic-reviewed-decision', currentDecision.label);
+        decisionBadge.dataset.status = currentDecision.key;
+        score.appendChild(decisionBadge);
+      }
       cardHead.append(person, score);
       card.appendChild(cardHead);
       appendReviewedSummary(card, entry);
 
       const actions = element('div', 'ic-reviewed-actions');
-      const edit = element('button', 'ic-save ic-save-secondary', 'Editar entrevista');
+      const edit = element('button', 'ic-save ic-save-secondary', withdrew ? 'Editar / reactivar' : 'Editar entrevista');
       edit.type = 'button';
-      const decisionSelect = selectFor(
-        DECISION_OPTIONS,
-        currentDecision.key === 'PENDING' ? '' : currentDecision.key
-      );
-      const decisionField = managementField('Decisión final', decisionSelect);
-      const saveDecision = element('button', 'ic-save', 'Guardar decisión');
-      saveDecision.type = 'button';
       const feedback = element('div', 'ic-reviewed-feedback');
-      actions.append(edit, decisionField, saveDecision, feedback);
+      actions.appendChild(edit);
+
+      let decisionSelect = null;
+      let saveDecision = null;
+      if (!withdrew) {
+        decisionSelect = selectFor(
+          DECISION_OPTIONS,
+          currentDecision.key === 'PENDING' ? '' : currentDecision.key
+        );
+        const decisionField = managementField('Decisión final', decisionSelect);
+        saveDecision = element('button', 'ic-save', 'Guardar decisión');
+        saveDecision.type = 'button';
+        actions.append(decisionField, saveDecision);
+      }
+      actions.appendChild(feedback);
       card.appendChild(actions);
 
       edit.addEventListener('click', async () => {
@@ -730,29 +807,31 @@
         }
       });
 
-      saveDecision.addEventListener('click', async () => {
-        const nextStatus = decisionSelect.value;
-        if (!nextStatus) {
-          feedback.textContent = 'Selecciona Contratado o Rechazado.';
-          feedback.dataset.kind = 'error';
-          return;
-        }
-        saveDecision.disabled = true;
-        decisionSelect.disabled = true;
-        feedback.textContent = 'Guardando decisión...';
-        delete feedback.dataset.kind;
-        try {
-          await persistCandidateDecision(entry, vacancyId, nextStatus);
-          feedback.textContent = 'Decisión actualizada.';
-          feedback.dataset.kind = 'success';
-          await refresh();
-        } catch (error) {
-          feedback.textContent = friendlyError(error);
-          feedback.dataset.kind = 'error';
-          saveDecision.disabled = false;
-          decisionSelect.disabled = false;
-        }
-      });
+      if (saveDecision && decisionSelect) {
+        saveDecision.addEventListener('click', async () => {
+          const nextStatus = decisionSelect.value;
+          if (!nextStatus) {
+            feedback.textContent = 'Selecciona Contratado o Rechazado.';
+            feedback.dataset.kind = 'error';
+            return;
+          }
+          saveDecision.disabled = true;
+          decisionSelect.disabled = true;
+          feedback.textContent = 'Guardando decisión...';
+          delete feedback.dataset.kind;
+          try {
+            await persistCandidateDecision(entry, vacancyId, nextStatus);
+            feedback.textContent = 'Decisión actualizada.';
+            feedback.dataset.kind = 'success';
+            await refresh();
+          } catch (error) {
+            feedback.textContent = friendlyError(error);
+            feedback.dataset.kind = 'error';
+            saveDecision.disabled = false;
+            decisionSelect.disabled = false;
+          }
+        });
+      }
 
       list.appendChild(card);
     }
