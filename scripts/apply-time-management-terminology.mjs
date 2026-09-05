@@ -45,35 +45,50 @@ function replaceProductTerminology(content) {
   return next;
 }
 
-function removeLegacyRouteAuthority(repoPath, content) {
+function restoreLegacyRouteCompatibility(repoPath, content) {
+  const legacyRoute = `/${oldAscii}`;
+  const legacyPath = `/admin/operaciones/asistencia/${oldAscii}`;
+  const canonicalPath = '/admin/operaciones/asistencia/gestion-tiempo';
   let next = content;
 
   if (repoPath === 'src/routes/dispatchAttendanceAdmin.js') {
-    next = next
-      .replace(/^const PAYROLL_LEGACY_ROUTE = .*\n/m, '')
-      .replace(/\nexport function legacyPayrollRedirectTarget\(req = \{\}\) \{[\s\S]*?\n\}\n\nfunction validAttendanceEvidenceKey/, '\nfunction validAttendanceEvidenceKey')
-      .replace(/\n\s*router\.use\(PAYROLL_LEGACY_ROUTE, \(req, res\) => \{[\s\S]*?\n\s*\}\);/m, '');
-  }
-
-  if (repoPath === 'src/services/adminNavigation.js') {
-    next = next
-      .replace(/^const LEGACY_PAYROLL_PATH = .*\n/m, '')
-      .replace(/\s*\|\|\s*path\.startsWith\(LEGACY_PAYROLL_PATH\)/g, '')
-      .replace(/\nfunction normalizePayrollPresentation\(html\) \{[\s\S]*?\n\}\n\nfunction normalizePayrollPaths\(html\) \{[\s\S]*?\n\}\n/, '\n')
-      .replace('  const normalizedHtml = normalizePayrollPaths(html);', '  const normalizedHtml = html;');
+    if (!next.includes('const PAYROLL_LEGACY_ROUTE =')) {
+      next = next.replace(
+        "const PAYROLL_CANONICAL_ROUTE = '/gestion-tiempo';\n",
+        `const PAYROLL_CANONICAL_ROUTE = '/gestion-tiempo';\nconst PAYROLL_LEGACY_ROUTE = '${legacyRoute}';\n`
+      );
+    }
+    if (!next.includes('export function legacyPayrollRedirectTarget')) {
+      const helper = `export function legacyPayrollRedirectTarget(req = {}) {\n  const rawUrl = String(req.url || '/');\n  const queryIndex = rawUrl.indexOf('?');\n  const rawPath = queryIndex >= 0 ? rawUrl.slice(0, queryIndex) : rawUrl;\n  const query = queryIndex >= 0 ? rawUrl.slice(queryIndex) : '';\n  const suffix = rawPath === '/' ? '' : rawPath;\n  return \`${canonicalPath}\${suffix}\${query}\`;\n}\n\n`;
+      next = next.replace('function validAttendanceEvidenceKey(value) {', `${helper}function validAttendanceEvidenceKey(value) {`);
+    }
+    if (!next.includes('router.use(PAYROLL_LEGACY_ROUTE')) {
+      const redirect = `  // Compatibilidad histórica únicamente: redirige al router canónico; no monta una segunda autoridad.\n  router.use(PAYROLL_LEGACY_ROUTE, (req, res) => {\n    applyNoStore(res);\n    return res.redirect(308, legacyPayrollRedirectTarget(req));\n  });\n`;
+      next = next.replace('  router.use(PAYROLL_CANONICAL_ROUTE, dispatchPayrollRouter(prisma));', `${redirect}  router.use(PAYROLL_CANONICAL_ROUTE, dispatchPayrollRouter(prisma));`);
+    }
   }
 
   if (repoPath === 'src/routes/dispatchBridge.js') {
-    next = next
-      .replace(/^const LEGACY_PAYROLL_PATH = .*\n/m, '')
-      .replace(/\s*\|\|\s*path\.startsWith\(LEGACY_PAYROLL_PATH\)/g, '');
+    if (!next.includes('const LEGACY_PAYROLL_PATH =')) {
+      next = next.replace(
+        `const PAYROLL_PATH = '${canonicalPath}';\n`,
+        `const PAYROLL_PATH = '${canonicalPath}';\nconst LEGACY_PAYROLL_PATH = '${legacyPath}';\n`
+      );
+    }
+    next = next.replace(
+      'return path.startsWith(PAYROLL_PATH);',
+      'return path.startsWith(PAYROLL_PATH) || path.startsWith(LEGACY_PAYROLL_PATH);'
+    );
   }
 
   if (repoPath === 'src/services/dispatchAuditMiddleware.js') {
-    const canonical = '/admin/operaciones/asistencia/gestion-tiempo';
     next = next.replace(
-      `path.startsWith('${canonical}') || path.startsWith('${canonical}')`,
-      `path.startsWith('${canonical}')`
+      `if (path.startsWith('${canonicalPath}')) {`,
+      `if (path.startsWith('${canonicalPath}') || path.startsWith('${legacyPath}')) {`
+    );
+    next = next.replace(
+      "if (path.includes('/gestion-tiempo')) return 'DISPATCH_PAYROLL_CHANGE';",
+      `if (path.includes('/gestion-tiempo') || path.includes('${legacyRoute}')) return 'DISPATCH_PAYROLL_CHANGE';`
     );
   }
 
@@ -82,7 +97,41 @@ function removeLegacyRouteAuthority(repoPath, content) {
 
 function replaceNavigationRegression(repoPath, content) {
   if (repoPath !== 'test/payrollNavigationLabelRegression.test.js') return content;
-  return `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { readFileSync } from 'node:fs';\n\nfunction source(path) {\n  return readFileSync(new URL(\`../\${path}\`, import.meta.url), 'utf8');\n}\n\ntest('Gestión de Tiempo conserva una sola ruta canónica sin redirect heredado', () => {\n  const attendanceRoute = source('src/routes/dispatchAttendanceAdmin.js');\n  const navigation = source('src/services/adminNavigation.js');\n  const bridge = source('src/routes/dispatchBridge.js');\n  const audit = source('src/services/dispatchAuditMiddleware.js');\n\n  assert.match(attendanceRoute, /PAYROLL_CANONICAL_ROUTE = '\\/gestion-tiempo'/);\n  assert.doesNotMatch(attendanceRoute, /legacyPayrollRedirectTarget|PAYROLL_LEGACY_ROUTE/);\n  assert.doesNotMatch(navigation, /LEGACY_PAYROLL_PATH|normalizePayrollPaths/);\n  assert.doesNotMatch(bridge, /LEGACY_PAYROLL_PATH/);\n  assert.match(audit, /asistencia\\/gestion-tiempo/);\n});\n\ntest('las vistas y exportaciones usan el nombre canónico del módulo', () => {\n  const mainView = source('src/views/operacionesGestionTiempo.ejs');\n  const exportView = source('src/views/operacionesGestionTiempoExport.ejs');\n  const testView = source('src/views/operacionesPruebasGestionTiempo.ejs');\n\n  for (const content of [mainView, exportView, testView]) {\n    assert.match(content, /Gestión de Tiempo|gestion-tiempo/);\n  }\n});\n`;
+  const legacyPath = `/admin/operaciones/asistencia/${oldAscii}`;
+  return `import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport express from 'express';\nimport { readFile } from 'node:fs/promises';\nimport { ADMIN_MODULE_PATHS } from '../src/services/adminNavigation.js';\nimport { dispatchAttendanceAdminRouter, legacyPayrollRedirectTarget } from '../src/routes/dispatchAttendanceAdmin.js';\n\nconst TIME_MANAGEMENT_PATH = '/admin/operaciones/asistencia/gestion-tiempo';\nconst LEGACY_TIME_MANAGEMENT_PATH = '${legacyPath}';\n\nasync function source(path) {\n  return readFile(new URL(\`../\${path}\`, import.meta.url), 'utf8');\n}\n\nasync function withServer(app, run) {\n  const server = app.listen(0, '127.0.0.1');\n  await new Promise((resolve, reject) => {\n    server.once('listening', resolve);\n    server.once('error', reject);\n  });\n  const address = server.address();\n  const origin = \`http://127.0.0.1:\${address.port}\`;\n  try {\n    await run(origin);\n  } finally {\n    await new Promise((resolve) => server.close(resolve));\n  }\n}\n\ntest('Gestión de Tiempo usa una sola ruta pública canónica en vistas y navegación', async () => {\n  const [mainView, exportView, testWorkspaceView] = await Promise.all([\n    source('src/views/operacionesGestionTiempo.ejs'),\n    source('src/views/operacionesGestionTiempoExport.ejs'),\n    source('src/views/operacionesPruebasGestionTiempo.ejs')\n  ]);\n\n  assert.equal(ADMIN_MODULE_PATHS.payroll, TIME_MANAGEMENT_PATH);\n  for (const rawView of [mainView, exportView, testWorkspaceView]) {\n    assert.match(rawView, new RegExp(TIME_MANAGEMENT_PATH.replaceAll('/', '\\\\/')));\n    assert.doesNotMatch(rawView, new RegExp(LEGACY_TIME_MANAGEMENT_PATH.replaceAll('/', '\\\\/')));\n  }\n});\n\ntest('el alias histórico redirige 308 a Gestión de Tiempo sin crear otra autoridad', async () => {\n  assert.equal(legacyPayrollRedirectTarget({ url: '/' }), TIME_MANAGEMENT_PATH);\n  assert.equal(\n    legacyPayrollRedirectTarget({ url: '/?periodType=CUSTOM&from=2026-08-01' }),\n    \`\${TIME_MANAGEMENT_PATH}?periodType=CUSTOM&from=2026-08-01\`\n  );\n  assert.equal(\n    legacyPayrollRedirectTarget({ url: '/export.xlsx?download=1' }),\n    \`\${TIME_MANAGEMENT_PATH}/export.xlsx?download=1\`\n  );\n\n  const app = express();\n  app.use('/admin/operaciones/asistencia', dispatchAttendanceAdminRouter({}));\n  await withServer(app, async (origin) => {\n    const response = await fetch(\`\${origin}\${LEGACY_TIME_MANAGEMENT_PATH}/export.xlsx?download=1\`, { redirect: 'manual' });\n    assert.equal(response.status, 308);\n    assert.equal(response.headers.get('location'), \`\${TIME_MANAGEMENT_PATH}/export.xlsx?download=1\`);\n  });\n});\n\ntest('la compatibilidad histórica queda limitada a routing, permisos y auditoría', async () => {\n  const [attendance, bridge, audit, navigation] = await Promise.all([\n    source('src/routes/dispatchAttendanceAdmin.js'),\n    source('src/routes/dispatchBridge.js'),\n    source('src/services/dispatchAuditMiddleware.js'),\n    source('src/services/adminNavigation.js')\n  ]);\n\n  assert.match(attendance, /PAYROLL_LEGACY_ROUTE/);\n  assert.match(bridge, /LEGACY_PAYROLL_PATH/);\n  assert.match(audit, /gestion-tiempo/);\n  assert.doesNotMatch(navigation, /LEGACY_PAYROLL_PATH|normalizePayrollPaths/);\n});\n`;
+}
+
+function fixTransformedRegressions(repoPath, content) {
+  let next = content;
+  if (repoPath === 'test/adminModuleNavigation.test.js') {
+    next = next
+      .replace('  assert.doesNotMatch(payroll, /\\/admin\\/operaciones\\/asistencia\\/gestion-tiempo/);\n', '')
+      .replace('  assert.doesNotMatch(payroll, />Gestión de Tiempo<|>Gestión de Tiempo y tiempo trabajado</);\n', '');
+  }
+  if (repoPath === 'docs/product/plan_tecnico_asistencia_operativa.md') {
+    next = next.replace('- preGestión de Tiempo;', '- preliquidación de tiempos;');
+  }
+  return next;
+}
+
+function allowDocumentedLegacyCompatibilityInScanner(repoPath, content) {
+  if (repoPath !== 'test/timeManagementPresentationTerminology.test.js') return content;
+  let next = content;
+  if (!next.includes('LEGACY_ROUTE_COMPATIBILITY_COUNTS')) {
+    next = next.replace(
+      "const LEGACY_COMPOUND_PRODUCT_NAME = ['Asistencia y', PRODUCT_NAME].join(' ');\n",
+      "const LEGACY_COMPOUND_PRODUCT_NAME = ['Asistencia y', PRODUCT_NAME].join(' ');\nconst LEGACY_ROUTE_COMPATIBILITY_COUNTS = new Map([\n  ['src/routes/dispatchAttendanceAdmin.js', 1],\n  ['src/routes/dispatchBridge.js', 1],\n  ['src/services/dispatchAuditMiddleware.js', 2],\n  ['test/payrollNavigationLabelRegression.test.js', 1]\n]);\n"
+    );
+    next = next.replace(
+      'function contentViolations(content) {',
+      "function contentForTerminologyScan(repoPath, content) {\n  const expectedLegacyRouteReferences = LEGACY_ROUTE_COMPATIBILITY_COUNTS.get(repoPath) || 0;\n  const actualLegacyRouteReferences = content.split(LEGACY_ASCII_TOKEN).length - 1;\n  assert.equal(\n    actualLegacyRouteReferences,\n    expectedLegacyRouteReferences,\n    `${repoPath}: cambió la cantidad documentada de referencias a la ruta histórica`\n  );\n  return expectedLegacyRouteReferences > 0\n    ? content.split(LEGACY_ASCII_TOKEN).join('legacy-time-route')\n    : content;\n}\n\nfunction contentViolations(content) {"
+    );
+    next = next.replace(
+      "    const content = readFileSync(file.absolute, 'utf8');\n    const reasons = [...pathViolations(file.repoPath), ...contentViolations(content)];",
+      "    const content = readFileSync(file.absolute, 'utf8');\n    const scanContent = contentForTerminologyScan(file.repoPath, content);\n    const reasons = [...pathViolations(file.repoPath), ...contentViolations(scanContent)];"
+    );
+  }
+  return next;
 }
 
 function wireTerminologyRegressionIntoCi(repoPath, content) {
@@ -111,8 +160,10 @@ for (const repoPath of trackedFiles()) {
   if (!existsSync(absolute)) continue;
   const original = readFileSync(absolute, 'utf8');
   let next = replaceProductTerminology(original);
-  next = removeLegacyRouteAuthority(repoPath, next);
   next = replaceNavigationRegression(repoPath, next);
+  next = fixTransformedRegressions(repoPath, next);
+  next = restoreLegacyRouteCompatibility(repoPath, next);
+  next = allowDocumentedLegacyCompatibilityInScanner(repoPath, next);
   next = wireTerminologyRegressionIntoCi(repoPath, next);
   if (next !== original) {
     writeFileSync(absolute, next, 'utf8');
