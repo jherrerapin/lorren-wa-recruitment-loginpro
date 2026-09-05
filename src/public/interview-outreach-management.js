@@ -376,13 +376,15 @@
     return wrapper;
   }
 
-  function buildDayManagementPanel(candidateId, response, refresh) {
+  function buildDayManagementPanel(candidateId, response, refresh, { attendanceOnly = false } = {}) {
     const management = response.management || {};
     const panel = element('div', 'ic-day-panel');
 
-    const title = element('div', 'ic-day-title');
-    title.appendChild(element('strong', '', 'Gestión de entrevista'));
-    panel.appendChild(title);
+    if (!attendanceOnly) {
+      const title = element('div', 'ic-day-title');
+      title.appendChild(element('strong', '', 'Gestión de entrevista'));
+      panel.appendChild(title);
+    }
 
     const grid = element('div', 'ic-day-grid');
     const attendance = selectFor(ATTENDANCE_OPTIONS, management.attendance?.status || 'PENDING');
@@ -393,6 +395,46 @@
         'ic-meta',
         `${management.attendance.updatedByLabel ? `Por ${management.attendance.updatedByLabel}` : 'Actualizado'} · ${formatDate(management.attendance.updatedAt)}`
       ));
+    }
+
+    const actions = element('div', 'ic-day-actions');
+    const saveAttendance = element('button', 'ic-save ic-save-secondary', 'Guardar asistencia');
+    saveAttendance.type = 'button';
+    const status = element('div', 'ic-day-status');
+
+    saveAttendance.addEventListener('click', async () => {
+      saveAttendance.disabled = true;
+      attendance.disabled = true;
+      status.textContent = 'Guardando asistencia...';
+      delete status.dataset.kind;
+      try {
+        await api(`/candidates/${encodeURIComponent(candidateId)}/attendance`, {
+          method: 'POST',
+          body: JSON.stringify({ status: attendance.value })
+        });
+        status.textContent = 'Asistencia actualizada.';
+        status.dataset.kind = 'success';
+        const destinationTab = attendance.value === 'ATTENDED'
+          ? 'interviewed'
+          : attendance.value === 'NO_SHOW'
+            ? 'no-show'
+            : 'selected';
+        await refresh(destinationTab);
+      } catch (error) {
+        status.textContent = friendlyError(error);
+        status.dataset.kind = 'error';
+      } finally {
+        saveAttendance.disabled = false;
+        attendance.disabled = false;
+      }
+    });
+
+    if (attendanceOnly) {
+      grid.append(attendanceField);
+      panel.appendChild(grid);
+      actions.append(saveAttendance, status);
+      panel.appendChild(actions);
+      return panel;
     }
 
     const continuation = selectFor(CONTINUATION_OPTIONS, management.continuation?.status || 'CONTINUES');
@@ -491,14 +533,10 @@
     complementaryCreate.append(complementaryLabelField, addComplementaryField, complementaryStatus);
     panel.appendChild(complementaryCreate);
 
-    const actions = element('div', 'ic-day-actions');
-    const saveAttendance = element('button', 'ic-save ic-save-secondary', 'Guardar asistencia');
-    saveAttendance.type = 'button';
     const saveContinuation = element('button', 'ic-save ic-save-secondary', 'Guardar continuidad');
     saveContinuation.type = 'button';
     const saveEvaluation = element('button', 'ic-save', 'Guardar calificación e información');
     saveEvaluation.type = 'button';
-    const status = element('div', 'ic-day-status');
     actions.append(saveAttendance, saveContinuation, saveEvaluation, status);
     panel.appendChild(actions);
 
@@ -511,12 +549,17 @@
       continuation.disabled = !attended || finalDecisionExists;
     };
     const syncEvaluationVisibility = () => {
+      const attended = attendance.value === 'ATTENDED';
       const withdrew = continuation.value === 'WITHDREW';
+      const canEvaluate = attended && !withdrew;
       for (const node of [ratingField, evaluation, complementaryTitle, complementaryContent, complementaryCreate, saveEvaluation]) {
-        node.hidden = withdrew;
+        node.hidden = !canEvaluate;
       }
     };
-    attendance.addEventListener('change', syncContinuationVisibility);
+    attendance.addEventListener('change', () => {
+      syncContinuationVisibility();
+      syncEvaluationVisibility();
+    });
     continuation.addEventListener('change', syncEvaluationVisibility);
     syncContinuationVisibility();
     syncEvaluationVisibility();
@@ -549,33 +592,6 @@
         complementaryStatus.dataset.kind = 'error';
         addComplementaryField.disabled = false;
         complementaryLabelInput.disabled = false;
-      }
-    });
-
-    saveAttendance.addEventListener('click', async () => {
-      saveAttendance.disabled = true;
-      attendance.disabled = true;
-      status.textContent = 'Guardando asistencia...';
-      delete status.dataset.kind;
-      try {
-        await api(`/candidates/${encodeURIComponent(candidateId)}/attendance`, {
-          method: 'POST',
-          body: JSON.stringify({ status: attendance.value })
-        });
-        status.textContent = 'Asistencia actualizada.';
-        status.dataset.kind = 'success';
-        const destinationTab = attendance.value === 'ATTENDED'
-          ? 'interviewed'
-          : attendance.value === 'NO_SHOW'
-            ? 'no-show'
-            : 'selected';
-        await refresh(destinationTab);
-      } catch (error) {
-        status.textContent = friendlyError(error);
-        status.dataset.kind = 'error';
-      } finally {
-        saveAttendance.disabled = false;
-        attendance.disabled = false;
       }
     });
 
@@ -888,7 +904,7 @@
     vacancyId,
     refresh,
     activeKey,
-    { tabKey, title, markSelectedDate = false } = {}
+    { tabKey, title, markSelectedDate = false, attendanceOnly = false } = {}
   ) {
     if (!entries.length) return;
 
@@ -907,7 +923,7 @@
       item.appendChild(renderRow(entry, vacancyId, refresh));
       try {
         const response = await api(`/candidates/${encodeURIComponent(entry.candidateId)}`);
-        item.appendChild(buildDayManagementPanel(entry.candidateId, response, refresh));
+        item.appendChild(buildDayManagementPanel(entry.candidateId, response, refresh, { attendanceOnly }));
       } catch (error) {
         const message = error?.status === 404
           ? 'La gestión complementaria de esta entrevista no está disponible.'
@@ -1120,7 +1136,8 @@
         {
           tabKey: 'selected',
           title: 'Entrevistas manuales — fecha seleccionada',
-          markSelectedDate: true
+          markSelectedDate: true,
+          attendanceOnly: true
         }
       );
       appendCoordinationGroup(
