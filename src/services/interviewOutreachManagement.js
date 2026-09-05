@@ -10,8 +10,14 @@ export const INTERVIEW_ATTENDANCE_STATUSES = Object.freeze([
   'NO_SHOW'
 ]);
 
+export const INTERVIEW_CONTINUATION_STATUSES = Object.freeze([
+  'CONTINUES',
+  'WITHDREW'
+]);
+
 const INTERVIEW_INVITATION_STATUS_SET = new Set(INTERVIEW_INVITATION_STATUSES);
 const INTERVIEW_ATTENDANCE_STATUS_SET = new Set(INTERVIEW_ATTENDANCE_STATUSES);
+const INTERVIEW_CONTINUATION_STATUS_SET = new Set(INTERVIEW_CONTINUATION_STATUSES);
 const MAX_OBSERVATION_LENGTH = 4000;
 const MAX_COMPLEMENTARY_LABEL_LENGTH = 80;
 const MAX_COMPLEMENTARY_VALUE_LENGTH = 2000;
@@ -68,6 +74,14 @@ export function normalizeInterviewAttendanceStatus(value) {
   const normalized = String(value || '').trim().toUpperCase();
   if (!INTERVIEW_ATTENDANCE_STATUS_SET.has(normalized)) {
     throw new TypeError('interview_attendance_status_invalid');
+  }
+  return normalized;
+}
+
+export function normalizeInterviewContinuationStatus(value) {
+  const normalized = String(value || '').trim().toUpperCase();
+  if (!INTERVIEW_CONTINUATION_STATUS_SET.has(normalized)) {
+    throw new TypeError('interview_continuation_status_invalid');
   }
   return normalized;
 }
@@ -146,6 +160,7 @@ export function deriveInterviewRatingBand(value) {
 
 export function isInterviewedCandidateReview(review = null) {
   if (!review || review.attendanceStatus !== 'ATTENDED') return false;
+  if ((review.continuationStatus || 'CONTINUES') === 'WITHDREW') return true;
   return normalizeInterviewRating(review.rating) !== null;
 }
 
@@ -229,7 +244,15 @@ export async function setInterviewAttendanceStatus(prisma, input = {}) {
     attendanceStatus: status,
     attendanceUpdatedByUserId: actor.userId,
     attendanceUpdatedByLabel: actor.label,
-    attendanceUpdatedAt: now
+    attendanceUpdatedAt: now,
+    ...(status === 'ATTENDED'
+      ? {}
+      : {
+          continuationStatus: 'CONTINUES',
+          continuationUpdatedByUserId: null,
+          continuationUpdatedByLabel: null,
+          continuationUpdatedAt: null
+        })
   };
 
   return prisma.interviewCandidateReview.upsert({
@@ -239,6 +262,38 @@ export async function setInterviewAttendanceStatus(prisma, input = {}) {
       candidateId,
       vacancyId,
       ...actorData
+    }
+  });
+}
+
+export async function setInterviewContinuationStatus(prisma, input = {}) {
+  requireManagementClient(prisma, 'interviewCandidateReview', ['findUnique', 'update']);
+  const candidateId = requireNonEmptyString(input.candidateId, 'candidate_id');
+  const vacancyId = requireNonEmptyString(input.vacancyId, 'vacancy_id');
+  const status = normalizeInterviewContinuationStatus(input.status);
+  const actor = normalizeActor(input.actor);
+  const now = requireValidDate(input.now === undefined ? new Date() : input.now, 'interview_continuation_updated_at');
+  const candidateStatus = String(input.candidateStatus || '').trim().toUpperCase();
+
+  if (['CONTRATADO', 'RECHAZADO'].includes(candidateStatus)) {
+    throw new TypeError('interview_continuation_final_decision_exists');
+  }
+
+  const review = await prisma.interviewCandidateReview.findUnique({
+    where: { candidateId_vacancyId: { candidateId, vacancyId } },
+    select: { attendanceStatus: true }
+  });
+  if (!review || review.attendanceStatus !== 'ATTENDED') {
+    throw new TypeError('interview_continuation_requires_attendance');
+  }
+
+  return prisma.interviewCandidateReview.update({
+    where: { candidateId_vacancyId: { candidateId, vacancyId } },
+    data: {
+      continuationStatus: status,
+      continuationUpdatedByUserId: actor.userId,
+      continuationUpdatedByLabel: actor.label,
+      continuationUpdatedAt: now
     }
   });
 }
@@ -425,6 +480,11 @@ export function buildInterviewManagementSnapshot({
       status: review?.attendanceStatus || 'PENDING',
       updatedAt: review?.attendanceUpdatedAt || null,
       updatedByLabel: review?.attendanceUpdatedByLabel || null
+    },
+    continuation: {
+      status: review?.continuationStatus || 'CONTINUES',
+      updatedAt: review?.continuationUpdatedAt || null,
+      updatedByLabel: review?.continuationUpdatedByLabel || null
     },
     evaluation: {
       rating,
