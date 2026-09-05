@@ -24,6 +24,7 @@ const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'q']);
 const CORRECTION_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
 const PAYROLL_CANONICAL_ROUTE = '/gestion-tiempo';
+const PAYROLL_LEGACY_ROUTE = '/nomina';
 const PAYROLL_CANONICAL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';
 
 function normalizeString(value) {
@@ -187,6 +188,15 @@ function applyNoStore(res) {
   res.set('Expires', '0');
 }
 
+export function legacyPayrollRedirectTarget(req = {}) {
+  const rawUrl = String(req.url || '/');
+  const queryIndex = rawUrl.indexOf('?');
+  const rawPath = queryIndex >= 0 ? rawUrl.slice(0, queryIndex) : rawUrl;
+  const query = queryIndex >= 0 ? rawUrl.slice(queryIndex) : '';
+  const suffix = rawPath === '/' ? '' : rawPath;
+  return `/admin/operaciones/asistencia/gestion-tiempo${suffix}${query}`;
+}
+
 function validAttendanceEvidenceKey(value) {
   return typeof value === 'string'
     && /^attendance\/[A-Za-z0-9_-]{1,120}\/[A-Za-z0-9_-]{1,120}\/(?:arrival|departure)\/[A-Za-z0-9_.-]{1,180}$/.test(value);
@@ -277,6 +287,11 @@ function reviewSuccessMessage(action) {
 export function dispatchAttendanceAdminRouter(prisma) {
   const router = express.Router();
   const formParser = express.urlencoded({ extended: false, limit: '16kb' });
+  // Compatibilidad histórica únicamente: redirige al router canónico; no monta una segunda autoridad.
+  router.use(PAYROLL_LEGACY_ROUTE, (req, res) => {
+    applyNoStore(res);
+    return res.redirect(308, legacyPayrollRedirectTarget(req));
+  });
   router.use(PAYROLL_CANONICAL_ROUTE, dispatchPayrollRouter(prisma));
 
   router.get('/map-tiles/:z/:x/:y.png', async (req, res) => {

@@ -770,7 +770,7 @@ Incluye:
 
 - cálculo de recargos;
 - cierre de periodos;
-- preGestión de Tiempo;
+- preliquidación de tiempos;
 - API externa;
 - webhooks;
 - portal de clientes;

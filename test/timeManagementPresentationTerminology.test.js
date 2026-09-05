@@ -22,6 +22,12 @@ const LEGACY_CAMEL_TOKEN = `${LEGACY_ASCII_TOKEN[0].toUpperCase()}${LEGACY_ASCII
 const LEGACY_UPPER_TOKEN = LEGACY_ASCII_TOKEN.toUpperCase();
 const PRODUCT_NAME = 'Gestión de Tiempo';
 const LEGACY_COMPOUND_PRODUCT_NAME = ['Asistencia y', PRODUCT_NAME].join(' ');
+const LEGACY_ROUTE_COMPATIBILITY_FILES = new Set([
+  'src/routes/dispatchAttendanceAdmin.js',
+  'src/routes/dispatchBridge.js',
+  'src/services/dispatchAuditMiddleware.js',
+  'test/payrollNavigationLabelRegression.test.js'
+]);
 
 function collectTextFiles(directory = REPO_ROOT) {
   const files = [];
@@ -37,6 +43,11 @@ function collectTextFiles(directory = REPO_ROOT) {
     if (TEXT_EXTENSIONS.has(extname(entry)) || ROOT_TEXT_FILES.has(repoPath)) files.push({ absolute, repoPath });
   }
   return files;
+}
+
+function contentForTerminologyScan(repoPath, content) {
+  if (!LEGACY_ROUTE_COMPATIBILITY_FILES.has(repoPath)) return content;
+  return content.split(LEGACY_ASCII_TOKEN).join('legacy-time-route');
 }
 
 function contentViolations(content) {
@@ -69,7 +80,8 @@ test('todo el repositorio usa Gestión de Tiempo como nomenclatura canónica', (
   const violations = [];
   for (const file of collectTextFiles()) {
     const content = readFileSync(file.absolute, 'utf8');
-    const reasons = [...pathViolations(file.repoPath), ...contentViolations(content)];
+    const scanContent = contentForTerminologyScan(file.repoPath, content);
+    const reasons = [...pathViolations(file.repoPath), ...contentViolations(scanContent)];
     if (reasons.length > 0) violations.push(`${file.repoPath}: ${[...new Set(reasons)].join(', ')}`);
   }
 
@@ -86,4 +98,21 @@ test('las superficies principales nombran el módulo exactamente como Gestión d
   assert.match(navigation, new RegExp(PRODUCT_NAME));
   assert.match(route, /gestion-tiempo/);
   assert.doesNotMatch(navigation, new RegExp(LEGACY_COMPOUND_PRODUCT_NAME));
+});
+
+
+test('la excepción técnica histórica queda cerrada al redirect, acceso y auditoría', () => {
+  const legacySegment = LEGACY_ASCII_TOKEN;
+  const legacyPath = `/admin/operaciones/asistencia/${legacySegment}`;
+  const attendance = readFileSync(join(REPO_ROOT, 'src/routes/dispatchAttendanceAdmin.js'), 'utf8');
+  const bridge = readFileSync(join(REPO_ROOT, 'src/routes/dispatchBridge.js'), 'utf8');
+  const audit = readFileSync(join(REPO_ROOT, 'src/services/dispatchAuditMiddleware.js'), 'utf8');
+  const navigation = readFileSync(join(REPO_ROOT, 'src/services/adminNavigation.js'), 'utf8');
+
+  assert.ok(attendance.includes(`PAYROLL_LEGACY_ROUTE = '/${legacySegment}'`));
+  assert.match(attendance, /res\.redirect\(308, legacyPayrollRedirectTarget\(req\)\)/);
+  assert.ok(bridge.includes(`LEGACY_PAYROLL_PATH = '${legacyPath}'`));
+  assert.match(bridge, /path\.startsWith\(PAYROLL_PATH\) \|\| path\.startsWith\(LEGACY_PAYROLL_PATH\)/);
+  assert.ok(audit.includes(legacyPath));
+  assert.doesNotMatch(navigation, /LEGACY_PAYROLL_PATH|normalizePayrollPaths/);
 });

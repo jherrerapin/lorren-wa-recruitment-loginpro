@@ -24,6 +24,7 @@ const ATTENDANCE_ADMIN_RUNTIME_SCRIPT = '/public/attendance-admin-runtime.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ATTENDANCE_GEOCODING_PATH = '/admin/operaciones/asistencia/geocodificar';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';
+const LEGACY_PAYROLL_PATH = '/admin/operaciones/asistencia/nomina';
 const LEGACY_TIMING_FIELD_NAMES = Object.freeze([
   'earlyArrivalWindowMinutes',
   'lateToleranceMinutes',
@@ -61,7 +62,7 @@ function isOpsUser(req) {
 
 function isPayrollRequest(req) {
   const path = String(req.originalUrl || '').split('?')[0];
-  return path.startsWith(PAYROLL_PATH);
+  return path.startsWith(PAYROLL_PATH) || path.startsWith(LEGACY_PAYROLL_PATH);
 }
 
 function canUseOps(req) {

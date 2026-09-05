@@ -109,8 +109,6 @@ test('cada desplegable conserva opciones y permisos de Operaciones y Gestión de
   assert.match(payroll, /data-module-menu="payroll"/);
   assert.match(payroll, /data-module-menu="payroll"[\s\S]*<span>Gestión de Tiempo<\/span>/);
   assert.match(payroll, /href="\/admin\/operaciones\/asistencia\/gestion-tiempo">Gestión de Tiempo<\/a>/);
-  assert.doesNotMatch(payroll, /\/admin\/operaciones\/asistencia\/gestion-tiempo/);
-  assert.doesNotMatch(payroll, />Gestión de Tiempo<|>Gestión de Tiempo y tiempo trabajado</);
   assert.match(payroll, /href="\/admin\/operaciones\/pruebas">Entorno de pruebas<\/a>/);
 
   const legacyRequest = nav(injectAdminModuleNavigation(baseHtml, req('/admin/operaciones/asistencia/gestion-tiempo', { canAccessPayroll: true })));
