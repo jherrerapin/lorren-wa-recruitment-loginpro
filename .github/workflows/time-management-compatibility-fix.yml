@@ -73,8 +73,14 @@ jobs:
         run: |
           set -euo pipefail
           while IFS= read -r -d '' file; do node --check "$file"; done < <(find src test -type f -name '*.js' -print0)
-      - name: Validate terminology and compatibility contracts
-        run: node --test test/timeManagementPresentationTerminology.test.js test/payrollNavigationLabelRegression.test.js
+      - name: Validate repository terminology inventory
+        run: node --test --test-name-pattern="todo el repositorio" test/timeManagementPresentationTerminology.test.js
+      - name: Validate canonical surfaces
+        run: node --test --test-name-pattern="superficies principales" test/timeManagementPresentationTerminology.test.js
+      - name: Validate compatibility boundary contract
+        run: node --test --test-name-pattern="excepción técnica histórica" test/timeManagementPresentationTerminology.test.js
+      - name: Validate HTTP 308 and navigation regression
+        run: node --test test/payrollNavigationLabelRegression.test.js
       - name: Run Gestión de Tiempo focal regressions
         shell: bash
         run: |
