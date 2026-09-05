@@ -124,7 +124,7 @@ jobs:
 
       - name: Run admin session contract
         if: ${{ !cancelled() }}
-        run: node --test test/adminSession.test.js
+        run: node --test test/adminSession.test.js test/liveSearchTypeaheadContracts.test.js
 
       - name: Run interview booking authority regressions
         if: ${{ !cancelled() }}
