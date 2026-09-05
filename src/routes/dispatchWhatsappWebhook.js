@@ -167,12 +167,11 @@ export function buildProgrammingSummaryText(report = {}) {
   );
   const restingAbsences = workerAbsences.filter((absence) => !isIncapacitated(absence));
   const incapacitatedCount = workerAbsences.length - restingAbsences.length;
-  const restingCount = restingAbsences.length;
   const restReasonCounts = new Map();
   for (const absence of restingAbsences) {
     const reason = String(absence?.reason || '').trim();
     const reasonLabel = String(absence?.reasonLabel || '').trim();
-    const label = reason ? (reasonLabel || reason.replaceAll('_', ' ')) : 'Sin justificación';
+    const label = reason ? (reasonLabel || reason.replaceAll('_', ' ')) : 'Descansando';
     restReasonCounts.set(label, (restReasonCounts.get(label) || 0) + 1);
   }
   const confirmedWorkers = requests.reduce((sum, request) => sum + confirmedOperationalAssignments(request).length, 0);
@@ -184,11 +183,15 @@ export function buildProgrammingSummaryText(report = {}) {
     `Pendientes: ${pendingRequests}`,
     `Auxiliares requeridos: ${Number(summary.requiredWorkers || 0)}`,
     `Asignados: ${Number(summary.assignedWorkers || 0)}`,
-    `Confirmados: ${confirmedWorkers}`,
-    `Descansando: ${restingCount}`
+    `Confirmados: ${confirmedWorkers}`
   ];
-  for (const [label, count] of [...restReasonCounts.entries()].sort(([left], [right]) => left.localeCompare(right, 'es'))) {
-    lines.push(`- ${label}: ${count}`);
+  const restReasonEntries = [...restReasonCounts.entries()].sort(([left], [right]) => {
+    if (left === 'Descansando') return 1;
+    if (right === 'Descansando') return -1;
+    return left.localeCompare(right, 'es');
+  });
+  for (const [label, count] of restReasonEntries) {
+    lines.push(`${label}: ${count}`);
   }
   if (incapacitatedCount > 0) lines.push(`Incapacitados: ${incapacitatedCount}`);
   return lines.join('\n');
