@@ -1,0 +1,64 @@
+name: Time management terminology cleanup
+
+on:
+  push:
+    branches:
+      - refactor/time-management-terminology-clean
+    paths:
+      - '.github/workflows/time-management-cleanup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  consolidate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/time-management-terminology-clean
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Apply terminology consolidation
+        run: node scripts/apply-time-management-cleanup.mjs
+      - name: Validate Prisma schema
+        run: npx prisma validate
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Validate JavaScript syntax
+        run: find src test -type f -name '*.js' -print0 | xargs -0 -n 1 node --check
+      - name: Run terminology and focal regressions
+        shell: bash
+        run: |
+          files=(
+            test/timeManagementPresentationTerminology.test.js
+            test/payrollNavigationLabelRegression.test.js
+            test/adminModuleNavigation.test.js
+            test/adminResponsiveShellRegression.test.js
+            test/attendanceClearMarks.test.js
+            test/dispatchDevPayrollTest.test.js
+            test/dispatchDevPayrollWhatsapp.test.js
+            test/dispatchDisabledWorkerHistory.test.js
+            test/dispatchWorkerRestAssignmentRegression.test.js
+            test/liveSearchTypeaheadContracts.test.js
+            test/operationalAccessRoles.test.js
+            test/testWorkspaceFeatureAccess.test.js
+            test/testWorkspaceHardening.test.js
+            test/testWorkspacePayrollReport.test.js
+          )
+          while IFS= read -r file; do files+=("$file"); done < <(find test -maxdepth 1 -name 'payroll*.test.js' -print | sort)
+          node --test "${files[@]}"
+      - name: Commit validated consolidation
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git diff --cached --quiet && exit 0
+          git commit -m 'refactor(time): consolidar Gestión de Tiempo'
+          git push origin HEAD:refactor/time-management-terminology-clean
