@@ -13,6 +13,7 @@ import {
   saveInterviewComplementaryValues,
   saveInterviewEvaluation,
   setInterviewAttendanceStatus,
+  setInterviewContinuationStatus,
   setInterviewInvitationStatus,
   sortInterviewedCandidateEntries
 } from '../services/interviewOutreachManagement.js';
@@ -36,6 +37,10 @@ const INTERVIEW_ATTENDANCE_AUDIT_LABELS = Object.freeze({
   PENDING: 'Pendiente',
   ATTENDED: 'Asistió',
   NO_SHOW: 'No asistió'
+});
+const INTERVIEW_CONTINUATION_AUDIT_LABELS = Object.freeze({
+  CONTINUES: 'Continúa en proceso',
+  WITHDREW: 'Desistió del proceso'
 });
 
 function normalizeString(value) {
@@ -240,6 +245,20 @@ export function buildInterviewAdminAuditEvents({
         fromValue: INTERVIEW_ATTENDANCE_AUDIT_LABELS[beforeStatus] || beforeStatus,
         toValue: INTERVIEW_ATTENDANCE_AUDIT_LABELS[afterStatus] || afterStatus,
         note: null
+      });
+    }
+  }
+
+  if (action === 'continuation' || action === 'attendance') {
+    const beforeStatus = beforeSnapshot?.continuation?.status || 'CONTINUES';
+    const afterStatus = afterSnapshot?.continuation?.status || 'CONTINUES';
+    if (beforeStatus !== afterStatus) {
+      events.push({
+        eventType: 'INTERVIEW_CONTINUATION_STATUS_CHANGED',
+        eventLabel: 'Actualizó continuidad después de entrevista',
+        fromValue: INTERVIEW_CONTINUATION_AUDIT_LABELS[beforeStatus] || beforeStatus,
+        toValue: INTERVIEW_CONTINUATION_AUDIT_LABELS[afterStatus] || afterStatus,
+        note: action === 'attendance' ? 'Ajuste automático por corrección de asistencia.' : null
       });
     }
   }
@@ -477,6 +496,7 @@ async function loadVacancyManagementEntries(prisma, req, vacancyId) {
       contactedAt: candidate.botPausedAt || null,
       invitation: snapshot.invitation,
       attendance: snapshot.attendance,
+      continuation: snapshot.continuation,
       evaluation: snapshot.evaluation,
       complementary: serializeComplementaryValues(candidate.interviewComplementaryValues),
       booking: serializeBooking(candidate.interviewBookings?.[0] || null)
@@ -660,6 +680,36 @@ export function interviewOutreachManagementRouter(prisma) {
         actor,
         buildInterviewAdminAuditEvents({
           action: 'attendance',
+          beforeSnapshot: data.snapshot,
+          afterSnapshot: updated?.snapshot
+        })
+      );
+      return res.json({ ok: true, management: updated.snapshot });
+    } catch (error) {
+      return sendManagementError(res, error);
+    }
+  });
+
+  router.post('/interview-management/candidates/:candidateId/continuation', apiSessionAuth, async (req, res) => {
+    const data = await requireCandidateManagementData(prisma, req, res);
+    if (!data) return;
+    try {
+      const actor = await resolveCurrentActor(prisma, req);
+      await setInterviewContinuationStatus(prisma, {
+        candidateId: data.candidate.id,
+        vacancyId: data.candidate.vacancyId,
+        candidateStatus: data.candidate.status,
+        status: req.body?.status,
+        actor
+      });
+      const updated = await loadCandidateManagementData(prisma, req, data.candidate.id);
+      await persistInterviewAdminAuditEvents(
+        prisma,
+        req,
+        data.candidate.id,
+        actor,
+        buildInterviewAdminAuditEvents({
+          action: 'continuation',
           beforeSnapshot: data.snapshot,
           afterSnapshot: updated?.snapshot
         })
