@@ -12,6 +12,10 @@
     ['ATTENDED', 'Asistió'],
     ['NO_SHOW', 'No asistió']
   ];
+  const DAY_ATTENDANCE_OPTIONS = [
+    ...ATTENDANCE_OPTIONS,
+    ['RESCHEDULED', 'Reprogramó']
+  ];
   const CONTINUATION_OPTIONS = [
     ['CONTINUES', 'Continúa en proceso'],
     ['WITHDREW', 'Desistió del proceso']
@@ -42,7 +46,8 @@
       .ic-save{min-height:36px;border:0;border-radius:7px;padding:7px 12px;background:#1d4f7a;color:#fff;font-weight:800;cursor:pointer}.ic-save:disabled{opacity:.6;cursor:default}.ic-save-secondary{background:#475569}
       .ic-feedback{grid-column:1/-1;min-height:14px;color:#64748b;font-size:11px;font-weight:700}.ic-feedback[data-kind="error"]{color:#b91c1c}.ic-feedback[data-kind="success"]{color:#15803d}
       .ic-empty{padding:8px 0;color:#64748b;font-size:12px}.ic-booking{font-weight:700;color:#28557a}
-      .ic-manual-day-item{display:grid;gap:8px}.ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}.ic-complementary-item{display:grid;gap:8px;border:1px solid #dbe5ef;border-radius:9px;background:#f8fbff;padding:9px}.ic-complementary-create{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;align-items:end;margin-top:9px}.ic-complementary-create .ic-day-status{grid-column:1/-1}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
+      .ic-manual-day-item{display:grid;gap:8px}.ic-manual-day-card{gap:0;border:1px solid #dbe5ef;border-radius:10px;background:#fff;overflow:hidden}.ic-manual-day-card>.ic-row{border:0;border-radius:0;background:transparent}.ic-manual-day-card>.ic-day-panel{border:0;border-top:1px solid #e2e8f0;border-radius:0;background:#f8fbff;padding:10px 12px 12px}
+      .ic-day-panel{border:1px dashed #b8c8d9;border-radius:10px;background:#fff;padding:12px 14px 14px}.ic-day-title{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:10px}.ic-day-title strong{color:#243b53;font-size:13px}.ic-day-grid{display:grid;grid-template-columns:minmax(170px,.7fr) minmax(180px,.7fr) minmax(240px,1.2fr);gap:12px;align-items:start}.ic-day-evaluation{display:grid;gap:9px}.ic-observation-toggle{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:800;color:#526477}.ic-observation-toggle input{width:auto}.ic-complementary{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px}.ic-complementary-item{display:grid;gap:8px;border:1px solid #dbe5ef;border-radius:9px;background:#f8fbff;padding:9px}.ic-complementary-create{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:8px;align-items:end;margin-top:9px}.ic-complementary-create .ic-day-status{grid-column:1/-1}.ic-day-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px}.ic-day-status{min-height:15px;font-size:11px;font-weight:700;color:#64748b}.ic-day-status[data-kind="error"]{color:#b91c1c}.ic-day-status[data-kind="success"]{color:#15803d}
       .ic-attended-pending{display:grid;gap:9px;border:2px solid #f59e0b;border-radius:10px;background:#fffbeb;padding:11px 12px}.ic-attended-pending-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap}.ic-attended-pending-badge{display:inline-flex;align-items:center;border-radius:999px;background:#fef3c7;color:#92400e;padding:5px 9px;font-size:10px;font-weight:900}.ic-attended-pending .ic-day-panel{border-color:#f59e0b;background:#fffdf5}
       .ic-reviewed-legend{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.ic-reviewed-legend-item{display:inline-flex;align-items:center;gap:6px;border:1px solid #dbe5ef;border-radius:999px;background:#fff;padding:6px 9px;font-size:11px;font-weight:850;color:#334155}.ic-reviewed-dot{width:10px;height:10px;border-radius:999px}.ic-reviewed-legend-item[data-band="OPTIONED"] .ic-reviewed-dot{background:#16a34a}.ic-reviewed-legend-item[data-band="RESERVE"] .ic-reviewed-dot{background:#d97706}.ic-reviewed-legend-item[data-band="DISQUALIFIED"] .ic-reviewed-dot{background:#dc2626}
       .ic-reviewed-list{display:grid;gap:9px}.ic-reviewed-card{border:1px solid #dbe5ef;border-left-width:5px;border-radius:10px;background:#fff;padding:12px 13px;display:grid;gap:10px}.ic-reviewed-card[data-band="OPTIONED"]{border-left-color:#16a34a;background:#f8fff9}.ic-reviewed-card[data-band="RESERVE"]{border-left-color:#d97706;background:#fffdf5}.ic-reviewed-card[data-band="DISQUALIFIED"]{border-left-color:#dc2626;background:#fffafa}.ic-reviewed-card[data-continuation="WITHDREW"]{border-color:#94a3b8;border-left-color:#64748b;background:#f8fafc}.ic-reviewed-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap}.ic-reviewed-score{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.ic-reviewed-rating{font-size:19px;font-weight:950;color:#1f2937}.ic-reviewed-band,.ic-reviewed-decision,.ic-continuation-badge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900}.ic-reviewed-band[data-band="OPTIONED"]{background:#dcfce7;color:#166534}.ic-reviewed-band[data-band="RESERVE"]{background:#fef3c7;color:#92400e}.ic-reviewed-band[data-band="DISQUALIFIED"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="CONTRATADO"]{background:#dcfce7;color:#166534}.ic-reviewed-decision[data-status="RECHAZADO"]{background:#fee2e2;color:#991b1b}.ic-reviewed-decision[data-status="PENDING"]{background:#e2e8f0;color:#475569}.ic-continuation-badge[data-status="WITHDREW"]{background:#e2e8f0;color:#334155}.ic-reviewed-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.ic-reviewed-summary-item{border:1px solid #e2e8f0;border-radius:8px;background:rgba(255,255,255,.8);padding:8px 9px}.ic-reviewed-summary-label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.035em;color:#64748b}.ic-reviewed-summary-value{margin-top:3px;font-size:12px;color:#334155;white-space:pre-wrap;overflow-wrap:anywhere}.ic-reviewed-actions{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}.ic-reviewed-actions .ic-field{min-width:190px;flex:1}.ic-reviewed-editor{display:grid;gap:8px}.ic-reviewed-feedback{min-height:15px;color:#64748b;font-size:11px;font-weight:700}.ic-reviewed-feedback[data-kind="error"]{color:#b91c1c}.ic-reviewed-feedback[data-kind="success"]{color:#15803d}
@@ -262,7 +267,7 @@
     return 'No fue posible guardar la gestión. Intenta nuevamente.';
   }
 
-  function renderRow(entry, vacancyId, refresh) {
+  function renderRow(entry, vacancyId, refresh, { onManagementStatusChange = null } = {}) {
     const row = element('div', 'ic-row');
     row.dataset.interviewCoordinationCandidate = entry.candidateId;
 
@@ -296,6 +301,7 @@
       dateField.hidden = !confirmed;
       dateInput.required = confirmed;
       if (bookingMeta) bookingMeta.hidden = !confirmed;
+      if (typeof onManagementStatusChange === 'function') onManagementStatusChange(management.value);
     };
     management.addEventListener('change', syncDateVisibility);
     syncDateVisibility();
@@ -387,7 +393,8 @@
     }
 
     const grid = element('div', 'ic-day-grid');
-    const attendance = selectFor(ATTENDANCE_OPTIONS, management.attendance?.status || 'PENDING');
+    const attendanceOptions = attendanceOnly ? DAY_ATTENDANCE_OPTIONS : ATTENDANCE_OPTIONS;
+    const attendance = selectFor(attendanceOptions, management.attendance?.status || 'PENDING');
     const attendanceField = managementField('Asistencia real', attendance);
     if (management.attendance?.updatedAt) {
       attendanceField.appendChild(element(
@@ -401,13 +408,55 @@
     const saveAttendance = element('button', 'ic-save ic-save-secondary', 'Guardar asistencia');
     saveAttendance.type = 'button';
     const status = element('div', 'ic-day-status');
+    let rescheduleField = null;
+    let rescheduleInput = null;
+
+    if (attendanceOnly) {
+      rescheduleInput = interviewDateInput();
+      rescheduleField = managementField('Nueva fecha y hora', rescheduleInput);
+      const syncRescheduleVisibility = () => {
+        const rescheduled = attendance.value === 'RESCHEDULED';
+        rescheduleField.hidden = !rescheduled;
+        rescheduleInput.required = rescheduled;
+      };
+      attendance.addEventListener('change', syncRescheduleVisibility);
+      syncRescheduleVisibility();
+      grid.append(attendanceField, rescheduleField);
+      panel.appendChild(grid);
+      actions.append(saveAttendance, status);
+      panel.appendChild(actions);
+    }
 
     saveAttendance.addEventListener('click', async () => {
+      if (attendanceOnly && attendance.value === 'RESCHEDULED') {
+        const scheduledAt = bogotaDateTimeToIso(rescheduleInput?.value);
+        if (!scheduledAt) {
+          status.textContent = 'Selecciona la nueva fecha y hora de la entrevista.';
+          status.dataset.kind = 'error';
+          return;
+        }
+      }
+
       saveAttendance.disabled = true;
       attendance.disabled = true;
-      status.textContent = 'Guardando asistencia...';
+      if (rescheduleInput) rescheduleInput.disabled = true;
+      status.textContent = attendanceOnly && attendance.value === 'RESCHEDULED'
+        ? 'Reprogramando entrevista...'
+        : 'Guardando asistencia...';
       delete status.dataset.kind;
       try {
+        if (attendanceOnly && attendance.value === 'RESCHEDULED') {
+          const scheduledAt = bogotaDateTimeToIso(rescheduleInput.value);
+          await api(`/candidates/${encodeURIComponent(candidateId)}/coordination`, {
+            method: 'POST',
+            body: JSON.stringify({ status: 'CONFIRMED', scheduledAt })
+          });
+          status.textContent = 'Entrevista reprogramada.';
+          status.dataset.kind = 'success';
+          await refresh();
+          return;
+        }
+
         await api(`/candidates/${encodeURIComponent(candidateId)}/attendance`, {
           method: 'POST',
           body: JSON.stringify({ status: attendance.value })
@@ -426,16 +475,11 @@
       } finally {
         saveAttendance.disabled = false;
         attendance.disabled = false;
+        if (rescheduleInput) rescheduleInput.disabled = false;
       }
     });
 
-    if (attendanceOnly) {
-      grid.append(attendanceField);
-      panel.appendChild(grid);
-      actions.append(saveAttendance, status);
-      panel.appendChild(actions);
-      return panel;
-    }
+    if (attendanceOnly) return panel;
 
     const continuation = selectFor(CONTINUATION_OPTIONS, management.continuation?.status || 'CONTINUES');
     const continuationField = managementField('Continuidad', continuation);
@@ -920,10 +964,21 @@
     const list = element('div', 'ic-list');
     for (const entry of entries) {
       const item = element('div', 'ic-manual-day-item');
-      item.appendChild(renderRow(entry, vacancyId, refresh));
+      if (attendanceOnly) item.classList.add('ic-manual-day-card');
+      let managementStatus = entry.invitation?.status || 'PENDING';
+      let attendancePanel = null;
+      const syncAttendancePanel = (nextStatus) => {
+        managementStatus = nextStatus;
+        if (attendancePanel) attendancePanel.hidden = nextStatus !== 'CONFIRMED';
+      };
+      item.appendChild(renderRow(entry, vacancyId, refresh, {
+        onManagementStatusChange: attendanceOnly ? syncAttendancePanel : null
+      }));
       try {
         const response = await api(`/candidates/${encodeURIComponent(entry.candidateId)}`);
-        item.appendChild(buildDayManagementPanel(entry.candidateId, response, refresh, { attendanceOnly }));
+        attendancePanel = buildDayManagementPanel(entry.candidateId, response, refresh, { attendanceOnly });
+        if (attendanceOnly) attendancePanel.hidden = managementStatus !== 'CONFIRMED';
+        item.appendChild(attendancePanel);
       } catch (error) {
         const message = error?.status === 404
           ? 'La gestión complementaria de esta entrevista no está disponible.'
