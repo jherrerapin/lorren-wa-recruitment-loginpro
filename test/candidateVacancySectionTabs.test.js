@@ -58,12 +58,41 @@ test('la fila secundaria de estados se oculta y sus estados faltantes pasan a la
   assert.match(runtime, /filterBar\.querySelectorAll\('a\[data-vacancy-status-scope\]'\)/);
   assert.match(runtime, /localKeys\.has\(key\)/);
   assert.match(runtime, /filterBar\.hidden = true/);
-  assert.match(runtime, /tab\.removeAttribute\('style'\)/);
-  assert.match(runtime, /tab\.dataset\.sectionTab = descriptor\.key/);
   assert.match(runtime, /tabList\.appendChild\(tab\)/);
   assert.match(runtime, /'contacted'/);
   assert.match(runtime, /'rejected'/);
   assert.doesNotMatch(runtime, /cloneNode/);
+});
+
+test('Contactados y Rechazados cargan sus registros dentro de la vacante sin navegar a la vista legacy', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /REMOTE_STATUS_KEYS = new Set\(\['contacted', 'rejected'\]\)/);
+  assert.match(runtime, /function buildRemoteStatusSection\(label, key\)/);
+  assert.match(runtime, /section\.dataset\.remoteStatusSection = key/);
+  assert.match(runtime, /remoteHref: anchor\.getAttribute\('href'\) \|\| ''/);
+  assert.match(runtime, /function buildRemoteStatusUrl\(descriptor, vacancyId\)/);
+  assert.match(runtime, /url\.searchParams\.set\('vacancyId', vacancyId\)/);
+  assert.match(runtime, /key\.startsWith\('vh_'\)/);
+  assert.match(runtime, /key === 'dateFrom'/);
+  assert.match(runtime, /key === 'dateTo'/);
+  assert.match(runtime, /async function loadRemoteStatusSection\(descriptor, tab, vacancyId\)/);
+  assert.match(runtime, /await fetch\(remoteUrl\.pathname \+ remoteUrl\.search/);
+  assert.match(runtime, /credentials: 'same-origin'/);
+  assert.match(runtime, /new DOMParser\(\)\.parseFromString\(html, 'text\/html'\)/);
+  assert.match(runtime, /parsed\.querySelector\('#legacy-candidates-table'\)/);
+  assert.match(runtime, /document\.importNode\(sourceTable, true\)/);
+  assert.match(runtime, /loadRemoteStatusSection\(target\.descriptor, target\.tab, rawVacancyId\)/);
+  assert.doesNotMatch(runtime, /window\.location\.(?:assign|replace)/);
+});
+
+test('si la carga inline falla conserva un fallback explícito a la ruta autorizada', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /descriptor\.remoteState = 'error'/);
+  assert.match(runtime, /No fue posible cargar estos registros dentro de la vacante/);
+  assert.match(runtime, /fallback\.href = remoteUrl\.pathname \+ remoteUrl\.search/);
+  assert.match(runtime, /fallback\.textContent = 'Abrir vista alternativa'/);
 });
 
 test('Gestión de entrevistas usa el board existente y la barra queda antes del contenido', () => {
@@ -72,7 +101,6 @@ test('Gestión de entrevistas usa el board existente y la barra queda antes del 
   assert.match(runtime, /const section = panel\.querySelector\('\[data-interview-coordination-board\]'\)/);
   assert.match(runtime, /section,/);
   assert.match(runtime, /vacancyHeader\.insertAdjacentElement\('afterend', tabList\)/);
-  assert.doesNotMatch(runtime, /createElement\(['"]section['"]\)/);
 });
 
 test('Gestión de entrevistas oculta los controles ajenos y los restaura al salir de la pestaña', () => {
@@ -88,7 +116,7 @@ test('Gestión de entrevistas oculta los controles ajenos y los restaura al sali
   assert.match(runtime, /updateManagementLayout\(panel, tabList, management\?\.section \|\| null, activeKey\)/);
 });
 
-test('cada pestaña local reutiliza el histórico de la vacante y conserva la pestaña tras recargar', () => {
+test('cada pestaña con sección reutiliza el histórico de la vacante y conserva la pestaña tras recargar', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
   assert.match(runtime, /TAB_CONTEXT_PREFIX = 'vacancyTab_'/);
@@ -101,6 +129,7 @@ test('cada pestaña local reutiliza el histórico de la vacante y conserva la pe
   assert.match(runtime, /sourceToggle\.hidden = true/);
   assert.match(runtime, /sourceToggle\.dataset\.sectionTabsRehomed = 'true'/);
   assert.match(runtime, /searchParams\.get\(tabContextParam\(rawVacancyId\)\)/);
+  assert.match(runtime, /installHistoryActions\(panel, descriptors, rawVacancyId\)/);
 });
 
 test('las descargas se contextualizan por pestaña sin cambiar los href existentes', () => {
@@ -118,7 +147,7 @@ test('las descargas se contextualizan por pestaña sin cambiar los href existent
   assert.doesNotMatch(runtime, /setAttribute\(['"]href['"]/);
 });
 
-test('solo una sección local queda visible y las demás se ocultan sin borrar contenido', () => {
+test('solo una sección queda visible y las demás se ocultan sin borrar contenido', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
   assert.match(runtime, /descriptor\.section\.hidden = true/);
@@ -140,6 +169,5 @@ test('la barra de pestañas es accesible y usable en móvil sin diálogos nativo
   assert.match(runtime, /End/);
   assert.match(runtime, /overflow-x:auto/);
   assert.match(runtime, /@media\(max-width:768px\)/);
-  assert.doesNotMatch(runtime, /window\.location\.(?:assign|replace)/);
   assert.doesNotMatch(runtime, /\b(?:alert|confirm|prompt)\s*\(/);
 });
