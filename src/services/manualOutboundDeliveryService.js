@@ -20,7 +20,6 @@ import { sendTextMessage as sendWhatsappTextMessage } from './whatsapp.js';
 const DEFAULT_DEDUPE_WINDOW_MS = 30_000;
 const PENDING_RECONCILIATION_MESSAGE = 'WhatsApp confirmó el envío, pero la actualización interna quedó pendiente. No reenvíes el mensaje; revisa la conversación y el estado del candidato.';
 const INTERVIEW_OUTREACH_SOURCE = 'admin_interview_template';
-const CONSENT_PROTECTED_MANUAL_ACTIONS = new Set(['request_missing_data', 'request_hv', 'reminder']);
 
 export const MANUAL_OUTBOUND_TRANSPORT = Object.freeze({
   CONFIGURED: 'CONFIGURED',
@@ -153,13 +152,6 @@ function duplicateRecentError() {
   );
 }
 
-function consentRequiredError() {
-  return manualOutboundError(
-    'manual_outbound_consent_required',
-    'Primero el candidato debe aceptar la autorización de tratamiento de datos antes de solicitar información personal o la hoja de vida.'
-  );
-}
-
 function sentPendingReconciliationError({ providerMessageId, messageId, cause = null }) {
   const error = manualOutboundError(
     'manual_outbound_sent_pending_reconciliation',
@@ -217,7 +209,6 @@ async function loadCandidateForManualOutbound(client, candidateId) {
     where: { id: candidateId },
     select: {
       id: true,
-      dataConsentStatus: true,
       botPaused: true,
       botPausedAt: true,
       botPausedBy: true,
@@ -325,12 +316,6 @@ export async function deliverManualOutboundText(prismaInput, input = {}, depende
       const currentCandidate = await loadCandidateForManualOutbound(tx, candidateId);
       if (!currentCandidate) {
         throw manualOutboundError('manual_outbound_candidate_not_found', 'Candidato no encontrado.');
-      }
-      if (
-        CONSENT_PROTECTED_MANUAL_ACTIONS.has(action)
-        && String(currentCandidate.dataConsentStatus || '') !== 'ACCEPTED'
-      ) {
-        throw consentRequiredError();
       }
 
       const previous = candidateSnapshot(currentCandidate);
