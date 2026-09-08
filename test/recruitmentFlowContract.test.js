@@ -87,14 +87,23 @@ test('la documentación conversacional coincide con el recordatorio operativo de
 
 test('los prompts de naturalReply evitan el voseo rioplatense y exigen tuteo colombiano', () => {
   const source = fs.readFileSync('src/services/naturalReply.js', 'utf8');
-  assert.match(source, /Usa tuteo colombiano natural y evita el voseo/);
-  assert.doesNotMatch(source, /Sos un reclutador/);
-  assert.doesNotMatch(source, /Saludá /);
-  assert.doesNotMatch(source, /Respondé/);
-  assert.doesNotMatch(source, /Ofrecé/);
-  assert.doesNotMatch(source, /Preguntá/);
-  assert.doesNotMatch(source, /Soná /);
-  assert.doesNotMatch(source, /usés/);
-  assert.doesNotMatch(source, /inventés/);
-  assert.doesNotMatch(source, /Confirmá/);
+
+  const instructionMatches = source.match(/Usa tuteo colombiano natural y evita el voseo\./g);
+  assert.ok(instructionMatches, 'La instrucción de tuteo no se encontró en el archivo.');
+  assert.equal(instructionMatches.length, 5, 'La instrucción de tuteo debe estar exactamente en las 5 construcciones de prompts.');
+
+  assert.doesNotMatch(source, /\bsos\b/i);
+  assert.doesNotMatch(source, /saludá/i);
+  assert.doesNotMatch(source, /respondé/i);
+  assert.doesNotMatch(source, /ofrecé/i);
+  assert.doesNotMatch(source, /preguntá/i);
+  assert.doesNotMatch(source, /soná\b/i);
+  assert.doesNotMatch(source, /usés/i);
+  assert.doesNotMatch(source, /inventés/i);
+  assert.doesNotMatch(source, /confirmá/i);
+  assert.doesNotMatch(source, /pedilo/i);
+  assert.doesNotMatch(source, /llamás/i);
+  assert.doesNotMatch(source, /decí\b/i);
+  assert.doesNotMatch(source, /dejá\b/i);
+  assert.doesNotMatch(source, /variá/i);
 });
