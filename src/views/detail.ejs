@@ -602,6 +602,7 @@
     <% } %>
 
     <% if (role === 'dev') { %>
+      <% const dataConsentAccepted = candidate.dataConsentStatus === 'ACCEPTED'; %>
       <div class="card">
         <h2>Mensajes salientes (solo desarrollo)</h2>
         <% if (outboundWindow) { %>
@@ -620,20 +621,23 @@
             </div>
           </div>
         <% } %>
+        <% if (!dataConsentAccepted) { %>
+          <div style="font-size:12px;color:#b45309;margin:0 0 8px;">Las solicitudes de datos y hoja de vida se habilitan cuando el candidato acepta la autorización de tratamiento de datos.</div>
+        <% } %>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/outbound" class="status-form" style="flex-wrap: wrap;">
           <input type="hidden" name="action" value="request_missing_data" />
-          <button type="submit">Solicitar datos pendientes</button>
+          <button type="submit" <%= !dataConsentAccepted ? 'disabled title="Consentimiento pendiente"' : '' %>>Solicitar datos pendientes</button>
         </form>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/outbound" class="status-form" style="flex-wrap: wrap;">
           <input type="hidden" name="action" value="request_hv" />
-          <button type="submit" <%= outboundWindow && !outboundWindow.isOpen ? 'disabled title="Ventana de 24h cerrada"' : '' %>>Solicitar Hoja de vida</button>
+          <button type="submit" <%= (!dataConsentAccepted || (outboundWindow && !outboundWindow.isOpen)) ? 'disabled title="Consentimiento pendiente o ventana de 24h cerrada"' : '' %>>Solicitar Hoja de vida</button>
         </form>
         <% if (outboundWindow && !outboundWindow.isOpen) { %>
           <div style="font-size:12px;color:#b45309;margin-top:6px;">Ventana de 24h cerrada</div>
         <% } %>
         <form method="post" action="/admin/candidates/<%= candidate.id %>/outbound" class="status-form" style="flex-wrap: wrap;">
           <input type="hidden" name="action" value="reminder" />
-          <button type="submit">Enviar recordatorio</button>
+          <button type="submit" <%= !dataConsentAccepted ? 'disabled title="Consentimiento pendiente"' : '' %>>Enviar recordatorio</button>
         </form>
         <% if (Array.isArray(shareableUserContacts) && shareableUserContacts.length) { %>
           <div style="width:100%;font-size:12px;color:#475569;margin-top:6px;">Enviar contacto de usuario:</div>
@@ -770,6 +774,17 @@
           && payload.source !== 'admin_manual_review_request'
           && !String(m.body || '').includes('Responde por este chat con la información que Lórren debe enviar al candidato');
       }); %>
+      <% const devConversationBody = (message) => {
+        const body = String(message?.body || '');
+        const source = String(message?.rawPayload?.source || '');
+        if (source === 'data_consent_gate' && body === 'Archivo enviado antes de autorizar; el archivo no fue almacenado.') {
+          return '(archivo adjunto)';
+        }
+        if (source === 'data_consent_gate' && body === 'Mensaje recibido antes de completar la autorización; el contenido protegido no fue almacenado.') {
+          return '(mensaje recibido)';
+        }
+        return body || '(archivo adjunto)';
+      }; %>
       <% const sorted = visibleMessages.slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); %>
       <% const conversationTokenTotals = sorted.reduce((acc, msg) => {
         const trace = msg?.rawPayload?.debugTrace;
@@ -794,7 +809,7 @@
 	            <div class="msg-header">
 	              <strong><%= isBot ? outboundSender : 'Candidato' %></strong> &middot; <%= formatDateTimeCO(m.createdAt) %>
 	            </div>
-	            <div class="msg-body"><%= m.body || '(archivo adjunto)' %></div>
+	            <div class="msg-body"><%= devConversationBody(m) %></div>
               <% if (m.rawPayload && m.rawPayload.debugTrace) { %>
                 <div class="msg-meta" style="margin-top:6px;font-size:12px;color:#475569;">
                   AI: <%= m.rawPayload.debugTrace.openai_status || '-' %>/<%= m.rawPayload.debugTrace.openai_intent || '-' %> ·
