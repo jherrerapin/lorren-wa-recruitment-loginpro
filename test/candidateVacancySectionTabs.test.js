@@ -32,9 +32,12 @@ test('las pestañas de vacante se cargan solo en la pantalla principal de reclut
   assert.doesNotMatch(usersHtml, /candidate-vacancy-section-tabs\.js/);
 });
 
-test('el controlador reconoce las cuatro secciones operativas solicitadas', () => {
+test('el controlador integra Gestión de entrevistas con las cuatro secciones operativas existentes', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
+  assert.match(runtime, /label: 'Gestión de entrevistas'/);
+  assert.match(runtime, /panel\.querySelector\('\[data-interview-coordination-board\]'\)/);
+  assert.match(runtime, /managementDescriptor\(panel\)/);
   assert.match(runtime, /label: 'Entrevistas'/);
   assert.match(runtime, /title\.includes\('entrevistas'\)/);
   assert.match(runtime, /label: 'Registrados'/);
@@ -45,12 +48,21 @@ test('el controlador reconoce las cuatro secciones operativas solicitadas', () =
   assert.match(runtime, /label: 'Aprobados'/);
 });
 
+test('Gestión de entrevistas usa el board existente y la barra queda antes del contenido', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /const section = panel\.querySelector\('\[data-interview-coordination-board\]'\)/);
+  assert.match(runtime, /section,/);
+  assert.match(runtime, /vacancyHeader\.insertAdjacentElement\('afterend', tabList\)/);
+  assert.doesNotMatch(runtime, /cloneNode/);
+  assert.doesNotMatch(runtime, /createElement\(['"]section['"]\)/);
+});
+
 test('solo una sección tabulada queda visible y las demás se ocultan sin borrar contenido', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
   assert.match(runtime, /descriptor\.section\.hidden = index !== 0/);
   assert.match(runtime, /descriptor\.section\.hidden = !selected/);
-  assert.match(runtime, /vacancyBody\.prepend\(tabList\)/);
   assert.match(runtime, /role', 'tabpanel'/);
   assert.doesNotMatch(runtime, /\.remove\(\)/);
   assert.doesNotMatch(runtime, /innerHTML\s*=/);
