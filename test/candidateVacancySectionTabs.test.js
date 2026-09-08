@@ -127,7 +127,7 @@ test('todas las pestañas de estado tienen scope de exportación contextual', ()
   assert.match(runtime, /contracted: 'contracted'/);
   assert.match(runtime, /rejected: 'rejected'/);
   assert.match(runtime, /function ensureContextualExportLink\(panel, activeKey, expectedScope\)/);
-  assert.match(runtime, /url.*scope=/s);
+  assert.match(runtime, /encodeURIComponent\(expectedScope\)/);
   assert.match(runtime, /generatedContextualExport/);
 });
 
