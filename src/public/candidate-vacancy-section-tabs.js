@@ -196,10 +196,7 @@
     const sourceToggle = panel.querySelector('[data-vacancy-cycle-toggle]');
     if (!sourceToggle || sourceToggle.dataset.sectionTabsRehomed === 'true') return false;
 
-    const sourceLabel = String(sourceToggle.textContent || '').trim();
-    const actionLabel = /^ver todos los registros$/i.test(sourceLabel)
-      ? 'Ver todos los registros de esta pestaña'
-      : sourceLabel;
+    const actionLabel = String(sourceToggle.textContent || '').trim();
 
     descriptors.forEach((descriptor) => {
       if (!descriptor.section || descriptor.key === 'interview-management') return;
