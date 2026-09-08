@@ -2,6 +2,12 @@
 
 (() => {
   const STYLE_ID = 'candidate-vacancy-section-tabs-style';
+  const MANAGEMENT_HIDDEN_ATTR = 'data-section-tabs-management-hidden';
+  const EXPORT_SCOPE_BY_TAB = Object.freeze({
+    registered: 'registered',
+    'missing-cv': 'missing_cv_complete',
+    approved: 'approved'
+  });
   const TAB_DEFINITIONS = [
     {
       key: 'interviews',
@@ -80,13 +86,60 @@
     return String(value || 'vacancy').replace(/[^a-zA-Z0-9_-]+/g, '-');
   }
 
+  function exportScope(anchor) {
+    try {
+      return new URL(anchor.getAttribute('href') || '', window.location.origin).searchParams.get('scope');
+    } catch {
+      return null;
+    }
+  }
+
+  function updateContextualActions(panel, activeKey) {
+    const expectedScope = EXPORT_SCOPE_BY_TAB[activeKey] || null;
+    const managementActive = activeKey === 'interview-management';
+
+    panel.querySelectorAll('.export-bar a[href*="/admin/export?"]').forEach((anchor) => {
+      const scope = exportScope(anchor);
+      anchor.hidden = managementActive || !(scope === 'all' || (expectedScope && scope === expectedScope));
+    });
+
+    panel.querySelectorAll('a[href^="/admin/outreach/approved"]').forEach((anchor) => {
+      anchor.hidden = activeKey !== 'approved';
+    });
+  }
+
+  function updateManagementLayout(panel, tabList, managementSection, activeKey) {
+    const managementActive = activeKey === 'interview-management';
+
+    [...panel.children].forEach((child) => {
+      const keepVisible = child === tabList
+        || child === managementSection
+        || child.classList?.contains('vacancy-header');
+      if (keepVisible) return;
+
+      if (managementActive) {
+        if (!child.hidden) {
+          child.hidden = true;
+          child.setAttribute(MANAGEMENT_HIDDEN_ATTR, 'true');
+        }
+        return;
+      }
+
+      if (child.getAttribute(MANAGEMENT_HIDDEN_ATTR) === 'true') {
+        child.hidden = false;
+        child.removeAttribute(MANAGEMENT_HIDDEN_ATTR);
+      }
+    });
+  }
+
   function installPanel(panel) {
     if (!panel || panel.dataset.sectionTabsReady === 'true') return;
     const vacancyBody = panel.querySelector('.vacancy-body');
     if (!vacancyBody) return;
 
+    const management = managementDescriptor(panel);
     const descriptors = [
-      managementDescriptor(panel),
+      management,
       ...[...vacancyBody.children]
         .filter((element) => element.classList?.contains('section'))
         .map(sectionDescriptor)
@@ -142,12 +195,15 @@
 
     const activate = (targetIndex, options = {}) => {
       const normalizedIndex = Math.max(0, Math.min(targetIndex, tabs.length - 1));
+      const activeKey = tabs[normalizedIndex].descriptor.key;
       tabs.forEach(({ tab, descriptor }, index) => {
         const selected = index === normalizedIndex;
         tab.setAttribute('aria-selected', selected ? 'true' : 'false');
         tab.tabIndex = selected ? 0 : -1;
         descriptor.section.hidden = !selected;
       });
+      updateManagementLayout(panel, tabList, management?.section || null, activeKey);
+      updateContextualActions(panel, activeKey);
       if (options.focus) tabs[normalizedIndex].tab.focus();
     };
 
@@ -164,6 +220,8 @@
         activate(nextIndex, { focus: true });
       });
     });
+
+    activate(0);
   }
 
   function install() {

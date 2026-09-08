@@ -58,6 +58,33 @@ test('Gestión de entrevistas usa el board existente y la barra queda antes del 
   assert.doesNotMatch(runtime, /createElement\(['"]section['"]\)/);
 });
 
+test('Gestión de entrevistas oculta los controles ajenos y los restaura al salir de la pestaña', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /function updateManagementLayout\(panel, tabList, managementSection, activeKey\)/);
+  assert.match(runtime, /activeKey === 'interview-management'/);
+  assert.match(runtime, /child === tabList/);
+  assert.match(runtime, /child === managementSection/);
+  assert.match(runtime, /child\.classList\?\.contains\('vacancy-header'\)/);
+  assert.match(runtime, /child\.setAttribute\(MANAGEMENT_HIDDEN_ATTR, 'true'\)/);
+  assert.match(runtime, /child\.removeAttribute\(MANAGEMENT_HIDDEN_ATTR\)/);
+  assert.match(runtime, /updateManagementLayout\(panel, tabList, management\?\.section \|\| null, activeKey\)/);
+});
+
+test('las descargas se contextualizan por pestaña sin cambiar los href existentes', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /registered: 'registered'/);
+  assert.match(runtime, /'missing-cv': 'missing_cv_complete'/);
+  assert.match(runtime, /approved: 'approved'/);
+  assert.match(runtime, /scope === 'all'/);
+  assert.match(runtime, /expectedScope && scope === expectedScope/);
+  assert.match(runtime, /\.export-bar a\[href\*="\/admin\/export\?"\]/);
+  assert.match(runtime, /a\[href\^="\/admin\/outreach\/approved"\]/);
+  assert.match(runtime, /anchor\.hidden = activeKey !== 'approved'/);
+  assert.doesNotMatch(runtime, /setAttribute\(['"]href['"]/);
+});
+
 test('solo una sección tabulada queda visible y las demás se ocultan sin borrar contenido', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
