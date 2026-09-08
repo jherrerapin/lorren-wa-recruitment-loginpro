@@ -5,6 +5,7 @@
   const MANAGEMENT_HIDDEN_ATTR = 'data-section-tabs-management-hidden';
   const TAB_CONTEXT_PREFIX = 'vacancyTab_';
   const STATUS_TAB_KEYS = new Set(['registered', 'approved', 'contacted', 'contracted', 'rejected']);
+  const REMOTE_STATUS_KEYS = new Set(['contacted', 'rejected']);
   const TAB_ORDER = [
     'interview-management',
     'interviews',
@@ -73,10 +74,15 @@
       .candidate-vacancy-section-panel[hidden]{display:none!important}
       .candidate-vacancy-section-history-actions{display:flex;justify-content:flex-end;align-items:center;margin:0 0 10px;gap:8px}
       .candidate-vacancy-section-view-all{white-space:nowrap}
+      .candidate-vacancy-remote-status-content{padding:0 18px 16px;overflow-x:auto}
+      .candidate-vacancy-remote-status-content .legacy-table{width:100%;margin:0}
+      .candidate-vacancy-remote-status-state{padding:18px;color:#64748b;font-size:12px}
+      .candidate-vacancy-remote-status-error{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px;border:1px solid #fecaca;border-radius:8px;background:#fff7f7;color:#991b1b;font-size:12px}
       @media(max-width:768px){
         .candidate-vacancy-section-tabs{padding:10px 14px 0;gap:5px}
         .candidate-vacancy-section-tab{padding:9px 11px;min-height:42px}
         .candidate-vacancy-section-history-actions{justify-content:flex-start}
+        .candidate-vacancy-remote-status-content{padding:0 14px 14px}
       }
     `;
     document.head.appendChild(style);
@@ -116,7 +122,33 @@
     return index === -1 ? TAB_ORDER.length : index;
   }
 
-  function statusNavigationDescriptors(panel, localKeys) {
+  function buildRemoteStatusSection(label, key) {
+    const section = document.createElement('div');
+    section.className = 'section candidate-vacancy-remote-status-section';
+    section.dataset.remoteStatusSection = key;
+
+    const header = document.createElement('div');
+    header.className = 'section-header';
+    const title = document.createElement('span');
+    title.className = 'section-title';
+    title.textContent = label;
+    const count = document.createElement('span');
+    count.className = 'section-count';
+    count.textContent = '—';
+    header.append(title, count);
+
+    const content = document.createElement('div');
+    content.className = 'candidate-vacancy-remote-status-content';
+    const state = document.createElement('div');
+    state.className = 'candidate-vacancy-remote-status-state';
+    state.textContent = 'Selecciona la pestaña para cargar los registros.';
+    content.appendChild(state);
+
+    section.append(header, content);
+    return section;
+  }
+
+  function statusNavigationDescriptors(panel, vacancyBody, localKeys) {
     const filterBar = panel.querySelector('[data-vacancy-status-filters]');
     if (!filterBar) return [];
 
@@ -124,9 +156,25 @@
     filterBar.querySelectorAll('a[data-vacancy-status-scope]').forEach((anchor) => {
       const key = String(anchor.dataset.vacancyStatusScope || '').trim();
       if (!STATUS_TAB_KEYS.has(key) || localKeys.has(key)) return;
+      const label = String(anchor.textContent || key).trim();
+
+      if (REMOTE_STATUS_KEYS.has(key)) {
+        const section = buildRemoteStatusSection(label, key);
+        vacancyBody.appendChild(section);
+        descriptors.push({
+          key,
+          label,
+          section,
+          count: '',
+          remoteHref: anchor.getAttribute('href') || '',
+          remoteState: 'idle'
+        });
+        return;
+      }
+
       descriptors.push({
         key,
-        label: String(anchor.textContent || key).trim(),
+        label,
         link: anchor,
         count: ''
       });
@@ -134,6 +182,86 @@
 
     filterBar.hidden = true;
     return descriptors;
+  }
+
+  function buildRemoteStatusUrl(descriptor, vacancyId) {
+    const url = new URL(descriptor.remoteHref || '/admin', window.location.origin);
+    url.searchParams.set('vacancyId', vacancyId);
+    const current = new URL(window.location.href);
+    current.searchParams.forEach((value, key) => {
+      if (key.startsWith('vh_') || key === 'dateFrom' || key === 'dateTo') {
+        url.searchParams.set(key, value);
+      }
+    });
+    return url;
+  }
+
+  function setRemoteTabCount(tab, descriptor, value) {
+    const countValue = String(value);
+    const sectionCount = descriptor.section?.querySelector('.section-count');
+    if (sectionCount) sectionCount.textContent = countValue;
+    let tabCount = tab?.querySelector('.candidate-vacancy-section-tab-count');
+    if (!tabCount && tab) {
+      tabCount = document.createElement('span');
+      tabCount.className = 'candidate-vacancy-section-tab-count';
+      tab.appendChild(tabCount);
+    }
+    if (tabCount) tabCount.textContent = countValue;
+  }
+
+  async function loadRemoteStatusSection(descriptor, tab, vacancyId) {
+    if (!descriptor?.remoteHref || descriptor.remoteState === 'loading' || descriptor.remoteState === 'loaded') return;
+    const content = descriptor.section?.querySelector('.candidate-vacancy-remote-status-content');
+    if (!content) return;
+
+    descriptor.remoteState = 'loading';
+    const loading = document.createElement('div');
+    loading.className = 'candidate-vacancy-remote-status-state';
+    loading.textContent = 'Cargando registros…';
+    content.replaceChildren(loading);
+
+    const remoteUrl = buildRemoteStatusUrl(descriptor, vacancyId);
+    try {
+      const response = await fetch(remoteUrl.pathname + remoteUrl.search, {
+        credentials: 'same-origin',
+        headers: { Accept: 'text/html' }
+      });
+      if (!response.ok) throw new Error(`status_${response.status}`);
+      const html = await response.text();
+      const parsed = new DOMParser().parseFromString(html, 'text/html');
+      const sourceTable = parsed.querySelector('#legacy-candidates-table');
+      const rows = sourceTable ? sourceTable.querySelectorAll('tbody tr').length : 0;
+      setRemoteTabCount(tab, descriptor, rows);
+
+      if (!sourceTable || rows === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        const message = document.createElement('p');
+        message.textContent = `No hay candidatos ${descriptor.label.toLowerCase()} en esta vacante.`;
+        empty.appendChild(message);
+        content.replaceChildren(empty);
+        descriptor.remoteState = 'loaded';
+        return;
+      }
+
+      const table = document.importNode(sourceTable, true);
+      table.removeAttribute('id');
+      table.querySelectorAll('[id]').forEach((element) => element.removeAttribute('id'));
+      content.replaceChildren(table);
+      descriptor.remoteState = 'loaded';
+    } catch (_error) {
+      descriptor.remoteState = 'error';
+      const errorBox = document.createElement('div');
+      errorBox.className = 'candidate-vacancy-remote-status-error';
+      const message = document.createElement('span');
+      message.textContent = 'No fue posible cargar estos registros dentro de la vacante.';
+      const fallback = document.createElement('a');
+      fallback.className = 'export-btn';
+      fallback.href = remoteUrl.pathname + remoteUrl.search;
+      fallback.textContent = 'Abrir vista alternativa';
+      errorBox.append(message, fallback);
+      content.replaceChildren(errorBox);
+    }
   }
 
   function exportScope(anchor) {
@@ -236,7 +364,7 @@
         .map(sectionDescriptor)
     ].filter(Boolean);
     const localKeys = new Set(localDescriptors.map((descriptor) => descriptor.key));
-    const navigationDescriptors = statusNavigationDescriptors(panel, localKeys);
+    const navigationDescriptors = statusNavigationDescriptors(panel, vacancyBody, localKeys);
     const descriptors = [...localDescriptors, ...navigationDescriptors]
       .sort((left, right) => descriptorOrder(left) - descriptorOrder(right));
 
@@ -314,6 +442,9 @@
       });
       updateManagementLayout(panel, tabList, management?.section || null, activeKey);
       updateContextualActions(panel, activeKey);
+      if (target.descriptor.remoteHref) {
+        loadRemoteStatusSection(target.descriptor, target.tab, rawVacancyId);
+      }
       if (options.focus) target.tab.focus();
     };
 
@@ -344,8 +475,8 @@
       : tabs.findIndex(({ descriptor }) => Boolean(descriptor.section));
     activate(Math.max(0, initialIndex));
 
-    if (!installHistoryActions(panel, localDescriptors, rawVacancyId)) {
-      window.setTimeout(() => installHistoryActions(panel, localDescriptors, rawVacancyId), 0);
+    if (!installHistoryActions(panel, descriptors, rawVacancyId)) {
+      window.setTimeout(() => installHistoryActions(panel, descriptors, rawVacancyId), 0);
     }
   }
 
