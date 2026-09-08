@@ -2,10 +2,11 @@
 
 (() => {
   const STYLE_ID = 'candidate-vacancy-section-tabs-style';
+  const DATE_RANGE_SCRIPT = '/public/candidate-export-date-range.js';
   const MANAGEMENT_HIDDEN_ATTR = 'data-section-tabs-management-hidden';
   const TAB_CONTEXT_PREFIX = 'vacancyTab_';
   const STATUS_TAB_KEYS = new Set(['registered', 'approved', 'contacted', 'contracted', 'rejected']);
-  const REMOTE_STATUS_KEYS = new Set(['contacted', 'rejected']);
+  const REMOTE_STATUS_KEYS = new Set(['contacted', 'contracted', 'rejected']);
   const TAB_ORDER = [
     'interview-management',
     'interviews',
@@ -20,7 +21,17 @@
     registered: 'registered',
     'missing-cv': 'missing_cv_complete',
     approved: 'approved',
-    contracted: 'contracted'
+    contacted: 'contacted',
+    contracted: 'contracted',
+    rejected: 'rejected'
+  });
+  const EXPORT_LABEL_BY_TAB = Object.freeze({
+    registered: 'registrados',
+    'missing-cv': 'completos sin HV',
+    approved: 'aprobados',
+    contacted: 'contactados',
+    contracted: 'contratados',
+    rejected: 'rechazados'
   });
   const TAB_DEFINITIONS = [
     {
@@ -49,6 +60,14 @@
       matches: (title) => title === 'contratados' || title.startsWith('contratados ')
     }
   ];
+
+  function ensureDateRangeScript() {
+    if (document.querySelector(`script[src="${DATE_RANGE_SCRIPT}"]`)) return;
+    const script = document.createElement('script');
+    script.src = DATE_RANGE_SCRIPT;
+    script.defer = true;
+    document.head.appendChild(script);
+  }
 
   function normalize(value) {
     return String(value || '')
@@ -181,6 +200,8 @@
     });
 
     filterBar.hidden = true;
+    filterBar.style.setProperty('display', 'none', 'important');
+    filterBar.setAttribute('aria-hidden', 'true');
     return descriptors;
   }
 
@@ -272,9 +293,35 @@
     }
   }
 
+  function ensureContextualExportLink(panel, activeKey, expectedScope) {
+    if (!expectedScope) return null;
+    const bar = panel.querySelector('.export-bar');
+    if (!bar) return null;
+    const existing = [...bar.querySelectorAll('a[href*="/admin/export?"]')]
+      .find((anchor) => exportScope(anchor) === expectedScope);
+    if (existing) return existing;
+
+    const vacancyId = String(panel.getAttribute('data-vacancy-panel') || '').trim();
+    if (!vacancyId) return null;
+    const anchor = document.createElement('a');
+    anchor.className = 'export-btn';
+    anchor.href = `/admin/export?scope=${encodeURIComponent(expectedScope)}&vacancyId=${encodeURIComponent(vacancyId)}`;
+    anchor.textContent = `↓ Descargar ${EXPORT_LABEL_BY_TAB[activeKey] || activeKey}`;
+    anchor.dataset.generatedContextualExport = activeKey;
+    const allAnchor = [...bar.querySelectorAll('a[href*="/admin/export?"]')]
+      .find((candidate) => exportScope(candidate) === 'all');
+    if (allAnchor) allAnchor.insertAdjacentElement('beforebegin', anchor);
+    else bar.appendChild(anchor);
+    return anchor;
+  }
+
   function updateContextualActions(panel, activeKey) {
     const expectedScope = EXPORT_SCOPE_BY_TAB[activeKey] || null;
     const managementActive = activeKey === 'interview-management';
+    ensureContextualExportLink(panel, activeKey, expectedScope);
+
+    panel.dataset.activeVacancyTab = activeKey;
+    panel.dataset.activeVacancyExportScope = expectedScope || '';
 
     panel.querySelectorAll('.export-bar a[href*="/admin/export?"]').forEach((anchor) => {
       const scope = exportScope(anchor);
@@ -284,6 +331,11 @@
     panel.querySelectorAll('a[href^="/admin/outreach/approved"]').forEach((anchor) => {
       anchor.hidden = activeKey !== 'approved';
     });
+
+    panel.dispatchEvent(new CustomEvent('candidate-vacancy-tab-change', {
+      bubbles: true,
+      detail: { key: activeKey, scope: expectedScope || '' }
+    }));
   }
 
   function updateManagementLayout(panel, tabList, managementSection, activeKey) {
@@ -482,6 +534,7 @@
 
   function install() {
     if (window.location.pathname !== '/admin') return;
+    ensureDateRangeScript();
     injectStyles();
     document.querySelectorAll('[data-vacancy-panel]').forEach(installPanel);
   }

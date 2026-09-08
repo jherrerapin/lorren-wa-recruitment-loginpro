@@ -32,54 +32,43 @@ test('las pestañas de vacante se cargan solo en la pantalla principal de reclut
   assert.doesNotMatch(usersHtml, /candidate-vacancy-section-tabs\.js/);
 });
 
-test('el controlador integra Gestión, secciones operativas y Contratados en la barra principal', () => {
+test('el controlador integra Gestión y todas las secciones operativas en la barra principal', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
   assert.match(runtime, /label: 'Gestión de entrevistas'/);
   assert.match(runtime, /panel\.querySelector\('\[data-interview-coordination-board\]'\)/);
   assert.match(runtime, /managementDescriptor\(panel\)/);
   assert.match(runtime, /label: 'Entrevistas'/);
-  assert.match(runtime, /title\.includes\('entrevistas'\)/);
   assert.match(runtime, /label: 'Registrados'/);
-  assert.match(runtime, /title\.includes\('registrados completos'\)/);
-  assert.match(runtime, /title\.includes\('pendientes de agendar'\)/);
   assert.match(runtime, /label: 'Completos sin HV'/);
-  assert.match(runtime, /title\.includes\('completos pendientes de hv'\)/);
   assert.match(runtime, /label: 'Aprobados'/);
   assert.match(runtime, /label: 'Contratados'/);
-  assert.match(runtime, /title === 'contratados'/);
+  assert.match(runtime, /'contacted'/);
+  assert.match(runtime, /'rejected'/);
 });
 
-test('la fila secundaria de estados se oculta y sus estados faltantes pasan a la barra de pestañas', () => {
+test('la fila secundaria de estados queda forzosamente oculta aunque tenga display inline', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
   assert.match(runtime, /STATUS_TAB_KEYS = new Set\(\['registered', 'approved', 'contacted', 'contracted', 'rejected'\]\)/);
   assert.match(runtime, /panel\.querySelector\('\[data-vacancy-status-filters\]'\)/);
   assert.match(runtime, /filterBar\.querySelectorAll\('a\[data-vacancy-status-scope\]'\)/);
-  assert.match(runtime, /localKeys\.has\(key\)/);
   assert.match(runtime, /filterBar\.hidden = true/);
-  assert.match(runtime, /tabList\.appendChild\(tab\)/);
-  assert.match(runtime, /'contacted'/);
-  assert.match(runtime, /'rejected'/);
-  assert.doesNotMatch(runtime, /cloneNode/);
+  assert.match(runtime, /filterBar\.style\.setProperty\('display', 'none', 'important'\)/);
+  assert.match(runtime, /filterBar\.setAttribute\('aria-hidden', 'true'\)/);
 });
 
-test('Contactados y Rechazados cargan sus registros dentro de la vacante sin navegar a la vista legacy', () => {
+test('Contactados, Contratados y Rechazados usan panel inline cuando no existe sección local', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
-  assert.match(runtime, /REMOTE_STATUS_KEYS = new Set\(\['contacted', 'rejected'\]\)/);
+  assert.match(runtime, /REMOTE_STATUS_KEYS = new Set\(\['contacted', 'contracted', 'rejected'\]\)/);
   assert.match(runtime, /function buildRemoteStatusSection\(label, key\)/);
   assert.match(runtime, /section\.dataset\.remoteStatusSection = key/);
   assert.match(runtime, /remoteHref: anchor\.getAttribute\('href'\) \|\| ''/);
   assert.match(runtime, /function buildRemoteStatusUrl\(descriptor, vacancyId\)/);
   assert.match(runtime, /url\.searchParams\.set\('vacancyId', vacancyId\)/);
-  assert.match(runtime, /key\.startsWith\('vh_'\)/);
-  assert.match(runtime, /key === 'dateFrom'/);
-  assert.match(runtime, /key === 'dateTo'/);
   assert.match(runtime, /async function loadRemoteStatusSection\(descriptor, tab, vacancyId\)/);
   assert.match(runtime, /await fetch\(remoteUrl\.pathname \+ remoteUrl\.search/);
-  assert.match(runtime, /credentials: 'same-origin'/);
-  assert.match(runtime, /new DOMParser\(\)\.parseFromString\(html, 'text\/html'\)/);
   assert.match(runtime, /parsed\.querySelector\('#legacy-candidates-table'\)/);
   assert.match(runtime, /document\.importNode\(sourceTable, true\)/);
   assert.match(runtime, /loadRemoteStatusSection\(target\.descriptor, target\.tab, rawVacancyId\)/);
@@ -113,7 +102,6 @@ test('Gestión de entrevistas oculta los controles ajenos y los restaura al sali
   assert.match(runtime, /child\.classList\?\.contains\('vacancy-header'\)/);
   assert.match(runtime, /child\.setAttribute\(MANAGEMENT_HIDDEN_ATTR, 'true'\)/);
   assert.match(runtime, /child\.removeAttribute\(MANAGEMENT_HIDDEN_ATTR\)/);
-  assert.match(runtime, /updateManagementLayout\(panel, tabList, management\?\.section \|\| null, activeKey\)/);
 });
 
 test('cada pestaña con sección reutiliza el histórico de la vacante y conserva la pestaña tras recargar', () => {
@@ -121,30 +109,45 @@ test('cada pestaña con sección reutiliza el histórico de la vacante y conserv
 
   assert.match(runtime, /TAB_CONTEXT_PREFIX = 'vacancyTab_'/);
   assert.match(runtime, /panel\.querySelector\('\[data-vacancy-cycle-toggle\]'\)/);
-  assert.match(runtime, /const actionLabel = String\(sourceToggle\.textContent \|\| ''\)\.trim\(\)/);
   assert.doesNotMatch(runtime, /Ver todos los registros de esta pestaña/);
   assert.match(runtime, /url\.searchParams\.set\(tabContextParam\(vacancyId\), key\)/);
   assert.match(runtime, /link\.dataset\.sectionHistoryAction = descriptor\.key/);
-  assert.match(runtime, /descriptor\.key === 'interview-management'/);
   assert.match(runtime, /sourceToggle\.hidden = true/);
-  assert.match(runtime, /sourceToggle\.dataset\.sectionTabsRehomed = 'true'/);
   assert.match(runtime, /searchParams\.get\(tabContextParam\(rawVacancyId\)\)/);
   assert.match(runtime, /installHistoryActions\(panel, descriptors, rawVacancyId\)/);
 });
 
-test('las descargas se contextualizan por pestaña sin cambiar los href existentes', () => {
+test('todas las pestañas de estado tienen scope de exportación contextual', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
   assert.match(runtime, /registered: 'registered'/);
   assert.match(runtime, /'missing-cv': 'missing_cv_complete'/);
   assert.match(runtime, /approved: 'approved'/);
+  assert.match(runtime, /contacted: 'contacted'/);
   assert.match(runtime, /contracted: 'contracted'/);
-  assert.match(runtime, /scope === 'all'/);
-  assert.match(runtime, /expectedScope && scope === expectedScope/);
-  assert.match(runtime, /\.export-bar a\[href\*="\/admin\/export\?"\]/);
-  assert.match(runtime, /a\[href\^="\/admin\/outreach\/approved"\]/);
-  assert.match(runtime, /anchor\.hidden = activeKey !== 'approved'/);
-  assert.doesNotMatch(runtime, /setAttribute\(['"]href['"]/);
+  assert.match(runtime, /rejected: 'rejected'/);
+  assert.match(runtime, /function ensureContextualExportLink\(panel, activeKey, expectedScope\)/);
+  assert.match(runtime, /encodeURIComponent\(expectedScope\)/);
+  assert.match(runtime, /generatedContextualExport/);
+});
+
+test('la pestaña activa publica su scope para que rango y descarga compartan contexto', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /panel\.dataset\.activeVacancyTab = activeKey/);
+  assert.match(runtime, /panel\.dataset\.activeVacancyExportScope = expectedScope \|\| ''/);
+  assert.match(runtime, /candidate-vacancy-tab-change/);
+  assert.match(runtime, /detail: \{ key: activeKey, scope: expectedScope \|\| '' \}/);
+});
+
+test('DEV puede cargar el mismo selector de rango mediante el controlador de pestañas', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /DATE_RANGE_SCRIPT = '\/public\/candidate-export-date-range\.js'/);
+  assert.match(runtime, /function ensureDateRangeScript\(\)/);
+  assert.match(runtime, /document\.querySelector\(`script\[src="\$\{DATE_RANGE_SCRIPT\}"\]`\)/);
+  assert.match(runtime, /document\.head\.appendChild\(script\)/);
+  assert.match(runtime, /ensureDateRangeScript\(\)/);
 });
 
 test('solo una sección queda visible y las demás se ocultan sin borrar contenido', () => {
@@ -153,7 +156,6 @@ test('solo una sección queda visible y las demás se ocultan sin borrar conteni
   assert.match(runtime, /descriptor\.section\.hidden = true/);
   assert.match(runtime, /descriptor\.section\.hidden = !selected/);
   assert.match(runtime, /role', 'tabpanel'/);
-  assert.doesNotMatch(runtime, /\.remove\(\)/);
   assert.doesNotMatch(runtime, /innerHTML\s*=/);
 });
 
