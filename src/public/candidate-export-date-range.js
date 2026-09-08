@@ -18,7 +18,8 @@
       .candidate-export-range-trigger:hover{background:#f8fafc;border-color:#cbd5e1}
       .candidate-export-range-trigger:focus-visible{outline:2px solid rgba(13,122,107,.24);border-color:#0d7a6b}
       .candidate-export-range-trigger-icon{color:#0d7a6b;font-size:14px}
-      .candidate-export-range-popover{position:absolute;z-index:1300;left:0;top:calc(100% + 6px);width:min(340px,calc(100vw - 32px));padding:12px;border:1px solid #d7dee8;border-radius:10px;background:#fff;box-shadow:0 16px 36px rgba(15,23,42,.18)}
+      .candidate-export-range-popover{position:absolute;z-index:1300;left:0;top:calc(100% + 6px);width:min(340px,calc(100vw - 32px));max-height:calc(100vh - 24px);overflow:auto;padding:12px;border:1px solid #d7dee8;border-radius:10px;background:#fff;box-shadow:0 16px 36px rgba(15,23,42,.18)}
+      .candidate-export-range-popover.is-above{top:auto;bottom:calc(100% + 6px)}
       .candidate-export-range-popover[hidden]{display:none!important}
       .candidate-export-range-header{display:grid;grid-template-columns:36px 1fr 36px;align-items:center;gap:6px;margin-bottom:10px}
       .candidate-export-range-month{font-size:13px;font-weight:800;color:#1e2d3d;text-align:center;text-transform:capitalize}
@@ -165,7 +166,20 @@
 
     const closePopover = () => {
       popover.hidden = true;
+      popover.classList.remove('is-above');
       trigger.setAttribute('aria-expanded', 'false');
+    };
+
+    const positionPopover = () => {
+      if (popover.hidden) return;
+      popover.classList.remove('is-above');
+      const controlsRect = controls.getBoundingClientRect();
+      const initialRect = popover.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - controlsRect.bottom;
+      const spaceAbove = controlsRect.top;
+      if (initialRect.bottom > window.innerHeight - 12 && spaceAbove > spaceBelow) {
+        popover.classList.add('is-above');
+      }
     };
 
     const renderCalendar = () => {
@@ -226,6 +240,7 @@
       renderCalendar();
       popover.hidden = false;
       trigger.setAttribute('aria-expanded', 'true');
+      positionPopover();
     };
 
     trigger.addEventListener('click', () => {
@@ -240,6 +255,7 @@
         viewYear -= 1;
       }
       renderCalendar();
+      positionPopover();
     });
 
     nextButton.addEventListener('click', () => {
@@ -249,6 +265,7 @@
         viewYear += 1;
       }
       renderCalendar();
+      positionPopover();
     });
 
     clearButton.addEventListener('click', () => {
@@ -267,6 +284,7 @@
         trigger.focus();
       }
     });
+    window.addEventListener('resize', positionPopover);
 
     exportLinks.forEach((link) => {
       link.addEventListener('click', () => {
