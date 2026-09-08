@@ -32,25 +32,39 @@ test('el rango de exportación se carga en /admin para no DEV y no para DEV', ()
   assert.doesNotMatch(usersHtml, /candidate-export-date-range\.js/);
 });
 
+test('la UI usa un solo selector visual y un calendario propio para elegir inicio y fin', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /candidate-export-range-trigger/);
+  assert.match(runtime, /candidate-export-range-popover/);
+  assert.match(runtime, /candidate-export-range-grid/);
+  assert.match(runtime, /Selecciona la fecha inicial y luego la fecha final/);
+  assert.match(runtime, /let selectedStart = '';/);
+  assert.match(runtime, /let selectedEnd = '';/);
+  assert.doesNotMatch(runtime, /input\.type\s*=\s*['"]date['"]/);
+  assert.doesNotMatch(runtime, /buildDateField/);
+});
+
 test('el controlador conserva scope y vacancyId y solo añade el rango de registro', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /\/admin\/export\?/);
   assert.match(runtime, /new URL\(link\.getAttribute\('href'\), window\.location\.origin\)/);
-  assert.match(runtime, /url\.searchParams\.set\('dateFrom', dateFrom\)/);
-  assert.match(runtime, /url\.searchParams\.set\('dateTo', dateTo\)/);
+  assert.match(runtime, /url\.searchParams\.set\('dateFrom', selectedStart\)/);
+  assert.match(runtime, /url\.searchParams\.set\('dateTo', selectedEnd\)/);
   assert.match(runtime, /url\.searchParams\.delete\('dateFrom'\)/);
   assert.match(runtime, /url\.searchParams\.delete\('dateTo'\)/);
   assert.doesNotMatch(runtime, /searchParams\.set\('scope'/);
   assert.doesNotMatch(runtime, /searchParams\.set\('vacancyId'/);
 });
 
-test('el rango invertido usa aviso inline y no diálogos nativos', () => {
+test('el selector normaliza el orden del rango, permite quitarlo y no usa diálogos nativos', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
-  assert.match(runtime, /dateFrom && dateTo && dateFrom > dateTo/);
-  assert.match(runtime, /candidate-export-date-error/);
-  assert.match(runtime, /event\.preventDefault\(\)/);
+  assert.match(runtime, /else if \(value < selectedStart\)/);
+  assert.match(runtime, /selectedEnd = selectedStart;/);
+  assert.match(runtime, /selectedStart = value;/);
+  assert.match(runtime, /Quitar rango/);
   assert.doesNotMatch(runtime, /\b(?:alert|confirm|prompt)\s*\(/);
   assert.match(runtime, /@media\(max-width:768px\)/);
 });
