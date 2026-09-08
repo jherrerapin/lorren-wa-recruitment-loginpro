@@ -93,7 +93,8 @@ test('cada pestaña local reutiliza el histórico de la vacante y conserva la pe
 
   assert.match(runtime, /TAB_CONTEXT_PREFIX = 'vacancyTab_'/);
   assert.match(runtime, /panel\.querySelector\('\[data-vacancy-cycle-toggle\]'\)/);
-  assert.match(runtime, /Ver todos los registros de esta pestaña/);
+  assert.match(runtime, /const actionLabel = String\(sourceToggle\.textContent \|\| ''\)\.trim\(\)/);
+  assert.doesNotMatch(runtime, /Ver todos los registros de esta pestaña/);
   assert.match(runtime, /url\.searchParams\.set\(tabContextParam\(vacancyId\), key\)/);
   assert.match(runtime, /link\.dataset\.sectionHistoryAction = descriptor\.key/);
   assert.match(runtime, /descriptor\.key === 'interview-management'/);
