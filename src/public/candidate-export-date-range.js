@@ -6,6 +6,22 @@
   const MONTH_FORMATTER = new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' });
   const RANGE_DATE_FORMATTER = new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
   const WEEKDAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+  const TAB_EXPORT_SCOPE = Object.freeze({
+    registered: 'registered',
+    'missing-cv': 'missing_cv_complete',
+    approved: 'approved',
+    contacted: 'contacted',
+    contracted: 'contracted',
+    rejected: 'rejected'
+  });
+  const TAB_EXPORT_LABEL = Object.freeze({
+    registered: 'registrados',
+    'missing-cv': 'completos sin HV',
+    approved: 'aprobados',
+    contacted: 'contactados',
+    contracted: 'contratados',
+    rejected: 'rechazados'
+  });
 
   function injectStyles() {
     if (document.getElementById(STYLE_ID)) return;
@@ -66,6 +82,75 @@
   function formatRangeDate(value) {
     const date = dateFromIso(value);
     return date ? RANGE_DATE_FORMATTER.format(date) : '';
+  }
+
+  function exportScope(link) {
+    try {
+      return new URL(link.getAttribute('href') || '', window.location.origin).searchParams.get('scope');
+    } catch {
+      return null;
+    }
+  }
+
+  function restoreRangeDecoratedLinks(bar) {
+    bar.querySelectorAll(`${EXPORT_LINK_SELECTOR}[data-range-base-href]`).forEach((link) => {
+      link.href = link.dataset.rangeBaseHref;
+      link.textContent = link.dataset.rangeBaseLabel || link.textContent;
+      delete link.dataset.rangeBaseHref;
+      delete link.dataset.rangeBaseLabel;
+    });
+    bar.querySelectorAll(`${EXPORT_LINK_SELECTOR}[data-range-forced-hidden]`).forEach((link) => {
+      link.hidden = link.dataset.rangePreviousHidden === 'true';
+      delete link.dataset.rangeForcedHidden;
+      delete link.dataset.rangePreviousHidden;
+    });
+  }
+
+  function activeExportContext(panel) {
+    const key = String(panel?.dataset?.activeVacancyTab || '');
+    const declaredScope = String(panel?.dataset?.activeVacancyExportScope || '');
+    return {
+      key,
+      scope: declaredScope || TAB_EXPORT_SCOPE[key] || '',
+      label: TAB_EXPORT_LABEL[key] || key
+    };
+  }
+
+  function rangeLabel(dateFrom, dateTo) {
+    if (!dateFrom) return '';
+    if (dateTo) return `${formatRangeDate(dateFrom)} – ${formatRangeDate(dateTo)}`;
+    return `desde ${formatRangeDate(dateFrom)}`;
+  }
+
+  function updateContextualRangeDownload(bar, panel, dateFrom, dateTo) {
+    restoreRangeDecoratedLinks(bar);
+    const context = activeExportContext(panel);
+    if (!dateFrom || !context.scope) return;
+
+    const links = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
+    const scopedLink = links.find((link) => exportScope(link) === context.scope);
+    if (!scopedLink) return;
+
+    const baseHref = scopedLink.getAttribute('href') || '';
+    const baseLabel = String(scopedLink.textContent || '').trim();
+    scopedLink.dataset.rangeBaseHref = baseHref;
+    scopedLink.dataset.rangeBaseLabel = baseLabel;
+
+    const url = new URL(baseHref, window.location.origin);
+    url.searchParams.set('scope', context.scope);
+    url.searchParams.set('dateFrom', dateFrom);
+    if (dateTo) url.searchParams.set('dateTo', dateTo);
+    else url.searchParams.delete('dateTo');
+    scopedLink.href = `${url.pathname}${url.search}${url.hash}`;
+    scopedLink.textContent = `↓ Descargar ${context.label} · ${rangeLabel(dateFrom, dateTo)}`;
+    scopedLink.hidden = false;
+
+    const allLink = links.find((link) => exportScope(link) === 'all');
+    if (allLink && allLink !== scopedLink) {
+      allLink.dataset.rangeForcedHidden = 'true';
+      allLink.dataset.rangePreviousHidden = allLink.hidden ? 'true' : 'false';
+      allLink.hidden = true;
+    }
   }
 
   function candidateRegisteredDate(row) {
@@ -145,8 +230,8 @@
 
   function installExportRange(bar) {
     if (!bar || bar.dataset.exportDateRangeReady === 'true') return;
-    const exportLinks = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
-    if (!exportLinks.length) return;
+    const initialExportLinks = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
+    if (!initialExportLinks.length) return;
 
     bar.dataset.exportDateRangeReady = 'true';
 
@@ -230,9 +315,14 @@
     const vacancyId = String(panel?.getAttribute('data-vacancy-panel') || '');
     installHistoryRangeBehavior(controls, panel, vacancyId);
 
+    const refreshDownloadContext = () => {
+      updateContextualRangeDownload(bar, panel, selectedStart, selectedEnd);
+    };
+
     const emitRangeChange = () => {
       controls.dataset.dateFrom = selectedStart;
       controls.dataset.dateTo = selectedEnd;
+      refreshDownloadContext();
       controls.dispatchEvent(new CustomEvent('candidate-date-range-change', {
         bubbles: true,
         detail: { dateFrom: selectedStart, dateTo: selectedEnd }
@@ -376,18 +466,21 @@
     });
     window.addEventListener('resize', positionPopover);
 
-    exportLinks.forEach((link) => {
-      link.addEventListener('click', () => {
-        const url = new URL(link.getAttribute('href'), window.location.origin);
-        if (selectedStart) url.searchParams.set('dateFrom', selectedStart);
-        else url.searchParams.delete('dateFrom');
-        if (selectedEnd) url.searchParams.set('dateTo', selectedEnd);
-        else url.searchParams.delete('dateTo');
-        link.href = `${url.pathname}${url.search}${url.hash}`;
-      });
+    panel?.addEventListener('candidate-vacancy-tab-change', refreshDownloadContext);
+
+    bar.addEventListener('click', (event) => {
+      const link = event.target.closest(EXPORT_LINK_SELECTOR);
+      if (!link || !bar.contains(link)) return;
+      const url = new URL(link.getAttribute('href'), window.location.origin);
+      if (selectedStart) url.searchParams.set('dateFrom', selectedStart);
+      else url.searchParams.delete('dateFrom');
+      if (selectedEnd) url.searchParams.set('dateTo', selectedEnd);
+      else url.searchParams.delete('dateTo');
+      link.href = `${url.pathname}${url.search}${url.hash}`;
     });
 
     updateTrigger();
+    refreshDownloadContext();
   }
 
   function install() {
