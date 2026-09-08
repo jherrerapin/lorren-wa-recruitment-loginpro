@@ -20,13 +20,17 @@ function req(role = 'admin', originalUrl = '/admin') {
   };
 }
 
-test('el rango de exportación se carga en /admin para no DEV y no para DEV', () => {
+test('el rango sigue cargándose directamente para no DEV y DEV tiene fallback dinámico desde pestañas', () => {
   const adminHtml = injectAdminModuleNavigation(baseHtml, req('admin'));
   assert.match(adminHtml, /\/public\/candidate-export-date-range\.js/);
   assert.equal((adminHtml.match(/candidate-export-date-range\.js/g) || []).length, 1);
 
   const devHtml = injectAdminModuleNavigation(baseHtml, req('dev'));
-  assert.doesNotMatch(devHtml, /candidate-export-date-range\.js/);
+  assert.match(devHtml, /\/public\/candidate-vacancy-section-tabs\.js/);
+
+  const tabsRuntime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+  assert.match(tabsRuntime, /DATE_RANGE_SCRIPT = '\/public\/candidate-export-date-range\.js'/);
+  assert.match(tabsRuntime, /ensureDateRangeScript\(\)/);
 
   const usersHtml = injectAdminModuleNavigation(baseHtml, req('admin', '/admin/users'));
   assert.doesNotMatch(usersHtml, /candidate-export-date-range\.js/);
@@ -42,7 +46,6 @@ test('la UI usa un solo selector visual y un calendario propio para elegir inici
   assert.match(runtime, /let selectedStart = '';/);
   assert.match(runtime, /let selectedEnd = '';/);
   assert.doesNotMatch(runtime, /input\.type\s*=\s*['"]date['"]/);
-  assert.doesNotMatch(runtime, /buildDateField/);
 });
 
 test('el calendario se reposiciona arriba cuando no cabe debajo y limita su alto al viewport', () => {
@@ -81,19 +84,49 @@ test('quitar el rango restaura el histórico visible y notifica el cambio', () =
   assert.match(runtime, /emitRangeChange\(\);/);
   assert.match(runtime, /detail: \{ dateFrom: selectedStart, dateTo: selectedEnd \}/);
   assert.match(runtime, /const inRange = \(!dateFrom \|\| registeredDate >= dateFrom\)/);
+  assert.match(runtime, /restoreRangeDecoratedLinks\(bar\)/);
 });
 
-test('el controlador conserva scope y vacancyId y solo añade el rango de registro', () => {
+test('el rango usa el scope de la pestaña activa y nunca scope all para la descarga contextual', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
-  assert.match(runtime, /\/admin\/export\?/);
-  assert.match(runtime, /new URL\(link\.getAttribute\('href'\), window\.location\.origin\)/);
+  assert.match(runtime, /TAB_EXPORT_SCOPE/);
+  assert.match(runtime, /contacted: 'contacted'/);
+  assert.match(runtime, /contracted: 'contracted'/);
+  assert.match(runtime, /rejected: 'rejected'/);
+  assert.match(runtime, /activeVacancyExportScope/);
+  assert.match(runtime, /url\.searchParams\.set\('scope', context\.scope\)/);
+  assert.match(runtime, /url\.searchParams\.set\('dateFrom', dateFrom\)/);
+  assert.match(runtime, /url\.searchParams\.set\('dateTo', dateTo\)/);
+  assert.match(runtime, /const allLink = links\.find\(\(link\) => exportScope\(link\) === 'all'\)/);
+  assert.match(runtime, /allLink\.hidden = true/);
+});
+
+test('el botón contextual muestra pestaña y rango seleccionado', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /TAB_EXPORT_LABEL/);
+  assert.match(runtime, /contacted: 'contactados'/);
+  assert.match(runtime, /rejected: 'rechazados'/);
+  assert.match(runtime, /scopedLink\.textContent = `↓ Descargar \$\{context\.label\} · \$\{rangeLabel\(dateFrom, dateTo\)\}`/);
+  assert.match(runtime, /RANGE_DATE_FORMATTER/);
+});
+
+test('al cambiar de pestaña el rango se recalcula contra el nuevo estado activo', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /candidate-vacancy-tab-change/);
+  assert.match(runtime, /refreshDownloadContext/);
+  assert.match(runtime, /panel\?\.addEventListener\('candidate-vacancy-tab-change', refreshDownloadContext\)/);
+});
+
+test('los enlaces generados después de instalar el calendario también reciben las fechas', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /bar\.addEventListener\('click'/);
+  assert.match(runtime, /event\.target\.closest\(EXPORT_LINK_SELECTOR\)/);
   assert.match(runtime, /url\.searchParams\.set\('dateFrom', selectedStart\)/);
   assert.match(runtime, /url\.searchParams\.set\('dateTo', selectedEnd\)/);
-  assert.match(runtime, /url\.searchParams\.delete\('dateFrom'\)/);
-  assert.match(runtime, /url\.searchParams\.delete\('dateTo'\)/);
-  assert.doesNotMatch(runtime, /searchParams\.set\('scope'/);
-  assert.doesNotMatch(runtime, /searchParams\.set\('vacancyId'/);
 });
 
 test('el selector normaliza el orden del rango, permite quitarlo y no usa diálogos nativos', () => {
