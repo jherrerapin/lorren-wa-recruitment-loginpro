@@ -45,6 +45,17 @@ test('la UI usa un solo selector visual y un calendario propio para elegir inici
   assert.doesNotMatch(runtime, /buildDateField/);
 });
 
+test('el calendario se reposiciona arriba cuando no cabe debajo y limita su alto al viewport', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /candidate-export-range-popover\.is-above/);
+  assert.match(runtime, /max-height:calc\(100vh - 24px\)/);
+  assert.match(runtime, /const positionPopover = \(\) =>/);
+  assert.match(runtime, /initialRect\.bottom > window\.innerHeight - 12/);
+  assert.match(runtime, /spaceAbove > spaceBelow/);
+  assert.match(runtime, /popover\.classList\.add\('is-above'\)/);
+});
+
 test('el controlador conserva scope y vacancyId y solo añade el rango de registro', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
