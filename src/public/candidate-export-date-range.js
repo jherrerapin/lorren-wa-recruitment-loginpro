@@ -68,6 +68,81 @@
     return date ? RANGE_DATE_FORMATTER.format(date) : '';
   }
 
+  function candidateRegisteredDate(row) {
+    const metadata = Array.from(row?.querySelectorAll?.('.candidate-dev-meta') || [])
+      .map((node) => String(node.textContent || '').trim())
+      .find((text) => /^Fecha de registro:/i.test(text));
+    const match = metadata?.match(/Fecha de registro:\s*(\d{1,2})\/(\d{1,2})\/(\d{4})/i);
+    if (!match) return '';
+    return `${match[3]}-${pad(match[2])}-${pad(match[1])}`;
+  }
+
+  function rowIsActuallyVisible(row) {
+    if (!row || row.hidden) return false;
+    const tabPanel = row.closest('.candidate-vacancy-section-panel');
+    return !tabPanel || !tabPanel.hidden;
+  }
+
+  function historyCheckboxes(panel) {
+    return Array.from(panel?.querySelectorAll?.('input[data-history-candidate-id]') || []);
+  }
+
+  function notifyCheckboxChange(checkbox) {
+    checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function pruneHiddenHistorySelections(panel) {
+    historyCheckboxes(panel).forEach((checkbox) => {
+      const row = checkbox.closest('.candidate-row, tr');
+      if (checkbox.checked && !rowIsActuallyVisible(row)) {
+        checkbox.checked = false;
+        notifyCheckboxChange(checkbox);
+      }
+    });
+  }
+
+  function filterHistoryRows(panel, dateFrom, dateTo) {
+    panel.querySelectorAll('.candidate-row').forEach((row) => {
+      const registeredDate = candidateRegisteredDate(row);
+      if (!registeredDate) return;
+      const inRange = (!dateFrom || registeredDate >= dateFrom)
+        && (!dateTo || registeredDate <= dateTo);
+      row.hidden = !inRange;
+    });
+    pruneHiddenHistorySelections(panel);
+  }
+
+  function historyIsActive(vacancyId) {
+    if (!vacancyId) return false;
+    const params = new URL(window.location.href).searchParams;
+    return String(params.get(`vh_${vacancyId}`) || '').toLowerCase() === 'all';
+  }
+
+  function installHistoryRangeBehavior(controls, panel, vacancyId) {
+    if (!panel || !historyIsActive(vacancyId)) return;
+
+    const bulkToolbar = Array.from(panel.querySelectorAll('[data-vacancy-bulk-status]'))
+      .find((element) => String(element.getAttribute('data-vacancy-bulk-status') || '') === vacancyId);
+    if (bulkToolbar) bulkToolbar.prepend(controls);
+
+    controls.addEventListener('candidate-date-range-change', (event) => {
+      const dateFrom = String(event.detail?.dateFrom || '');
+      const dateTo = String(event.detail?.dateTo || '');
+      filterHistoryRows(panel, dateFrom, dateTo);
+    });
+
+    const selectAll = Array.from(panel.querySelectorAll('[data-history-select-all]'))
+      .find((element) => String(element.getAttribute('data-history-select-all') || '') === vacancyId);
+    selectAll?.addEventListener('change', () => {
+      window.setTimeout(() => pruneHiddenHistorySelections(panel), 0);
+    });
+
+    panel.addEventListener('click', (event) => {
+      if (!event.target.closest('[data-section-tab]')) return;
+      window.setTimeout(() => pruneHiddenHistorySelections(panel), 0);
+    });
+  }
+
   function installExportRange(bar) {
     if (!bar || bar.dataset.exportDateRangeReady === 'true') return;
     const exportLinks = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
@@ -151,6 +226,19 @@
     controls.append(title, trigger, popover);
     bar.prepend(controls);
 
+    const panel = bar.closest('[data-vacancy-panel]');
+    const vacancyId = String(panel?.getAttribute('data-vacancy-panel') || '');
+    installHistoryRangeBehavior(controls, panel, vacancyId);
+
+    const emitRangeChange = () => {
+      controls.dataset.dateFrom = selectedStart;
+      controls.dataset.dateTo = selectedEnd;
+      controls.dispatchEvent(new CustomEvent('candidate-date-range-change', {
+        bubbles: true,
+        detail: { dateFrom: selectedStart, dateTo: selectedEnd }
+      }));
+    };
+
     const updateTrigger = () => {
       if (selectedStart && selectedEnd) {
         triggerText.textContent = `${formatRangeDate(selectedStart)} – ${formatRangeDate(selectedEnd)}`;
@@ -224,6 +312,7 @@
 
           updateTrigger();
           renderCalendar();
+          emitRangeChange();
           if (selectedStart && selectedEnd) closePopover();
         });
 
@@ -273,6 +362,7 @@
       selectedEnd = '';
       updateTrigger();
       renderCalendar();
+      emitRangeChange();
       closePopover();
     });
 

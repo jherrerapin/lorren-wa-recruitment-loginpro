@@ -56,6 +56,33 @@ test('el calendario se reposiciona arriba cuando no cabe debajo y limita su alto
   assert.match(runtime, /popover\.classList\.add\('is-above'\)/);
 });
 
+test('el histórico reutiliza el mismo selector, filtra por fecha visible y acota la selección masiva', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /function historyIsActive\(vacancyId\)/);
+  assert.match(runtime, /params\.get\(`vh_\$\{vacancyId\}`\)/);
+  assert.match(runtime, /data-vacancy-bulk-status/);
+  assert.match(runtime, /bulkToolbar\.prepend\(controls\)/);
+  assert.match(runtime, /candidate-date-range-change/);
+  assert.match(runtime, /function candidateRegisteredDate\(row\)/);
+  assert.match(runtime, /Fecha de registro:/);
+  assert.match(runtime, /row\.hidden = !inRange/);
+  assert.match(runtime, /data-history-candidate-id/);
+  assert.match(runtime, /data-history-select-all/);
+  assert.match(runtime, /rowIsActuallyVisible\(row\)/);
+  assert.match(runtime, /pruneHiddenHistorySelections\(panel\)/);
+});
+
+test('quitar el rango restaura el histórico visible y notifica el cambio', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /selectedStart = '';/);
+  assert.match(runtime, /selectedEnd = '';/);
+  assert.match(runtime, /emitRangeChange\(\);/);
+  assert.match(runtime, /detail: \{ dateFrom: selectedStart, dateTo: selectedEnd \}/);
+  assert.match(runtime, /const inRange = \(!dateFrom \|\| registeredDate >= dateFrom\)/);
+});
+
 test('el controlador conserva scope y vacancyId y solo añade el rango de registro', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
