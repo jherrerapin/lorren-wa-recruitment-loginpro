@@ -65,6 +65,17 @@
     return { ...definition, section, count };
   }
 
+  function managementDescriptor(panel) {
+    const section = panel.querySelector('[data-interview-coordination-board]');
+    if (!section) return null;
+    return {
+      key: 'interview-management',
+      label: 'Gestión de entrevistas',
+      section,
+      count: ''
+    };
+  }
+
   function safeId(value) {
     return String(value || 'vacancy').replace(/[^a-zA-Z0-9_-]+/g, '-');
   }
@@ -74,10 +85,12 @@
     const vacancyBody = panel.querySelector('.vacancy-body');
     if (!vacancyBody) return;
 
-    const descriptors = [...vacancyBody.children]
-      .filter((element) => element.classList?.contains('section'))
-      .map(sectionDescriptor)
-      .filter(Boolean);
+    const descriptors = [
+      managementDescriptor(panel),
+      ...[...vacancyBody.children]
+        .filter((element) => element.classList?.contains('section'))
+        .map(sectionDescriptor)
+    ].filter(Boolean);
 
     if (descriptors.length < 2) return;
     panel.dataset.sectionTabsReady = 'true';
@@ -123,7 +136,9 @@
       return { tab, descriptor };
     });
 
-    vacancyBody.prepend(tabList);
+    const vacancyHeader = panel.querySelector('.vacancy-header');
+    if (vacancyHeader) vacancyHeader.insertAdjacentElement('afterend', tabList);
+    else panel.prepend(tabList);
 
     const activate = (targetIndex, options = {}) => {
       const normalizedIndex = Math.max(0, Math.min(targetIndex, tabs.length - 1));
