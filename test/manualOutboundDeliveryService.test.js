@@ -150,6 +150,7 @@ function dedupeKeyFor(inputValue) {
 const baseCandidate = {
   id: 'candidate-delivery-1',
   phone: '573001112233',
+  dataConsentStatus: 'ACCEPTED',
   botPaused: false,
   botPausedAt: null,
   botPausedBy: null,
@@ -424,6 +425,43 @@ test('bloquea una entrega ya reclamada antes de contactar al proveedor', async (
   assert.equal(harness.calls.sends.length, 0);
   assert.equal(harness.state.messages.length, 0);
 });
+
+for (const protectedAction of ['request_missing_data', 'request_hv', 'reminder']) {
+  test(`bloquea ${protectedAction} antes de reclamar al candidato o contactar WhatsApp sin consentimiento`, async () => {
+    const harness = createHarness({
+      candidate: {
+        ...baseCandidate,
+        dataConsentStatus: 'PENDING'
+      }
+    });
+    const protectedInput = {
+      ...input,
+      body: 'Solicitud protegida de prueba.',
+      rawPayload: {
+        source: 'admin_outbound',
+        action: protectedAction,
+        preserveExactBody: true
+      }
+    };
+
+    await assert.rejects(
+      () => deliverManualOutboundText(harness.prisma, protectedInput, {
+        sendText: harness.sendText,
+        now: createClock('2026-07-16T01:35:00.000Z')
+      }),
+      (error) => {
+        assert.equal(error.code, 'manual_outbound_consent_required');
+        assert.match(getManualOutboundUserMessage(error), /aceptar la autorización de tratamiento de datos/i);
+        return true;
+      }
+    );
+
+    assert.equal(harness.calls.sends.length, 0);
+    assert.equal(harness.state.messages.length, 0);
+    assert.equal(harness.calls.order.some((entry) => entry.startsWith('candidate:update:')), false);
+    assert.equal(harness.state.candidate.botPaused, false);
+  });
+}
 
 test('outreach de entrevista dentro de 24h usa texto libre y no invoca plantilla', async () => {
   const inboundAt = new Date('2026-07-16T00:30:00.000Z');
