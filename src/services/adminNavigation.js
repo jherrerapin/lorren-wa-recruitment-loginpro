@@ -23,6 +23,7 @@ const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.c
 const USERS_PROGRAMMING_ACCESS_SCRIPT = '/public/users-programming-access.js';
 const LIVE_SEARCH_SCRIPT = '/public/lorren-live-search.js';
 const CANDIDATE_EXPORT_DATE_RANGE_SCRIPT = '/public/candidate-export-date-range.js';
+const CANDIDATE_VACANCY_SECTION_TABS_SCRIPT = '/public/candidate-vacancy-section-tabs.js';
 const MODULE_MENU_GROUP = 'admin-primary-navigation';
 const RECRUITMENT_ICON = '';
 const OPERATIONS_ICON = '';
@@ -333,8 +334,16 @@ function ensureCandidateExportDateRangeScript(html, req = {}) {
   return html.replace(/<\/body>/i, `  <script src="${CANDIDATE_EXPORT_DATE_RANGE_SCRIPT}" defer></script>\n</body>`);
 }
 
+function ensureCandidateVacancySectionTabsScript(html, req = {}) {
+  const path = requestPath(req);
+  if (path !== RECRUITMENT_PATH || html.includes(CANDIDATE_VACANCY_SECTION_TABS_SCRIPT) || !/<\/body>/i.test(html)) return html;
+  return html.replace(/<\/body>/i, `  <script src="${CANDIDATE_VACANCY_SECTION_TABS_SCRIPT}" defer></script>\n</body>`);
+}
+
 function ensureAdminEnhancementScripts(html, req = {}) {
-  return ensureCandidateExportDateRangeScript(ensureLiveSearchScript(html), req);
+  let output = ensureLiveSearchScript(html);
+  output = ensureCandidateExportDateRangeScript(output, req);
+  return ensureCandidateVacancySectionTabsScript(output, req);
 }
 
 function normalizePayrollPresentation(html) {
