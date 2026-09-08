@@ -73,7 +73,7 @@ function requireNow(now) {
     if (value === null || typeof value === 'boolean') {
       throw new TypeError('manual_outbound_clock_invalid');
     }
-    const date = value instanceof Date ? new Date(value) : new Date(value);
+    const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
     if (Number.isNaN(date.getTime())) throw new TypeError('manual_outbound_clock_invalid');
     return date;
   };
