@@ -3,10 +3,23 @@
 (() => {
   const STYLE_ID = 'candidate-vacancy-section-tabs-style';
   const MANAGEMENT_HIDDEN_ATTR = 'data-section-tabs-management-hidden';
+  const TAB_CONTEXT_PREFIX = 'vacancyTab_';
+  const STATUS_TAB_KEYS = new Set(['registered', 'approved', 'contacted', 'contracted', 'rejected']);
+  const TAB_ORDER = [
+    'interview-management',
+    'interviews',
+    'registered',
+    'missing-cv',
+    'approved',
+    'contacted',
+    'contracted',
+    'rejected'
+  ];
   const EXPORT_SCOPE_BY_TAB = Object.freeze({
     registered: 'registered',
     'missing-cv': 'missing_cv_complete',
-    approved: 'approved'
+    approved: 'approved',
+    contracted: 'contracted'
   });
   const TAB_DEFINITIONS = [
     {
@@ -28,6 +41,11 @@
       key: 'approved',
       label: 'Aprobados',
       matches: (title) => title === 'aprobados' || title.startsWith('aprobados ')
+    },
+    {
+      key: 'contracted',
+      label: 'Contratados',
+      matches: (title) => title === 'contratados' || title.startsWith('contratados ')
     }
   ];
 
@@ -46,16 +64,19 @@
     style.id = STYLE_ID;
     style.textContent = `
       .candidate-vacancy-section-tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 18px 0;border-top:1px solid #eaecef;background:#fff;scrollbar-width:thin;-webkit-overflow-scrolling:touch}
-      .candidate-vacancy-section-tab{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;border:1px solid #e1e4e8;border-bottom:0;border-radius:8px 8px 0 0;padding:8px 13px;background:#f9fafb;color:#64748b;font:inherit;font-size:12px;font-weight:700;cursor:pointer;min-height:38px}
+      .candidate-vacancy-section-tab{display:inline-flex;align-items:center;gap:7px;flex:0 0 auto;border:1px solid #e1e4e8;border-bottom:0;border-radius:8px 8px 0 0;padding:8px 13px;background:#f9fafb;color:#64748b;font:inherit;font-size:12px;font-weight:700;cursor:pointer;min-height:38px;text-decoration:none}
       .candidate-vacancy-section-tab:hover{background:#f3f4f6;color:#1e2d3d}
       .candidate-vacancy-section-tab[aria-selected="true"]{background:#fff;color:#1e2d3d;border-color:#cbd5e1;box-shadow:inset 0 2px 0 #0d7a6b}
       .candidate-vacancy-section-tab:focus-visible{outline:2px solid rgba(13,122,107,.24);outline-offset:-2px}
       .candidate-vacancy-section-tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#eef2f7;color:#475569;font-size:10px;font-weight:800}
       .candidate-vacancy-section-tab[aria-selected="true"] .candidate-vacancy-section-tab-count{background:#e6f4f1;color:#0d5f54}
       .candidate-vacancy-section-panel[hidden]{display:none!important}
+      .candidate-vacancy-section-history-actions{display:flex;justify-content:flex-end;align-items:center;margin:0 0 10px;gap:8px}
+      .candidate-vacancy-section-view-all{white-space:nowrap}
       @media(max-width:768px){
         .candidate-vacancy-section-tabs{padding:10px 14px 0;gap:5px}
         .candidate-vacancy-section-tab{padding:9px 11px;min-height:42px}
+        .candidate-vacancy-section-history-actions{justify-content:flex-start}
       }
     `;
     document.head.appendChild(style);
@@ -84,6 +105,35 @@
 
   function safeId(value) {
     return String(value || 'vacancy').replace(/[^a-zA-Z0-9_-]+/g, '-');
+  }
+
+  function tabContextParam(vacancyId) {
+    return TAB_CONTEXT_PREFIX + String(vacancyId || 'vacancy');
+  }
+
+  function descriptorOrder(descriptor) {
+    const index = TAB_ORDER.indexOf(descriptor.key);
+    return index === -1 ? TAB_ORDER.length : index;
+  }
+
+  function statusNavigationDescriptors(panel, localKeys) {
+    const filterBar = panel.querySelector('[data-vacancy-status-filters]');
+    if (!filterBar) return [];
+
+    const descriptors = [];
+    filterBar.querySelectorAll('a[data-vacancy-status-scope]').forEach((anchor) => {
+      const key = String(anchor.dataset.vacancyStatusScope || '').trim();
+      if (!STATUS_TAB_KEYS.has(key) || localKeys.has(key)) return;
+      descriptors.push({
+        key,
+        label: String(anchor.textContent || key).trim(),
+        link: anchor,
+        count: ''
+      });
+    });
+
+    filterBar.hidden = true;
+    return descriptors;
   }
 
   function exportScope(anchor) {
@@ -132,41 +182,103 @@
     });
   }
 
+  function historyHref(sourceToggle, vacancyId, key) {
+    try {
+      const url = new URL(sourceToggle.getAttribute('href') || '', window.location.origin);
+      url.searchParams.set(tabContextParam(vacancyId), key);
+      return url.pathname + url.search + url.hash;
+    } catch {
+      return sourceToggle.getAttribute('href') || '#';
+    }
+  }
+
+  function installHistoryActions(panel, descriptors, vacancyId) {
+    const sourceToggle = panel.querySelector('[data-vacancy-cycle-toggle]');
+    if (!sourceToggle || sourceToggle.dataset.sectionTabsRehomed === 'true') return false;
+
+    const sourceLabel = String(sourceToggle.textContent || '').trim();
+    const actionLabel = /^ver todos los registros$/i.test(sourceLabel)
+      ? 'Ver todos los registros de esta pestaña'
+      : sourceLabel;
+
+    descriptors.forEach((descriptor) => {
+      if (!descriptor.section || descriptor.key === 'interview-management') return;
+      if (descriptor.section.querySelector('[data-section-view-all]')) return;
+
+      const actions = document.createElement('div');
+      actions.className = 'candidate-vacancy-section-history-actions';
+      actions.dataset.sectionViewAll = descriptor.key;
+
+      const link = document.createElement('a');
+      link.className = 'export-btn candidate-vacancy-section-view-all';
+      link.href = historyHref(sourceToggle, vacancyId, descriptor.key);
+      link.textContent = actionLabel;
+      link.dataset.sectionHistoryAction = descriptor.key;
+      actions.appendChild(link);
+
+      const sectionHeader = descriptor.section.querySelector('.section-header');
+      if (sectionHeader) sectionHeader.insertAdjacentElement('afterend', actions);
+      else descriptor.section.prepend(actions);
+    });
+
+    sourceToggle.hidden = true;
+    sourceToggle.dataset.sectionTabsRehomed = 'true';
+    return true;
+  }
+
   function installPanel(panel) {
     if (!panel || panel.dataset.sectionTabsReady === 'true') return;
     const vacancyBody = panel.querySelector('.vacancy-body');
     if (!vacancyBody) return;
 
     const management = managementDescriptor(panel);
-    const descriptors = [
+    const localDescriptors = [
       management,
       ...[...vacancyBody.children]
         .filter((element) => element.classList?.contains('section'))
         .map(sectionDescriptor)
     ].filter(Boolean);
+    const localKeys = new Set(localDescriptors.map((descriptor) => descriptor.key));
+    const navigationDescriptors = statusNavigationDescriptors(panel, localKeys);
+    const descriptors = [...localDescriptors, ...navigationDescriptors]
+      .sort((left, right) => descriptorOrder(left) - descriptorOrder(right));
 
-    if (descriptors.length < 2) return;
+    if (localDescriptors.length < 2) return;
     panel.dataset.sectionTabsReady = 'true';
 
-    const vacancyId = safeId(panel.getAttribute('data-vacancy-panel'));
+    const rawVacancyId = String(panel.getAttribute('data-vacancy-panel') || 'vacancy');
+    const vacancyId = safeId(rawVacancyId);
     const tabList = document.createElement('div');
     tabList.className = 'candidate-vacancy-section-tabs';
     tabList.setAttribute('role', 'tablist');
     tabList.setAttribute('aria-label', 'Secciones de la vacante');
 
-    const tabs = descriptors.map((descriptor, index) => {
-      const tab = document.createElement('button');
+    const tabs = descriptors.map((descriptor) => {
       const tabId = `vacancy-${vacancyId}-tab-${descriptor.key}`;
-      const panelId = `vacancy-${vacancyId}-section-${descriptor.key}`;
 
+      if (descriptor.link) {
+        const tab = descriptor.link;
+        tab.removeAttribute('style');
+        tab.id = tabId;
+        tab.className = 'candidate-vacancy-section-tab';
+        tab.dataset.sectionTab = descriptor.key;
+        tab.setAttribute('role', 'tab');
+        tab.setAttribute('aria-selected', 'false');
+        tab.tabIndex = -1;
+        tabList.appendChild(tab);
+        return { tab, descriptor };
+      }
+
+      const tab = document.createElement('button');
+      const panelId = `vacancy-${vacancyId}-section-${descriptor.key}`;
       tab.type = 'button';
       tab.id = tabId;
       tab.className = 'candidate-vacancy-section-tab';
       tab.dataset.sectionTab = descriptor.key;
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-controls', panelId);
-      tab.setAttribute('aria-selected', index === 0 ? 'true' : 'false');
-      tab.tabIndex = index === 0 ? 0 : -1;
+      tab.setAttribute('aria-selected', 'false');
+      tab.tabIndex = -1;
 
       const label = document.createElement('span');
       label.textContent = descriptor.label;
@@ -183,7 +295,7 @@
       descriptor.section.classList.add('candidate-vacancy-section-panel');
       descriptor.section.setAttribute('role', 'tabpanel');
       descriptor.section.setAttribute('aria-labelledby', tabId);
-      descriptor.section.hidden = index !== 0;
+      descriptor.section.hidden = true;
 
       tabList.appendChild(tab);
       return { tab, descriptor };
@@ -194,34 +306,50 @@
     else panel.prepend(tabList);
 
     const activate = (targetIndex, options = {}) => {
-      const normalizedIndex = Math.max(0, Math.min(targetIndex, tabs.length - 1));
-      const activeKey = tabs[normalizedIndex].descriptor.key;
+      const target = tabs[targetIndex];
+      if (!target?.descriptor?.section) return;
+      const activeKey = target.descriptor.key;
       tabs.forEach(({ tab, descriptor }, index) => {
-        const selected = index === normalizedIndex;
+        const selected = index === targetIndex && Boolean(descriptor.section);
         tab.setAttribute('aria-selected', selected ? 'true' : 'false');
         tab.tabIndex = selected ? 0 : -1;
-        descriptor.section.hidden = !selected;
+        if (descriptor.section) descriptor.section.hidden = !selected;
       });
       updateManagementLayout(panel, tabList, management?.section || null, activeKey);
       updateContextualActions(panel, activeKey);
-      if (options.focus) tabs[normalizedIndex].tab.focus();
+      if (options.focus) target.tab.focus();
     };
 
-    tabs.forEach(({ tab }, index) => {
-      tab.addEventListener('click', () => activate(index));
+    const focusTab = (targetIndex) => {
+      const normalizedIndex = (targetIndex + tabs.length) % tabs.length;
+      tabs.forEach(({ tab }, index) => { tab.tabIndex = index === normalizedIndex ? 0 : -1; });
+      tabs[normalizedIndex].tab.focus();
+    };
+
+    tabs.forEach(({ tab, descriptor }, index) => {
+      if (descriptor.section) tab.addEventListener('click', () => activate(index));
       tab.addEventListener('keydown', (event) => {
         let nextIndex = null;
-        if (event.key === 'ArrowLeft') nextIndex = index === 0 ? tabs.length - 1 : index - 1;
-        if (event.key === 'ArrowRight') nextIndex = index === tabs.length - 1 ? 0 : index + 1;
+        if (event.key === 'ArrowLeft') nextIndex = index - 1;
+        if (event.key === 'ArrowRight') nextIndex = index + 1;
         if (event.key === 'Home') nextIndex = 0;
         if (event.key === 'End') nextIndex = tabs.length - 1;
         if (nextIndex == null) return;
         event.preventDefault();
-        activate(nextIndex, { focus: true });
+        focusTab(nextIndex);
       });
     });
 
-    activate(0);
+    const requestedKey = new URL(window.location.href).searchParams.get(tabContextParam(rawVacancyId));
+    const requestedIndex = tabs.findIndex(({ descriptor }) => descriptor.section && descriptor.key === requestedKey);
+    const initialIndex = requestedIndex >= 0
+      ? requestedIndex
+      : tabs.findIndex(({ descriptor }) => Boolean(descriptor.section));
+    activate(Math.max(0, initialIndex));
+
+    if (!installHistoryActions(panel, localDescriptors, rawVacancyId)) {
+      window.setTimeout(() => installHistoryActions(panel, localDescriptors, rawVacancyId), 0);
+    }
   }
 
   function install() {
@@ -230,9 +358,13 @@
     document.querySelectorAll('[data-vacancy-panel]').forEach(installPanel);
   }
 
+  function scheduleInstall() {
+    window.setTimeout(install, 0);
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', install, { once: true });
+    document.addEventListener('DOMContentLoaded', scheduleInstall, { once: true });
   } else {
-    install();
+    scheduleInstall();
   }
 })();
