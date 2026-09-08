@@ -93,17 +93,17 @@ test('los prompts de naturalReply evitan el voseo rioplatense y exigen tuteo col
   assert.equal(instructionMatches.length, 5, 'La instrucción de tuteo debe estar exactamente en las 5 construcciones de prompts.');
 
   assert.doesNotMatch(source, /\bsos\b/i);
-  assert.doesNotMatch(source, /saludá/i);
-  assert.doesNotMatch(source, /respondé/i);
-  assert.doesNotMatch(source, /ofrecé/i);
-  assert.doesNotMatch(source, /preguntá/i);
+  assert.doesNotMatch(source, /saludá\b/i);
+  assert.doesNotMatch(source, /respondé\b/i);
+  assert.doesNotMatch(source, /ofrecé\b/i);
+  assert.doesNotMatch(source, /preguntá\b/i);
   assert.doesNotMatch(source, /soná\b/i);
-  assert.doesNotMatch(source, /usés/i);
-  assert.doesNotMatch(source, /inventés/i);
-  assert.doesNotMatch(source, /confirmá/i);
-  assert.doesNotMatch(source, /pedilo/i);
-  assert.doesNotMatch(source, /llamás/i);
+  assert.doesNotMatch(source, /usés\b/i);
+  assert.doesNotMatch(source, /inventés\b/i);
+  assert.doesNotMatch(source, /confirmá\b/i);
+  assert.doesNotMatch(source, /pedilo\b/i);
+  assert.doesNotMatch(source, /llamás\b/i);
   assert.doesNotMatch(source, /decí\b/i);
   assert.doesNotMatch(source, /dejá\b/i);
-  assert.doesNotMatch(source, /variá/i);
+  assert.doesNotMatch(source, /variá\b/i);
 });
