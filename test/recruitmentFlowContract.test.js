@@ -84,3 +84,17 @@ test('la documentación conversacional coincide con el recordatorio operativo de
   assert.match(principles, /recordatorio de entrevista se envía 1 hora antes/);
   assert.doesNotMatch(principles, /recordatorio de entrevista se envía 40 minutos antes/);
 });
+
+test('los prompts de naturalReply evitan el voseo rioplatense y exigen tuteo colombiano', () => {
+  const source = fs.readFileSync('src/services/naturalReply.js', 'utf8');
+  assert.match(source, /Usa tuteo colombiano natural y evita el voseo/);
+  assert.doesNotMatch(source, /Sos un reclutador/);
+  assert.doesNotMatch(source, /Saludá /);
+  assert.doesNotMatch(source, /Respondé/);
+  assert.doesNotMatch(source, /Ofrecé/);
+  assert.doesNotMatch(source, /Preguntá/);
+  assert.doesNotMatch(source, /Soná /);
+  assert.doesNotMatch(source, /usés/);
+  assert.doesNotMatch(source, /inventés/);
+  assert.doesNotMatch(source, /Confirmá/);
+});
