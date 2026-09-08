@@ -22,6 +22,7 @@ const SHELL_STYLESHEET = '/public/admin-module-shell.css';
 const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
 const USERS_PROGRAMMING_ACCESS_SCRIPT = '/public/users-programming-access.js';
 const LIVE_SEARCH_SCRIPT = '/public/lorren-live-search.js';
+const CANDIDATE_EXPORT_DATE_RANGE_SCRIPT = '/public/candidate-export-date-range.js';
 const MODULE_MENU_GROUP = 'admin-primary-navigation';
 const RECRUITMENT_ICON = '';
 const OPERATIONS_ICON = '';
@@ -326,6 +327,16 @@ function ensureLiveSearchScript(html) {
   return html.replace(/<\/body>/i, `  <script src="${LIVE_SEARCH_SCRIPT}" defer></script>\n</body>`);
 }
 
+function ensureCandidateExportDateRangeScript(html, req = {}) {
+  const path = requestPath(req);
+  if (path !== RECRUITMENT_PATH || requestRole(req) === 'dev' || html.includes(CANDIDATE_EXPORT_DATE_RANGE_SCRIPT) || !/<\/body>/i.test(html)) return html;
+  return html.replace(/<\/body>/i, `  <script src="${CANDIDATE_EXPORT_DATE_RANGE_SCRIPT}" defer></script>\n</body>`);
+}
+
+function ensureAdminEnhancementScripts(html, req = {}) {
+  return ensureCandidateExportDateRangeScript(ensureLiveSearchScript(html), req);
+}
+
 function normalizePayrollPresentation(html) {
   return html
     .replace(/<title>\s*Nómina y tiempo trabajado\s*—\s*LoginPro<\/title>/gi, '<title>Asistencia y Gestión de Tiempo — LoginPro</title>')
@@ -349,11 +360,11 @@ export function injectAdminModuleNavigation(html, req = {}) {
   if (!path.startsWith('/admin') || isPayrollApiPath(path) || path.startsWith('/admin/operaciones/pruebas/api/')) return html;
 
   const normalizedHtml = normalizePayrollPaths(html);
-  if (normalizedHtml.includes('data-module-navigation="true"')) return ensureLiveSearchScript(normalizedHtml);
+  if (normalizedHtml.includes('data-module-navigation="true"')) return ensureAdminEnhancementScripts(normalizedHtml, req);
 
   const navPattern = /<nav\b[^>]*class=["'][^"']*\bnavbar\b[^"']*["'][^>]*>[\s\S]*?<\/nav>/i;
   const originalNav = normalizedHtml.match(navPattern)?.[0] || '';
-  if (!originalNav) return ensureLiveSearchScript(normalizedHtml);
+  if (!originalNav) return ensureAdminEnhancementScripts(normalizedHtml, req);
 
   const moduleNavbar = buildAdminModuleNavbar(req, originalNav);
   let output = ensureViewportMeta(normalizedHtml);
@@ -362,7 +373,7 @@ export function injectAdminModuleNavigation(html, req = {}) {
   output = ensureAdminPageShell(output);
   output = stripDuplicateModuleButtons(output, moduleNavbar);
   output = ensureUsersProgrammingAccessScript(output, path);
-  return ensureLiveSearchScript(output);
+  return ensureAdminEnhancementScripts(output, req);
 }
 
 export const ADMIN_MODULE_PATHS = Object.freeze({
