@@ -351,7 +351,7 @@ export function publicDispatchClientRouter() {
       clientOperationsPath(req.params.clientId),
       () => prisma.dispatchClientService.delete({ where: { id: service.id } }),
       'Servicio eliminado correctamente.',
-      'No fue posible eliminar la operación porque tiene dependencias operativas.'
+      'No fue posible eliminar el servicio porque tiene dependencias operativas.'
     );
   });
 
