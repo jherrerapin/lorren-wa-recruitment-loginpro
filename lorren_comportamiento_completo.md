@@ -118,19 +118,23 @@ No se debe:
 
 - duplicar la solicitud;
 - enviar varias versiones consecutivas;
-- persistir datos personales como entidades del perfil, documentos o archivos antes de autorización válida;
 - interpretar una pregunta como consentimiento;
+- ocultar, sustituir o encubrir información real que el candidato ya envió;
 - ni reiniciar la vacante después de autorizar.
 
 La solicitud debe ser idempotente: mientras esté pendiente, un mismo evento, lote o reintento no puede producir otra solicitud.
 
-Para trazabilidad operativa, el texto inbound recibido antes del consentimiento puede conservarse literalmente en el historial conversacional accesible al personal autorizado. Esa evidencia debe quedar marcada como preconsentimiento protegido y no puede alimentar la interpretación automática posterior, prellenar el perfil ni convertirse en una entidad persistida del candidato sin autorización válida. El texto no debe duplicarse innecesariamente en logs o metadata técnica.
+El consentimiento conserva autoridad sobre su propio estado, trazabilidad, aceptación, rechazo y revocación, pero **no funciona como barrera técnica de recepción, visibilidad o persistencia**. Todo mensaje que el candidato envíe por WhatsApp debe conservarse literalmente en el historial autorizado y puede alimentar las autoridades normales de interpretación y persistencia del perfil, aunque el consentimiento continúe pendiente.
 
-Si llega un archivo antes del consentimiento, el sistema debe informar brevemente que no fue guardado y solicitar una sola autorización. Tras aceptar, debe pedir reenviar el archivo únicamente si efectivamente no fue persistido. Esta excepción de trazabilidad aplica al texto; no autoriza descargar o conservar archivos preconsentimiento.
+No se deben crear mensajes técnicos que sustituyan lo que realmente llegó. En particular, el sistema no debe mostrar como si fueran palabras del candidato frases como “contenido protegido”, “dato no almacenado” o equivalentes.
+
+Si llega una hoja de vida, documento, imagen u otro archivo mientras el consentimiento está pendiente, se procesa con la misma autoridad de recepción y almacenamiento que se utiliza después de autorizar. No se obliga al candidato a reenviar un archivo únicamente porque llegó antes de la respuesta de consentimiento.
+
+El estado `REVOKED` detiene la continuación automática de la postulación y se responde una sola vez de forma breve. La negativa no borra automáticamente el registro histórico ni los archivos ya recibidos. La eliminación completa, cuando corresponda por la política operativa, es una acción manual autorizada de DEV y debe conservar trazabilidad administrativa.
 
 ## 7. Datos configurables por vacante
 
-Después del consentimiento, Lórren solicita los campos configurados para la vacante. No debe existir un formulario universal rígido si la configuración exige otro conjunto.
+Durante la postulación, Lórren solicita los campos configurados para la vacante. No debe existir un formulario universal rígido si la configuración exige otro conjunto.
 
 Cada campo debe tener una autoridad única que determine:
 
@@ -236,13 +240,13 @@ Cuando la información no esté registrada, debe decirlo con honestidad y, cuand
 
 ## 10. Hoja de vida
 
-La hoja de vida se solicita cuando los datos obligatorios previos estén completos, salvo que la configuración permita recibirla antes.
+La hoja de vida se solicita cuando los datos obligatorios previos estén completos, salvo que la configuración permita recibirla antes o el candidato la envíe espontáneamente.
 
-Al recibir un archivo válido, Lórren debe:
+Al recibir un archivo válido, sin importar si el consentimiento está pendiente o ya fue aceptado, Lórren debe:
 
-1. asociarlo al candidato y a la vacante confirmada;
+1. asociarlo al candidato y, cuando exista, a la vacante confirmada;
 2. persistirlo de manera idempotente;
-3. confirmar una sola vez que fue recibido;
+3. confirmar una sola vez que fue recibido cuando la política conversacional permita responder;
 4. actualizar el estado correspondiente;
 5. y no volver a solicitarlo mientras esa versión siga vigente.
 
@@ -420,7 +424,8 @@ El corpus de regresión debe demostrar, como mínimo:
 - nombre con tildes y etiquetas;
 - experiencia redactada libremente;
 - corrección de un campo;
-- hoja de vida antes y después del consentimiento;
+- hoja de vida antes y después del consentimiento, persistida por la misma autoridad;
+- visibilidad literal de mensajes enviados antes del consentimiento;
 - solo postulación;
 - postulación más entrevista;
 - horario con seis horas o menos de anticipación rechazado;
