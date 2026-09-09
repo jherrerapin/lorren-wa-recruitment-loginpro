@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
@@ -47,7 +48,7 @@ function createHarness(replay) {
   };
 
   axios.post = async (_url, requestBody) => {
-    sentBodies.push(requestBody?.text?.body || '');
+    sentBodies.push(requestBody?.interactive?.body?.text || requestBody?.text?.body || '');
     return { data: { messages: [{ id: `TEST-OUTBOUND-${sentBodies.length}` }] } };
   };
 
@@ -104,7 +105,7 @@ function createHarness(replay) {
 
 async function executeReplay(replay) {
   const harness = createHarness(replay);
-  const middleware = dataConsentGateMiddleware(harness.prisma);
+  const middleware = dataConsentGateMiddleware(withConsentGatePersistence(harness.prisma));
   const deliveries = [];
 
   for (const messages of replay.deliveries) {
@@ -193,3 +194,4 @@ test('replay CONV-008: un adjunto pendiente conserva reenvío de CV sin repetir 
   assert.deepEqual(observed.deliveries[0].statuses, [200]);
   assert.equal(observed.deliveries[0].remainingMessages, 0);
 });
+

@@ -160,6 +160,7 @@ export async function recordCandidateDataConsent(prisma, {
   note = null,
   candidatePatch = {},
   expected = null,
+  idempotent = false,
   now = new Date()
 } = {}) {
   if (!validatePrismaContract(prisma)) {
@@ -182,6 +183,31 @@ export async function recordCandidateDataConsent(prisma, {
     return await executeConsentOperations(prisma, async (transactionClient) => {
       let stepTransition = null;
 
+      if (idempotent) {
+        const current = await transactionClient.candidate.findUnique({ where: { id: normalizedCandidateId } });
+        if (!current) throw new Error('consent_candidate_not_found');
+        if (current.dataConsentStatus === mutation.status && current.dataConsentVersion === version) {
+          return { candidate: current, event: null, recordedAt: null, stepTransition: null, conflict: false, duplicate: true };
+        }
+        // Claim the semantic transition, not merely its destination step. Two
+        // distinct WhatsApp events can request the same decision concurrently.
+        const claimed = await transactionClient.candidate.updateMany({
+          where: {
+            id: normalizedCandidateId,
+            dataConsentStatus: current.dataConsentStatus,
+            dataConsentVersion: current.dataConsentVersion ?? null,
+            ...(expected?.currentStep ? { currentStep: expected.currentStep } : {})
+          },
+          data: split.candidateData
+        });
+        if (claimed.count !== 1) {
+          throw new CandidateConsentStepConflictError({
+            count: 0,
+            candidate: await transactionClient.candidate.findUnique({ where: { id: normalizedCandidateId } })
+          });
+        }
+      }
+
       if (split.stepTransitionInput) {
         stepTransition = await transitionCandidateConsentStep(transactionClient, {
           candidateId: normalizedCandidateId,
@@ -193,10 +219,12 @@ export async function recordCandidateDataConsent(prisma, {
         }
       }
 
-      const candidate = await transactionClient.candidate.update({
-        where: { id: normalizedCandidateId },
-        data: split.candidateData
-      });
+      const candidate = idempotent
+        ? await transactionClient.candidate.findUnique({ where: { id: normalizedCandidateId } })
+        : await transactionClient.candidate.update({
+          where: { id: normalizedCandidateId },
+          data: split.candidateData
+        });
       const event = await transactionClient.candidateDataConsentEvent.create({
         data: {
           candidateId: normalizedCandidateId,

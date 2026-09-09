@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
@@ -118,7 +119,7 @@ function pendingTextRows(harness) {
 }
 
 async function runMiddleware(harness, message) {
-  const middleware = dataConsentGateMiddleware(harness.prisma);
+  const middleware = dataConsentGateMiddleware(withConsentGatePersistence(harness.prisma));
   const req = { body: webhookPayload(message), headers: {}, ip: '127.0.0.1' };
   const res = { sendStatus: (status) => status };
   await middleware(req, res, () => {});
@@ -221,7 +222,7 @@ test('rechazo por texto conserva literalmente la decisión visible en la convers
   assert.equal(pendingTextRows(harness).some((row) => row.waMessageId === inbound.waMessageId), false);
 });
 
-test('PII enviada antes de autorizar no se persiste literalmente y usa una explicación humana', async () => {
+test('texto preconsentimiento conserva trazabilidad literal protegida sin alimentar el perfil', async () => {
   const candidate = {
     id: 'TEST-CANDIDATE-PRECONSENT-PII',
     phone: 'TEST-PHONE-PRECONSENT-PII',
@@ -244,11 +245,11 @@ test('PII enviada antes de autorizar no se persiste literalmente y usa una expli
 
   const inbound = harness.inboundRows.find((row) => row.waMessageId === 'TEST-WAMID-PRECONSENT-PII');
   assert.ok(inbound);
-  assert.notEqual(inbound.body, protectedText);
-  assert.doesNotMatch(inbound.body || '', /99999123/);
-  assert.doesNotMatch(inbound.body || '', /^\[.*\]$/);
-  assert.match(inbound.body || '', /no fue almacenado|no se almacenó/i);
+  assert.equal(inbound.body, protectedText);
+  assert.equal(inbound.rawPayload.preConsentProtected, true);
+  assert.equal(harness.getCandidate().documentNumber, undefined);
   assert.doesNotMatch(JSON.stringify(inbound.rawPayload || {}), /99999123/);
   assert.ok(inbound.respondedAt, 'la PII protegida ya consumida no puede reingresar al batch');
   assert.equal(pendingTextRows(harness).some((row) => row.waMessageId === inbound.waMessageId), false);
 });
+

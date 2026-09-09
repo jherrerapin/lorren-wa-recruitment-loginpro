@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
@@ -43,7 +44,7 @@ function buildHarness({
   const providerOutbound = [];
 
   axios.post = async (_url, payload) => {
-    providerOutbound.push(payload?.text?.body || '');
+    providerOutbound.push(payload?.interactive?.body?.text || payload?.text?.body || '');
     return { data: { messages: [{ id: 'TEST-RC-OUTBOUND' }] } };
   };
 
@@ -60,7 +61,15 @@ function buildHarness({
         candidate = { ...candidate, ...structuredClone(data) };
         return structuredClone(candidate);
       },
-      updateMany: async () => ({ count: 1 })
+      updateMany: async ({ data }) => {
+        if (candidateUpdateFailuresRemaining > 0) {
+          candidateUpdateFailuresRemaining -= 1;
+          throw new Error('TEST-RC-CANDIDATE-UPDATE-FAILURE');
+        }
+        candidateUpdates.push(structuredClone(data));
+        candidate = { ...candidate, ...structuredClone(data) };
+        return { count: 1 };
+      }
     },
     message: {
       findFirst: async ({ where }) => {
@@ -167,7 +176,7 @@ async function runMiddleware(harness, body, id = 'TEST-RC-WAMID') {
   };
   const observed = { nextCalls: 0, statuses: [] };
   const res = { sendStatus: (status) => observed.statuses.push(status) };
-  await dataConsentGateMiddleware(harness.prisma)(req, res, () => { observed.nextCalls += 1; });
+  await dataConsentGateMiddleware(withConsentGatePersistence(harness.prisma))(req, res, () => { observed.nextCalls += 1; });
   return observed;
 }
 
@@ -344,3 +353,4 @@ test('TEST-RC-PRECONSENT-IDEMPOTENCY: el mismo webhook produce una sola adquisic
   assert.equal(transitionFailure.providerOutbound.length, 1);
   assert.equal(transitionFailure.inboundRows[0].rawPayload?.consentGateProcessing?.state, 'COMPLETED');
 });
+

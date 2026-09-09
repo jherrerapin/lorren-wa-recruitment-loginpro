@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
@@ -47,7 +48,7 @@ function createHarness(replay) {
   };
 
   axios.post = async (_url, payload) => {
-    sentBodies.push(payload?.text?.body || '');
+    sentBodies.push(payload?.interactive?.body?.text || payload?.text?.body || '');
     return { data: { messages: [{ id: 'TEST-OUTBOUND-ID' }] } };
   };
 
@@ -148,7 +149,7 @@ function createHarness(replay) {
 
 async function executeReplay(replay) {
   const harness = createHarness(replay);
-  const middleware = dataConsentGateMiddleware(harness.prisma);
+  const middleware = dataConsentGateMiddleware(withConsentGatePersistence(harness.prisma));
   const req = {
     body: webhookPayload(replay.inbound),
     headers: {},
@@ -288,3 +289,4 @@ test('replay CONV-008: un archivo sin interés explícito se bloquea sin pedir c
   assert.equal(finalCandidate.currentStep, replay.expected.finalStep);
   assert.equal(finalCandidate.botResumeMode, replay.expected.finalResumeMode);
 });
+
