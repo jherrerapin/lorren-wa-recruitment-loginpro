@@ -20,7 +20,10 @@ import {
   sendDispatchAllConfirmedAdminAlert,
   sendDispatchNoveltyAdminAlert
 } from './dispatchWhatsappAdminAlerts.js';
-import { recordDispatchWhatsappMessageAudit } from './dispatchWhatsappMonitor.js';
+import {
+  recordDispatchWhatsappMessageAudit,
+  recordDispatchWhatsappProviderStatusAudit
+} from './dispatchWhatsappMonitor.js';
 
 function normalizeConfirmationText(value) {
   return String(value || '')
@@ -340,6 +343,20 @@ export async function processDispatchWhatsappInboundMessage({
         scope, link: target.link, assignment: target.assignment, prismaClient, axiosClient
       }).catch((error) => ({ sent: false, error }));
       adminAlertSent = Boolean(adminAlert?.sent);
+      if (adminAlertSent && adminAlert?.providerMessageId && adminAlert?.phone) {
+        await recordDispatchWhatsappMessageAudit({
+          prismaClient,
+          scope,
+          direction: 'OUTBOUND',
+          phone: adminAlert.phone,
+          body: '⚠️ Alerta de novedad enviada al coordinador.',
+          messageType: 'TEXT',
+          providerMessageId: adminAlert.providerMessageId,
+          dedupeKey: `novelty-admin-alert:${confirmationMessageId}`,
+          source: 'NOVELTY_ADMIN_ALERT',
+          occurredAt: new Date()
+        });
+      }
     }
     setDispatchWhatsappRuntimeState(scope, { lastInboundAt: new Date().toISOString(), lastError: null });
     console.info(`[dispatch-wa-cloud] Novedad de auxiliar procesada. scope=${scope} assignment=${target.assignment.id} reported=${novelty.noveltyReported ? 'yes' : 'no'} adminAlert=${adminAlertSent ? 'sent' : 'not-sent'}.`);
@@ -421,26 +438,50 @@ export async function processDispatchWhatsappProviderStatus({
   const providerMessageId = String(status.id || '').trim();
   const nextStatus = normalizedProviderStatus(status.status);
   if (!providerMessageId || !nextStatus) return { handled: false };
+
+  const auditResult = await recordDispatchWhatsappProviderStatusAudit({
+    prismaClient,
+    scope,
+    providerMessageId,
+    providerStatus: nextStatus,
+    statusPayload: status
+  });
   const link = await prismaClient.dispatchWhatsappConfirmation.findFirst({
     where: { providerMessageId }, select: { id: true, status: true }
   });
-  if (!link || TERMINAL_LINK_STATUSES.has(link.status) || link.status === 'CONFIRMED_REPLY_PENDING') {
-    return { handled: false };
-  }
-  const currentRank = DELIVERY_RANK.get(link.status);
-  const nextRank = DELIVERY_RANK.get(nextStatus);
-  const shouldUpdate = nextStatus === 'FAILED'
-    ? link.status !== 'READ'
-    : nextRank !== undefined && (currentRank === undefined || nextRank >= currentRank);
-  if (!shouldUpdate) return { handled: false };
+  const linkCanUpdate = Boolean(link && !TERMINAL_LINK_STATUSES.has(link.status) && link.status !== 'CONFIRMED_REPLY_PENDING');
+  let linkUpdated = false;
 
-  await prismaClient.dispatchWhatsappConfirmation.update({ where: { id: link.id }, data: { status: nextStatus } });
-  setDispatchWhatsappRuntimeState(scope, {
-    lastProviderStatus: nextStatus,
-    lastProviderStatusAt: new Date().toISOString(),
-    lastError: nextStatus === 'FAILED' ? 'Meta reportó un fallo de entrega en un mensaje de despacho.' : null
-  });
-  return { handled: true, status: nextStatus };
+  if (linkCanUpdate) {
+    const currentRank = DELIVERY_RANK.get(link.status);
+    const nextRank = DELIVERY_RANK.get(nextStatus);
+    const shouldUpdate = nextStatus === 'FAILED'
+      ? link.status !== 'READ'
+      : nextRank !== undefined && (currentRank === undefined || nextRank >= currentRank);
+    if (shouldUpdate) {
+      await prismaClient.dispatchWhatsappConfirmation.update({ where: { id: link.id }, data: { status: nextStatus } });
+      linkUpdated = true;
+      setDispatchWhatsappRuntimeState(scope, {
+        lastProviderStatus: nextStatus,
+        lastProviderStatusAt: auditResult?.statusAt || new Date().toISOString(),
+        lastError: nextStatus === 'FAILED' ? 'Meta reportó un fallo de entrega en un mensaje de despacho.' : null
+      });
+    }
+  }
+
+  if (nextStatus === 'FAILED' && auditResult?.recorded) {
+    console.warn('[dispatch-wa-cloud][DEV] Meta reportó FAILED para un mensaje auditado de Despacho.', {
+      wamid: providerMessageId.slice(0, 80),
+      diagnostic: auditResult.diagnostic || 'Meta reportó FAILED sin detalle adicional.'
+    });
+  }
+
+  return {
+    handled: linkUpdated || Boolean(auditResult?.recorded),
+    status: nextStatus,
+    linkUpdated,
+    auditUpdated: Boolean(auditResult?.recorded)
+  };
 }
 
 function webhookValues(payload = {}) {
