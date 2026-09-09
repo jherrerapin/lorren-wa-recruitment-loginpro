@@ -226,8 +226,14 @@ export async function sendDispatchNoveltyAdminAlert({ scope = 'operational', lin
   const user = await alertUserByUsername(prismaClient, ownerUsername);
   if (!user?.isActive || !user.dispatchAlertPhone) return { sent: false, reason: 'admin_alert_not_configured' };
   try {
-    await sendDispatchWhatsappTextMessage({ scope, phone: user.dispatchAlertPhone, text: buildDispatchNoveltyAdminAlertText(assignment), axiosClient });
-    return { sent: true, userId: user.id };
+    const phone = normalizeDispatchWhatsappPhone(user.dispatchAlertPhone);
+    const providerMessageId = await sendDispatchWhatsappTextMessage({
+      scope,
+      phone,
+      text: buildDispatchNoveltyAdminAlertText(assignment),
+      axiosClient
+    });
+    return { sent: true, userId: user.id, phone, providerMessageId };
   } catch (error) {
     console.warn(`[dispatch-wa-cloud] No fue posible enviar alerta de novedad al administrador ${user.username}: ${error?.message || error}`);
     return { sent: false, reason: 'provider_error', error: String(error?.message || error).slice(0, 300) };
