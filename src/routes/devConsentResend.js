@@ -14,6 +14,8 @@ import { sendReplyButtonsMessage } from '../services/whatsapp.js';
 import { getWhatsappWindowState } from '../services/reminderPolicy.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HISTORY_HEADING = '<h2>Historial de conversación</h2>';
+const DELETE_RECORD_LABEL = 'Eliminar registro completo';
+const DELETE_NO_CONSENT_LABEL = 'Eliminar registro por no consentimiento';
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -87,10 +89,15 @@ export function buildDevConsentResendForm({ candidate = {}, outboundWindow = nul
 }
 
 export function injectDevConsentResendAction(html, context = {}) {
-  if (typeof html !== 'string' || !html.includes(HISTORY_HEADING)) return html;
+  if (typeof html !== 'string') return html;
+  const consentStatus = String(context?.candidate?.dataConsentStatus || '').trim().toUpperCase();
+  let rendered = consentStatus !== 'ACCEPTED'
+    ? html.replace(DELETE_RECORD_LABEL, DELETE_NO_CONSENT_LABEL)
+    : html;
+  if (!rendered.includes(HISTORY_HEADING)) return rendered;
   const form = buildDevConsentResendForm(context);
-  if (!form) return html;
-  return html.replace(HISTORY_HEADING, `${HISTORY_HEADING}\n${form}`);
+  if (!form) return rendered;
+  return rendered.replace(HISTORY_HEADING, `${HISTORY_HEADING}\n${form}`);
 }
 
 async function latestInboundAt(prisma, candidateId) {
