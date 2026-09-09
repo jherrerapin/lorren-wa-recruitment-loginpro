@@ -2,6 +2,7 @@ import { withConsentGatePersistence } from './helpers/consentGatePersistence.js'
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DATA_CONSENT_VERSION,
   dataConsentGateMiddleware,
   evaluateConsentBoundary
 } from '../src/services/dataConsentGate.js';
@@ -28,6 +29,7 @@ function webhookPayload(message) {
 const acceptedCandidate = {
   id: 'candidate-revocation-test',
   dataConsentStatus: 'ACCEPTED',
+  dataConsentVersion: DATA_CONSENT_VERSION,
   currentStep: 'COLLECTING_DATA',
   botResumeMode: null
 };

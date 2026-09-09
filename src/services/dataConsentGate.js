@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { CandidateStatus, ConversationStep, MessageType } from '@prisma/client';
 import { extractMessages, sendTextMessage, sendReplyButtonsMessage, buildReplyButtonsPayload } from './whatsapp.js';
-import { deliverAutomaticOutboundText } from './automaticOutboundDeliveryService.js';
+import { deliverAutomaticOutboundText, canBlockDuplicate } from './automaticOutboundDeliveryService.js';
 import { getCandidateReadiness, buildMissingFieldReply } from './readinessGuard.js';
 import {
   normalizeCandidateFields,
@@ -242,7 +242,8 @@ function isNegativeVacancyConfirmation(text = '') {
 }
 
 function isConsentAlreadyAccepted(candidate = {}) {
-  return candidate?.dataConsentStatus === 'ACCEPTED';
+  return candidate?.dataConsentStatus === 'ACCEPTED'
+    && candidate.dataConsentVersion === DATA_CONSENT_VERSION;
 }
 
 function isAwaitingCampaignVacancyConfirmation(candidate = {}) {
@@ -638,6 +639,7 @@ export function evaluateConsentBoundary(candidate = {}, message = {}, options = 
   if (withdrawalRequested) return { block: true, reason: 'explicit_consent_revocation' };
   if (isConsentAlreadyAccepted(candidate)) return { block: false, reason: 'consent_already_accepted' };
   if (candidate?.dataConsentStatus === 'REVOKED') return { block: true, reason: 'consent_revoked' };
+  if (candidate?.dataConsentStatus === 'ACCEPTED') return { block: true, reason: 'consent_version_required' };
   if (parseConsentPendingMode(candidate?.botResumeMode).pending) return { block: true, reason: 'consent_pending' };
   if (isPreConsentCaptureMode(candidate?.botResumeMode)) return { block: true, reason: 'capture_mode_without_consent' };
   if (isProtectedAttachment(message)) return { block: true, reason: 'attachment_before_consent' };
@@ -931,10 +933,21 @@ async function sendConsentTurnReply(prisma, candidate, message, to, body, source
       if (!fresh) return false;
       if (source === 'data_consent_revoked') return fresh.dataConsentStatus === 'REVOKED';
       if (fresh.botPaused) return false;
-      if (source.startsWith('data_consent_accepted')) return fresh.dataConsentStatus === 'ACCEPTED';
-      return !['ACCEPTED', 'REVOKED'].includes(fresh.dataConsentStatus);
+      if (source.startsWith('data_consent_accepted')) return isConsentAlreadyAccepted(fresh);
+      return !isConsentAlreadyAccepted(fresh) && fresh.dataConsentStatus !== 'REVOKED';
     }
   });
+}
+
+// Delivery policy remains owned by the outbox; unversioned history is never
+// promoted to evidence for the current legal version.
+function isCurrentConsentPrompt(message = {}) {
+  const raw = message.rawPayload;
+  return raw?.consentVersion === DATA_CONSENT_VERSION
+    && (['data_consent_prompt', 'pre_consent_attachment_rejected',
+      'campaign_vacancy_confirmed_interest'].includes(raw.source)
+      || raw.replyKind === 'DATA_CONSENT_PROMPT')
+    && canBlockDuplicate(message);
 }
 
 // Both the middleware and the vacancy resolver enter this single request
@@ -957,23 +970,18 @@ export async function requestDataConsent(prisma, {
     sendText: (recipient, text) => sendReplyButtonsMessage(recipient, text, DATA_CONSENT_BUTTONS),
     beforeSend: async () => {
       const fresh = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-      return fresh && !fresh.botPaused && !['ACCEPTED', 'REVOKED'].includes(fresh.dataConsentStatus);
+      return fresh && !fresh.botPaused && !isConsentAlreadyAccepted(fresh) && fresh.dataConsentStatus !== 'REVOKED';
     },
     prepareClaim: async (tx) => {
       const current = await tx.candidate.findUnique({ where: { id: candidate.id } });
-      if (!current || current.botPaused || ['ACCEPTED', 'REVOKED'].includes(current.dataConsentStatus)) return false;
+      if (!current || current.botPaused || isConsentAlreadyAccepted(current) || current.dataConsentStatus === 'REVOKED') return false;
       const inbound = await findInboundConversationMessage(tx, { candidateId: candidate.id, waMessageId: inboundMessageId });
       if (!inbound.found) return false;
       const historical = await tx.message.findMany({
         where: { candidateId: candidate.id, direction: 'OUTBOUND' },
         select: { rawPayload: true }
       });
-      if (historical.some(({ rawPayload: raw }) => raw && (
-        raw.consentVersion === DATA_CONSENT_VERSION && [
-          'data_consent_prompt', 'pre_consent_attachment_rejected', 'campaign_vacancy_confirmed_interest'
-        ].includes(raw.source)
-        || raw.replyKind === 'DATA_CONSENT_PROMPT' && !raw.consentVersion
-      ))) return false;
+      if (historical.some(isCurrentConsentPrompt)) return false;
       // Preserve the existing snapshot authority for a newly resolved vacancy.
       if (Object.keys(candidateUpdates).length && (
         current.vacancyId !== candidate.vacancyId || current.currentStep !== candidate.currentStep
@@ -1299,7 +1307,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
   const context = { ...(message[CONSENT_TURN_CLAIM]?.processingRawPayload?.consentContext || getConsentContext(candidate)) };
   let vacancy = await loadVacancy(prisma, candidate.vacancyId);
   const consentTurn = shouldRequestConsentForTurn(candidate, body);
-  const consentEligible = context.pending || consentTurn.allowed;
+  let consentEligible = context.pending || consentTurn.allowed;
 
   if (candidate?.dataConsentStatus === 'REVOKED') {
     // Existing REVOKED remains terminal for greetings/interest. Only a new,
@@ -1308,6 +1316,25 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
       && message[CONSENT_TURN_CLAIM]?.processingRawPayload?.consentDecision === 'REVOKED';
     if (!recoveringRejection && !hasExplicitConsentAcceptance(body)) return true;
     if (!recoveringRejection) context.pending = true;
+  }
+
+  if (candidate.dataConsentStatus === 'ACCEPTED' && !isConsentAlreadyAccepted(candidate)
+      && !isExplicitConsentRevocation(body)) {
+    // Historical acceptance proves prior interest, not acceptance of new terms.
+    // Require a current-version prompt before interpreting even an old pending
+    // mode or an affirmative reply. Preserve all historical consent events.
+    const history = await prisma.message.findMany({
+      where: { candidateId: candidate.id, direction: 'OUTBOUND' },
+      select: { rawPayload: true }
+    });
+    if (!history.some(isCurrentConsentPrompt)) {
+      await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id,
+        context: { ...context, cvResendRequired: context.cvResendRequired || isProtectedAttachment(message) },
+        prefix: isProtectedAttachment(message) ? PRE_CONSENT_ATTACHMENT_REPLY : '' });
+      return true;
+    }
+    context.pending = true;
+    consentEligible = true;
   }
 
   if (isProtectedAttachment(message)) {
@@ -1418,7 +1445,13 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
       body,
       questionReply ? 'PENDING_QUESTION' : 'PENDING_NO_REPLY'
     );
-    if (!claimed || !questionReply) return true;
+    if (!claimed) return true;
+    if (!questionReply) {
+      // A new inbound can recover a confirmed failed prompt. The same outbox
+      // policy still suppresses pending/sent/uncertain deliveries.
+      await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id, context });
+      return true;
+    }
     const reply = [questionReply, CONSENT_CLARIFIER_REPLY].filter(Boolean).join('\n\n');
     await sendConsentTurnReply(prisma, candidate, message, from, reply, 'data_consent_pending_question', {
       resumedMode: context.resumeMode,
@@ -1551,7 +1584,8 @@ export function dataConsentGateMiddleware(prisma) {
         }
         const profileDataDecision = evaluateProfileDataEvidence(body, { candidate });
         const boundary = evaluateConsentBoundary(candidate, message, { profileDataDecision });
-        const campaign = isAwaitingCampaignVacancyConfirmation(candidate);
+        const campaign = candidate.dataConsentStatus !== 'ACCEPTED'
+          && isAwaitingCampaignVacancyConfirmation(candidate);
         if (boundary.reason === 'protected_step_without_consent' && !candidate.vacancyId
             && !isProtectedAttachment(message) && !profileDataDecision.containsProfileData) {
           await handleConsentPrerequisite(prisma, candidate, message, from, null, boundary.reason);

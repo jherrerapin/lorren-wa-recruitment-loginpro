@@ -109,7 +109,7 @@ function deliveryState(message = {}) {
   return normalizeScopePart(message?.rawPayload?.delivery?.state).toUpperCase();
 }
 
-function canBlockDuplicate(message = {}) {
+export function canBlockDuplicate(message = {}) {
   const state = deliveryState(message);
   if (!state) return true; // outbound histórico previo al contrato de delivery
   // UNKNOWN significa que el proveedor pudo haber recibido el mensaje. No se
@@ -146,10 +146,11 @@ async function claimInsideTransaction(tx, input) {
         direction: MessageDirection.OUTBOUND,
         rawPayload: { path: ['delivery', 'dedupeKey'], equals: input.idempotencyKey }
       },
-      select: { id: true }
+      select: { id: true, rawPayload: true }
     });
-    if (existing.length) {
-      return { claimed: false, suppressed: true, duplicateMessageId: existing[0].id, scope: scope.key };
+    const duplicate = existing.find(canBlockDuplicate);
+    if (duplicate) {
+      return { claimed: false, suppressed: true, duplicateMessageId: duplicate.id, scope: scope.key };
     }
   }
   if (input.prepareClaim && await input.prepareClaim(tx) === false) {

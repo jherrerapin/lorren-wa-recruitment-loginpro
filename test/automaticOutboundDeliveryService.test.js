@@ -24,7 +24,8 @@ function createHarness({ failFirstSerializable = false } = {}) {
           .filter((message) => (
             message.candidateId === args.where?.candidateId
             && message.direction === args.where?.direction
-            && message.messageType === args.where?.messageType
+            && (!args.where?.messageType || message.messageType === args.where.messageType)
+            && (!args.where?.rawPayload?.path || message.rawPayload?.delivery?.dedupeKey === args.where.rawPayload.equals)
             && message.createdAt.getTime() >= since
           ))
           .sort((a, b) => b.createdAt - a.createdAt)
@@ -251,4 +252,19 @@ test('delivery automático delega lastOutboundAt y no escribe Candidate directam
 test('contrato del harness usa mensajes OUTBOUND TEXT persistidos', () => {
   assert.equal(MessageDirection.OUTBOUND, 'OUTBOUND');
   assert.equal(MessageType.TEXT, 'TEXT');
+});
+
+test('durable key shares the existing delivery-state policy for FAILED/SENDING/SENT/UNKNOWN', async () => {
+  for (const state of ['FAILED', 'SENDING', 'SENT', 'UNKNOWN']) {
+    const h = createHarness();
+    const input = { ...deliveryInput(), idempotencyKey: 'TEST-DURABLE-EVENT' };
+    h.messages.push({ id: 'TEST-PREVIOUS', candidateId: input.candidateId,
+      direction: MessageDirection.OUTBOUND, messageType: MessageType.INTERACTIVE,
+      createdAt: new Date(0), body: input.body,
+      rawPayload: { delivery: { dedupeKey: input.idempotencyKey, state } } });
+    const results = await Promise.all([1, 2].map(() => deliverAutomaticOutboundText(h.prisma, input, { sendText: h.sendText })));
+    assert.equal(h.sends.length, state === 'FAILED' ? 1 : 0, state);
+    assert.equal(results.filter(r => r.sent).length, state === 'FAILED' ? 1 : 0, state);
+    assert.equal(h.messages.length, state === 'FAILED' ? 2 : 1, state);
+  }
 });

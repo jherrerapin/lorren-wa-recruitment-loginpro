@@ -71,7 +71,7 @@ test('H: natural acceptance and rejection retain the same semantic authority', a
 });
 
 test('I: ACCEPTED suppresses consent even with a stale campaign-confirmation mode', async () => {
-  const h = createConsentGateHarness({ candidate: { dataConsentStatus: 'ACCEPTED', botResumeMode: 'campaign_vacancy_pending_confirmation' } });
+  const h = createConsentGateHarness({ candidate: { dataConsentStatus: 'ACCEPTED', dataConsentVersion: DATA_CONSENT_VERSION, botResumeMode: 'campaign_vacancy_pending_confirmation' } });
   await h.run(text('TEST-ALREADY', 'Quiero postularme'));
   await requestDataConsent(h.prisma, { candidate: h.getCandidate(), to: 'TEST-PHONE', inboundMessageId: 'TEST-ALREADY' });
   assert.equal(h.sent.length, 0); assert.equal(h.events.length, 0);
@@ -168,4 +168,98 @@ test('acceptance asks for the CV when all canonical profile fields are complete'
   await pending(h); await h.run(button('TEST-CV-NEXT', 0));
   assert.match(h.sent[1].text.body, /adjunta tu hoja de vida/i);
   assert.doesNotMatch(h.sent[1].text.body, /hola|ciudad|cargo|te interesa/i);
+});
+
+test('HTTP 429/400: requestDataConsent outbox retries the same inbound and delivers only once', async () => {
+  for (const status of [429, 400]) {
+    const h = createConsentGateHarness();
+    let attempts = 0, delivered = 0;
+    axios.post = async () => {
+      attempts++;
+      if (attempts === 1) throw Object.assign(new Error('TEST-confirmed-rejection'), { response: { status } });
+      delivered++;
+      return { data: { messages: [{ id: 'TEST-RECOVERED' }] } };
+    };
+    const inbound = text('TEST-FAILED-RETRY', 'Quiero postularme');
+    assert.equal((await h.run(inbound)).status, 503);
+    assert.deepEqual(h.messages.filter(m => m.direction === 'OUTBOUND').map(m => m.rawPayload.delivery.state), ['FAILED']);
+    await Promise.all([h.run(inbound), h.run(inbound)]);
+    await h.run(inbound);
+    assert.equal(attempts, 2); assert.equal(delivered, 1); assert.equal(h.events.length, 0);
+    assert.deepEqual(h.messages.filter(m => m.direction === 'OUTBOUND').map(m => m.rawPayload.delivery.state), ['FAILED', 'SENT']);
+  }
+});
+
+test('current-version acceptance preserves fields, vacancy and step without another prompt', async () => {
+  const h = createConsentGateHarness({ candidate: { dataConsentStatus: 'ACCEPTED',
+    dataConsentVersion: DATA_CONSENT_VERSION, fullName: 'Persona Sintética',
+    currentStep: 'ASK_CV', botResumeMode: null } });
+  const before = h.getCandidate();
+  await h.run(text('TEST-CURRENT', 'Quiero continuar'));
+  assert.deepEqual(h.getCandidate(), before); assert.equal(h.sent.length, 0); assert.equal(h.events.length, 0);
+});
+
+test('old/null acceptance requires current terms; old prompt or button cannot authorize the new version', async () => {
+  for (const version of ['TEST-OLD-VERSION', null]) {
+    const h = createConsentGateHarness({ candidate: { dataConsentStatus: 'ACCEPTED',
+      dataConsentVersion: version, fullName: 'Persona Sintética', botResumeMode: 'awaiting_data_consent' } });
+    const historicalEvent = { status: 'ACCEPTED', version };
+    h.events.push(structuredClone(historicalEvent));
+    await h.prisma.message.create({ data: { candidateId: 'TEST-CANDIDATE', direction: 'OUTBOUND',
+      rawPayload: { replyKind: 'DATA_CONSENT_PROMPT', ...(version ? { consentVersion: version } : {}) } } });
+    await h.run(text('TEST-OLD-PENDING-YES', 'sí autorizo'));
+    assert.equal(prompts(h).length, 1); assert.deepEqual(h.events, [historicalEvent]);
+    assert.equal(h.getCandidate().dataConsentVersion, version);
+    const oldButton = button('TEST-OLD-BUTTON', 0);
+    oldButton.interactive.button_reply.id = 'data_consent:TEST-OLD-VERSION:accept';
+    await h.run(oldButton);
+    assert.deepEqual(h.events, [historicalEvent]);
+    await Promise.all([h.run(button('TEST-NEW-BUTTON', 0)), h.run(button('TEST-NEW-BUTTON', 0))]);
+    assert.equal(h.events.length, 2); assert.deepEqual(h.events[0], historicalEvent);
+    assert.equal(h.getCandidate().dataConsentVersion, DATA_CONSENT_VERSION);
+    assert.equal(h.getCandidate().fullName, 'Persona Sintética');
+    assert.equal(h.getCandidate().vacancyId, 'TEST-VACANCY');
+    assert.equal(prompts(h).length, 1);
+  }
+});
+
+test('a later real inbound also recovers FAILED without duplicating the delivered prompt', async () => {
+  const h = createConsentGateHarness();
+  let attempts = 0;
+  axios.post = async () => {
+    if (++attempts === 1) throw Object.assign(new Error('TEST-429'), { response: { status: 429 } });
+    return { data: { messages: [{ id: 'TEST-RETRY-NEW-INBOUND' }] } };
+  };
+  await h.run(text('TEST-FIRST-429', 'Quiero postularme'));
+  await h.run(text('TEST-NEW-INBOUND', 'Hola'));
+  await h.run(text('TEST-NEW-INBOUND', 'Hola'));
+  assert.equal(attempts, 2); assert.equal(h.events.length, 0);
+});
+
+test('FAILED recovery honors a human pause before the next provider attempt', async () => {
+  const h = createConsentGateHarness();
+  let attempts = 0;
+  axios.post = async () => {
+    attempts++;
+    throw Object.assign(new Error('TEST-429'), { response: { status: 429 } });
+  };
+  const inbound = text('TEST-PAUSED-429', 'Quiero postularme');
+  await h.run(inbound);
+  await h.prisma.candidate.update({ data: { botPaused: true } });
+  const result = await requestDataConsent(h.prisma, {
+    candidate: h.getCandidate(), to: 'TEST-PHONE', inboundMessageId: inbound.id
+  });
+  assert.equal(result.suppressed, true); assert.equal(attempts, 1);
+  assert.equal(h.getCandidate().botPaused, true); assert.equal(h.events.length, 0);
+});
+
+test('renewal can be rejected once without altering historical acceptance', async () => {
+  const h = createConsentGateHarness({ candidate: { dataConsentStatus: 'ACCEPTED', dataConsentVersion: 'TEST-OLD' } });
+  h.events.push({ status: 'ACCEPTED', version: 'TEST-OLD' });
+  await h.run(text('TEST-RENEW', 'Quiero continuar'));
+  await Promise.all([h.run(button('TEST-RENEW-REJECT', 1)), h.run(button('TEST-RENEW-REJECT', 1))]);
+  await h.run(text('TEST-AFTER-REJECT', 'Hola'));
+  assert.deepEqual(h.events.map(e => e.status), ['ACCEPTED', 'REVOKED']);
+  assert.equal(h.events[0].version, 'TEST-OLD'); assert.equal(h.getCandidate().dataConsentStatus, 'REVOKED');
+  assert.equal(h.sent.length, 2);
 });
