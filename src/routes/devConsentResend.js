@@ -8,8 +8,7 @@ import {
   buildDataConsentPromptReply
 } from '../services/dataConsentGate.js';
 import { sendReplyButtonsMessage } from '../services/whatsapp.js';
-
-const WHATSAPP_WINDOW_MS = 24 * 60 * 60 * 1000;
+import { getWhatsappWindowState } from '../services/reminderPolicy.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HISTORY_HEADING = '<h2>Historial de conversación</h2>';
 
@@ -124,11 +123,7 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
   const currentTime = validDate(now());
   if (!currentTime) throw new TypeError('dev_consent_resend_clock_invalid');
   const inboundAt = validDate(await latestInboundAt(prisma, candidateId));
-  const windowOpen = Boolean(
-    inboundAt
-    && currentTime.getTime() >= inboundAt.getTime()
-    && currentTime.getTime() - inboundAt.getTime() <= WHATSAPP_WINDOW_MS
-  );
+  const windowOpen = getWhatsappWindowState(inboundAt, currentTime).isOpen;
   if (!windowOpen) {
     throw consentResendError(
       'dev_consent_resend_window_closed',
