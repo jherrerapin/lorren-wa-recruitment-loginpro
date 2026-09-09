@@ -659,7 +659,7 @@
       <p style="margin-bottom:12px;color:#64748b;">Estas acciones son solo para limpieza manual y no están disponibles para reclutador.</p>
       <form method="post" action="/admin/candidates/<%= candidate.id %>/delete" onsubmit="return confirm('¿Seguro que deseas eliminar este candidato con sus mensajes y agendamientos? Esta acción no se puede deshacer.');">
         <input type="hidden" name="returnTo" value="<%= returnToPath || '/admin' %>" />
-        <button type="submit" class="btn-danger">Eliminar registro completo</button>
+        <button type="submit" class="btn-danger">Eliminar registro por no consentimiento</button>
       </form>
     </div>
     <% } %>
