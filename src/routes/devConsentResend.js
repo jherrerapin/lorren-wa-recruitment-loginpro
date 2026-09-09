@@ -5,7 +5,9 @@ import { deliverAutomaticOutboundText } from '../services/automaticOutboundDeliv
 import {
   DATA_CONSENT_BUTTONS,
   DATA_CONSENT_VERSION,
-  buildDataConsentPromptReply
+  buildConsentPendingMode,
+  buildDataConsentPromptReply,
+  parseConsentPendingMode
 } from '../services/dataConsentGate.js';
 import { sendReplyButtonsMessage } from '../services/whatsapp.js';
 import { getWhatsappWindowState } from '../services/reminderPolicy.js';
@@ -56,6 +58,12 @@ export function buildConsentResendIdempotencyKey(candidateId, nonce) {
     throw new TypeError('dev_consent_resend_nonce_invalid');
   }
   return `admin-resend-data-consent:${normalizedCandidateId}:${DATA_CONSENT_VERSION}:${normalizedNonce}`;
+}
+
+export function buildDevConsentPendingMode(candidate = {}) {
+  const existing = parseConsentPendingMode(candidate?.botResumeMode);
+  if (existing.pending) return buildConsentPendingMode(existing);
+  return buildConsentPendingMode({ resumeMode: null, cvResendRequired: false });
 }
 
 export function buildDevConsentResendForm({ candidate = {}, outboundWindow = null, nonce = randomUUID() } = {}) {
@@ -109,7 +117,8 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
     select: {
       id: true,
       phone: true,
-      dataConsentStatus: true
+      dataConsentStatus: true,
+      botResumeMode: true
     }
   });
   if (!candidate) throw consentResendError('dev_consent_resend_candidate_not_found', 'Candidato no encontrado.');
@@ -150,7 +159,28 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
     }
   }, {
     sendText: (recipient, text) => sendButtons(recipient, text, DATA_CONSENT_BUTTONS),
-    now
+    now,
+    prepareClaim: async (tx) => {
+      const fresh = await tx.candidate.findUnique({
+        where: { id: candidateId },
+        select: { id: true, dataConsentStatus: true, botResumeMode: true }
+      });
+      if (!fresh || !canShowDevConsentResend(fresh)) return false;
+      const nextMode = buildDevConsentPendingMode(fresh);
+      const updated = await tx.candidate.updateMany({
+        where: {
+          id: candidateId,
+          dataConsentStatus: 'PENDING',
+          botResumeMode: fresh.botResumeMode ?? null
+        },
+        data: {
+          botResumeMode: nextMode,
+          reminderScheduledFor: null,
+          reminderState: 'SKIPPED'
+        }
+      });
+      return updated.count === 1;
+    }
   });
 }
 
