@@ -301,24 +301,38 @@ test('rechaza documentos equivalentes repetidos dentro del mismo archivo', () =>
   assert.throws(() => prepareDispatchWorkerExcelRows(parsed, { cities }), DispatchWorkerExcelValidationError);
 });
 
-test('altas manuales bloquean identidad repetida sin agregar aviso y Personal ofrece descarga Excel', () => {
+test('altas manuales bloquean identidad repetida, avisan en el formulario y Personal ofrece descarga Excel', () => {
   const publicRoute = fs.readFileSync('src/routes/publicDispatchClient.js', 'utf8');
   const extrasRoute = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
-  const view = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
+  const personalView = fs.readFileSync('src/views/operacionesPersonal.ejs', 'utf8');
+  const createView = fs.readFileSync('src/views/operacionesPersonalNuevo.ejs', 'utf8');
+  const duplicateCheck = sourceBlock(publicRoute, "router.post('/admin-worker/documento-existe'", "router.post('/admin-clientes'");
   const canonicalCreate = sourceBlock(publicRoute, "router.post('/admin-worker/nuevo'", "router.get('/admin-worker/:workerId/editar'");
   const legacyCreate = sourceBlock(extrasRoute, "router.post('/personal/nuevo'", "router.get('/personal/:workerId/editar'");
   const exportRoute = sourceBlock(extrasRoute, "router.get('/personal/exportar-excel'", "router.get('/personal/importar-excel'");
 
   assert.match(publicRoute, /findDispatchWorkerByDocumentIdentity/);
-  assert.match(canonicalCreate, /if \(!worker\) return res\.redirect\('\/admin\/operaciones\/personal'\)/);
+  assert.match(duplicateCheck, /findDispatchWorkerByDocumentIdentity\(prisma, documentNumber\)/);
+  assert.match(duplicateCheck, /res\.json\(\{ exists: Boolean\(duplicate\) \}\)/);
+  assert.doesNotMatch(duplicateCheck, /fullName|phone|documentType/);
+  assert.match(canonicalCreate, /DUPLICATE_WORKER_DOCUMENT_MESSAGE/);
+  assert.match(canonicalCreate, /\/operaciones\/admin-worker\/nuevo\?error=/);
   assert.match(legacyCreate, /findDispatchWorkerByDocumentIdentity\(prisma, workerData\.documentNumber\)/);
   assert.match(legacyCreate, /if \(duplicate\) return res\.redirect\('\/admin\/operaciones\/personal'\)/);
+  assert.match(createView, /id="asyncToast" class="async-toast"/);
+  assert.match(createView, /addEventListener\('blur'/);
+  assert.match(createView, /addEventListener\('submit'/);
+  assert.match(createView, /\/operaciones\/admin-worker\/documento-existe/);
+  assert.match(createView, /Este número de documento ya está registrado\./);
+  assert.match(createView, /if \(mode === 'create'\)/);
+  assert.doesNotMatch(createView, /\b(?:window\.)?alert\s*\(/);
+  assert.doesNotMatch(createView, /No se permiten auxiliares duplicados/i);
   assert.match(exportRoute, /dispatchWorker\.findMany\(\{\s*select:/);
   assert.doesNotMatch(exportRoute, /\bwhere\s*:/);
   assert.match(exportRoute, /buildDispatchWorkersExportWorkbook\(workers\)/);
   assert.match(exportRoute, /Content-Disposition/);
-  assert.match(view, /href="\/admin\/operaciones\/personal\/exportar-excel"/);
-  assert.match(view, />&#11015; Descargar Excel<\/a>/);
+  assert.match(personalView, /href="\/admin\/operaciones\/personal\/exportar-excel"/);
+  assert.match(personalView, />&#11015; Descargar Excel<\/a>/);
 });
 
 test('catálogo exportado ya no contiene columna de vacantes', () => {
