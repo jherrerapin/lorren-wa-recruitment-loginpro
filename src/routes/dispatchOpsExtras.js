@@ -18,7 +18,8 @@ import {
   DISPATCH_WORKER_EXCEL_COLUMNS,
   applyDispatchWorkerImportBatch,
   buildDispatchWorkerImportReview,
-  buildDispatchWorkerImportTemplate
+  buildDispatchWorkerImportTemplate,
+  findDispatchWorkerByDocumentIdentity
 } from '../services/dispatchWorkerExcelImport.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ACTIVE_DISPATCH_ASSIGNMENT_STATUSES;
@@ -31,6 +32,7 @@ const DEFAULT_ABSENCE_GRACE_MINUTES = 15;
 const DISABLED_OPERATIONAL_STATUSES = ['DISABLED', 'INACTIVE'];
 
 const DISPATCH_OWNED_SOURCES = ['MANUAL', 'EXCEL_IMPORT', 'CANDIDATE'];
+const XLSX_MIME_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 const MAX_EXCEL_SIZE_BYTES = 5 * 1024 * 1024;
 const DISPATCH_WORKER_IMPORT_REVIEW_TTL_MS = 2 * 60 * 60 * 1000;
@@ -259,6 +261,96 @@ async function replaceWorkerRelations(prisma, workerId, body) {
     ...(cityIds.length ? [prisma.dispatchWorkerCity.createMany({ data: cityIds.map((cityId) => ({ workerId, cityId })), skipDuplicates: true })] : []),
     ...(vacancyIds.length ? [prisma.dispatchWorkerVacancy.createMany({ data: vacancyIds.map((vacancyId) => ({ workerId, vacancyId })), skipDuplicates: true })] : [])
   ]);
+}
+
+function exportWorkerStatus(value) {
+  if (value === 'CONTRATADO') return 'Contratado / disponible';
+  if (DISABLED_OPERATIONAL_STATUSES.includes(value)) return 'Inactivo / desactivado';
+  return value || 'Sin estado';
+}
+
+function exportWorkerSource(value) {
+  return ({ CANDIDATE: 'Bot / candidato', MANUAL: 'Manual', EXCEL_IMPORT: 'Excel masivo' }[value] || value || 'Sin origen');
+}
+
+export function buildDispatchWorkersExportWorkbook(workers = [], generatedAt = new Date()) {
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Lórren Operaciones';
+  workbook.created = generatedAt;
+  const worksheet = workbook.addWorksheet('Personal operativo', {
+    views: [{ state: 'frozen', ySplit: 4 }],
+    properties: { defaultRowHeight: 20 }
+  });
+  const columns = [
+    ['Nombre completo', 30],
+    ['Teléfono', 18],
+    ['Tipo de documento', 18],
+    ['Número de documento', 22],
+    ['Ciudad de residencia', 22],
+    ['Localidad / barrio', 24],
+    ['Medio de transporte', 20],
+    ['Tipo de contrato', 18],
+    ['Estado operativo', 24],
+    ['Sucursales operativas', 34],
+    ['Origen', 20],
+    ['Notas operativas', 38],
+    ['Hoja de vida', 30],
+    ['Fecha de registro', 22],
+    ['Última actualización', 22]
+  ];
+  columns.forEach(([, width], index) => { worksheet.getColumn(index + 1).width = width; });
+  worksheet.mergeCells('A1:O1');
+  worksheet.getCell('A1').value = 'Personal operativo — LoginPro';
+  worksheet.getCell('A1').font = { bold: true, size: 18, color: { argb: 'FFFFFFFF' } };
+  worksheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E2D3D' } };
+  worksheet.getCell('A1').alignment = { vertical: 'middle', horizontal: 'left' };
+  worksheet.getRow(1).height = 32;
+  worksheet.mergeCells('A2:O2');
+  worksheet.getCell('A2').value = `Auxiliares registrados: ${workers.length} · Generado: ${generatedAt.toLocaleString('es-CO', { timeZone: 'America/Bogota' })}`;
+  worksheet.getCell('A2').font = { italic: true, color: { argb: 'FF475569' } };
+  worksheet.getCell('A2').alignment = { vertical: 'middle', horizontal: 'left' };
+  const rows = workers.map((worker) => [
+    worker.fullName || '',
+    worker.phone || '',
+    worker.documentType || '',
+    worker.documentNumber || '',
+    worker.residenceCity || '',
+    worker.residenceLocality || '',
+    worker.transportMode || '',
+    worker.contractType === 'CONTRATISTA' ? 'Contratista' : (worker.contractType === 'DIRECTO' ? 'Directo' : (worker.contractType || '')),
+    exportWorkerStatus(worker.operationalStatus),
+    (worker.cities || []).map((entry) => entry.city?.name).filter(Boolean).sort((a, b) => a.localeCompare(b, 'es')).join(', '),
+    exportWorkerSource(worker.source),
+    worker.notes || '',
+    worker.cvOriginalName || '',
+    worker.createdAt instanceof Date ? worker.createdAt : (worker.createdAt ? new Date(worker.createdAt) : null),
+    worker.updatedAt instanceof Date ? worker.updatedAt : (worker.updatedAt ? new Date(worker.updatedAt) : null)
+  ]);
+  worksheet.addTable({
+    name: 'PersonalOperativoRegistrado',
+    ref: 'A4',
+    headerRow: true,
+    totalsRow: false,
+    style: { theme: 'TableStyleMedium2', showRowStripes: true, showColumnStripes: false },
+    columns: columns.map(([name]) => ({ name })),
+    rows
+  });
+  const header = worksheet.getRow(4);
+  header.height = 30;
+  header.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D7A6B' } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+  });
+  for (let rowNumber = 5; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+    worksheet.getRow(rowNumber).alignment = { vertical: 'top', wrapText: true };
+    worksheet.getRow(rowNumber).getCell(14).numFmt = 'dd/mm/yyyy hh:mm';
+    worksheet.getRow(rowNumber).getCell(15).numFmt = 'dd/mm/yyyy hh:mm';
+  }
+  worksheet.getColumn(4).numFmt = '@';
+  worksheet.getColumn(2).numFmt = '@';
+  worksheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 };
+  return workbook;
 }
 
 /**
@@ -522,6 +614,34 @@ export function dispatchOpsExtrasRouter(prisma) {
     });
   });
 
+  router.get('/personal/exportar-excel', requireOps, async (_req, res) => {
+    const workers = await prisma.dispatchWorker.findMany({
+      select: {
+        fullName: true,
+        phone: true,
+        documentType: true,
+        documentNumber: true,
+        residenceCity: true,
+        residenceLocality: true,
+        transportMode: true,
+        contractType: true,
+        operationalStatus: true,
+        source: true,
+        notes: true,
+        cvOriginalName: true,
+        createdAt: true,
+        updatedAt: true,
+        cities: { select: { city: { select: { name: true } } } }
+      },
+      orderBy: [{ fullName: 'asc' }, { createdAt: 'asc' }]
+    });
+    const workbook = buildDispatchWorkersExportWorkbook(workers);
+    res.setHeader('Content-Type', XLSX_MIME_TYPE);
+    res.setHeader('Content-Disposition', `attachment; filename="personal-operativo-${todayIsoDate()}.xlsx"`);
+    await workbook.xlsx.write(res);
+    return res.end();
+  });
+
   router.get('/personal/importar-excel', requireOps, async (req, res) => {
     await prisma.dispatchWorkerImportBatch.deleteMany({ where: { expiresAt: { lt: new Date() } } });
     const [cities, vacancies] = await loadWorkerFormLists(prisma);
@@ -636,6 +756,8 @@ export function dispatchOpsExtrasRouter(prisma) {
     if (req.workerCvUploadError) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: req.workerCvUploadError });
     if (missingFields.length) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: buildRequiredWorkerFieldsMessage(missingFields) });
     try {
+      const duplicate = await findDispatchWorkerByDocumentIdentity(prisma, workerData.documentNumber);
+      if (duplicate) return res.redirect('/admin/operaciones/personal');
       const worker = await prisma.dispatchWorker.create({ data: { ...applyWorkerCvFile(workerData, req.file), source: 'MANUAL' } });
       await replaceWorkerRelations(prisma, worker.id, req.body);
       return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('Auxiliar manual creado.')}`);
