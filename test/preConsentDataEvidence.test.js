@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
@@ -41,7 +42,7 @@ function buildHarness({ candidateOverrides = {}, persistedInboundIds = [] } = {}
   const candidateUpdates = [];
 
   axios.post = async (_url, payload) => {
-    outbound.push(payload?.text?.body || '');
+    outbound.push(payload?.interactive?.body?.text || payload?.text?.body || '');
     return { data: { messages: [{ id: 'TEST-OUTBOUND-DATA-EVIDENCE' }] } };
   };
 
@@ -86,7 +87,7 @@ function buildHarness({ candidateOverrides = {}, persistedInboundIds = [] } = {}
 }
 
 async function runMiddleware(harness, body, id = 'TEST-WAMID-DATA-EVIDENCE') {
-  const middleware = dataConsentGateMiddleware(harness.prisma);
+  const middleware = dataConsentGateMiddleware(withConsentGatePersistence(harness.prisma));
   const req = {
     body: { entry: [{ changes: [{ value: { messages: [textMessage(body, id)] } }] }] },
     headers: {},
@@ -244,7 +245,7 @@ test('el texto preconsentimiento queda visible en auditoría pero fuera del perf
   };
   const observed = { nextCalls: 0, statuses: [] };
   const res = { sendStatus: (status) => observed.statuses.push(status) };
-  await dataConsentGateMiddleware(prisma)(req, res, () => { observed.nextCalls += 1; });
+  await dataConsentGateMiddleware(withConsentGatePersistence(prisma))(req, res, () => { observed.nextCalls += 1; });
 
   assert.equal(observed.nextCalls, 0);
   assert.deepEqual(observed.statuses, [200]);
@@ -267,3 +268,4 @@ test('el texto preconsentimiento queda visible en auditoría pero fuera del perf
   assert.equal(interpretationContext.recentConversation.some((row) => row.body.includes('Persona de Prueba')), false);
   assert.equal(interpretationContext.recentConversation.some((row) => row.body.includes('Usme')), false);
 });
+

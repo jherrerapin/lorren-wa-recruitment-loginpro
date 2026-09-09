@@ -102,6 +102,36 @@ export async function sendTextMessage(to, body) {
   return postWhatsAppPayload(payload);
 }
 
+export function buildReplyButtonsPayload(to, body, buttons = []) {
+  const text = requireTemplateString(body, 'whatsapp_interactive_body');
+  if (text.length > 1024) throw new TypeError('whatsapp_interactive_body_too_long');
+  if (!Array.isArray(buttons) || buttons.length < 1 || buttons.length > 3) {
+    throw new TypeError('whatsapp_interactive_buttons_invalid');
+  }
+  const ids = new Set();
+  const titles = new Set();
+  const replies = buttons.map(({ id, title }) => {
+    id = requireTemplateString(id, 'whatsapp_interactive_button_id');
+    title = requireTemplateString(title, 'whatsapp_interactive_button_title');
+    if (id.length > 256 || title.length > 20 || ids.has(id) || titles.has(title)) {
+      throw new TypeError('whatsapp_interactive_button_invalid');
+    }
+    ids.add(id);
+    titles.add(title);
+    return { type: 'reply', reply: { id, title } };
+  });
+  return {
+    messaging_product: 'whatsapp',
+    to: requireTemplateString(to, 'whatsapp_interactive_recipient'),
+    type: 'interactive',
+    interactive: { type: 'button', body: { text }, action: { buttons: replies } }
+  };
+}
+
+export async function sendReplyButtonsMessage(to, body, buttons) {
+  return postWhatsAppPayload(buildReplyButtonsPayload(to, body, buttons));
+}
+
 export async function sendImageMessage(to, image, caption = '') {
   const payload = {
     messaging_product: 'whatsapp',

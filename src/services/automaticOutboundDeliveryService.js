@@ -137,6 +137,24 @@ function isDuplicateReply(body, rawPayload, message) {
 
 async function claimInsideTransaction(tx, input) {
   const scope = buildDeliveryScope(input.rawPayload);
+  // A caller with a durable business event must not fall back to a time-window
+  // similarity check. The existing serializable outbox owns both claim types.
+  if (input.idempotencyKey) {
+    const existing = await tx.message.findMany({
+      where: {
+        candidateId: input.candidateId,
+        direction: MessageDirection.OUTBOUND,
+        rawPayload: { path: ['delivery', 'dedupeKey'], equals: input.idempotencyKey }
+      },
+      select: { id: true }
+    });
+    if (existing.length) {
+      return { claimed: false, suppressed: true, duplicateMessageId: existing[0].id, scope: scope.key };
+    }
+  }
+  if (input.prepareClaim && await input.prepareClaim(tx) === false) {
+    return { claimed: false, suppressed: true, scope: scope.key };
+  }
   const dedupeWindowMs = scope.strong ? STRONG_SCOPE_WINDOW_MS : WEAK_SCOPE_WINDOW_MS;
   const createdSince = new Date(input.startedAt.getTime() - dedupeWindowMs);
   const recent = await tx.message.findMany({
@@ -156,7 +174,7 @@ async function claimInsideTransaction(tx, input) {
     }
   });
 
-  const duplicate = recent.find((message) => isDuplicateReply(input.body, input.rawPayload, message));
+  const duplicate = !input.idempotencyKey && recent.find((message) => isDuplicateReply(input.body, input.rawPayload, message));
   if (duplicate) {
     return {
       claimed: false,
@@ -166,7 +184,7 @@ async function claimInsideTransaction(tx, input) {
     };
   }
 
-  const deliveryKey = normalizeReplySignature([
+  const deliveryKey = input.idempotencyKey || normalizeReplySignature([
     input.candidateId,
     scope.key,
     input.body
@@ -185,7 +203,7 @@ async function claimInsideTransaction(tx, input) {
   };
   const persisted = await persistOutboundConversationMessage(tx, {
     candidateId: input.candidateId,
-    messageType: MessageType.TEXT,
+    messageType: input.messageType,
     body: input.body,
     rawPayload
   });
@@ -236,17 +254,27 @@ export async function deliverAutomaticOutboundText(prismaInput, input = {}, depe
   const sendText = requireSendText(dependencies.sendText);
   const now = normalizeNow(dependencies.now || (() => new Date()));
   const beforeSend = normalizeOptionalHook(dependencies.beforeSend, 'automatic_outbound_before_send');
+  const prepareClaim = normalizeOptionalHook(dependencies.prepareClaim, 'automatic_outbound_prepare_claim');
   const candidateId = requireNonEmptyString(input.candidateId, 'automatic_outbound_candidate_id');
   const to = requireNonEmptyString(input.to, 'automatic_outbound_to');
   const body = requireNonEmptyString(input.body, 'automatic_outbound_body');
   const rawPayload = normalizeRawPayload(input.rawPayload);
   const startedAt = now();
+  const idempotencyKey = input.idempotencyKey == null ? null
+    : requireNonEmptyString(input.idempotencyKey, 'automatic_outbound_idempotency_key');
+  const messageType = input.messageType || MessageType.TEXT;
+  if (![MessageType.TEXT, MessageType.INTERACTIVE].includes(messageType)) {
+    throw new TypeError('automatic_outbound_message_type_invalid');
+  }
 
   const claim = await claimAutomaticOutbound(prisma, {
     candidateId,
     body,
     rawPayload,
-    startedAt
+    startedAt,
+    idempotencyKey,
+    messageType,
+    prepareClaim
   });
   if (!claim.claimed) {
     return {
@@ -259,7 +287,11 @@ export async function deliverAutomaticOutboundText(prismaInput, input = {}, depe
   }
 
   try {
-    if (beforeSend) await beforeSend();
+    if (beforeSend && await beforeSend() === false) {
+      await updateOutboundConversationDelivery(prisma, { messageId: claim.messageId,
+        state: 'FAILED', occurredAt: now(), lastError: 'cancelled_before_send' });
+      return { sent: false, suppressed: true, reason: 'cancelled_before_send', messageId: claim.messageId };
+    }
   } catch (error) {
     await markDeliveryFailure(prisma, claim.messageId, error, now());
     throw error;

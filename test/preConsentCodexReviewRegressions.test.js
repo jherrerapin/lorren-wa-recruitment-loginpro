@@ -1,3 +1,4 @@
+import { matches } from './helpers/consentGateHarness.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -123,6 +124,7 @@ function jsonEquals(left, right) {
 }
 
 function matchesMessageWhere(row, where = {}) {
+  if (where.rawPayload?.path && !matches(row, { rawPayload: where.rawPayload })) return false;
   if (where.id && row.id !== where.id) return false;
   if (where.candidateId && row.candidateId !== where.candidateId) return false;
   if (where.waMessageId && row.waMessageId !== where.waMessageId) return false;
@@ -176,7 +178,7 @@ function buildIdempotencyHarness({
   }
 
   axios.post = async (_url, payload) => {
-    providerOutbound.push(payload?.text?.body || '');
+    providerOutbound.push(payload?.interactive?.body?.text || payload?.text?.body || '');
     return {
       data: {
         messages: [{ id: `TEST-CODEX-PROVIDER-${providerOutbound.length}` }]
@@ -281,6 +283,12 @@ function buildIdempotencyHarness({
     }
   };
 
+  let transactionTail = Promise.resolve();
+  prisma.$transaction = (fn) => {
+    const run = () => { const { $transaction, ...tx } = prisma; return fn(tx); };
+    const current = transactionTail.then(run, run);
+    transactionTail = current.catch(() => {}); return current;
+  };
   return {
     prisma,
     inboundRows,
@@ -385,3 +393,4 @@ test('TEST-CODEX-CI-FAILURE-IDENTITIES: la suite completa bloquea identidades no
     /if\s+\[\s*"\$fail_count"\s+-gt\s+71\s*\][\s\S]*legacy test failures remain[\s\S]*exit 0/
   );
 });
+

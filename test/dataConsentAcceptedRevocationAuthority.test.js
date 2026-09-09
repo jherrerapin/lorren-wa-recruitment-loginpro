@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -112,7 +113,7 @@ test('A1: reintentar el mismo webhook con REVOKED persistido no crea otro evento
       }
     }
   };
-  const middleware = dataConsentGateMiddleware(prisma);
+  const middleware = dataConsentGateMiddleware(withConsentGatePersistence(prisma));
   const message = textMessage(
     'Reitero que deseo borrar mis datos y detener el proceso.',
     'wa-revocation-idempotent-001'
@@ -144,3 +145,4 @@ test('A1: reintentar el mismo webhook con REVOKED persistido no crea otro evento
   assert.equal(writes.nextCalls, 0);
   assert.deepEqual(writes.statuses, [200, 200]);
 });
+

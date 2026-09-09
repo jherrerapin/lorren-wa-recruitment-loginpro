@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
@@ -27,7 +28,7 @@ function createHarness(initialCandidate, vacancy = null) {
   const updates = [];
 
   axios.post = async (_url, requestBody) => {
-    sentBodies.push(requestBody?.text?.body || '');
+    sentBodies.push(requestBody?.interactive?.body?.text || requestBody?.text?.body || '');
     return { data: { messages: [{ id: 'TEST-OUTBOUND-RECOVERY' }] } };
   };
 
@@ -65,7 +66,7 @@ function createHarness(initialCandidate, vacancy = null) {
 }
 
 async function runMiddleware(harness, message) {
-  const middleware = dataConsentGateMiddleware(harness.prisma);
+  const middleware = dataConsentGateMiddleware(withConsentGatePersistence(harness.prisma));
   const req = { body: payload(message), headers: {}, ip: '127.0.0.1' };
   const observed = { nextCalls: 0, statuses: [] };
   const res = {
@@ -255,7 +256,7 @@ test('un lote con interés y texto consecutivo queda íntegramente dentro del ga
     }
   };
 
-  await dataConsentGateMiddleware(harness.prisma)(req, res, () => {
+  await dataConsentGateMiddleware(withConsentGatePersistence(harness.prisma))(req, res, () => {
     observed.nextCalls += 1;
   });
 
@@ -289,3 +290,4 @@ test('mientras espera interés una respuesta no interrogativa no puede escapar a
     reason: 'application_interest_pending'
   });
 });
+

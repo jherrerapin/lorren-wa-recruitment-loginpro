@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -99,7 +100,7 @@ function buildReplayPrisma(replay, options = {}) {
 
 async function executeReplay(replay, options = {}) {
   const runtime = buildReplayPrisma(replay, options);
-  const middleware = dataConsentGateMiddleware(runtime.prisma);
+  const middleware = dataConsentGateMiddleware(withConsentGatePersistence(runtime.prisma));
   const req = {
     body: webhookPayload(replay.inbound),
     headers: {},
@@ -283,3 +284,4 @@ test('A3: la consulta canónica de inbound usa candidato, dirección y waMessage
     waMessageId: 'wamid-replay-query'
   });
 });
+

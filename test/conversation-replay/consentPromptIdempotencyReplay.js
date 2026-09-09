@@ -125,7 +125,7 @@ export const CONSENT_PROMPT_IDEMPOTENCY_REPLAYS = Object.freeze([
       }
     }]],
     expected: {
-      outboundMessages: 0,
+      outboundMessages: 1,
       inboundClaims: 1,
       consentPromptCount: 0,
       finalPending: true,
@@ -133,3 +133,4 @@ export const CONSENT_PROMPT_IDEMPOTENCY_REPLAYS = Object.freeze([
     }
   }
 ]);
+

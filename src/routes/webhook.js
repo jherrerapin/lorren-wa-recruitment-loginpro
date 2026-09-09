@@ -1,3 +1,4 @@
+import { requestDataConsent, buildDataConsentPromptReply } from '../services/dataConsentGate.js';
 import express from 'express';
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendImageMessage, sendTextMessage } from '../services/whatsapp.js';
@@ -2102,6 +2103,21 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return;
   }
 
+  if (vacancyFirstGateDecision.replyKind === 'DATA_CONSENT_PROMPT') {
+    if (!options.inboundMessageId) return;
+    const information = String(vacancyFirstGateDecision.reply || '')
+      .replace(buildDataConsentPromptReply(), '').trim();
+    if (information) {
+      await reply(prisma, candidate.id, from, information, cleanText, {
+        source: 'vacancy_first_gate_information', body: information,
+        safetyVacancy: vacancyFirstGateDecision.vacancy || currentVacancy
+      });
+    }
+    return requestDataConsent(prisma, {
+      candidate, to: from, inboundMessageId: options.inboundMessageId,
+      candidateUpdates: vacancyFirstGateDecision.candidateUpdates
+    });
+  }
   if (vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY) {
     const applied = await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
     if (!applied.applied) return;
@@ -2957,6 +2973,7 @@ export function webhookRouter(prisma) {
 
           try {
             await processText(prisma, candidateForBatch, from, consolidatedText, debugTrace, {
+              inboundMessageId: anchorMessage.waMessageId,
               batchedMessageCount: pendingBatch.length,
               usedMultilineContext: pendingBatch.length > 1,
               consolidatedInputSummary: summarizeConsolidatedInput(consolidatedText)
@@ -3271,3 +3288,4 @@ export function webhookRouter(prisma) {
 
   return router;
 }
+

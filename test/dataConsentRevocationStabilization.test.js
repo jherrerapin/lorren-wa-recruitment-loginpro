@@ -1,3 +1,4 @@
+import { withConsentGatePersistence } from './helpers/consentGatePersistence.js';
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
@@ -124,7 +125,7 @@ function buildHarness(initialCandidate) {
 }
 
 async function runMiddleware(harness, candidate, message) {
-  const middleware = dataConsentGateMiddleware(harness.prisma);
+  const middleware = dataConsentGateMiddleware(withConsentGatePersistence(harness.prisma));
   const req = { body: webhookPayload(message), headers: {}, ip: '127.0.0.1' };
   const res = {
     sendStatus(status) {
@@ -210,3 +211,4 @@ test('revocación: el mismo webhook no crea otro evento, cancelación ni respues
   assert.equal(harness.metrics.outboundMessages, 1);
   assert.equal(harness.metrics.nextCalls, 0);
 });
+
