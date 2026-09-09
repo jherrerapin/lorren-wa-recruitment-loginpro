@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
+import { findDispatchWorkerByDocumentIdentity } from '../services/dispatchWorkerExcelImport.js';
 
 const workerCvUpload = multer({
   storage: multer.memoryStorage(),
@@ -18,6 +19,7 @@ const ALLOWED_WORKER_CV_MIME_TYPES = new Set([
 ]);
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DUPLICATE_WORKER_DOCUMENT_MESSAGE = 'Este número de documento ya está registrado.';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -164,6 +166,8 @@ async function validateSelectedBranches(cityIds) {
 
 async function createWorkerWithBranches(workerData, cityIds) {
   return prisma.$transaction(async (tx) => {
+    const duplicate = await findDispatchWorkerByDocumentIdentity(tx, workerData.documentNumber);
+    if (duplicate) return null;
     const worker = await tx.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } });
     await tx.dispatchWorkerCity.createMany({
       data: cityIds.map((cityId) => ({ workerId: worker.id, cityId })),
@@ -283,6 +287,13 @@ export function publicDispatchClientRouter() {
     return res.json({ cities, generatedAt: new Date().toISOString() });
   });
 
+  router.post('/admin-worker/documento-existe', requireOps, async (req, res) => {
+    const documentNumber = normalizeString(req.body.documentNumber);
+    if (!documentNumber) return res.json({ exists: false });
+    const duplicate = await findDispatchWorkerByDocumentIdentity(prisma, documentNumber);
+    return res.json({ exists: Boolean(duplicate) });
+  });
+
   router.post('/admin-clientes', requireOps, async (req, res) => {
     const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
     if (!data.name) return res.status(400).send('Nombre requerido');
@@ -393,6 +404,7 @@ export function publicDispatchClientRouter() {
       if (!workerData.fullName) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent('Nombre requerido.'));
       const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
       const worker = await createWorkerWithBranches(workerData, cityIds);
+      if (!worker) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent(DUPLICATE_WORKER_DOCUMENT_MESSAGE));
       await saveWorkerCv(worker.id, req.file);
       return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar manual creado.'));
     } catch (error) {

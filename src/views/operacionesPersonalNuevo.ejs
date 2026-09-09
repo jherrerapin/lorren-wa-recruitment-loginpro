@@ -6,6 +6,9 @@
   <title><%= mode === 'edit' ? 'Editar auxiliar' : 'Crear auxiliar manual' %> — LoginPro</title>
   <link rel="icon" type="image/png" href="/public/favicon-loginpro.svg" />
   <link rel="stylesheet" href="/public/operaciones-ui.css" />
+  <style>
+    .async-toast{position:fixed;right:18px;bottom:18px;max-width:360px;background:#172033;color:#fff;border-radius:14px;padding:11px 13px;box-shadow:var(--shadow);font-size:13px;line-height:1.35;z-index:9999;opacity:0;transform:translateY(8px);transition:opacity .18s,transform .18s;pointer-events:none}.async-toast.show{opacity:1;transform:translateY(0)}
+  </style>
 </head>
 <body>
   <nav class="navbar">
@@ -40,7 +43,7 @@
           const normalizedTransportMode = w.transportMode || '';
           const residenceCityNames = new Set(cities.map((city) => city.name));
         %>
-        <form method="post" action="<%= formAction %>" enctype="multipart/form-data">
+        <form id="workerForm" method="post" action="<%= formAction %>" enctype="multipart/form-data">
           <div class="form-grid">
             <div class="field full"><label for="fullName">Nombre completo <span class="muted">* obligatorio</span></label><input id="fullName" name="fullName" required value="<%= w.fullName || '' %>" placeholder="Nombre y apellido" /></div>
             <div class="field"><label for="phone">Teléfono <span class="muted">* obligatorio</span></label><input id="phone" name="phone" required value="<%= w.phone || '' %>" placeholder="Celular" /></div>
@@ -88,5 +91,81 @@
       </div>
     </section>
   </main>
+
+  <div id="asyncToast" class="async-toast" role="status" aria-live="polite"></div>
+  <% if (mode === 'create') { %>
+    <script>
+      (() => {
+        const form = document.getElementById('workerForm');
+        const documentInput = document.getElementById('documentNumber');
+        const submitButton = form?.querySelector('button[type="submit"]');
+        const toast = document.getElementById('asyncToast');
+        if (!form || !documentInput || !toast) return;
+
+        let checkSequence = 0;
+        let toastTimer = null;
+
+        function showToast(message) {
+          toast.textContent = message;
+          toast.classList.add('show');
+          window.clearTimeout(toastTimer);
+          toastTimer = window.setTimeout(() => toast.classList.remove('show'), 3200);
+        }
+
+        async function checkDocument({ announce = false } = {}) {
+          const documentNumber = documentInput.value.trim();
+          if (!documentNumber) return false;
+          const sequence = ++checkSequence;
+          const body = new URLSearchParams({ documentNumber });
+          const response = await fetch('/operaciones/admin-worker/documento-existe', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+              'X-Requested-With': 'fetch'
+            },
+            body
+          });
+          if (!response.ok) throw new Error('document_check_failed');
+          const result = await response.json();
+          if (sequence !== checkSequence) return false;
+          const exists = Boolean(result?.exists);
+          if (exists) {
+            documentInput.setAttribute('aria-invalid', 'true');
+            if (announce) showToast('Este número de documento ya está registrado.');
+          } else {
+            documentInput.removeAttribute('aria-invalid');
+          }
+          return exists;
+        }
+
+        documentInput.addEventListener('input', () => {
+          checkSequence += 1;
+          documentInput.removeAttribute('aria-invalid');
+        });
+
+        documentInput.addEventListener('blur', () => {
+          void checkDocument({ announce: true }).catch(() => {});
+        });
+
+        form.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          if (submitButton) submitButton.disabled = true;
+          try {
+            const exists = await checkDocument({ announce: true });
+            if (exists) {
+              documentInput.focus();
+              return;
+            }
+            HTMLFormElement.prototype.submit.call(form);
+          } catch (_error) {
+            HTMLFormElement.prototype.submit.call(form);
+          } finally {
+            if (submitButton) submitButton.disabled = false;
+          }
+        });
+      })();
+    </script>
+  <% } %>
 </body>
 </html>
