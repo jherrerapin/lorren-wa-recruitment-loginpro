@@ -19,6 +19,7 @@ const ALLOWED_WORKER_CV_MIME_TYPES = new Set([
 ]);
 
 const TIME_HH_MM_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const DUPLICATE_WORKER_DOCUMENT_MESSAGE = 'Este número de documento ya está registrado.';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -286,6 +287,13 @@ export function publicDispatchClientRouter() {
     return res.json({ cities, generatedAt: new Date().toISOString() });
   });
 
+  router.post('/admin-worker/documento-existe', requireOps, async (req, res) => {
+    const documentNumber = normalizeString(req.body.documentNumber);
+    if (!documentNumber) return res.json({ exists: false });
+    const duplicate = await findDispatchWorkerByDocumentIdentity(prisma, documentNumber);
+    return res.json({ exists: Boolean(duplicate) });
+  });
+
   router.post('/admin-clientes', requireOps, async (req, res) => {
     const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
     if (!data.name) return res.status(400).send('Nombre requerido');
@@ -351,7 +359,7 @@ export function publicDispatchClientRouter() {
       clientOperationsPath(req.params.clientId),
       () => prisma.dispatchClientService.delete({ where: { id: service.id } }),
       'Servicio eliminado correctamente.',
-      'No fue posible eliminar el servicio porque tiene dependencias operativas.'
+      'No fue posible eliminar la operación porque tiene dependencias operativas.'
     );
   });
 
@@ -396,7 +404,7 @@ export function publicDispatchClientRouter() {
       if (!workerData.fullName) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent('Nombre requerido.'));
       const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
       const worker = await createWorkerWithBranches(workerData, cityIds);
-      if (!worker) return res.redirect('/admin/operaciones/personal');
+      if (!worker) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent(DUPLICATE_WORKER_DOCUMENT_MESSAGE));
       await saveWorkerCv(worker.id, req.file);
       return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar manual creado.'));
     } catch (error) {
