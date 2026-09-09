@@ -28,6 +28,7 @@ function candidate(overrides = {}) {
     phone: '573001112233',
     dataConsentStatus: 'PENDING',
     botResumeMode: null,
+    botPaused: false,
     ...overrides
   };
 }
@@ -45,6 +46,7 @@ function prismaHarness(candidateValue = candidate(), inboundAt = new Date(NOW.ge
         if (!current) return { count: 0 };
         if (where.id != null && current.id !== where.id) return { count: 0 };
         if (where.dataConsentStatus != null && current.dataConsentStatus !== where.dataConsentStatus) return { count: 0 };
+        if (where.botPaused != null && current.botPaused !== where.botPaused) return { count: 0 };
         if (Object.prototype.hasOwnProperty.call(where, 'botResumeMode')
             && (current.botResumeMode ?? null) !== (where.botResumeMode ?? null)) return { count: 0 };
         Object.assign(current, structuredClone(data));
@@ -119,8 +121,12 @@ test('reenvío reserva el contexto de consentimiento pendiente antes de enviar a
       observed.deliverCalls += 1;
       observed.input = structuredClone(input);
       observed.claimed = await dependencies.prepareClaim(prisma);
-      observed.sendResult = await dependencies.sendText(input.to, input.body);
-      return { sent: true, suppressed: false, messageId: 'outbound-1' };
+      if (observed.claimed) {
+        observed.sendResult = await dependencies.sendText(input.to, input.body);
+      }
+      return observed.claimed
+        ? { sent: true, suppressed: false, messageId: 'outbound-1' }
+        : { sent: false, suppressed: true };
     },
     sendButtons: async (to, body, buttons) => {
       observed.sendCalls += 1;
@@ -168,7 +174,7 @@ test('reenvío conserva un contexto pendiente ya existente', () => {
   });
 });
 
-test('ACCEPTED, REVOKED y ventana vencida bloquean el reenvío antes del delivery', async () => {
+test('ACCEPTED, REVOKED, bot pausado y ventana vencida bloquean el reenvío antes del delivery', async () => {
   let deliveries = 0;
   const deps = {
     now: () => new Date(NOW),
@@ -186,6 +192,13 @@ test('ACCEPTED, REVOKED y ventana vencida bloquean el reenvío antes del deliver
   }
 
   await assert.rejects(
+    resendDataConsentFromDev(prismaHarness(candidate({ botPaused: true })), {
+      candidateId: 'candidate-1', nonce: NONCE
+    }, deps),
+    (error) => error?.code === 'dev_consent_resend_bot_paused'
+  );
+
+  await assert.rejects(
     resendDataConsentFromDev(
       prismaHarness(candidate(), new Date(NOW.getTime() - (24 * 60 * 60 * 1000) - 1)),
       { candidateId: 'candidate-1', nonce: NONCE },
@@ -194,6 +207,12 @@ test('ACCEPTED, REVOKED y ventana vencida bloquean el reenvío antes del deliver
     (error) => error?.code === 'dev_consent_resend_window_closed'
   );
   assert.equal(deliveries, 0);
+});
+
+test('ruta DEV delega la mutación de candidato a ConsentStateService', () => {
+  const route = readFileSync(new URL('../src/routes/devConsentResend.js', import.meta.url), 'utf8');
+  assert.match(route, /claimCandidateDataConsentPromptPendingState/);
+  assert.doesNotMatch(route, /\.candidate\.updateMany\s*\(/);
 });
 
 test('bootstrap registra la extensión DEV sin modificar el router monolítico ni el contrato de consentimiento', () => {
