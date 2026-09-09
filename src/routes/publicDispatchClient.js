@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
+import { findDispatchWorkerByDocumentIdentity } from '../services/dispatchWorkerExcelImport.js';
 
 const workerCvUpload = multer({
   storage: multer.memoryStorage(),
@@ -164,6 +165,8 @@ async function validateSelectedBranches(cityIds) {
 
 async function createWorkerWithBranches(workerData, cityIds) {
   return prisma.$transaction(async (tx) => {
+    const duplicate = await findDispatchWorkerByDocumentIdentity(tx, workerData.documentNumber);
+    if (duplicate) return null;
     const worker = await tx.dispatchWorker.create({ data: { ...workerData, source: 'MANUAL' } });
     await tx.dispatchWorkerCity.createMany({
       data: cityIds.map((cityId) => ({ workerId: worker.id, cityId })),
@@ -348,7 +351,7 @@ export function publicDispatchClientRouter() {
       clientOperationsPath(req.params.clientId),
       () => prisma.dispatchClientService.delete({ where: { id: service.id } }),
       'Servicio eliminado correctamente.',
-      'No fue posible eliminar el servicio porque tiene dependencias operativas.'
+      'No fue posible eliminar la operación porque tiene dependencias operativas.'
     );
   });
 
@@ -393,6 +396,7 @@ export function publicDispatchClientRouter() {
       if (!workerData.fullName) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent('Nombre requerido.'));
       const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
       const worker = await createWorkerWithBranches(workerData, cityIds);
+      if (!worker) return res.redirect('/admin/operaciones/personal');
       await saveWorkerCv(worker.id, req.file);
       return res.redirect('/admin/operaciones/personal?message=' + encodeURIComponent('Auxiliar manual creado.'));
     } catch (error) {
