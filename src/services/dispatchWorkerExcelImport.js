@@ -131,6 +131,26 @@ function normalizeString(value) {
   return text.length ? text : null;
 }
 
+export function normalizeDispatchWorkerDocumentKey(value) {
+  return normalizeString(value)
+    ?.normalize('NFKC')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '') || '';
+}
+
+export async function findDispatchWorkerByDocumentIdentity(prismaClient, documentNumber, { excludeWorkerId = null } = {}) {
+  const documentKey = normalizeDispatchWorkerDocumentKey(documentNumber);
+  if (!documentKey || !prismaClient?.dispatchWorker?.findMany) return null;
+  const workers = await prismaClient.dispatchWorker.findMany({
+    where: {
+      documentNumber: { not: null },
+      ...(excludeWorkerId ? { id: { not: excludeWorkerId } } : {})
+    },
+    select: { id: true, documentNumber: true }
+  });
+  return workers.find((worker) => normalizeDispatchWorkerDocumentKey(worker.documentNumber) === documentKey) || null;
+}
+
 function normalizeNamePart(value) {
   return normalizeString(value)?.replace(/\s+/g, ' ') || null;
 }
@@ -317,7 +337,7 @@ export function prepareDispatchWorkerExcelRows(rows, references = {}) {
     const cityIds = [...new Set(operationalCities.map((city) => city.id))];
 
     const documentNumber = normalizeString(row.documentNumber);
-    const documentKey = documentNumber?.toUpperCase();
+    const documentKey = normalizeDispatchWorkerDocumentKey(documentNumber);
     if (documentKey && documentNumbers.has(documentKey)) {
       errors.push(`Fila ${row.rowNumber}: el Número de documento está repetido dentro del archivo.`);
     }
@@ -449,30 +469,25 @@ function buildReviewChanges(row, existing = null) {
   return changes;
 }
 
-function normalizeDocumentKey(value) {
-  return normalizeString(value)?.toUpperCase() || '';
-}
-
 export async function buildDispatchWorkerImportReview({ prisma, workbook, cities = [] } = {}) {
   const parsedRows = parseDispatchWorkerExcelWorksheet(workbook?.worksheets?.[0]);
   const preparedRows = prepareDispatchWorkerExcelRows(parsedRows, { cities });
-  const documentNumbers = [...new Set(preparedRows.map((row) => row.workerData.documentNumber).filter(Boolean))];
-  const existingWorkers = documentNumbers.length
+  const existingWorkers = preparedRows.length
     ? await prisma.dispatchWorker.findMany({
-      where: { documentNumber: { in: documentNumbers } },
+      where: { documentNumber: { not: null } },
       include: { cities: { include: { city: true } } }
     })
     : [];
   const byDocument = new Map();
   for (const worker of existingWorkers) {
-    const key = normalizeDocumentKey(worker.documentNumber);
+    const key = normalizeDispatchWorkerDocumentKey(worker.documentNumber);
     const matches = byDocument.get(key) || [];
     matches.push(worker);
     byDocument.set(key, matches);
   }
 
   const items = preparedRows.map((row) => {
-    const matches = byDocument.get(normalizeDocumentKey(row.workerData.documentNumber)) || [];
+    const matches = byDocument.get(normalizeDispatchWorkerDocumentKey(row.workerData.documentNumber)) || [];
     if (matches.length > 1) {
       return {
         id: `row-${row.rowNumber}`,
@@ -569,22 +584,25 @@ export async function applyDispatchWorkerImportBatch({
     const targets = selectedReviewItems(items, selectedItemIds, applyAll);
     if (!targets.length) throw new DispatchWorkerExcelValidationError(['Selecciona al menos un auxiliar nuevo o un cambio para aprobar.']);
 
+    const existingWorkers = await tx.dispatchWorker.findMany({
+      where: { documentNumber: { not: null } },
+      select: { id: true, documentNumber: true }
+    });
+    const existingDocumentKeys = new Set(existingWorkers.map((worker) => normalizeDispatchWorkerDocumentKey(worker.documentNumber)).filter(Boolean));
     const result = { created: 0, updated: 0, conflicts: 0, selected: targets.length };
     for (const item of targets) {
       const incoming = item.incoming || {};
       const workerData = incoming.workerData || {};
       if (item.type === 'NEW') {
-        const existing = await tx.dispatchWorker.findFirst({
-          where: { documentNumber: workerData.documentNumber },
-          select: { id: true }
-        });
-        if (existing || !(incoming.cityIds || []).length) {
+        const documentKey = normalizeDispatchWorkerDocumentKey(workerData.documentNumber);
+        if (!documentKey || existingDocumentKeys.has(documentKey) || !(incoming.cityIds || []).length) {
           result.conflicts += 1;
           continue;
         }
         const worker = await tx.dispatchWorker.create({
           data: { ...workerData, source: 'EXCEL_IMPORT' }
         });
+        existingDocumentKeys.add(documentKey);
         await replaceWorkerBranches(tx, worker.id, incoming.cityIds || [], { cities: true });
         result.created += 1;
         continue;
