@@ -118,15 +118,22 @@ No se debe:
 
 - duplicar la solicitud;
 - enviar varias versiones consecutivas;
-- persistir datos personales como entidades del perfil, documentos o archivos antes de autorización válida;
 - interpretar una pregunta como consentimiento;
 - ni reiniciar la vacante después de autorizar.
 
 La solicitud debe ser idempotente: mientras esté pendiente, un mismo evento, lote o reintento no puede producir otra solicitud.
 
-Para trazabilidad operativa, el texto inbound recibido antes del consentimiento puede conservarse literalmente en el historial conversacional accesible al personal autorizado. Esa evidencia debe quedar marcada como preconsentimiento protegido y no puede alimentar la interpretación automática posterior, prellenar el perfil ni convertirse en una entidad persistida del candidato sin autorización válida. El texto no debe duplicarse innecesariamente en logs o metadata técnica.
+El consentimiento conserva autoridad sobre la aceptación, rechazo, revocación y sobre si la postulación puede continuar funcionalmente. **No es una barrera técnica para conservar o mostrar contenido que el candidato ya envió por WhatsApp.**
 
-Si llega un archivo antes del consentimiento, el sistema debe informar brevemente que no fue guardado y solicitar una sola autorización. Tras aceptar, debe pedir reenviar el archivo únicamente si efectivamente no fue persistido. Esta excepción de trazabilidad aplica al texto; no autoriza descargar o conservar archivos preconsentimiento.
+Todo inbound real debe permanecer visible para el personal autorizado tal como llegó. No se reemplaza texto, datos o adjuntos por frases técnicas de “contenido protegido”, “dato no guardado” o equivalentes, y no se excluye un mensaje de la interpretación posterior únicamente por haber llegado antes de la autorización.
+
+Si el candidato envía datos personales antes de aceptar el consentimiento, esos datos pueden persistirse mediante las mismas autoridades canónicas de extracción y persistencia usadas en el resto del flujo. Esto no convierte el mensaje en una aceptación ni permite inferir consentimiento de su contenido.
+
+Si el candidato envía una hoja de vida, documento o archivo antes de aceptar el consentimiento, el archivo puede descargarse y persistirse mediante la misma autoridad canónica de adjuntos/HV. No se obliga a reenviarlo únicamente por haber llegado antes de la autorización.
+
+Si el candidato rechaza o revoca el consentimiento, Lórren detiene la continuación automática de la postulación y no interpreta ese rechazo como autorización. El registro ya recibido no se elimina automáticamente. En DEV debe existir una acción manual de eliminación completa identificada como `Eliminar registro por no consentimiento`, que conserva la autoridad actual de borrado de candidato, mensajes, agendamientos y almacenamiento asociado.
+
+No debe existir `preConsentProtected` ni un mecanismo equivalente como autoridad para ocultar, sustituir o excluir contenido real únicamente por el estado de consentimiento.
 
 ## 7. Datos configurables por vacante
 
