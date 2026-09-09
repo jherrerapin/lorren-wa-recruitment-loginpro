@@ -224,3 +224,149 @@ test('resumen de solicitudes conserva la limpieza existente', () => {
   const view = readSource('src/views/operacionesSolicitudesResumen.ejs');
   assert.doesNotMatch(view, /Ver todas las solicitudes/);
 });
+
+const providerAuditPhone = `57${'3'}${'0'.repeat(9)}`;
+const providerAuditWamid = 'wamid.TEST-DISPATCH-STATUS';
+
+function providerAuditRow(metadata = {}) {
+  return {
+    id: 'audit-test-1',
+    entityType: 'DISPATCH_WHATSAPP_MESSAGE',
+    entityId: `dispatch-wa:outbound:${providerAuditWamid}`,
+    entityLabel: providerAuditPhone,
+    action: 'DISPATCH_WHATSAPP_OUTBOUND',
+    createdAt: new Date('2026-09-08T23:30:00.000Z'),
+    metadata: {
+      scope: 'operational',
+      direction: 'OUTBOUND',
+      phone: providerAuditPhone,
+      body: 'Mensaje operativo de prueba.',
+      messageType: 'TEXT',
+      messageId: '',
+      providerMessageId: providerAuditWamid,
+      source: 'TEST_OUTBOUND',
+      occurredAt: '2026-09-08T23:30:00.000Z',
+      providerStatus: 'ACCEPTED',
+      providerStatusAt: '2026-09-08T23:30:00.000Z',
+      providerDiagnostic: null,
+      ...metadata
+    }
+  };
+}
+
+test('auditoría DEV distingue aceptación inicial de entrega y muestra FAILED sanitizado', async () => {
+  const {
+    loadDispatchWhatsappPhoneConversation,
+    recordDispatchWhatsappMessageAudit,
+    recordDispatchWhatsappProviderStatusAudit
+  } = await import('../src/services/dispatchWhatsappMonitor.js');
+  let created = null;
+  const createPrisma = {
+    devAuditEvent: {
+      findFirst: async () => null,
+      create: async ({ data }) => { created = data; return data; }
+    }
+  };
+  const createdResult = await recordDispatchWhatsappMessageAudit({
+    prismaClient: createPrisma,
+    scope: 'operational',
+    direction: 'OUTBOUND',
+    phone: providerAuditPhone,
+    body: 'Mensaje operativo de prueba.',
+    messageType: 'TEXT',
+    providerMessageId: providerAuditWamid,
+    source: 'TEST_OUTBOUND',
+    occurredAt: new Date('2026-09-08T23:30:00.000Z')
+  });
+  assert.equal(createdResult.recorded, true);
+  assert.equal(created.metadata.providerStatus, 'ACCEPTED');
+
+  const longRecipient = '9'.repeat(12);
+  let updated = null;
+  const row = providerAuditRow();
+  const updatePrisma = {
+    devAuditEvent: {
+      findFirst: async () => row,
+      update: async ({ data }) => { updated = data; return { ...row, ...data }; }
+    }
+  };
+  const failed = await recordDispatchWhatsappProviderStatusAudit({
+    prismaClient: updatePrisma,
+    scope: 'operational',
+    providerMessageId: providerAuditWamid,
+    providerStatus: 'FAILED',
+    statusPayload: {
+      id: providerAuditWamid,
+      status: 'failed',
+      timestamp: '1788910800',
+      errors: [{
+        code: 131026,
+        title: 'Message undeliverable',
+        message: `Bearer TEST_SECRET recipient=${longRecipient}`,
+        error_data: { details: 'Delivery failed after initial acceptance.' }
+      }]
+    }
+  });
+  assert.equal(failed.recorded, true);
+  assert.equal(updated.metadata.providerStatus, 'FAILED');
+  assert.match(updated.metadata.providerDiagnostic, /code=131026/);
+  assert.doesNotMatch(updated.metadata.providerDiagnostic, /TEST_SECRET/);
+  assert.doesNotMatch(updated.metadata.providerDiagnostic, new RegExp(longRecipient));
+
+  const conversationPrisma = {
+    dispatchWhatsappContactWindow: { findUnique: async () => null },
+    dispatchWhatsappConfirmation: { findMany: async () => [] },
+    devAuditEvent: { findMany: async () => [providerAuditRow({
+      providerStatus: 'FAILED',
+      providerStatusAt: '2026-09-08T23:31:00.000Z',
+      providerDiagnostic: 'code=131026 title=Message undeliverable'
+    })] }
+  };
+  const conversation = await loadDispatchWhatsappPhoneConversation({ prismaClient: conversationPrisma, phone: providerAuditPhone });
+  assert.equal(conversation.messageHistory[0].providerStatus, 'FAILED');
+  assert.match(conversation.messageHistory[0].body, /\[Meta: FAILED\]/);
+  assert.match(conversation.messageHistory[0].body, /code=131026/);
+});
+
+test('callback Meta de alerta al coordinador se procesa sin DispatchWhatsappConfirmation', async () => {
+  const { processDispatchWhatsappProviderStatus } = await import('../src/services/dispatchWhatsappWebhookService.js');
+  const row = providerAuditRow();
+  let updated = null;
+  const prismaClient = {
+    devAuditEvent: {
+      findFirst: async () => row,
+      update: async ({ data }) => { updated = data; return { ...row, ...data }; }
+    },
+    dispatchWhatsappConfirmation: { findFirst: async () => null }
+  };
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const result = await processDispatchWhatsappProviderStatus({
+      scope: 'operational',
+      prismaClient,
+      status: {
+        id: providerAuditWamid,
+        status: 'failed',
+        errors: [{ code: 131026, title: 'Message undeliverable' }]
+      }
+    });
+    assert.equal(result.handled, true);
+    assert.equal(result.linkUpdated, false);
+    assert.equal(result.auditUpdated, true);
+    assert.equal(updated.metadata.providerStatus, 'FAILED');
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('novedad conserva wamid y los detalles técnicos quedan en la superficie DEV', () => {
+  const adminAlerts = readSource('src/services/dispatchWhatsappAdminAlerts.js');
+  const webhook = readSource('src/services/dispatchWhatsappWebhookService.js');
+  const route = readSource('src/routes/dispatchWhatsappNotifications.js');
+  assert.match(adminAlerts, /return \{ sent: true, userId: user\.id, phone, providerMessageId \}/);
+  assert.match(webhook, /source: 'NOVELTY_ADMIN_ALERT'/);
+  assert.match(webhook, /recordDispatchWhatsappProviderStatusAudit/);
+  assert.match(route, /router\.get\('\/monitor', requireDevMonitor/);
+  assert.match(route, /if \(!isDev\)[\s\S]*lastError: publicLastError/);
+});
