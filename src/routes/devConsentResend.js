@@ -9,6 +9,7 @@ import {
   buildDataConsentPromptReply,
   parseConsentPendingMode
 } from '../services/dataConsentGate.js';
+import { claimCandidateDataConsentPromptPendingState } from '../services/consentStateService.js';
 import { sendReplyButtonsMessage } from '../services/whatsapp.js';
 import { getWhatsappWindowState } from '../services/reminderPolicy.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -118,7 +119,8 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
       id: true,
       phone: true,
       dataConsentStatus: true,
-      botResumeMode: true
+      botResumeMode: true,
+      botPaused: true
     }
   });
   if (!candidate) throw consentResendError('dev_consent_resend_candidate_not_found', 'Candidato no encontrado.');
@@ -126,6 +128,12 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
     throw consentResendError(
       'dev_consent_resend_not_pending',
       'El consentimiento de este candidato ya no está pendiente; no se reenvió la autorización.'
+    );
+  }
+  if (candidate.botPaused) {
+    throw consentResendError(
+      'dev_consent_resend_bot_paused',
+      'Lórren está pausado para este candidato. Reanuda el bot antes de reenviar la autorización.'
     );
   }
 
@@ -163,23 +171,16 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
     prepareClaim: async (tx) => {
       const fresh = await tx.candidate.findUnique({
         where: { id: candidateId },
-        select: { id: true, dataConsentStatus: true, botResumeMode: true }
+        select: { id: true, dataConsentStatus: true, botResumeMode: true, botPaused: true }
       });
-      if (!fresh || !canShowDevConsentResend(fresh)) return false;
+      if (!fresh || !canShowDevConsentResend(fresh) || fresh.botPaused) return false;
       const nextMode = buildDevConsentPendingMode(fresh);
-      const updated = await tx.candidate.updateMany({
-        where: {
-          id: candidateId,
-          dataConsentStatus: 'PENDING',
-          botResumeMode: fresh.botResumeMode ?? null
-        },
-        data: {
-          botResumeMode: nextMode,
-          reminderScheduledFor: null,
-          reminderState: 'SKIPPED'
-        }
+      const claimed = await claimCandidateDataConsentPromptPendingState(tx, {
+        candidateId,
+        expectedBotResumeMode: fresh.botResumeMode ?? null,
+        pendingBotResumeMode: nextMode
       });
-      return updated.count === 1;
+      return claimed.count === 1;
     }
   });
 }
