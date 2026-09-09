@@ -63,14 +63,11 @@ const NON_NAME_INTRODUCTION_PATTERN = /\b(mujer|hombre|femenin[ao]|masculin[ao]|
 const CONSENT_SUBJECT_PATTERN = /\b(tratamiento|datos|dato personal|datos personales|hoja de vida|hv|documentos?|consentimiento|autorizacion)\b/;
 const OFFER_SUBJECT_PATTERN = /\b(vacante|oferta|cargo|trabajo|empleo|postulacion|entrevista)\b/;
 
-const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Antes de recibir o guardar datos personales, hojas de vida o documentos, necesito tu autorización para tratarlos con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nElige Sí autorizo o No autorizo. También puedes responder por escrito.`;
+const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Antes de continuar con tu postulación, necesito tu autorización para tratar tus datos personales, hoja de vida y documentos con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nElige Sí autorizo o No autorizo. También puedes responder por escrito.`;
 const CONSENT_CLARIFIER_REPLY = 'Para continuar necesito saber si autorizas a LoginPro a tratar tus datos y hoja de vida para este proceso. Elige Sí autorizo o No autorizo. También puedes responder por escrito.';
-const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
+const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación por este medio. La información que ya enviaste permanece registrada para trazabilidad y puede ser eliminada por el equipo autorizado.';
 const VACANCY_NOT_CONFIRMED_REPLY = 'Entendido. Para ubicar bien tu proceso, cuéntame la ciudad y el cargo o vacante que te interesa.';
-const PRE_CONSENT_ATTACHMENT_REPLY = 'Recibí que intentaste enviar un archivo, pero todavía no lo descargué ni lo guardé.';
-const PRE_CONSENT_DATA_REPLY = 'Veo que compartiste información personal, pero todavía no la registré en tu perfil.';
-const APPLICATION_INTEREST_REQUIRED_REPLY = 'Antes de solicitar tu autorización o recibir datos, confírmame si deseas postularte a esta vacante.';
-const RESEND_CV_REPLY = 'Como el archivo anterior llegó antes de la autorización y no fue guardado, vuelve a adjuntar tu hoja de vida en PDF o DOCX.';
+const APPLICATION_INTEREST_REQUIRED_REPLY = 'Antes de solicitar tu autorización, confírmame si deseas postularte a esta vacante.';
 const ALTERNATIVE_VACANCY_UNAVAILABLE_REPLY = 'Gracias, tu autorización quedó registrada. La vacante alternativa que te había mencionado ya no está activa o dejó de recibir postulaciones. Cuéntame la ciudad y el cargo que te interesa para revisar opciones vigentes.';
 
 function normalize(value = '') {
@@ -642,15 +639,12 @@ export function evaluateConsentBoundary(candidate = {}, message = {}, options = 
   if (candidate?.dataConsentStatus === 'ACCEPTED') return { block: true, reason: 'consent_version_required' };
   if (parseConsentPendingMode(candidate?.botResumeMode).pending) return { block: true, reason: 'consent_pending' };
   if (isPreConsentCaptureMode(candidate?.botResumeMode)) return { block: true, reason: 'capture_mode_without_consent' };
-  if (isProtectedAttachment(message)) return { block: true, reason: 'attachment_before_consent' };
   if (PROTECTED_STEPS.has(candidate?.currentStep)) {
     if (shouldRequestConsentForTurn(candidate, body).allowed) {
       return { block: true, reason: 'candidate_wants_to_continue' };
     }
     return { block: true, reason: 'protected_step_without_consent' };
   }
-  const profileDataDecision = options.profileDataDecision || evaluateProfileDataEvidence(body, { candidate });
-  if (profileDataDecision.containsProfileData) return { block: true, reason: 'profile_data_before_consent' };
   if (shouldRequestConsentForTurn(candidate, body).allowed) {
     return { block: true, reason: 'candidate_wants_to_continue' };
   }
@@ -709,34 +703,9 @@ function inboundMessageType(message = {}) {
   return MessageType.UNKNOWN;
 }
 
-const PRE_CONSENT_ATTACHMENT_EVIDENCE_BODY = 'Archivo enviado antes de autorizar; el archivo no fue almacenado.';
-const PRE_CONSENT_PROTECTED_EVIDENCE_BODY = 'Mensaje recibido antes de completar la autorización; el contenido protegido no fue almacenado.';
-
-function consentEvidenceBody(decision = '', body = '', message = {}) {
+function consentEvidenceBody(body = '', message = {}) {
   const literalBody = String(message.interactive?.button_reply?.title || body || '').trim().slice(0, 4096);
-
-  // La decisión de consentimiento ya es evidencia autorizante/revocatoria y debe
-  // verse en la conversación tal como la expresó el candidato.
-  if (['ACCEPTED', 'REVOKED'].includes(decision) && literalBody) return literalBody;
-
-  // Los archivos siguen sin descargarse ni persistirse antes del consentimiento.
-  if (isProtectedAttachment(message) || /ATTACHMENT/i.test(decision)) {
-    return PRE_CONSENT_ATTACHMENT_EVIDENCE_BODY;
-  }
-
-  // El texto inbound se conserva literalmente como trazabilidad conversacional.
-  // Esto no lo convierte en dato de perfil ni autoriza su extracción posterior.
-  if (literalBody) return literalBody;
-  return PRE_CONSENT_PROTECTED_EVIDENCE_BODY;
-}
-
-function isPreConsentProtectedTextEvidence(decision = '', body = '', message = {}) {
-  if (isProtectedAttachment(message) || /ATTACHMENT/i.test(decision)) return false;
-  if (['ACCEPTED', 'REVOKED'].includes(decision)) return false;
-  const literalBody = String(body || '').trim();
-  if (!literalBody) return false;
-  return /profile_data_before_consent/i.test(decision)
-    || evaluateProfileDataEvidence(literalBody).containsProfileData;
+  return literalBody || null;
 }
 
 function consentGateProcessingState(message = {}) {
@@ -751,8 +720,7 @@ function retryableConsentGateError(error) {
 async function saveInboundConsentEvidence(prisma, candidateId, message, body, decision) {
   const owned = message[CONSENT_TURN_CLAIM];
   if (owned?.claimed) {
-    const payload = { ...owned.processingRawPayload, consentDecision: decision,
-      preConsentProtected: isPreConsentProtectedTextEvidence(decision, body, message) };
+    const payload = { ...owned.processingRawPayload, consentDecision: decision };
     const updated = await compareAndSwapConversationMessagePayload(prisma, {
       messageId: owned.messageId, expectedRawPayload: owned.processingRawPayload, rawPayload: payload
     });
@@ -766,13 +734,12 @@ async function saveInboundConsentEvidence(prisma, candidateId, message, body, de
     waMessageId,
     messageType: inboundMessageType(message),
     respondedAt: new Date(),
-    body: consentEvidenceBody(decision, body, message),
+    body: consentEvidenceBody(body, message),
     rawPayload: {
       source: 'data_consent_gate',
       consentVersion: DATA_CONSENT_VERSION,
       consentDecision: decision,
-      waMessageId,
-      preConsentProtected: isPreConsentProtectedTextEvidence(decision, body, message)
+      waMessageId
     }
   });
   return result.created;
@@ -840,14 +807,13 @@ async function claimPreConsentTurn(prisma, candidateId, message, decision) {
         waMessageId,
         messageType: inboundMessageType(message),
         respondedAt: new Date(),
-        body: consentEvidenceBody(decision, inboundText(message), message),
+        body: consentEvidenceBody(inboundText(message), message),
         rawPayload: {
           source: 'data_consent_gate',
           consentVersion: DATA_CONSENT_VERSION,
           consentDecision: decision,
           ...(message.interactive?.button_reply?.id ? { consentReplyId: String(message.interactive.button_reply.id).slice(0, 256) } : {}),
           waMessageId,
-          preConsentProtected: isPreConsentProtectedTextEvidence(decision, inboundText(message), message),
           consentGateProcessing: { state: 'PENDING', decision }
         }
       });
@@ -1098,14 +1064,13 @@ if (/\b(requisito|perfil|estudio|formacion|documento|moto|carro|transporte|vehic
   return 'Ese detalle no aparece en la información disponible de esta vacante.';
 }
 
-export function buildConsentAcceptedReply(candidate = {}, vacancy = null, options = {}) {
+export function buildConsentAcceptedReply(candidate = {}, vacancy = null) {
   const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
   const dataPrompt = readiness.missingFields?.length || readiness.eligibilityFailures?.length
     ? buildMissingFieldReply(readiness) : '';
   const parts = ['Gracias, tu autorización quedó registrada.'];
   if (dataPrompt) parts.push(dataPrompt);
-  if (options.cvResendRequired && !dataPrompt) parts.push(RESEND_CV_REPLY);
-  if (!dataPrompt && !options.cvResendRequired) parts.push(buildMissingFieldReply(readiness));
+  if (!dataPrompt) parts.push(buildMissingFieldReply(readiness));
   return parts.join(' ');
 }
 
@@ -1214,31 +1179,23 @@ async function handleCampaignVacancyConfirmation(prisma, candidate, message, fro
     return true;
   }
 
-  if (isProtectedAttachment(message)) {
-    if (!await updateCampaignContext({ botResumeMode: CAMPAIGN_CONFIRMATION_CV_MODE })) return true;
-    const reply = `${PRE_CONSENT_ATTACHMENT_REPLY}\n\n${buildVacancyConfirmationPrompt(vacancy)}`;
-    await sendConsentTurnReply(prisma, candidate, message, from, reply, 'pre_consent_attachment_vacancy_pending', { vacancyId: vacancy.id, cvResendRequired: true });
-    return true;
-  }
-
   const questionReply = buildVacancyQuestionReply(vacancy, body);
   if (isAffirmativeVacancyConfirmation(body)) {
-    const cvResendRequired = candidate.botResumeMode === CAMPAIGN_CONFIRMATION_CV_MODE;
     const explicitApplicationInterest = Boolean(analyzeConversationTurn(body).interest);
     if (explicitApplicationInterest) {
       await sendConsentTurnReply(prisma, candidate, message, from,
         [questionReply, buildVacancyInfoReply(vacancy, { includeInterestPrompt: false })].filter(Boolean).join('\n\n'),
         'campaign_vacancy_information');
       await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id,
-        context: { cvResendRequired }, candidateUpdates: { currentStep: ConversationStep.GREETING_SENT } });
+        context: { cvResendRequired: false }, candidateUpdates: { currentStep: ConversationStep.GREETING_SENT } });
       return true;
     }
     if (!await updateCampaignContext({
       currentStep: ConversationStep.GREETING_SENT,
-      botResumeMode: cvResendRequired ? PRE_CONSENT_CV_RESEND_MODE : APPLICATION_INTEREST_PENDING_MODE
+      botResumeMode: APPLICATION_INTEREST_PENDING_MODE
     })) return true;
     const reply = [questionReply, buildVacancyInfoReply(vacancy)].filter(Boolean).join('\n\n');
-    await sendConsentTurnReply(prisma, candidate, message, from, reply, 'campaign_vacancy_confirmed', { vacancyId: vacancy.id, cvResendRequired });
+    await sendConsentTurnReply(prisma, candidate, message, from, reply, 'campaign_vacancy_confirmed', { vacancyId: vacancy.id, cvResendRequired: false });
     return true;
   }
 
@@ -1255,7 +1212,7 @@ async function handleCampaignVacancyConfirmation(prisma, candidate, message, fro
 
 function getConsentContext(candidate = {}) {
   const pending = parseConsentPendingMode(candidate.botResumeMode);
-  if (pending.pending) return pending;
+  if (pending.pending) return { ...pending, cvResendRequired: false };
   const mode = String(candidate.botResumeMode || '');
   if (mode === APPLICATION_INTEREST_PENDING_MODE) {
     return { pending: false, resumeMode: null, cvResendRequired: false };
@@ -1263,25 +1220,19 @@ function getConsentContext(candidate = {}) {
   return {
     pending: false,
     resumeMode: mode === PRE_CONSENT_CV_RESEND_MODE ? null : (mode || null),
-    cvResendRequired: mode === PRE_CONSENT_CV_RESEND_MODE
+    cvResendRequired: false
   };
 }
 
-function buildConsentPrerequisiteReply(candidate = {}, vacancy = null, boundaryReason = '') {
-  const preface = boundaryReason === 'attachment_before_consent'
-    ? PRE_CONSENT_ATTACHMENT_REPLY
-    : (boundaryReason === 'profile_data_before_consent' ? PRE_CONSENT_DATA_REPLY : null);
-  const next = candidate?.vacancyId || vacancy
+function buildConsentPrerequisiteReply(candidate = {}, vacancy = null) {
+  return candidate?.vacancyId || vacancy
     ? APPLICATION_INTEREST_REQUIRED_REPLY
     : VACANCY_NOT_CONFIRMED_REPLY;
-  return [preface, next].filter(Boolean).join('\n\n');
 }
 
 async function handleConsentPrerequisite(prisma, candidate, message, from, vacancy, boundaryReason, profileDataEvidence = []) {
   const hasVacancy = Boolean(candidate?.vacancyId || vacancy?.id);
-  const nextMode = hasVacancy
-    ? (isProtectedAttachment(message) ? PRE_CONSENT_CV_RESEND_MODE : APPLICATION_INTEREST_PENDING_MODE)
-    : null;
+  const nextMode = hasVacancy ? APPLICATION_INTEREST_PENDING_MODE : null;
   const nextStep = hasVacancy || PROTECTED_STEPS.has(candidate.currentStep)
     ? ConversationStep.GREETING_SENT : candidate.currentStep;
   const update = {};
@@ -1304,7 +1255,8 @@ async function handleConsentPrerequisite(prisma, candidate, message, from, vacan
 }
 
 async function handleConsentDecision(prisma, req, candidate, message, from, body, boundaryReason, profileDataEvidence = []) {
-  const context = { ...(message[CONSENT_TURN_CLAIM]?.processingRawPayload?.consentContext || getConsentContext(candidate)) };
+  const storedContext = message[CONSENT_TURN_CLAIM]?.processingRawPayload?.consentContext || getConsentContext(candidate);
+  const context = { ...storedContext, cvResendRequired: false };
   let vacancy = await loadVacancy(prisma, candidate.vacancyId);
   const consentTurn = shouldRequestConsentForTurn(candidate, body);
   let consentEligible = context.pending || consentTurn.allowed;
@@ -1329,36 +1281,11 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     });
     if (!history.some(isCurrentConsentPrompt)) {
       await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id,
-        context: { ...context, cvResendRequired: context.cvResendRequired || isProtectedAttachment(message) },
-        prefix: isProtectedAttachment(message) ? PRE_CONSENT_ATTACHMENT_REPLY : '' });
+        context: { ...context, cvResendRequired: false } });
       return true;
     }
     context.pending = true;
     consentEligible = true;
-  }
-
-  if (isProtectedAttachment(message)) {
-    if (!consentEligible) {
-      return handleConsentPrerequisite(prisma, candidate, message, from, vacancy, boundaryReason, profileDataEvidence);
-    }
-    const claimed = await saveInboundConsentEvidence(prisma, candidate.id, message, body,
-      context.pending ? 'PENDING_ATTACHMENT' : 'PROMPTED_WITH_ATTACHMENT');
-    if (!claimed) return true;
-    const attachmentContext = { ...context, cvResendRequired: true };
-    if (context.pending) {
-      await prisma.candidate.updateMany({
-        where: { id: candidate.id, dataConsentStatus: candidate.dataConsentStatus,
-          botResumeMode: candidate.botResumeMode },
-        data: { botResumeMode: buildConsentPendingMode(attachmentContext) }
-      });
-      await sendConsentTurnReply(prisma, candidate, message, from,
-        `${PRE_CONSENT_ATTACHMENT_REPLY} Elige si autorizas para poder continuar.`,
-        'pre_consent_attachment_rejected', {}, true);
-    } else {
-      await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id,
-        context: attachmentContext, prefix: PRE_CONSENT_ATTACHMENT_REPLY });
-    }
-    return true;
   }
 
   const questionReply = buildConsentQuestionReply(body) || buildVacancyQuestionReply(vacancy, body);
@@ -1427,7 +1354,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     const acceptedCandidate = captured.candidate || consentedCandidate;
     const reply = [
       questionReply,
-      buildConsentAcceptedReply(acceptedCandidate, vacancy, { cvResendRequired: context.cvResendRequired })
+      buildConsentAcceptedReply(acceptedCandidate, vacancy)
     ].filter(Boolean).join('\n\n');
     await sendConsentTurnReply(prisma, candidate, message, from, reply, 'data_consent_accepted', {
       capturedFields: captured.capturedFields || [],
@@ -1466,74 +1393,15 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
 
   const claimed = await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'PROMPTED');
   if (!claimed) return true;
-  const preface = boundaryReason === 'profile_data_before_consent' ? PRE_CONSENT_DATA_REPLY : null;
   await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id, context,
-    prefix: [questionReply, preface].filter(Boolean).join('\n\n') });
+    prefix: questionReply });
   return true;
 }
 
-async function preparePausedCandidateForConsentGate(prisma, candidate = {}, message = {}) {
+async function preparePausedCandidateForConsentGate(candidate = {}) {
   if (!candidate?.botPaused) {
     return { candidate, blocked: false, consume: false, defer: false, retry: false, reason: 'automation_not_paused' };
   }
-
-  const waMessageId = String(message?.id || '').trim();
-  let existingMessage = null;
-  if (waMessageId) {
-    const existing = await findInboundConversationMessage(prisma, {
-      candidateId: candidate.id,
-      waMessageId
-    });
-    existingMessage = existing.message || null;
-    if (existing.found && consentGateProcessingState(existing.message) !== 'PENDING') {
-      return { candidate, blocked: true, consume: true, defer: false, retry: false, reason: 'paused_inbound_retry' };
-    }
-  }
-
-  const profileDataDecision = evaluateProfileDataEvidence(inboundText(message), { candidate });
-  const protectedBeforeConsent = !isConsentAlreadyAccepted(candidate)
-    && (isProtectedAttachment(message) || profileDataDecision.containsProfileData);
-  if (protectedBeforeConsent) {
-    let claim = null;
-    try {
-      const decision = isProtectedAttachment(message)
-        ? 'PAUSED_PRECONSENT_ATTACHMENT'
-        : 'PAUSED_PRECONSENT_PROFILE_DATA';
-      claim = await claimPreConsentTurn(prisma, candidate.id, message, decision);
-      if (!claim.claimed && existingMessage) {
-        return { candidate, blocked: true, consume: true, defer: false, retry: false, reason: 'paused_inbound_retry' };
-      }
-      await completePreConsentTurn(prisma, claim);
-    } catch (error) {
-      if (claim?.claimed) {
-        try {
-          await releasePreConsentTurn(prisma, claim);
-        } catch (releaseError) {
-          console.warn('[PAUSED_PRECONSENT_CLAIM_RELEASE_ERROR]', safeErrorDetails(releaseError));
-        }
-      }
-      console.warn('[PAUSED_PRECONSENT_ATTACHMENT_PERSISTENCE_ERROR]', safeErrorDetails(error));
-      return {
-        candidate,
-        blocked: true,
-        consume: false,
-        defer: false,
-        retry: true,
-        reason: 'paused_preconsent_attachment_persistence_error'
-      };
-    }
-    return {
-      candidate,
-      blocked: true,
-      consume: true,
-      defer: false,
-      retry: false,
-      reason: isProtectedAttachment(message)
-        ? 'paused_preconsent_attachment_consumed'
-        : 'paused_preconsent_profile_data_consumed'
-    };
-  }
-
   return {
     candidate,
     blocked: false,
@@ -1572,22 +1440,26 @@ export function dataConsentGateMiddleware(prisma) {
           }
           continue;
         }
-        if (!withdrawalRequested) {
-          const pauseDecision = await preparePausedCandidateForConsentGate(prisma, candidate, message);
+        const profileDataDecision = evaluateProfileDataEvidence(body, { candidate });
+        const consentPromptPending = parseConsentPendingMode(candidate.botResumeMode).pending;
+        const explicitConsentDecision = withdrawalRequested
+          || consentButton
+          || shouldRecordConsentAcceptance(body, { consentPromptPending })
+          || shouldRecordConsentRejection(body, { consentPromptPending });
+        if (!explicitConsentDecision
+            && (isProtectedAttachment(message) || profileDataDecision.containsProfileData)) {
+          continue;
+        }
+        if (!withdrawalRequested && !explicitConsentDecision) {
+          const pauseDecision = await preparePausedCandidateForConsentGate(candidate);
           candidate = pauseDecision.candidate || candidate;
-          if (pauseDecision.retry) return res.sendStatus(503);
-          if (pauseDecision.blocked) {
-            if (pauseDecision.consume) handledMessages.push(message);
-            continue;
-          }
           if (pauseDecision.defer) continue;
         }
-        const profileDataDecision = evaluateProfileDataEvidence(body, { candidate });
         const boundary = evaluateConsentBoundary(candidate, message, { profileDataDecision });
         const campaign = candidate.dataConsentStatus !== 'ACCEPTED'
           && isAwaitingCampaignVacancyConfirmation(candidate);
         if (boundary.reason === 'protected_step_without_consent' && !candidate.vacancyId
-            && !isProtectedAttachment(message) && !profileDataDecision.containsProfileData) {
+            && !profileDataDecision.containsProfileData) {
           await handleConsentPrerequisite(prisma, candidate, message, from, null, boundary.reason);
           continue;
         }
