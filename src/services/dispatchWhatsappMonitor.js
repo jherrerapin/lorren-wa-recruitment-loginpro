@@ -7,6 +7,13 @@ const UNMATCHED_INBOUND_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const DISPATCH_WHATSAPP_MESSAGE_ENTITY = 'DISPATCH_WHATSAPP_MESSAGE';
 const MESSAGE_HISTORY_LIMIT = 20;
 const MESSAGE_BODY_LIMIT = 4000;
+const PROVIDER_DIAGNOSTIC_LIMIT = 500;
+const PROVIDER_STATUS_RANK = new Map([
+  ['ACCEPTED', 0],
+  ['SENT', 1],
+  ['DELIVERED', 2],
+  ['READ', 3]
+]);
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -53,6 +60,45 @@ function latestDate(...values) {
     .map(validDate)
     .filter(Boolean)
     .sort((a, b) => b.getTime() - a.getTime())[0] || null;
+}
+
+function sanitizeProviderDiagnosticText(value) {
+  return String(value || '')
+    .replace(/Bearer\s+[^\s,;]+/gi, 'Bearer [redacted]')
+    .replace(/\b(access[_-]?token|token)\s*[:=]\s*["']?[^"',;\s]+["']?/gi, '$1=[redacted]')
+    .replace(/\b(wa_id|recipient|phone|to)\s*[:=]\s*["']?\+?\d{7,16}["']?/gi, '$1=[redacted]')
+    .replace(/\+?\d{7,16}/g, '[redacted-number]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, PROVIDER_DIAGNOSTIC_LIMIT);
+}
+
+function providerFailureDiagnostic(statusPayload = {}) {
+  const errors = Array.isArray(statusPayload?.errors) ? statusPayload.errors : [];
+  if (!errors.length) return 'Meta reportó FAILED sin detalle adicional.';
+  const diagnostic = errors.slice(0, 3).map((error) => {
+    const parts = [];
+    if (error?.code !== undefined && error?.code !== null) parts.push(`code=${String(error.code).slice(0, 30)}`);
+    if (error?.error_subcode !== undefined && error?.error_subcode !== null) parts.push(`subcode=${String(error.error_subcode).slice(0, 30)}`);
+    if (text(error?.title)) parts.push(`title=${text(error.title)}`);
+    if (text(error?.message)) parts.push(`message=${text(error.message)}`);
+    if (text(error?.error_data?.details)) parts.push(`details=${text(error.error_data.details)}`);
+    return parts.join(' ');
+  }).filter(Boolean).join(' | ');
+  return sanitizeProviderDiagnosticText(diagnostic || 'Meta reportó FAILED sin detalle adicional.');
+}
+
+function providerStatusOccurredAt(statusPayload = {}) {
+  const timestamp = Number(statusPayload?.timestamp || 0);
+  return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp * 1000) : new Date();
+}
+
+function shouldAdvanceProviderStatus(currentStatus, nextStatus) {
+  if (nextStatus === 'FAILED') return currentStatus !== 'READ';
+  if (currentStatus === 'FAILED') return false;
+  const currentRank = PROVIDER_STATUS_RANK.get(currentStatus);
+  const nextRank = PROVIDER_STATUS_RANK.get(nextStatus);
+  return nextRank !== undefined && (currentRank === undefined || nextRank >= currentRank);
 }
 
 function windowSnapshot(lastInboundValue, now, evidenceSource = null) {
@@ -138,7 +184,8 @@ export async function recordDispatchWhatsappMessageAudit({
   if (scope !== 'operational' || !prismaClient?.devAuditEvent?.create) return { recorded: false, reason: 'unsupported' };
   const normalizedPhone = normalizePhone(phone);
   const normalizedDirection = String(direction || '').trim().toUpperCase();
-  const externalId = text(messageId) || text(providerMessageId) || text(dedupeKey);
+  const normalizedProviderMessageId = text(providerMessageId);
+  const externalId = text(messageId) || normalizedProviderMessageId || text(dedupeKey);
   const eventDate = validDate(occurredAt) || new Date();
   if (!normalizedPhone || !['INBOUND', 'OUTBOUND'].includes(normalizedDirection) || !externalId) {
     return { recorded: false, reason: 'invalid' };
@@ -168,7 +215,10 @@ export async function recordDispatchWhatsappMessageAudit({
           body: cleanBody || null,
           messageType: String(messageType || 'UNKNOWN').toUpperCase(),
           messageId: text(messageId),
-          providerMessageId: text(providerMessageId),
+          providerMessageId: normalizedProviderMessageId,
+          providerStatus: normalizedDirection === 'OUTBOUND' && normalizedProviderMessageId ? 'ACCEPTED' : null,
+          providerStatusAt: normalizedDirection === 'OUTBOUND' && normalizedProviderMessageId ? eventDate.toISOString() : null,
+          providerDiagnostic: null,
           source: source || null,
           occurredAt: eventDate.toISOString()
         },
@@ -182,18 +232,78 @@ export async function recordDispatchWhatsappMessageAudit({
   }
 }
 
+export async function recordDispatchWhatsappProviderStatusAudit({
+  prismaClient,
+  scope = 'operational',
+  providerMessageId,
+  providerStatus,
+  statusPayload = {}
+} = {}) {
+  const normalizedProviderMessageId = text(providerMessageId || statusPayload?.id);
+  const normalizedStatus = String(providerStatus || statusPayload?.status || '').trim().toUpperCase();
+  if (scope !== 'operational' || !normalizedProviderMessageId || !['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(normalizedStatus)) {
+    return { recorded: false, reason: 'invalid' };
+  }
+  if (!prismaClient?.devAuditEvent?.findFirst || !prismaClient?.devAuditEvent?.update) {
+    return { recorded: false, reason: 'unsupported' };
+  }
+  const entityId = `dispatch-wa:outbound:${normalizedProviderMessageId}`;
+  try {
+    const row = await prismaClient.devAuditEvent.findFirst({
+      where: {
+        entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
+        entityId,
+        action: 'DISPATCH_WHATSAPP_OUTBOUND'
+      },
+      select: { id: true, metadata: true }
+    });
+    if (!row) return { recorded: false, reason: 'not_found' };
+    const metadata = row.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+    const currentStatus = String(metadata.providerStatus || '').trim().toUpperCase();
+    if (!shouldAdvanceProviderStatus(currentStatus, normalizedStatus)) {
+      return { recorded: false, reason: 'stale_status', status: currentStatus };
+    }
+    const statusAt = providerStatusOccurredAt(statusPayload);
+    const diagnostic = normalizedStatus === 'FAILED' ? providerFailureDiagnostic(statusPayload) : null;
+    await prismaClient.devAuditEvent.update({
+      where: { id: row.id },
+      data: {
+        metadata: {
+          ...metadata,
+          providerStatus: normalizedStatus,
+          providerStatusAt: statusAt.toISOString(),
+          providerDiagnostic: diagnostic
+        }
+      }
+    });
+    return { recorded: true, status: normalizedStatus, statusAt: statusAt.toISOString(), diagnostic };
+  } catch (_error) {
+    console.warn('[dispatch-wa-audit] No fue posible actualizar el estado de entrega de Meta.');
+    return { recorded: false, reason: 'storage_error' };
+  }
+}
+
 function auditMessageFromRow(row) {
   const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
   const direction = String(metadata.direction || (row.action?.endsWith('INBOUND') ? 'INBOUND' : 'OUTBOUND')).toUpperCase();
+  const providerStatus = text(metadata.providerStatus) || null;
+  const providerDiagnostic = text(metadata.providerDiagnostic) || null;
+  const baseBody = text(metadata.body) || '(mensaje sin texto)';
+  const providerLine = direction === 'OUTBOUND' && providerStatus
+    ? `[Meta: ${providerStatus}]${providerDiagnostic ? ` ${providerDiagnostic}` : ''}`
+    : null;
   return {
     id: row.entityId || row.id,
     direction,
-    body: text(metadata.body) || '(mensaje sin texto)',
+    body: providerLine ? `${baseBody}\n\n${providerLine}` : baseBody,
     messageType: text(metadata.messageType) || 'UNKNOWN',
     at: isoDate(metadata.occurredAt || row.createdAt),
     source: text(metadata.source) || 'AUDIT',
     messageId: text(metadata.messageId) || null,
     providerMessageId: text(metadata.providerMessageId) || null,
+    providerStatus,
+    providerStatusAt: isoDate(metadata.providerStatusAt),
+    providerDiagnostic,
     persisted: true,
     reconstructed: false
   };
