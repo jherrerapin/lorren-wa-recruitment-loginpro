@@ -5,6 +5,7 @@ import axios from 'axios';
 import './dataConsentHumanPauseReplay.test.js';
 import './preConsentDataEvidence.test.js';
 import {
+  DATA_CONSENT_VERSION,
   dataConsentGateMiddleware,
   evaluateConsentBoundary
 } from '../src/services/dataConsentGate.js';
@@ -36,6 +37,7 @@ function acceptedCandidate(overrides = {}) {
     phone: 'TEST-PHONE-REVOCATION',
     status: 'NUEVO',
     dataConsentStatus: 'ACCEPTED',
+    dataConsentVersion: DATA_CONSENT_VERSION,
     currentStep: 'SCHEDULED',
     vacancyId: 'TEST-VACANCY-REVOCATION',
     botResumeMode: null,

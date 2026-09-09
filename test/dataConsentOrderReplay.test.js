@@ -3,6 +3,7 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
 import {
+  DATA_CONSENT_VERSION,
   dataConsentGateMiddleware,
   deriveConsentResumeUpdate,
   evaluateConsentBoundary,
@@ -235,7 +236,10 @@ test('autorización aceptada pasa al router y rechazo o revocación persistidos 
     'rejected-consent-is-not-requested-again-v1',
     'conv-007-revoked-consent-is-not-requested-again-v1'
   ]) {
-    const replay = CONSENT_ORDER_REPLAYS.find((item) => item.id === id);
+    const replay = structuredClone(CONSENT_ORDER_REPLAYS.find((item) => item.id === id));
+    if (replay.candidate.dataConsentStatus === 'ACCEPTED') {
+      replay.candidate.dataConsentVersion = DATA_CONSENT_VERSION;
+    }
     const decision = evaluateConsentBoundary(replay.candidate, replay.inbound);
     const observed = await executeReplay(replay);
 

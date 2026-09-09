@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  DATA_CONSENT_VERSION,
   CAMPAIGN_VACANCY_CONFIRMATION_MODE,
   buildVacancyQuestionReply,
   evaluateConsentBoundary,
@@ -91,7 +92,7 @@ test('un perfil futuro sin vacancyId también exige consentimiento antes de capt
 
 test('un candidato con autorización aceptada no vuelve a ser bloqueado por el gate', () => {
   const decision = evaluateConsentBoundary(
-    { dataConsentStatus: 'ACCEPTED', currentStep: 'COLLECTING_DATA', botResumeMode: null },
+    { dataConsentStatus: 'ACCEPTED', dataConsentVersion: DATA_CONSENT_VERSION, currentStep: 'COLLECTING_DATA', botResumeMode: null },
     { type: 'document', document: { id: 'media-1', filename: 'hoja-de-vida.pdf' } }
   );
 
