@@ -5,8 +5,11 @@ import { deliverAutomaticOutboundText } from '../services/automaticOutboundDeliv
 import {
   DATA_CONSENT_BUTTONS,
   DATA_CONSENT_VERSION,
-  buildDataConsentPromptReply
+  buildConsentPendingMode,
+  buildDataConsentPromptReply,
+  parseConsentPendingMode
 } from '../services/dataConsentGate.js';
+import { claimCandidateDataConsentPromptPendingState } from '../services/consentStateService.js';
 import { sendReplyButtonsMessage } from '../services/whatsapp.js';
 import { getWhatsappWindowState } from '../services/reminderPolicy.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -56,6 +59,12 @@ export function buildConsentResendIdempotencyKey(candidateId, nonce) {
     throw new TypeError('dev_consent_resend_nonce_invalid');
   }
   return `admin-resend-data-consent:${normalizedCandidateId}:${DATA_CONSENT_VERSION}:${normalizedNonce}`;
+}
+
+export function buildDevConsentPendingMode(candidate = {}) {
+  const existing = parseConsentPendingMode(candidate?.botResumeMode);
+  if (existing.pending) return buildConsentPendingMode(existing);
+  return buildConsentPendingMode({ resumeMode: null, cvResendRequired: false });
 }
 
 export function buildDevConsentResendForm({ candidate = {}, outboundWindow = null, nonce = randomUUID() } = {}) {
@@ -109,7 +118,9 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
     select: {
       id: true,
       phone: true,
-      dataConsentStatus: true
+      dataConsentStatus: true,
+      botResumeMode: true,
+      botPaused: true
     }
   });
   if (!candidate) throw consentResendError('dev_consent_resend_candidate_not_found', 'Candidato no encontrado.');
@@ -117,6 +128,12 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
     throw consentResendError(
       'dev_consent_resend_not_pending',
       'El consentimiento de este candidato ya no está pendiente; no se reenvió la autorización.'
+    );
+  }
+  if (candidate.botPaused) {
+    throw consentResendError(
+      'dev_consent_resend_bot_paused',
+      'Lórren está pausado para este candidato. Reanuda el bot antes de reenviar la autorización.'
     );
   }
 
@@ -150,7 +167,21 @@ export async function resendDataConsentFromDev(prisma, input = {}, dependencies 
     }
   }, {
     sendText: (recipient, text) => sendButtons(recipient, text, DATA_CONSENT_BUTTONS),
-    now
+    now,
+    prepareClaim: async (tx) => {
+      const fresh = await tx.candidate.findUnique({
+        where: { id: candidateId },
+        select: { id: true, dataConsentStatus: true, botResumeMode: true, botPaused: true }
+      });
+      if (!fresh || !canShowDevConsentResend(fresh) || fresh.botPaused) return false;
+      const nextMode = buildDevConsentPendingMode(fresh);
+      const claimed = await claimCandidateDataConsentPromptPendingState(tx, {
+        candidateId,
+        expectedBotResumeMode: fresh.botResumeMode ?? null,
+        pendingBotResumeMode: nextMode
+      });
+      return claimed.count === 1;
+    }
   });
 }
 

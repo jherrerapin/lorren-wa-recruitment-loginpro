@@ -4,10 +4,14 @@ import { readFileSync } from 'node:fs';
 import {
   DATA_CONSENT_BUTTONS,
   DATA_CONSENT_VERSION,
-  buildDataConsentPromptReply
+  buildConsentPendingMode,
+  buildDataConsentPromptReply,
+  evaluateConsentBoundary,
+  parseConsentPendingMode
 } from '../src/services/dataConsentGate.js';
 import {
   buildConsentResendIdempotencyKey,
+  buildDevConsentPendingMode,
   buildDevConsentResendForm,
   canShowDevConsentResend,
   injectDevConsentResendAction,
@@ -23,14 +27,31 @@ function candidate(overrides = {}) {
     id: 'candidate-1',
     phone: '573001112233',
     dataConsentStatus: 'PENDING',
+    botResumeMode: null,
+    botPaused: false,
     ...overrides
   };
 }
 
 function prismaHarness(candidateValue = candidate(), inboundAt = new Date(NOW.getTime() - 60_000)) {
+  const state = {
+    candidate: candidateValue ? structuredClone(candidateValue) : null
+  };
   return {
+    __state: state,
     candidate: {
-      findUnique: async () => candidateValue ? structuredClone(candidateValue) : null
+      findUnique: async () => state.candidate ? structuredClone(state.candidate) : null,
+      updateMany: async ({ where = {}, data = {} } = {}) => {
+        const current = state.candidate;
+        if (!current) return { count: 0 };
+        if (where.id != null && current.id !== where.id) return { count: 0 };
+        if (where.dataConsentStatus != null && current.dataConsentStatus !== where.dataConsentStatus) return { count: 0 };
+        if (where.botPaused != null && current.botPaused !== where.botPaused) return { count: 0 };
+        if (Object.prototype.hasOwnProperty.call(where, 'botResumeMode')
+            && (current.botResumeMode ?? null) !== (where.botResumeMode ?? null)) return { count: 0 };
+        Object.assign(current, structuredClone(data));
+        return { count: 1 };
+      }
     },
     message: {
       findFirst: async () => inboundAt ? { createdAt: new Date(inboundAt) } : null
@@ -88,7 +109,7 @@ test('idempotencia usa candidato + versión + nonce: mismo render repite clave y
   assert.match(first, new RegExp(DATA_CONSENT_VERSION));
 });
 
-test('reenvío usa exactamente el prompt y botones canónicos como INTERACTIVE sin mutar candidato', async () => {
+test('reenvío reserva el contexto de consentimiento pendiente antes de enviar a Meta', async () => {
   const observed = { deliverCalls: 0, sendCalls: 0 };
   const prisma = prismaHarness();
   const result = await resendDataConsentFromDev(prisma, {
@@ -99,8 +120,13 @@ test('reenvío usa exactamente el prompt y botones canónicos como INTERACTIVE s
     deliver: async (_prisma, input, dependencies) => {
       observed.deliverCalls += 1;
       observed.input = structuredClone(input);
-      observed.sendResult = await dependencies.sendText(input.to, input.body);
-      return { sent: true, suppressed: false, messageId: 'outbound-1' };
+      observed.claimed = await dependencies.prepareClaim(prisma);
+      if (observed.claimed) {
+        observed.sendResult = await dependencies.sendText(input.to, input.body);
+      }
+      return observed.claimed
+        ? { sent: true, suppressed: false, messageId: 'outbound-1' }
+        : { sent: false, suppressed: true };
     },
     sendButtons: async (to, body, buttons) => {
       observed.sendCalls += 1;
@@ -111,6 +137,7 @@ test('reenvío usa exactamente el prompt y botones canónicos como INTERACTIVE s
 
   assert.equal(result.sent, true);
   assert.equal(observed.deliverCalls, 1);
+  assert.equal(observed.claimed, true);
   assert.equal(observed.sendCalls, 1);
   assert.equal(observed.input.messageType, 'INTERACTIVE');
   assert.equal(observed.input.body, buildDataConsentPromptReply());
@@ -118,9 +145,36 @@ test('reenvío usa exactamente el prompt y botones canónicos como INTERACTIVE s
   assert.equal(observed.input.rawPayload.source, 'admin_resend_data_consent');
   assert.equal(observed.input.rawPayload.manualIntervention, false);
   assert.equal(observed.input.rawPayload.consentVersion, DATA_CONSENT_VERSION);
+  assert.equal(prisma.__state.candidate.dataConsentStatus, 'PENDING');
+  assert.equal(prisma.__state.candidate.reminderState, 'SKIPPED');
+  assert.equal(prisma.__state.candidate.reminderScheduledFor, null);
+
+  const pending = parseConsentPendingMode(prisma.__state.candidate.botResumeMode);
+  assert.equal(pending.pending, true);
+  const boundary = evaluateConsentBoundary(prisma.__state.candidate, {
+    id: 'wamid-consent-response',
+    from: prisma.__state.candidate.phone,
+    type: 'text',
+    text: { body: 'Sí autorizo' }
+  });
+  assert.equal(boundary.block, true);
+  assert.equal(boundary.reason, 'consent_pending');
 });
 
-test('ACCEPTED, REVOKED y ventana vencida bloquean el reenvío antes del delivery', async () => {
+test('reenvío conserva un contexto pendiente ya existente', () => {
+  const previous = buildConsentPendingMode({
+    resumeMode: 'alternative_vacancy_offer:vacancy-77',
+    cvResendRequired: true
+  });
+  const next = buildDevConsentPendingMode(candidate({ botResumeMode: previous }));
+  assert.deepEqual(parseConsentPendingMode(next), {
+    pending: true,
+    resumeMode: 'alternative_vacancy_offer:vacancy-77',
+    cvResendRequired: true
+  });
+});
+
+test('ACCEPTED, REVOKED, bot pausado y ventana vencida bloquean el reenvío antes del delivery', async () => {
   let deliveries = 0;
   const deps = {
     now: () => new Date(NOW),
@@ -138,6 +192,13 @@ test('ACCEPTED, REVOKED y ventana vencida bloquean el reenvío antes del deliver
   }
 
   await assert.rejects(
+    resendDataConsentFromDev(prismaHarness(candidate({ botPaused: true })), {
+      candidateId: 'candidate-1', nonce: NONCE
+    }, deps),
+    (error) => error?.code === 'dev_consent_resend_bot_paused'
+  );
+
+  await assert.rejects(
     resendDataConsentFromDev(
       prismaHarness(candidate(), new Date(NOW.getTime() - (24 * 60 * 60 * 1000) - 1)),
       { candidateId: 'candidate-1', nonce: NONCE },
@@ -146,6 +207,12 @@ test('ACCEPTED, REVOKED y ventana vencida bloquean el reenvío antes del deliver
     (error) => error?.code === 'dev_consent_resend_window_closed'
   );
   assert.equal(deliveries, 0);
+});
+
+test('ruta DEV delega la mutación de candidato a ConsentStateService', () => {
+  const route = readFileSync(new URL('../src/routes/devConsentResend.js', import.meta.url), 'utf8');
+  assert.match(route, /claimCandidateDataConsentPromptPendingState/);
+  assert.doesNotMatch(route, /\.candidate\.updateMany\s*\(/);
 });
 
 test('bootstrap registra la extensión DEV sin modificar el router monolítico ni el contrato de consentimiento', () => {

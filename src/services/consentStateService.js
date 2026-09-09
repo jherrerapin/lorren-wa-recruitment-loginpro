@@ -70,11 +70,56 @@ function validatePrismaContract(prisma) {
   );
 }
 
+function validatePendingPromptPrismaContract(prisma) {
+  return Boolean(
+    prisma
+    && prisma.candidate
+    && typeof prisma.candidate.findUnique === 'function'
+    && typeof prisma.candidate.updateMany === 'function'
+  );
+}
+
 async function executeConsentOperations(prisma, operation) {
   if (typeof prisma.$transaction === 'function') {
     return prisma.$transaction(operation);
   }
   return operation(prisma);
+}
+
+export async function claimCandidateDataConsentPromptPendingState(prisma, {
+  candidateId,
+  expectedBotResumeMode = null,
+  pendingBotResumeMode
+} = {}) {
+  if (!validatePendingPromptPrismaContract(prisma)) {
+    throw new Error('consent_pending_prompt_prisma_contract_invalid');
+  }
+
+  const normalizedCandidateId = requireNonEmptyString(candidateId, 'candidate_id');
+  const expectedResumeMode = normalizeNullableString(expectedBotResumeMode);
+  const nextResumeMode = requireNonEmptyString(pendingBotResumeMode, 'consent_pending_resume_mode');
+
+  const result = await prisma.candidate.updateMany({
+    where: {
+      id: normalizedCandidateId,
+      dataConsentStatus: 'PENDING',
+      botPaused: false,
+      botResumeMode: expectedResumeMode
+    },
+    data: {
+      botResumeMode: nextResumeMode,
+      reminderScheduledFor: null,
+      reminderState: 'SKIPPED'
+    }
+  });
+  const candidate = await prisma.candidate.findUnique({
+    where: { id: normalizedCandidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate
+  };
 }
 
 function splitConsentStepTransition(candidateData, expected) {
