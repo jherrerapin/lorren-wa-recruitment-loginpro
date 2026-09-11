@@ -2,7 +2,7 @@
 
 (() => {
   const STYLE_ID = 'candidate-export-date-range-style';
-  const EXPORT_LINK_SELECTOR = 'a[href^="/admin/export?"]';
+  const EXPORT_LINK_SELECTOR = 'a[href^="/admin/export?"],a[href^="/admin/export-global?"]';
   const MONTH_FORMATTER = new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' });
   const RANGE_DATE_FORMATTER = new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
   const WEEKDAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -21,6 +21,16 @@
     contacted: 'contactados',
     contracted: 'contratados',
     rejected: 'rechazados'
+  });
+  const GLOBAL_EXPORT_LABEL = Object.freeze({
+    registered: 'registrados',
+    approved: 'aprobados',
+    missing_cv_complete: 'pendientes HV',
+    new: 'nuevos',
+    contacted: 'contactados',
+    contracted: 'contratados',
+    rejected: 'rechazados',
+    all: 'todos'
   });
 
   function injectStyles() {
@@ -79,6 +89,10 @@
     return new Date(year, month - 1, day, 12, 0, 0, 0);
   }
 
+  function validIsoDate(value) {
+    return dateFromIso(value) ? String(value) : '';
+  }
+
   function formatRangeDate(value) {
     const date = dateFromIso(value);
     return date ? RANGE_DATE_FORMATTER.format(date) : '';
@@ -106,7 +120,20 @@
     });
   }
 
-  function activeExportContext(panel) {
+  function activeGlobalExportContext() {
+    const params = new URL(window.location.href).searchParams;
+    const scope = params.get('approvedOnly') === '1'
+      ? 'approved'
+      : String(params.get('status') || 'registered').trim();
+    return {
+      key: scope,
+      scope: Object.hasOwn(GLOBAL_EXPORT_LABEL, scope) ? scope : '',
+      label: GLOBAL_EXPORT_LABEL[scope] || scope
+    };
+  }
+
+  function activeExportContext(panel, bar) {
+    if (!panel && bar?.dataset?.globalCandidateExport === 'true') return activeGlobalExportContext();
     const key = String(panel?.dataset?.activeVacancyTab || '');
     const declaredScope = String(panel?.dataset?.activeVacancyExportScope || '');
     return {
@@ -122,9 +149,30 @@
     return `desde ${formatRangeDate(dateFrom)}`;
   }
 
+  function updateGlobalRangeDownload(bar, context, dateFrom, dateTo) {
+    const link = bar.querySelector('[data-global-candidate-export-link]');
+    if (!link || !context.scope) return;
+    const url = new URL(link.getAttribute('href') || '/admin/export-global', window.location.origin);
+    url.pathname = '/admin/export-global';
+    url.searchParams.set('scope', context.scope);
+    if (dateFrom) url.searchParams.set('dateFrom', dateFrom);
+    else url.searchParams.delete('dateFrom');
+    if (dateTo) url.searchParams.set('dateTo', dateTo);
+    else url.searchParams.delete('dateTo');
+    link.href = `${url.pathname}${url.search}`;
+    link.textContent = dateFrom
+      ? `↓ Descargar ${context.label} · ${rangeLabel(dateFrom, dateTo)}`
+      : `↓ Descargar ${context.label}`;
+  }
+
   function updateContextualRangeDownload(bar, panel, dateFrom, dateTo) {
+    const context = activeExportContext(panel, bar);
+    if (!panel && bar.dataset.globalCandidateExport === 'true') {
+      updateGlobalRangeDownload(bar, context, dateFrom, dateTo);
+      return;
+    }
+
     restoreRangeDecoratedLinks(bar);
-    const context = activeExportContext(panel);
     if (!dateFrom || !context.scope) return;
 
     const links = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
@@ -228,6 +276,54 @@
     });
   }
 
+  function setRangeParam(url, key, value) {
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+
+  function setFormRangeInput(form, name, value) {
+    let input = form.querySelector(`input[name="${name}"][data-global-range-param]`);
+    if (!value) {
+      input?.remove();
+      return;
+    }
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.dataset.globalRangeParam = 'true';
+      form.appendChild(input);
+    }
+    input.value = value;
+  }
+
+  function syncGlobalRangeNavigation(bar, dateFrom, dateTo) {
+    if (bar.dataset.globalCandidateExport !== 'true') return;
+
+    const current = new URL(window.location.href);
+    setRangeParam(current, 'dateFrom', dateFrom);
+    setRangeParam(current, 'dateTo', dateTo);
+    window.history.replaceState({}, '', `${current.pathname}${current.search}${current.hash}`);
+
+    document.querySelectorAll('a[href^="/admin?"]').forEach((anchor) => {
+      let url;
+      try {
+        url = new URL(anchor.getAttribute('href') || '', window.location.origin);
+      } catch {
+        return;
+      }
+      if (url.pathname !== '/admin' || !url.searchParams.has('status')) return;
+      setRangeParam(url, 'dateFrom', dateFrom);
+      setRangeParam(url, 'dateTo', dateTo);
+      anchor.href = `${url.pathname}${url.search}${url.hash}`;
+    });
+
+    document.querySelectorAll('form[method="get"][action="/admin"]').forEach((form) => {
+      setFormRangeInput(form, 'dateFrom', dateFrom);
+      setFormRangeInput(form, 'dateTo', dateTo);
+    });
+  }
+
   function installExportRange(bar) {
     if (!bar || bar.dataset.exportDateRangeReady === 'true') return;
     const initialExportLinks = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
@@ -235,8 +331,10 @@
 
     bar.dataset.exportDateRangeReady = 'true';
 
-    let selectedStart = '';
-    let selectedEnd = '';
+    const initialParams = new URL(window.location.href).searchParams;
+    let selectedStart = validIsoDate(initialParams.get('dateFrom'));
+    let selectedEnd = validIsoDate(initialParams.get('dateTo'));
+    if (selectedStart && selectedEnd && selectedStart > selectedEnd) selectedEnd = '';
     const today = new Date();
     let viewYear = today.getFullYear();
     let viewMonth = today.getMonth();
@@ -322,6 +420,7 @@
     const emitRangeChange = () => {
       controls.dataset.dateFrom = selectedStart;
       controls.dataset.dateTo = selectedEnd;
+      syncGlobalRangeNavigation(bar, selectedStart, selectedEnd);
       refreshDownloadContext();
       controls.dispatchEvent(new CustomEvent('candidate-date-range-change', {
         bubbles: true,
@@ -480,13 +579,14 @@
     });
 
     updateTrigger();
+    syncGlobalRangeNavigation(bar, selectedStart, selectedEnd);
     refreshDownloadContext();
   }
 
   function install() {
     if (window.location.pathname !== '/admin') return;
     injectStyles();
-    document.querySelectorAll('[data-vacancy-panel] .export-bar').forEach(installExportRange);
+    document.querySelectorAll('[data-vacancy-panel] .export-bar, .export-bar[data-global-candidate-export="true"]').forEach(installExportRange);
   }
 
   if (document.readyState === 'loading') {
