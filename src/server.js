@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import { PrismaClient } from '@prisma/client';
 import { webhookRouter } from './routes/webhook.js';
 import { adminRouter } from './routes/admin.js';
+import { adminCandidateGlobalExportRouter } from './routes/adminCandidateGlobalExport.js';
 import { interviewOutreachManagementRouter } from './routes/interviewOutreachManagement.js';
 import { botKnowledgeCrudRouter } from './routes/botKnowledgeCrud.js';
 import { locationsRouter } from './routes/locations.js';
@@ -688,6 +689,7 @@ app.use('/admin', (req, res, next) => {
   }
   return next();
 });
+app.use('/admin', wrapAsyncRouter(adminCandidateGlobalExportRouter(prisma)));
 app.use('/admin', wrapAsyncRouter(interviewOutreachManagementRouter(prisma)));
 app.use('/admin', adminRouter(prisma));
 app.use('/admin/locations', locationsRouter(prisma));
