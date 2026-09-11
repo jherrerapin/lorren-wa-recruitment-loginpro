@@ -22,8 +22,6 @@ function completeCandidate(overrides = {}) {
     medicalRestrictions: 'Sin restricciones médicas',
     transportMode: 'Público',
     status: 'REGISTRADO',
-    rejectionReason: null,
-    rejectionDetails: null,
     createdAt: new Date('2026-09-08T15:00:00.000Z'),
     cvMimeType: 'application/pdf',
     cvOriginalName: 'cv-ejemplo.pdf',
@@ -120,7 +118,7 @@ test('la vista global reutiliza un solo selector visual y descarga la pestaña a
   assert.match(runtime, /\/admin\/export-global\?scope=/);
   assert.match(runtime, /GLOBAL_EXPORT_LABEL/);
   assert.match(runtime, /approvedOnly \? 'approved' : requestedStatus/);
-  assert.match(runtime, /data-global-candidate-export-link/);
+  assert.match(runtime, /globalCandidateExportLink/);
   assert.match(runtime, /globalCandidateExportScope/);
   assert.match(runtime, /\.export-bar\[data-global-candidate-export="true"\]/);
   assert.match(runtime, /candidate-export-range-trigger/);
