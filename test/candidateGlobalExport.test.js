@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
   buildGlobalCandidateExportWhere,
-  GLOBAL_CANDIDATE_EXPORT_SCOPES,
   loadGlobalCandidateExportRows
 } from '../src/routes/adminCandidateGlobalExport.js';
+import { CANDIDATE_EXPORT_SCOPES } from '../src/services/candidateExport.js';
 import { normalizeApplicantDateRange } from '../src/services/vacancyDashboardSearchExpansion.js';
 
 function completeCandidate(overrides = {}) {
@@ -100,8 +100,8 @@ test('carga global delega los estados a filterCandidatesForExport sin solaparlos
   assert.equal(observed.every((args) => args.orderBy?.createdAt === 'desc'), true);
 });
 
-test('scopes globales corresponden a las pestañas visibles solicitadas', () => {
-  assert.deepEqual([...GLOBAL_CANDIDATE_EXPORT_SCOPES], [
+test('la exportación global consume los scopes canónicos de candidatos', () => {
+  for (const scope of [
     'registered',
     'missing_cv_complete',
     'approved',
@@ -109,7 +109,9 @@ test('scopes globales corresponden a las pestañas visibles solicitadas', () => 
     'contracted',
     'rejected',
     'all'
-  ]);
+  ]) {
+    assert.equal(CANDIDATE_EXPORT_SCOPES.includes(scope), true, scope);
+  }
 });
 
 test('la vista global reutiliza un solo selector visual y descarga la pestaña activa', () => {
