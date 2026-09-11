@@ -6,7 +6,10 @@ import {
   loadGlobalCandidateExportRows
 } from '../src/routes/adminCandidateGlobalExport.js';
 import { CANDIDATE_EXPORT_SCOPES } from '../src/services/candidateExport.js';
-import { normalizeApplicantDateRange } from '../src/services/vacancyDashboardSearchExpansion.js';
+import {
+  candidateMatchesApplicantDateRange,
+  normalizeApplicantDateRange
+} from '../src/services/vacancyDashboardSearchExpansion.js';
 
 function completeCandidate(overrides = {}) {
   return {
@@ -144,6 +147,31 @@ test('el rango global se conserva al cambiar de pestaña y al usar filtros GET',
   assert.match(runtime, /setFormRangeInput\(form, 'dateFrom', dateFrom\)/);
   assert.match(runtime, /setFormRangeInput\(form, 'dateTo', dateTo\)/);
   assert.match(runtime, /syncGlobalRangeNavigation\(bar, selectedStart, selectedEnd\)/);
+});
+
+test('el listado global usa el mismo rango Colombia sobre Candidate.createdAt', () => {
+  const dateRange = normalizeApplicantDateRange({
+    dateFrom: '2026-09-08',
+    dateTo: '2026-09-08'
+  });
+
+  assert.equal(candidateMatchesApplicantDateRange(
+    completeCandidate({ createdAt: new Date('2026-09-08T15:00:00.000Z') }),
+    dateRange
+  ), true);
+  assert.equal(candidateMatchesApplicantDateRange(
+    completeCandidate({ createdAt: new Date('2026-09-09T15:00:00.000Z') }),
+    dateRange
+  ), false);
+});
+
+test('completar o quitar el rango global refresca el listado automáticamente sin botón aplicar', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /const globalRangeComplete = bar\.dataset\.globalCandidateExport === 'true'/);
+  assert.match(runtime, /\(!selectedStart && !selectedEnd\) \|\| \(selectedStart && selectedEnd\)/);
+  assert.match(runtime, /if \(globalRangeComplete\) window\.location\.reload\(\)/);
+  assert.doesNotMatch(runtime, /Aplicar (?:filtro|rango)/i);
 });
 
 test('quitar el rango global elimina dateFrom/dateTo sin crear otro selector', () => {
