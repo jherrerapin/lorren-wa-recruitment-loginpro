@@ -77,7 +77,6 @@ export async function loadGlobalCandidateExportRows(prisma, {
     where: buildGlobalCandidateExportWhere(accessContext, dateRange),
     orderBy: { createdAt: 'desc' },
     select: {
-      id: true,
       fullName: true,
       phone: true,
       documentType: true,
@@ -89,15 +88,12 @@ export async function loadGlobalCandidateExportRows(prisma, {
       medicalRestrictions: true,
       transportMode: true,
       status: true,
-      rejectionReason: true,
-      rejectionDetails: true,
       createdAt: true,
       cvMimeType: true,
       cvOriginalName: true,
       cvStorageKey: true,
       vacancy: {
         select: {
-          id: true,
           title: true,
           role: true,
           city: true
