@@ -2,7 +2,7 @@
 
 (() => {
   const STYLE_ID = 'candidate-export-date-range-style';
-  const EXPORT_LINK_SELECTOR = 'a[href^="/admin/export?"]';
+  const EXPORT_LINK_SELECTOR = 'a[href^="/admin/export?"], a[href^="/admin/export-global?"]';
   const MONTH_FORMATTER = new Intl.DateTimeFormat('es-CO', { month: 'long', year: 'numeric' });
   const RANGE_DATE_FORMATTER = new Intl.DateTimeFormat('es-CO', { day: '2-digit', month: 'short', year: 'numeric' });
   const WEEKDAYS = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -21,6 +21,15 @@
     contacted: 'contactados',
     contracted: 'contratados',
     rejected: 'rechazados'
+  });
+  const GLOBAL_EXPORT_LABEL = Object.freeze({
+    registered: 'registrados',
+    missing_cv_complete: 'pendientes HV',
+    approved: 'aprobados',
+    contacted: 'contactados',
+    contracted: 'contratados',
+    rejected: 'rechazados',
+    all: 'todos'
   });
 
   function injectStyles() {
@@ -106,7 +115,14 @@
     });
   }
 
-  function activeExportContext(panel) {
+  function activeExportContext(panel, bar) {
+    if (!panel && bar?.dataset?.globalCandidateExportScope) {
+      return {
+        key: 'global',
+        scope: String(bar.dataset.globalCandidateExportScope || ''),
+        label: String(bar.dataset.globalCandidateExportLabel || 'registros')
+      };
+    }
     const key = String(panel?.dataset?.activeVacancyTab || '');
     const declaredScope = String(panel?.dataset?.activeVacancyExportScope || '');
     return {
@@ -124,7 +140,7 @@
 
   function updateContextualRangeDownload(bar, panel, dateFrom, dateTo) {
     restoreRangeDecoratedLinks(bar);
-    const context = activeExportContext(panel);
+    const context = activeExportContext(panel, bar);
     if (!dateFrom || !context.scope) return;
 
     const links = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
@@ -483,10 +499,44 @@
     refreshDownloadContext();
   }
 
+  function installGlobalExportBar() {
+    if (!document.getElementById('legacy-candidates-table')) return null;
+    const bar = Array.from(document.querySelectorAll('.export-bar'))
+      .find((candidate) => !candidate.closest('[data-vacancy-panel]'));
+    if (!bar) return null;
+
+    const params = new URL(window.location.href).searchParams;
+    const requestedStatus = String(params.get('status') || 'registered').trim();
+    const approvedOnly = params.get('approvedOnly') === '1';
+    const scope = approvedOnly ? 'approved' : requestedStatus;
+    const label = GLOBAL_EXPORT_LABEL[scope];
+    if (!label) return null;
+
+    bar.dataset.globalCandidateExport = 'true';
+    bar.dataset.globalCandidateExportScope = scope;
+    bar.dataset.globalCandidateExportLabel = label;
+
+    Array.from(bar.querySelectorAll('.filter-note')).forEach((note) => {
+      if (/descarga Excel ahora se realiza desde cada vacante/i.test(String(note.textContent || ''))) note.remove();
+    });
+
+    let link = bar.querySelector('[data-global-candidate-export-link]');
+    if (!link) {
+      link = document.createElement('a');
+      link.className = 'export-btn';
+      link.dataset.globalCandidateExportLink = 'true';
+      bar.prepend(link);
+    }
+    link.href = `/admin/export-global?scope=${encodeURIComponent(scope)}`;
+    link.textContent = `↓ Descargar ${label}`;
+    return bar;
+  }
+
   function install() {
     if (window.location.pathname !== '/admin') return;
     injectStyles();
-    document.querySelectorAll('[data-vacancy-panel] .export-bar').forEach(installExportRange);
+    installGlobalExportBar();
+    document.querySelectorAll('[data-vacancy-panel] .export-bar, .export-bar[data-global-candidate-export="true"]').forEach(installExportRange);
   }
 
   if (document.readyState === 'loading') {
