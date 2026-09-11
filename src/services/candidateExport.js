@@ -85,6 +85,7 @@ export function deriveCandidateStatusForUI(candidate = {}) {
 
 export function isOperationallyRegistered(candidate) {
   const uiStatus = normalizeCandidateStatusForUI(candidate.status);
+  if (!['NUEVO', 'REGISTRADO'].includes(uiStatus)) return false;
   return hasValue(candidate.fullName)
     && hasValue(candidate.documentType)
     && hasValue(candidate.documentNumber)
@@ -93,13 +94,12 @@ export function isOperationallyRegistered(candidate) {
     && hasValue(getCandidateResidenceValue(candidate))
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
-    && candidateHasCv(candidate)
-    && uiStatus !== 'RECHAZADO'
-    && uiStatus !== 'CONTACTADO';
+    && candidateHasCv(candidate);
 }
 
 export function isOperationallyCompleteWithoutCv(candidate) {
   const uiStatus = normalizeCandidateStatusForUI(candidate.status);
+  if (!['NUEVO', 'REGISTRADO'].includes(uiStatus)) return false;
   return hasValue(candidate.fullName)
     && hasValue(candidate.documentType)
     && hasValue(candidate.documentNumber)
@@ -108,8 +108,7 @@ export function isOperationallyCompleteWithoutCv(candidate) {
     && hasValue(getCandidateResidenceValue(candidate))
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
-    && !candidateHasCv(candidate)
-    && uiStatus !== 'RECHAZADO';
+    && !candidateHasCv(candidate);
 }
 
 export function filterCandidatesByScope(candidates, scope = 'all') {
@@ -117,7 +116,7 @@ export function filterCandidatesByScope(candidates, scope = 'all') {
   if (scope === 'approved') return candidates.filter((c) => c?.status === 'APROBADO');
   if (scope === 'registered') return candidates.filter((c) => isOperationallyRegistered(c));
   if (scope === 'missing_cv_complete') return candidates.filter((c) => isOperationallyCompleteWithoutCv(c));
-  if (scope === 'new') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'NUEVO');
+  if (scope === 'new') return candidates.filter((c) => deriveCandidateStatusForUI(c) === 'NUEVO');
   if (scope === 'contacted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTACTADO');
   if (scope === 'contracted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTRATADO');
   if (scope === 'rejected') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'RECHAZADO');

@@ -4,7 +4,7 @@ const SCRIPT_MARK = 'data-approved-recruitment-ux';
 
 const RECRUITER_VACANCY_STATUS_FILTERS = Object.freeze([
   Object.freeze({ scope: 'registered', routeScope: 'registered', label: 'Registrados' }),
-  Object.freeze({ scope: 'approved', routeScope: 'registered', label: 'Aprobados', approvedOnly: true }),
+  Object.freeze({ scope: 'approved', routeScope: 'all', label: 'Aprobados', approvedOnly: true }),
   Object.freeze({ scope: 'contacted', routeScope: 'contacted', label: 'Contactados' }),
   Object.freeze({ scope: 'contracted', routeScope: 'contracted', label: 'Contratados' }),
   Object.freeze({ scope: 'rejected', routeScope: 'rejected', label: 'Rechazados' })
@@ -286,7 +286,7 @@ function approvedRecruitmentScript() {
     if (registeredLink && !approvedLink) {
       approvedLink = registeredLink.cloneNode(true);
       const url = adminUrlFromAnchor(registeredLink) || new URL('/admin', window.location.origin);
-      url.searchParams.set('status', 'registered');
+      url.searchParams.set('status', 'all');
       url.searchParams.set('approvedOnly', '1');
       approvedLink.href = url.pathname + url.search;
       approvedLink.textContent = 'Aprobados';
@@ -326,7 +326,7 @@ function approvedRecruitmentScript() {
       document.querySelectorAll('a[href^="/admin?"]').forEach((anchor) => {
         if (!/^Limpiar/.test(anchor.textContent.trim())) return;
         const url = adminUrlFromAnchor(anchor);
-        if (!url || url.searchParams.get('status') !== 'registered') return;
+        if (!url || url.searchParams.get('status') !== 'all') return;
         url.searchParams.set('approvedOnly', '1');
         anchor.href = url.pathname + url.search;
       });

@@ -30,11 +30,15 @@ const baseCandidate = {
   cvData: Buffer.from('cv')
 };
 
-test('registered operativo exige campos completos + CV + no rechazado', () => {
+test('registered operativo exige completitud y conserva solo estados previos a decisión manual', () => {
   assert.equal(isOperationallyRegistered(baseCandidate), true);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'NUEVO' }), true);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'VALIDANDO' }), true);
   assert.equal(isOperationallyRegistered({ ...baseCandidate, cvData: null }), false);
-  assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'RECHAZADO' }), false);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'APROBADO' }), false);
   assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'CONTACTADO' }), false);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'CONTRATADO' }), false);
+  assert.equal(isOperationallyRegistered({ ...baseCandidate, status: 'RECHAZADO' }), false);
   assert.equal(isOperationallyRegistered({ ...baseCandidate, transportMode: '' }), false);
 });
 
@@ -43,7 +47,7 @@ test('candidateHasCv reconoce hojas de vida migradas a almacenamiento externo', 
   assert.equal(candidateHasCv({ cvStorageKey: null, cvData: null, cvOriginalName: null, cvMimeType: null }), false);
 });
 
-test('legacy VALIDANDO se normaliza a REGISTRADO y APROBADO se mantiene visible', () => {
+test('legacy VALIDANDO se normaliza a REGISTRADO y estados posteriores conservan su identidad', () => {
   assert.equal(normalizeCandidateStatusForUI('VALIDANDO'), 'REGISTRADO');
   assert.equal(normalizeCandidateStatusForUI('APROBADO'), 'APROBADO');
   assert.equal(normalizeCandidateStatusForUI('CONTACTADO'), 'CONTACTADO');
@@ -58,24 +62,23 @@ test('deriveCandidateStatusForUI refleja reglas operativas reales', () => {
   assert.equal(deriveCandidateStatusForUI({ ...baseCandidate, status: 'CONTRATADO', cvData: null }), 'CONTRATADO');
 });
 
-test('scope registered incluye estados legacy cuando cumplen criterio operativo', () => {
+test('scopes de estado son exclusivos después de una decisión manual', () => {
   const candidates = [
     { ...baseCandidate, id: 'reg', status: 'REGISTRADO' },
     { ...baseCandidate, id: 'legacy-validando', status: 'VALIDANDO' },
-    { ...baseCandidate, id: 'legacy-aprobado', status: 'APROBADO' },
+    { ...baseCandidate, id: 'approved', status: 'APROBADO' },
     { ...baseCandidate, id: 'contacted', status: 'CONTACTADO' },
+    { ...baseCandidate, id: 'contracted', status: 'CONTRATADO' },
     { ...baseCandidate, id: 'new-incomplete', status: 'NUEVO', cvData: null },
     { ...baseCandidate, id: 'rejected', status: 'RECHAZADO' }
   ];
 
-  assert.deepEqual(
-    filterCandidatesByScope(candidates, 'registered').map((c) => c.id),
-    ['reg', 'legacy-validando', 'legacy-aprobado']
-  );
-  assert.deepEqual(filterCandidatesByScope(candidates, 'new').map((c) => c.id), ['new-incomplete']);
+  assert.deepEqual(filterCandidatesByScope(candidates, 'registered').map((c) => c.id), ['reg', 'legacy-validando']);
+  assert.deepEqual(filterCandidatesByScope(candidates, 'approved').map((c) => c.id), ['approved']);
   assert.deepEqual(filterCandidatesByScope(candidates, 'contacted').map((c) => c.id), ['contacted']);
-  assert.deepEqual(filterCandidatesByScope([...candidates, { ...baseCandidate, id: 'contracted', status: 'CONTRATADO' }], 'contracted').map((c) => c.id), ['contracted']);
+  assert.deepEqual(filterCandidatesByScope(candidates, 'contracted').map((c) => c.id), ['contracted']);
   assert.deepEqual(filterCandidatesByScope(candidates, 'rejected').map((c) => c.id), ['rejected']);
+  assert.deepEqual(filterCandidatesByScope(candidates, 'new').map((c) => c.id), ['new-incomplete']);
 });
 
 test('scope all excluye rechazados y el apartado rejected conserva esos registros', () => {
@@ -118,12 +121,11 @@ test('isOperationallyCompleteWithoutCv devuelve false si falta un dato clave', (
   assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, transportMode: null }), false);
 });
 
-test('isOperationallyCompleteWithoutCv devuelve false si está rechazado', () => {
+test('pendientes HV tampoco absorbe estados manuales posteriores', () => {
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, status: 'APROBADO' }), false);
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, status: 'CONTACTADO' }), false);
+  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, status: 'CONTRATADO' }), false);
   assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, status: 'RECHAZADO' }), false);
-});
-
-test('isOperationallyCompleteWithoutCv permite CONTACTADO si cumple criterio y sin HV', () => {
-  assert.equal(isOperationallyCompleteWithoutCv({ ...baseCandidate, cvData: null, status: 'CONTACTADO' }), true);
 });
 
 test('criterios operativos aceptan localidad en Bogota aunque no haya barrio', () => {
@@ -138,7 +140,7 @@ test('criterios operativos aceptan localidad en Bogota aunque no haya barrio', (
   assert.equal(isOperationallyCompleteWithoutCv({ ...bogotaCandidate, cvData: null }), true);
 });
 
-test('scope missing_cv_complete filtra candidatos completos sin HV', () => {
+test('scope missing_cv_complete filtra candidatos completos sin HV aún no movidos a otro estado', () => {
   const candidates = [
     { ...baseCandidate, id: 'ok', cvData: null, status: 'REGISTRADO' },
     { ...baseCandidate, id: 'ok-contacted', cvData: null, status: 'CONTACTADO' },
@@ -149,7 +151,7 @@ test('scope missing_cv_complete filtra candidatos completos sin HV', () => {
 
   assert.deepEqual(
     filterCandidatesByScope(candidates, 'missing_cv_complete').map((c) => c.id),
-    ['ok', 'ok-contacted']
+    ['ok']
   );
 });
 
@@ -180,7 +182,7 @@ test('exportación no DEV no filtra solo por estado: aprobado o contratado incom
   assert.deepEqual(filterCandidatesForExport([contractedIncomplete, contractedComplete], 'contracted', { vacancy }).map((candidate) => candidate.id), ['TEST-CONTRACTED-COMPLETE']);
 });
 
-test('conteos de exportación usan exactamente la misma elegibilidad que el backend', () => {
+test('conteos de exportación mantienen estados mutuamente exclusivos', () => {
   const vacancy = { city: 'TEST Ciudad' };
   const candidates = [
     { ...baseCandidate, id: 'TEST-REGISTERED', status: 'REGISTRADO', vacancy },
@@ -191,7 +193,7 @@ test('conteos de exportación usan exactamente la misma elegibilidad que el back
   ];
 
   assert.deepEqual(candidateExportCounts(candidates, { isDev: false, vacancy }), {
-    registered: 3,
+    registered: 1,
     missingCvComplete: 1,
     approved: 1,
     contracted: 1,
