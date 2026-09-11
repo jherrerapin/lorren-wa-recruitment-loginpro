@@ -1,0 +1,140 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {
+  buildGlobalCandidateExportWhere,
+  GLOBAL_CANDIDATE_EXPORT_SCOPES,
+  loadGlobalCandidateExportRows
+} from '../src/routes/adminCandidateGlobalExport.js';
+import { normalizeApplicantDateRange } from '../src/services/vacancyDashboardSearchExpansion.js';
+
+function completeCandidate(overrides = {}) {
+  return {
+    id: overrides.id || 'candidate-test',
+    fullName: 'Persona Ejemplo',
+    phone: '573000000000',
+    documentType: 'CC',
+    documentNumber: '1000000000',
+    age: 30,
+    neighborhood: 'Zona Ejemplo',
+    locality: null,
+    zone: null,
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Público',
+    status: 'REGISTRADO',
+    rejectionReason: null,
+    rejectionDetails: null,
+    createdAt: new Date('2026-09-08T15:00:00.000Z'),
+    cvMimeType: 'application/pdf',
+    cvOriginalName: 'cv-ejemplo.pdf',
+    cvStorageKey: 'test/cv-ejemplo.pdf',
+    vacancy: {
+      id: 'vacancy-example',
+      title: 'Vacante Ejemplo',
+      role: 'Auxiliar',
+      city: 'Bogotá'
+    },
+    ...overrides
+  };
+}
+
+test('exportación global reutiliza acceso y rango Colombia en Candidate.createdAt', () => {
+  const dateRange = normalizeApplicantDateRange({
+    dateFrom: '2026-09-08',
+    dateTo: '2026-09-09'
+  });
+  const where = buildGlobalCandidateExportWhere({
+    isDev: false,
+    scope: 'CITY',
+    cities: ['Bogotá']
+  }, dateRange);
+
+  assert.deepEqual(where.vacancy, { city: { in: ['Bogotá'] } });
+  assert.equal(where.createdAt.gte.toISOString(), '2026-09-08T05:00:00.000Z');
+  assert.equal(where.createdAt.lte.toISOString(), '2026-09-10T04:59:59.999Z');
+});
+
+test('carga global delega los estados a filterCandidatesForExport sin solaparlos', async () => {
+  const candidates = [
+    completeCandidate({ id: 'registered-example', status: 'REGISTRADO' }),
+    completeCandidate({ id: 'approved-example', status: 'APROBADO' }),
+    completeCandidate({ id: 'contacted-example', status: 'CONTACTADO' }),
+    completeCandidate({ id: 'contracted-example', status: 'CONTRATADO' }),
+    completeCandidate({ id: 'rejected-example', status: 'RECHAZADO' })
+  ];
+  const observed = [];
+  const prisma = {
+    candidate: {
+      findMany: async (args) => {
+        observed.push(args);
+        return candidates;
+      }
+    }
+  };
+  const accessContext = { isDev: false, scope: 'ALL' };
+  const dateRange = normalizeApplicantDateRange({});
+
+  const registered = await loadGlobalCandidateExportRows(prisma, {
+    accessContext,
+    scope: 'registered',
+    dateRange
+  });
+  const approved = await loadGlobalCandidateExportRows(prisma, {
+    accessContext,
+    scope: 'approved',
+    dateRange
+  });
+  const contracted = await loadGlobalCandidateExportRows(prisma, {
+    accessContext,
+    scope: 'contracted',
+    dateRange
+  });
+  const rejected = await loadGlobalCandidateExportRows(prisma, {
+    accessContext,
+    scope: 'rejected',
+    dateRange
+  });
+
+  assert.deepEqual(registered.map((candidate) => candidate.id), ['registered-example']);
+  assert.deepEqual(approved.map((candidate) => candidate.id), ['approved-example']);
+  assert.deepEqual(contracted.map((candidate) => candidate.id), ['contracted-example']);
+  assert.deepEqual(rejected.map((candidate) => candidate.id), ['rejected-example']);
+  assert.equal(observed.every((args) => args.orderBy?.createdAt === 'desc'), true);
+});
+
+test('scopes globales corresponden a las pestañas visibles solicitadas', () => {
+  assert.deepEqual([...GLOBAL_CANDIDATE_EXPORT_SCOPES], [
+    'registered',
+    'missing_cv_complete',
+    'approved',
+    'contacted',
+    'contracted',
+    'rejected',
+    'all'
+  ]);
+});
+
+test('la vista global reutiliza un solo selector visual y descarga la pestaña activa', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /\/admin\/export-global\?scope=/);
+  assert.match(runtime, /GLOBAL_EXPORT_LABEL/);
+  assert.match(runtime, /approvedOnly \? 'approved' : requestedStatus/);
+  assert.match(runtime, /data-global-candidate-export-link/);
+  assert.match(runtime, /globalCandidateExportScope/);
+  assert.match(runtime, /\.export-bar\[data-global-candidate-export="true"\]/);
+  assert.match(runtime, /candidate-export-range-trigger/);
+  assert.match(runtime, /Selecciona la fecha inicial y luego la fecha final/);
+  assert.doesNotMatch(runtime, /input\.type\s*=\s*['"]date['"]/);
+});
+
+test('server monta el transporte global antes del router admin principal', () => {
+  const source = fs.readFileSync('src/server.js', 'utf8');
+  const globalMount = source.indexOf("app.use('/admin', wrapAsyncRouter(adminCandidateGlobalExportRouter(prisma)))");
+  const adminMount = source.indexOf("app.use('/admin', adminRouter(prisma))");
+
+  assert.match(source, /import \{ adminCandidateGlobalExportRouter \} from '\.\/routes\/adminCandidateGlobalExport\.js';/);
+  assert.notEqual(globalMount, -1);
+  assert.notEqual(adminMount, -1);
+  assert.equal(globalMount < adminMount, true);
+});
