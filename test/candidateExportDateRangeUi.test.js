@@ -43,8 +43,8 @@ test('la UI usa un solo selector visual y un calendario propio para elegir inici
   assert.match(runtime, /candidate-export-range-popover/);
   assert.match(runtime, /candidate-export-range-grid/);
   assert.match(runtime, /Selecciona la fecha inicial y luego la fecha final/);
-  assert.match(runtime, /let selectedStart = '';/);
-  assert.match(runtime, /let selectedEnd = '';/);
+  assert.match(runtime, /let selectedStart = validIsoDate\(initialParams\.get\('dateFrom'\)\)/);
+  assert.match(runtime, /let selectedEnd = validIsoDate\(initialParams\.get\('dateTo'\)\)/);
   assert.doesNotMatch(runtime, /input\.type\s*=\s*['"]date['"]/);
 });
 
@@ -87,7 +87,7 @@ test('quitar el rango restaura el histórico visible y notifica el cambio', () =
   assert.match(runtime, /restoreRangeDecoratedLinks\(bar\)/);
 });
 
-test('el rango usa el scope de la pestaña activa y nunca scope all para la descarga contextual', () => {
+test('el rango usa el scope de la pestaña activa y nunca scope all para la descarga contextual de vacante', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /TAB_EXPORT_SCOPE/);
@@ -112,7 +112,7 @@ test('el botón contextual muestra pestaña y rango seleccionado', () => {
   assert.match(runtime, /RANGE_DATE_FORMATTER/);
 });
 
-test('al cambiar de pestaña el rango se recalcula contra el nuevo estado activo', () => {
+test('al cambiar de pestaña de vacante el rango se recalcula contra el nuevo estado activo', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /candidate-vacancy-tab-change/);
@@ -140,7 +140,53 @@ test('el selector normaliza el orden del rango, permite quitarlo y no usa diálo
   assert.match(runtime, /@media\(max-width:768px\)/);
 });
 
-test('la ruta de exportación mantiene la autoridad de fecha en Candidate.createdAt', () => {
+test('la vista global reutiliza el mismo selector y crea un solo botón según la pestaña activa', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+  const ux = fs.readFileSync('src/services/approvedRecruitmentUx.js', 'utf8');
+
+  assert.match(ux, /bar\.dataset\.globalCandidateExport = 'true'/);
+  assert.match(ux, /data-global-candidate-export-link/);
+  assert.match(ux, /new URL\('\/admin\/export-global'/);
+  assert.match(ux, /if \(approvedOnly\) return 'approved'/);
+  assert.match(ux, /installGlobalCandidateExport\(legacyTable\)/);
+  assert.match(runtime, /\.export-bar\[data-global-candidate-export="true"\]/);
+  assert.match(runtime, /function activeGlobalExportContext\(\)/);
+  assert.match(runtime, /params\.get\('approvedOnly'\) === '1'/);
+  assert.match(runtime, /updateGlobalRangeDownload/);
+});
+
+test('el rango global se conserva en la URL, pestañas y formularios del listado', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /function syncGlobalRangeNavigation\(bar, dateFrom, dateTo\)/);
+  assert.match(runtime, /window\.history\.replaceState/);
+  assert.match(runtime, /a\[href\^="\/admin\?"\]/);
+  assert.match(runtime, /url\.searchParams\.has\('status'\)/);
+  assert.match(runtime, /setRangeParam\(url, 'dateFrom', dateFrom\)/);
+  assert.match(runtime, /setRangeParam\(url, 'dateTo', dateTo\)/);
+  assert.match(runtime, /form\[method="get"\]\[action="\/admin"\]/);
+  assert.match(runtime, /setFormRangeInput\(form, 'dateFrom', dateFrom\)/);
+  assert.match(runtime, /setFormRangeInput\(form, 'dateTo', dateTo\)/);
+});
+
+test('la ruta global delega permisos, fecha y estado a autoridades existentes', () => {
+  const routeSource = fs.readFileSync('src/routes/adminCandidateGlobalExport.js', 'utf8');
+  const serverSource = fs.readFileSync('src/server.js', 'utf8');
+
+  assert.match(routeSource, /buildCandidateAccessWhere/);
+  assert.match(routeSource, /getAccessContext/);
+  assert.match(routeSource, /normalizeApplicantDateRange/);
+  assert.match(routeSource, /filterCandidatesForExport/);
+  assert.match(routeSource, /exportFilenameByScope/);
+  assert.match(routeSource, /router\.get\('\/export-global', requireAdminSession/);
+  assert.match(routeSource, /dateRange\.start/);
+  assert.match(routeSource, /dateRange\.end/);
+  assert.doesNotMatch(routeSource, /cvData:\s*true/);
+  assert.match(serverSource, /adminCandidateGlobalExportRouter/);
+  assert.match(serverSource, /app\.use\('\/admin', wrapAsyncRouter\(adminCandidateGlobalExportRouter\(prisma\)\)\)/);
+});
+
+test('la ruta de exportación por vacante mantiene su autoridad de fecha en Candidate.createdAt', () => {
   const adminRouteSource = fs.readFileSync('src/routes/admin.js', 'utf8');
 
   assert.match(adminRouteSource, /const dateFilter = normalizeCandidateDateRangeFilter\(req\.query\);/);
