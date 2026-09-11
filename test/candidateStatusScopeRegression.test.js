@@ -4,6 +4,7 @@ import {
   enhanceApprovedRecruitmentUx,
   vacancyStatusFilterDefinitions
 } from '../src/services/approvedRecruitmentUx.js';
+import { filterCandidatesByScope } from '../src/services/candidateExport.js';
 
 test('Aprobados deja de depender del scope Registrados', () => {
   const approved = vacancyStatusFilterDefinitions('admin')
@@ -26,4 +27,22 @@ test('Aprobados deja de depender del scope Registrados', () => {
 
   assert.match(enhanced, /url\.searchParams\.set\('status', 'all'\)/);
   assert.match(enhanced, /url\.searchParams\.set\('approvedOnly', '1'\)/);
+});
+
+test('un NUEVO completo con HV se clasifica como Registrado y deja de aparecer en Nuevos', () => {
+  const completeNew = {
+    id: 'candidate-scope-test',
+    status: 'NUEVO',
+    fullName: 'Persona Prueba',
+    documentType: 'CC',
+    documentNumber: 'TEST-DOC-001',
+    age: 28,
+    neighborhood: 'Zona Prueba',
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    cvData: Buffer.from('cv-test')
+  };
+
+  assert.deepEqual(filterCandidatesByScope([completeNew], 'registered').map((candidate) => candidate.id), ['candidate-scope-test']);
+  assert.deepEqual(filterCandidatesByScope([completeNew], 'new'), []);
 });
