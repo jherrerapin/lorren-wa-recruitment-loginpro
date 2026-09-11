@@ -85,6 +85,7 @@ export function deriveCandidateStatusForUI(candidate = {}) {
 
 export function isOperationallyRegistered(candidate) {
   const uiStatus = normalizeCandidateStatusForUI(candidate.status);
+  if (!['NUEVO', 'REGISTRADO'].includes(uiStatus)) return false;
   return hasValue(candidate.fullName)
     && hasValue(candidate.documentType)
     && hasValue(candidate.documentNumber)
@@ -93,13 +94,12 @@ export function isOperationallyRegistered(candidate) {
     && hasValue(getCandidateResidenceValue(candidate))
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
-    && candidateHasCv(candidate)
-    && uiStatus !== 'RECHAZADO'
-    && uiStatus !== 'CONTACTADO';
+    && candidateHasCv(candidate);
 }
 
 export function isOperationallyCompleteWithoutCv(candidate) {
   const uiStatus = normalizeCandidateStatusForUI(candidate.status);
+  if (!['NUEVO', 'REGISTRADO'].includes(uiStatus)) return false;
   return hasValue(candidate.fullName)
     && hasValue(candidate.documentType)
     && hasValue(candidate.documentNumber)
@@ -108,8 +108,7 @@ export function isOperationallyCompleteWithoutCv(candidate) {
     && hasValue(getCandidateResidenceValue(candidate))
     && hasValue(candidate.medicalRestrictions)
     && hasValue(candidate.transportMode)
-    && !candidateHasCv(candidate)
-    && uiStatus !== 'RECHAZADO';
+    && !candidateHasCv(candidate);
 }
 
 export function filterCandidatesByScope(candidates, scope = 'all') {
