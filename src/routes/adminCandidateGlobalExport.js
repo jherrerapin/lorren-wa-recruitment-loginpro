@@ -7,21 +7,12 @@ import {
 import { getCandidateResidenceValue } from '../services/candidateData.js';
 import {
   buildWhatsAppLink,
+  CANDIDATE_EXPORT_SCOPES,
   candidateHasCv,
   exportFilenameByScope,
   filterCandidatesForExport
 } from '../services/candidateExport.js';
 import { normalizeApplicantDateRange } from '../services/vacancyDashboardSearchExpansion.js';
-
-export const GLOBAL_CANDIDATE_EXPORT_SCOPES = new Set([
-  'registered',
-  'missing_cv_complete',
-  'approved',
-  'contacted',
-  'contracted',
-  'rejected',
-  'all'
-]);
 
 function compact(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -162,7 +153,7 @@ export function adminCandidateGlobalExportRouter(prisma) {
 
   router.get('/export-global', async (req, res) => {
     const scope = compact(req.query.scope) || 'all';
-    if (!GLOBAL_CANDIDATE_EXPORT_SCOPES.has(scope)) {
+    if (!CANDIDATE_EXPORT_SCOPES.includes(scope)) {
       return res.status(400).send('Scope inválido.');
     }
 
