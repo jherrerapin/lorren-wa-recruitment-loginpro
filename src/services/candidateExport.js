@@ -116,7 +116,7 @@ export function filterCandidatesByScope(candidates, scope = 'all') {
   if (scope === 'approved') return candidates.filter((c) => c?.status === 'APROBADO');
   if (scope === 'registered') return candidates.filter((c) => isOperationallyRegistered(c));
   if (scope === 'missing_cv_complete') return candidates.filter((c) => isOperationallyCompleteWithoutCv(c));
-  if (scope === 'new') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'NUEVO');
+  if (scope === 'new') return candidates.filter((c) => deriveCandidateStatusForUI(c) === 'NUEVO');
   if (scope === 'contacted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTACTADO');
   if (scope === 'contracted') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'CONTRATADO');
   if (scope === 'rejected') return candidates.filter((c) => normalizeCandidateStatusForUI(c.status) === 'RECHAZADO');
