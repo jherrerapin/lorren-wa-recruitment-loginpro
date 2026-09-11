@@ -1,6 +1,17 @@
 import { isOperationallyCompleteForRecruiter } from './vacancyDashboardSearchExpansion.js';
 import { getCandidateResidenceValue } from './candidateData.js';
 
+export const CANDIDATE_EXPORT_SCOPES = Object.freeze([
+  'all',
+  'registered',
+  'missing_cv_complete',
+  'approved',
+  'new',
+  'contacted',
+  'contracted',
+  'rejected'
+]);
+
 function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== '';
 }
@@ -154,9 +165,7 @@ export function formatDateForFilenameCO(date = new Date()) {
 }
 
 export function exportFilenameByScope(scope = 'all') {
-  const safeScope = ['all', 'registered', 'missing_cv_complete', 'approved', 'new', 'contacted', 'contracted', 'rejected'].includes(scope)
-    ? scope
-    : 'all';
+  const safeScope = CANDIDATE_EXPORT_SCOPES.includes(scope) ? scope : 'all';
   const scopeLabelByKey = {
     registered: 'registrados',
     missing_cv_complete: 'pendientes_hv',
@@ -172,9 +181,7 @@ export function exportFilenameByScope(scope = 'all') {
 }
 
 export function exportFilenameByScopeAndVacancy(scope = 'all', vacancy = {}) {
-  const safeScope = ['all', 'registered', 'missing_cv_complete', 'approved', 'new', 'contacted', 'contracted', 'rejected'].includes(scope)
-    ? scope
-    : 'all';
+  const safeScope = CANDIDATE_EXPORT_SCOPES.includes(scope) ? scope : 'all';
   const scopeLabelByKey = {
     registered: 'registrados',
     missing_cv_complete: 'pendientes_hv',
