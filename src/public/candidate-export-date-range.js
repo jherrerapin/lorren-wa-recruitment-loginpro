@@ -400,6 +400,10 @@
         bubbles: true,
         detail: { dateFrom: selectedStart, dateTo: selectedEnd }
       }));
+
+      const globalRangeComplete = bar.dataset.globalCandidateExport === 'true'
+        && ((!selectedStart && !selectedEnd) || (selectedStart && selectedEnd));
+      if (globalRangeComplete) window.location.reload();
     };
 
     const updateTrigger = () => {
