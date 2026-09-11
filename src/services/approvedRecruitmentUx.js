@@ -48,6 +48,16 @@ function approvedRecruitmentScript() {
     CONTACTADO: 'Contactado',
     RECHAZADO: 'Rechazado'
   };
+  const globalExportLabels = {
+    registered: 'registrados',
+    approved: 'aprobados',
+    missing_cv_complete: 'pendientes HV',
+    new: 'nuevos',
+    contacted: 'contactados',
+    contracted: 'contratados',
+    rejected: 'rechazados',
+    all: 'todos'
+  };
 
   function adminUrlFromAnchor(anchor) {
     try {
@@ -55,6 +65,46 @@ function approvedRecruitmentScript() {
     } catch {
       return null;
     }
+  }
+
+  function activeGlobalExportScope() {
+    if (approvedOnly) return 'approved';
+    const status = String(currentUrl.searchParams.get('status') || 'registered').trim();
+    return Object.hasOwn(globalExportLabels, status) ? status : null;
+  }
+
+  function installGlobalCandidateExport(table) {
+    const scope = activeGlobalExportScope();
+    if (!table || !scope) return;
+    const page = table.closest('.page') || document;
+    const bar = page.querySelector('.export-bar');
+    if (!bar || bar.closest('[data-vacancy-panel]')) return;
+
+    bar.dataset.globalCandidateExport = 'true';
+    bar.querySelectorAll('.filter-note').forEach((note) => note.remove());
+
+    let link = bar.querySelector('[data-global-candidate-export-link]');
+    if (!link) {
+      link = document.createElement('a');
+      link.className = 'export-btn';
+      link.dataset.globalCandidateExportLink = 'true';
+      const outreach = Array.from(bar.querySelectorAll('a')).find((anchor) => {
+        const url = adminUrlFromAnchor(anchor);
+        return url?.pathname === '/admin/outreach/approved';
+      });
+      if (outreach) bar.insertBefore(link, outreach);
+      else bar.appendChild(link);
+    }
+
+    const url = new URL('/admin/export-global', window.location.origin);
+    url.searchParams.set('scope', scope);
+    for (const key of ['dateFrom', 'dateTo']) {
+      const value = String(currentUrl.searchParams.get(key) || '').trim();
+      if (value) url.searchParams.set(key, value);
+    }
+    link.href = url.pathname + url.search;
+    link.textContent = '↓ Descargar ' + globalExportLabels[scope];
+    link.dataset.exportScope = scope;
   }
 
   function installVacancyStatusFilters(panel, vacancyId) {
@@ -288,6 +338,10 @@ function approvedRecruitmentScript() {
       const url = adminUrlFromAnchor(registeredLink) || new URL('/admin', window.location.origin);
       url.searchParams.set('status', 'all');
       url.searchParams.set('approvedOnly', '1');
+      for (const key of ['dateFrom', 'dateTo']) {
+        const value = String(currentUrl.searchParams.get(key) || '').trim();
+        if (value) url.searchParams.set(key, value);
+      }
       approvedLink.href = url.pathname + url.search;
       approvedLink.textContent = 'Aprobados';
       approvedLink.dataset.approvedFilterTab = 'true';
@@ -335,6 +389,7 @@ function approvedRecruitmentScript() {
       if (summary) summary.textContent = 'Mostrando ' + visible + ' candidato(s) aprobados';
     }
 
+    installGlobalCandidateExport(legacyTable);
     installFilteredBulkStatusControls(legacyTable);
   }
 
