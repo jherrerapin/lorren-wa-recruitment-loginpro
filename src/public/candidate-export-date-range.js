@@ -88,6 +88,12 @@
     return new Date(year, month - 1, day, 12, 0, 0, 0);
   }
 
+  function validIsoDate(value) {
+    const date = dateFromIso(value);
+    if (!date) return '';
+    return isoDate(date.getFullYear(), date.getMonth(), date.getDate()) === String(value) ? String(value) : '';
+  }
+
   function formatRangeDate(value) {
     const date = dateFromIso(value);
     return date ? RANGE_DATE_FORMATTER.format(date) : '';
@@ -244,6 +250,54 @@
     });
   }
 
+  function setRangeParam(url, key, value) {
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+  }
+
+  function setFormRangeInput(form, name, value) {
+    let input = form.querySelector(`input[name="${name}"][data-global-range-param]`);
+    if (!value) {
+      input?.remove();
+      return;
+    }
+    if (!input) {
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.dataset.globalRangeParam = 'true';
+      form.appendChild(input);
+    }
+    input.value = value;
+  }
+
+  function syncGlobalRangeNavigation(bar, dateFrom, dateTo) {
+    if (bar.dataset.globalCandidateExport !== 'true') return;
+
+    const current = new URL(window.location.href);
+    setRangeParam(current, 'dateFrom', dateFrom);
+    setRangeParam(current, 'dateTo', dateTo);
+    window.history.replaceState({}, '', `${current.pathname}${current.search}${current.hash}`);
+
+    document.querySelectorAll('a[href^="/admin?"]').forEach((anchor) => {
+      let url;
+      try {
+        url = new URL(anchor.getAttribute('href') || '', window.location.origin);
+      } catch {
+        return;
+      }
+      if (url.pathname !== '/admin' || !url.searchParams.has('status')) return;
+      setRangeParam(url, 'dateFrom', dateFrom);
+      setRangeParam(url, 'dateTo', dateTo);
+      anchor.href = `${url.pathname}${url.search}${url.hash}`;
+    });
+
+    document.querySelectorAll('form[method="get"][action="/admin"]').forEach((form) => {
+      setFormRangeInput(form, 'dateFrom', dateFrom);
+      setFormRangeInput(form, 'dateTo', dateTo);
+    });
+  }
+
   function installExportRange(bar) {
     if (!bar || bar.dataset.exportDateRangeReady === 'true') return;
     const initialExportLinks = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
@@ -251,8 +305,10 @@
 
     bar.dataset.exportDateRangeReady = 'true';
 
-    let selectedStart = '';
-    let selectedEnd = '';
+    const initialParams = new URL(window.location.href).searchParams;
+    let selectedStart = validIsoDate(initialParams.get('dateFrom'));
+    let selectedEnd = validIsoDate(initialParams.get('dateTo'));
+    if (selectedStart && selectedEnd && selectedStart > selectedEnd) selectedEnd = '';
     const today = new Date();
     let viewYear = today.getFullYear();
     let viewMonth = today.getMonth();
@@ -338,6 +394,7 @@
     const emitRangeChange = () => {
       controls.dataset.dateFrom = selectedStart;
       controls.dataset.dateTo = selectedEnd;
+      syncGlobalRangeNavigation(bar, selectedStart, selectedEnd);
       refreshDownloadContext();
       controls.dispatchEvent(new CustomEvent('candidate-date-range-change', {
         bubbles: true,
@@ -496,6 +553,7 @@
     });
 
     updateTrigger();
+    syncGlobalRangeNavigation(bar, selectedStart, selectedEnd);
     refreshDownloadContext();
   }
 
