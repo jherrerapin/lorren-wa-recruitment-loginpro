@@ -124,8 +124,12 @@ function approvedRecruitmentScript() {
     } catch {
       return '';
     }
-    const match = /^\/admin\/candidates\/([^/]+)\/status$/.exec(url.pathname);
-    return match?.[1] ? decodeURIComponent(match[1]) : '';
+    const prefix = '/admin/candidates/';
+    const suffix = '/status';
+    if (!url.pathname.startsWith(prefix) || !url.pathname.endsWith(suffix)) return '';
+    const encodedCandidateId = url.pathname.slice(prefix.length, -suffix.length);
+    if (!encodedCandidateId || encodedCandidateId.includes('/')) return '';
+    return decodeURIComponent(encodedCandidateId);
   }
 
   async function postCandidateStatus(candidateId, status, returnTo) {
