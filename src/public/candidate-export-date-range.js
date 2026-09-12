@@ -673,6 +673,7 @@
     window.addEventListener('resize', positionPopover);
 
     panel?.addEventListener('candidate-vacancy-tab-change', () => {
+      bar.querySelectorAll(EXPORT_LINK_SELECTOR).forEach((link) => link.remove());
       syncScopeOptionState(scopeOptions, bar, panel);
       syncIncludeScopesNavigation(bar, panel);
       refreshDownloadContext();
