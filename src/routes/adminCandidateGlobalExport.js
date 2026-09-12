@@ -92,16 +92,24 @@ export function globalCandidateExportFilename(scopes = []) {
 }
 
 export function buildGlobalCandidateExportWhere(accessContext = {}, dateRange = {}, vacancyId = '') {
+  const accessWhere = buildCandidateAccessWhere(accessContext);
   const createdAt = {};
   if (dateRange.start) createdAt.gte = dateRange.start;
   if (dateRange.end) createdAt.lte = dateRange.end;
   const normalizedVacancyId = compact(vacancyId);
 
-  return {
-    ...buildCandidateAccessWhere(accessContext),
-    ...(normalizedVacancyId ? { vacancyId: normalizedVacancyId } : {}),
-    ...(Object.keys(createdAt).length ? { createdAt } : {})
-  };
+  if (!normalizedVacancyId) {
+    return {
+      ...accessWhere,
+      ...(Object.keys(createdAt).length ? { createdAt } : {})
+    };
+  }
+
+  const constraints = [];
+  if (Object.keys(accessWhere).length) constraints.push(accessWhere);
+  constraints.push({ vacancyId: normalizedVacancyId });
+  if (Object.keys(createdAt).length) constraints.push({ createdAt });
+  return constraints.length === 1 ? constraints[0] : { AND: constraints };
 }
 
 export async function loadGlobalCandidateExportRows(prisma, {
