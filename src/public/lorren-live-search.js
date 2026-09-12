@@ -268,9 +268,15 @@
     const detailPath = new URL(href, window.location.origin).pathname;
     if (!/^\/admin\/candidates\/[^/]+\/?$/.test(detailPath)) return null;
     const cells = container.tagName === 'TR' ? [...container.children] : [];
+    const directNameText = [...(cells[1]?.childNodes || [])]
+      .filter((node) => node.nodeType === 3)
+      .map((node) => node.textContent || '')
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     const name = container.querySelector('.candidate-name')?.textContent?.trim()
       || container.querySelector('.vacancy-title')?.textContent?.trim()
-      || cells[1]?.querySelector('div,strong')?.textContent?.trim()
+      || directNameText
       || cells[1]?.textContent?.trim()
       || container.querySelector('strong')?.textContent?.trim()
       || 'Candidato';
