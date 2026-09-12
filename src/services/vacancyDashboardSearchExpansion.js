@@ -392,19 +392,44 @@ export async function applyVacancyApplicationCycleScope(viewModel = {}, query = 
   return viewModel;
 }
 
-async function loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds) {
+function applicantCreatedAtWhere(dateRange = {}) {
+  if (!dateRange.isActive) return null;
+  const createdAt = {};
+  if (dateRange.start) createdAt.gte = dateRange.start;
+  if (dateRange.end) createdAt.lte = dateRange.end;
+  return Object.keys(createdAt).length ? createdAt : null;
+}
+
+export function applyApplicantDateRangeToVacancyLists(viewModel = {}, dateRange = {}) {
+  for (const city of viewModel.cities || []) {
+    for (const vacancy of city.vacancies || []) {
+      for (const field of VACANCY_LIST_FIELDS) {
+        vacancy[field] = (vacancy[field] || []).filter((candidate) => (
+          candidateMatchesApplicantDateRange(candidate, dateRange)
+        ));
+      }
+      const metadata = viewModel.vacancyApplicationCycles?.[String(vacancy.id || '')];
+      if (metadata) metadata.visibleCandidateCount = vacancyListCandidateIds(vacancy).size;
+    }
+  }
+  return viewModel;
+}
+
+async function loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds, dateRange = {}) {
   const activeVacancyIds = Object.entries(searches)
     .filter(([vacancyId, search]) => search?.text && visibleVacancyIds.has(String(vacancyId)))
     .map(([vacancyId]) => vacancyId);
   if (!activeVacancyIds.length) return [];
 
   const accessContext = getRequestAccessContext(req);
+  const createdAt = applicantCreatedAtWhere(dateRange);
   return prisma.candidate.findMany({
     where: {
       AND: [
         buildCandidateAccessWhere(accessContext),
         { vacancyId: { in: activeVacancyIds } },
-        { status: { in: RECRUITER_VISIBLE_STATUSES } }
+        { status: { in: RECRUITER_VISIBLE_STATUSES } },
+        ...(createdAt ? [{ createdAt }] : [])
       ]
     },
     orderBy: { createdAt: 'desc' },
@@ -451,20 +476,25 @@ async function loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds) 
 
 export async function expandVacancySearchCandidates(viewModel = {}, query = {}, req = {}) {
   const searches = normalizeVacancyDashboardSearches(query);
+  const dateRange = normalizeApplicantDateRange(query);
   const visibleVacancyIds = new Set();
   for (const city of viewModel.cities || []) {
     for (const vacancy of city.vacancies || []) visibleVacancyIds.add(String(vacancy.id));
   }
 
+  viewModel.applicantDateRange = dateRange;
+  if (dateRange.error && !viewModel.errorMsg) viewModel.errorMsg = dateRange.error;
+
   const accessContext = getRequestAccessContext(req);
   sanitizeVacancyDashboardVisibility(viewModel, { isDev: accessContext.isDev });
 
   if (Object.values(searches).some((search) => search?.text)) {
-    const candidates = await loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds);
+    const candidates = await loadAuthorizedSearchCandidates(req, searches, visibleVacancyIds, dateRange);
     mergeVacancySearchResults(viewModel, searches, candidates, { isDev: accessContext.isDev });
   }
 
   await applyVacancyApplicationCycleScope(viewModel, query);
+  applyApplicantDateRangeToVacancyLists(viewModel, dateRange);
   return viewModel;
 }
 
@@ -707,6 +737,24 @@ function buildApplicantLinkScript(dateRange) {
       }
       applyDateRange(url);
       anchor.setAttribute('href', relativeHref(url));
+    });
+
+    document.addEventListener('candidate-date-range-change', (event) => {
+      const controls = event.target;
+      if (!controls || typeof controls.closest !== 'function') return;
+      const bar = controls.closest('.export-bar');
+      if (!bar || bar.dataset.globalCandidateExport === 'true') return;
+      const nextFrom = String(event.detail?.dateFrom || '');
+      const nextTo = String(event.detail?.dateTo || '');
+      const completeRange = (!nextFrom && !nextTo) || (nextFrom && nextTo);
+      if (!completeRange) return;
+
+      const target = new URL(window.location.href);
+      if (nextFrom) target.searchParams.set('dateFrom', nextFrom);
+      else target.searchParams.delete('dateFrom');
+      if (nextTo) target.searchParams.set('dateTo', nextTo);
+      else target.searchParams.delete('dateTo');
+      window.location.assign(relativeHref(target));
     });
 
     const activeStatus = pageParams.get('status');
