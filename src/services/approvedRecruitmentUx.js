@@ -217,6 +217,48 @@ function approvedRecruitmentScript() {
       syncControls();
     });
 
+    async function applyCandidateStatus(candidateId, status, returnTo) {
+      const body = new URLSearchParams();
+      body.set('status', status);
+      body.set('returnTo', returnTo);
+      const response = await fetch('/admin/candidates/' + encodeURIComponent(candidateId) + '/status', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: body.toString()
+      });
+      const finalUrl = new URL(response.url || window.location.href, window.location.origin);
+      const detailPrefix = '/admin/candidates/';
+      const finalCandidateId = finalUrl.pathname.startsWith(detailPrefix)
+        ? finalUrl.pathname.slice(detailPrefix.length)
+        : '';
+      return response.ok && Boolean(finalCandidateId) && !finalCandidateId.includes('/');
+    }
+
+    async function triggerConfiguredApprovedOutreach(candidateId) {
+      const body = new URLSearchParams();
+      body.append('candidateIds', candidateId);
+      body.set('vacancyId', vacancyId);
+      const response = await fetch('/admin/outreach/approved/prepare', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: body.toString()
+      });
+      if (!response.ok) return false;
+
+      const verificationUrl = new URL('/admin/outreach/approved/window-status', window.location.origin);
+      verificationUrl.searchParams.set('candidateIds', candidateId);
+      const verification = await fetch(verificationUrl.pathname + verificationUrl.search, {
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' }
+      });
+      if (!verification.ok) return false;
+      const payload = await verification.json().catch(() => null);
+      if (!payload?.ok || !Array.isArray(payload.candidates)) return false;
+      return !payload.candidates.some((candidate) => candidate?.candidateId === candidateId);
+    }
+
     toolbar.addEventListener('submit', async (event) => {
       event.preventDefault();
       const selectedIds = visibleCandidateCheckboxes()
@@ -229,44 +271,74 @@ function approvedRecruitmentScript() {
       selectAll.disabled = true;
       statusSelect.disabled = true;
       allCandidateCheckboxes().forEach((checkbox) => { checkbox.disabled = true; });
+
+      const autoOutreachOnApproval = status === 'APROBADO'
+        && ['registered', 'missing_cv_complete'].includes(activeStatus);
       let completed = 0;
+      let contacted = 0;
+      let approvedPendingOutreach = 0;
+      let failed = 0;
       const returnTo = currentUrl.pathname + currentUrl.search;
 
-      try {
-        for (const candidateId of selectedIds) {
-          feedback.textContent = 'Actualizando ' + (completed + 1) + ' de ' + selectedIds.length + '...';
-          const body = new URLSearchParams();
-          body.set('status', status);
-          body.set('returnTo', returnTo);
-          const response = await fetch('/admin/candidates/' + encodeURIComponent(candidateId) + '/status', {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-            body: body.toString()
-          });
-          const finalUrl = new URL(response.url || window.location.href, window.location.origin);
-          const detailPrefix = '/admin/candidates/';
-          const finalCandidateId = finalUrl.pathname.startsWith(detailPrefix)
-            ? finalUrl.pathname.slice(detailPrefix.length)
-            : '';
-          if (!response.ok || !finalCandidateId || finalCandidateId.includes('/')) {
-            throw new Error('bulk_status_request_failed');
+      for (let index = 0; index < selectedIds.length; index += 1) {
+        const candidateId = selectedIds[index];
+        feedback.textContent = 'Procesando ' + (index + 1) + ' de ' + selectedIds.length + '...';
+        try {
+          const statusUpdated = await applyCandidateStatus(candidateId, status, returnTo);
+          if (!statusUpdated) {
+            failed += 1;
+            continue;
           }
-          completed += 1;
-        }
 
-        const target = new URL(window.location.href);
-        target.searchParams.delete('error');
-        target.searchParams.set('success', completed + ' registro' + (completed === 1 ? '' : 's') + ' actualizado' + (completed === 1 ? '' : 's') + ' a ' + (bulkStatusLabels[status] || status) + '.');
-        window.location.assign(target.pathname + target.search);
-      } catch (_error) {
-        const target = new URL(window.location.href);
-        target.searchParams.delete('success');
-        target.searchParams.set('error', completed
-          ? 'Se actualizaron ' + completed + ' de ' + selectedIds.length + ' registros. Revisa el listado antes de reintentar.'
-          : 'No fue posible aplicar el cambio masivo. Ningún registro fue confirmado como actualizado.');
-        window.location.assign(target.pathname + target.search);
+          if (autoOutreachOnApproval) {
+            const outreachCompleted = await triggerConfiguredApprovedOutreach(candidateId);
+            if (outreachCompleted) contacted += 1;
+            else approvedPendingOutreach += 1;
+            continue;
+          }
+
+          completed += 1;
+        } catch (_error) {
+          if (autoOutreachOnApproval) approvedPendingOutreach += 1;
+          else failed += 1;
+        }
       }
+
+      const target = new URL(window.location.href);
+      target.searchParams.delete('success');
+      target.searchParams.delete('error');
+
+      if (autoOutreachOnApproval) {
+        if (contacted > 0) {
+          target.searchParams.set(
+            'success',
+            contacted + ' candidato' + (contacted === 1 ? '' : 's') + ' aprobado' + (contacted === 1 ? '' : 's')
+              + ', con citación aceptada por Meta y movido' + (contacted === 1 ? '' : 's') + ' a Contactados.'
+          );
+        }
+        const pendingTotal = approvedPendingOutreach + failed;
+        if (pendingTotal > 0) {
+          target.searchParams.set(
+            'error',
+            approvedPendingOutreach
+              ? approvedPendingOutreach + ' candidato' + (approvedPendingOutreach === 1 ? '' : 's')
+                + ' quedó' + (approvedPendingOutreach === 1 ? '' : 'aron')
+                + ' en Aprobados porque no se confirmó la citación. Revisa Aprobados antes de reintentar.'
+              : failed + ' candidato' + (failed === 1 ? '' : 's') + ' no pudo cambiar a Aprobado.'
+          );
+        }
+      } else if (failed > 0) {
+        target.searchParams.set(
+          'error',
+          completed
+            ? 'Se actualizaron ' + completed + ' de ' + selectedIds.length + ' registros. Revisa el listado antes de reintentar.'
+            : 'No fue posible aplicar el cambio masivo. Ningún registro fue confirmado como actualizado.'
+        );
+      } else {
+        target.searchParams.set('success', completed + ' registro' + (completed === 1 ? '' : 's') + ' actualizado' + (completed === 1 ? '' : 's') + ' a ' + (bulkStatusLabels[status] || status) + '.');
+      }
+
+      window.location.assign(target.pathname + target.search);
     });
 
     syncControls();
