@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
+  applyApplicantDateRangeToVacancyLists,
   candidateMatchesApplicantDateRange,
   candidateMatchesVacancyDashboardSearch,
   compareCandidatesByRegisteredAtDesc,
@@ -239,6 +241,97 @@ test('el rango de fechas usa días de Colombia y valida rangos invertidos', () =
   });
   assert.equal(invalid.isActive, false);
   assert.match(invalid.error, /fecha inicial/i);
+});
+
+test('el rango limita todas las listas de estado de una vacante sin tocar entrevistas', () => {
+  const range = normalizeApplicantDateRange({
+    dateFrom: '2026-09-01',
+    dateTo: '2026-09-07'
+  });
+  const inside = (id, status = 'REGISTRADO', overrides = {}) => completeCandidate({
+    id,
+    status,
+    createdAt: new Date('2026-09-04T15:00:00.000Z'),
+    ...overrides
+  });
+  const outside = (id, status = 'REGISTRADO', overrides = {}) => completeCandidate({
+    id,
+    status,
+    createdAt: new Date('2026-08-31T15:00:00.000Z'),
+    ...overrides
+  });
+  const model = {
+    cities: [{
+      name: 'Ibagué',
+      vacancies: [vacancyModel({
+        bookingsToday: [{ id: 'booking-test', candidate: outside('booking-outside') }],
+        registeredNoBooking: [inside('registered-inside'), outside('registered-outside')],
+        registeredComplete: [inside('complete-inside'), outside('complete-outside')],
+        completeWithoutCv: [
+          inside('missing-cv-inside', 'REGISTRADO', { cvStorageKey: null }),
+          outside('missing-cv-outside', 'REGISTRADO', { cvStorageKey: null })
+        ],
+        approvedCandidates: [inside('approved-inside', 'APROBADO'), outside('approved-outside', 'APROBADO')],
+        contractedCandidates: [inside('contracted-inside', 'CONTRATADO'), outside('contracted-outside', 'CONTRATADO')]
+      })]
+    }],
+    vacancyApplicationCycles: {
+      'vacancy-1': { visibleCandidateCount: 99, historicalCandidateCount: 99 }
+    }
+  };
+
+  applyApplicantDateRangeToVacancyLists(model, range);
+  const vacancy = model.cities[0].vacancies[0];
+
+  assert.deepEqual(vacancy.registeredNoBooking.map((candidate) => candidate.id), ['registered-inside']);
+  assert.deepEqual(vacancy.registeredComplete.map((candidate) => candidate.id), ['complete-inside']);
+  assert.deepEqual(vacancy.completeWithoutCv.map((candidate) => candidate.id), ['missing-cv-inside']);
+  assert.deepEqual(vacancy.approvedCandidates.map((candidate) => candidate.id), ['approved-inside']);
+  assert.deepEqual(vacancy.contractedCandidates.map((candidate) => candidate.id), ['contracted-inside']);
+  assert.equal(vacancy.bookingsToday.length, 1);
+  assert.equal(model.vacancyApplicationCycles['vacancy-1'].visibleCandidateCount, 5);
+  assert.equal(model.vacancyApplicationCycles['vacancy-1'].historicalCandidateCount, 99);
+});
+
+test('una pestaña de estado legacy conserva su estado y se limita por fecha de registro', async () => {
+  const viewModel = {
+    mode: 'legacy',
+    candidates: [
+      completeCandidate({
+        id: 'approved-inside-range',
+        status: 'APROBADO',
+        createdAt: new Date('2026-09-05T13:00:00.000Z')
+      }),
+      completeCandidate({
+        id: 'approved-outside-range',
+        status: 'APROBADO',
+        createdAt: new Date('2026-08-20T13:00:00.000Z')
+      })
+    ]
+  };
+
+  await enhanceLegacyApplicantList(viewModel, {
+    status: 'approved',
+    dateFrom: '2026-09-01',
+    dateTo: '2026-09-07'
+  }, {
+    userRole: 'admin',
+    userAccessScope: 'ALL'
+  });
+
+  assert.deepEqual(viewModel.candidates.map((candidate) => candidate.id), ['approved-inside-range']);
+  assert.equal(viewModel.candidates[0].status, 'APROBADO');
+});
+
+test('la búsqueda ampliada comparte el rango y el calendario de vacante recarga el listado', () => {
+  const source = readFileSync('src/services/vacancyDashboardSearchExpansion.js', 'utf8');
+
+  assert.match(source, /loadAuthorizedSearchCandidates\(req, searches, visibleVacancyIds, dateRange\)/);
+  assert.match(source, /\.\.\.\(createdAt \? \[\{ createdAt \}\] : \[\]\)/);
+  assert.match(source, /applyApplicantDateRangeToVacancyLists\(viewModel, dateRange\)/);
+  assert.match(source, /candidate-date-range-change/);
+  assert.match(source, /bar\.dataset\.globalCandidateExport === 'true'/);
+  assert.match(source, /window\.location\.assign\(relativeHref\(target\)\)/);
 });
 
 test('Ver todos filtra incompletos y ordena por fecha de registro descendente', async () => {
