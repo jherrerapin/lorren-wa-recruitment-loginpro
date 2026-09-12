@@ -16,33 +16,74 @@ function approvedClientScriptBody(html = '') {
   return match?.[1] || '';
 }
 
-function renderBulkScript() {
-  const html = [
+function renderBulkHtml() {
+  return [
     '<html><body>',
+    '<a href="/admin/outreach/approved" class="export-btn">Mensajes a aprobados</a>',
     '<table id="legacy-candidates-table"><tbody>',
     '<tr><td>fecha</td><td>Persona Prueba</td><td></td><td></td><td></td><td></td><td></td><td></td><td><span class="badge badge-registrado">Registrado</span></td><td></td><td><a class="link-detail" href="/admin/candidates/candidate-test-1">Ver</a></td></tr>',
     '</tbody></table>',
     '</body></html>'
   ].join('');
-  return approvedClientScriptBody(enhanceApprovedRecruitmentUx(html));
 }
 
-test('aprobar desde Registrados o Pendientes HV encadena el outreach configurado existente', () => {
-  const script = renderBulkScript();
+function renderDetailHtml() {
+  return [
+    '<html><body>',
+    '<form method="post" action="/admin/candidates/candidate-test-1/status" class="status-form">',
+    '<input type="hidden" name="returnTo" value="/admin?status=registered" />',
+    '<select name="status"><option value="REGISTRADO" selected>Registrado</option><option value="APROBADO">Aprobado</option></select>',
+    '<button type="submit">Guardar</button>',
+    '</form>',
+    '</body></html>'
+  ].join('');
+}
 
-  assert.match(script, /status === 'APROBADO'/);
-  assert.match(script, /\['registered', 'missing_cv_complete'\]\.includes\(activeStatus\)/);
-  assert.match(script, /applyCandidateStatus\(candidateId, status, returnTo\)/);
-  assert.match(script, /triggerConfiguredApprovedOutreach\(candidateId\)/);
+test('cualquier cambio masivo a APROBADO encadena el outreach configurado existente', () => {
+  const script = approvedClientScriptBody(enhanceApprovedRecruitmentUx(renderBulkHtml()));
+
+  assert.match(script, /const autoOutreachOnApproval = status === 'APROBADO'/);
+  assert.match(script, /postCandidateStatus\(candidateId, status, returnTo\)/);
+  assert.match(script, /triggerConfiguredApprovedOutreach\(candidateId, vacancyId\)/);
   assert.match(script, /\/admin\/outreach\/approved\/prepare/);
   assert.match(script, /body\.append\('candidateIds', candidateId\)/);
-  assert.match(script, /body\.set\('vacancyId', vacancyId\)/);
+  assert.match(script, /if \(vacancyId\) body\.set\('vacancyId', vacancyId\)/);
+  assert.doesNotMatch(script, /\['registered', 'missing_cv_complete'\]\.includes\(activeStatus\)/);
   assert.doesNotMatch(script, /citacion_entrevista_loginpro|templateLanguage|bodyParameters/);
   assert.doesNotThrow(() => new Function(script));
 });
 
+test('la aprobación individual usa el mismo cambio de estado y el mismo outreach que el batch', () => {
+  const enhanced = enhanceApprovedRecruitmentUx(renderDetailHtml());
+  const script = approvedClientScriptBody(enhanced);
+
+  assert.match(script, /function candidateIdFromStatusForm\(form\)/);
+  assert.match(script, /function installSingleCandidateApprovalAutomation\(\)/);
+  assert.match(script, /statusSelect\.value !== 'APROBADO'/);
+  assert.match(script, /postCandidateStatus\(candidateId, 'APROBADO', returnTo\)/);
+  assert.match(script, /triggerConfiguredApprovedOutreach\(candidateId\)/);
+  assert.equal((script.match(/async function postCandidateStatus/g) || []).length, 1);
+  assert.equal((script.match(/async function triggerConfiguredApprovedOutreach/g) || []).length, 1);
+  assert.doesNotMatch(script, /\b(?:alert|confirm|prompt)\s*\(/);
+  assert.doesNotThrow(() => new Function(script));
+});
+
+test('la UI elimina los accesos manuales a Mensajes a aprobados', () => {
+  const html = [
+    '<html><body>',
+    '<a href="/admin/outreach/approved" class="export-btn">Mensajes a aprobados</a>',
+    '<section data-vacancy-panel="vacancy-test"><div class="vacancy-header"></div>',
+    '<a href="/admin/outreach/approved" class="export-btn">Mensajes a aprobados</a></section>',
+    '</body></html>'
+  ].join('');
+  const enhanced = enhanceApprovedRecruitmentUx(html);
+
+  assert.doesNotMatch(enhanced, /href=["']\/admin\/outreach\/approved["']/);
+  assert.doesNotMatch(enhanced, />Mensajes a aprobados<\/a>/);
+});
+
 test('solo la aprobación automática continúa el lote ante fallo individual', () => {
-  const script = renderBulkScript();
+  const script = approvedClientScriptBody(enhanceApprovedRecruitmentUx(renderBulkHtml()));
 
   assert.match(script, /\/admin\/outreach\/approved\/window-status/);
   assert.match(script, /!payload\.candidates\.some\(\(candidate\) => candidate\?\.candidateId === candidateId\)/);
@@ -52,7 +93,6 @@ test('solo la aprobación automática continúa el lote ante fallo individual', 
   assert.match(script, /if \(!autoOutreachOnApproval\) break;/);
   assert.match(script, /if \(autoOutreachOnApproval\)[\s\S]*continue;/);
   assert.doesNotMatch(script, /bulk_status_request_failed/);
-  assert.doesNotMatch(script, /\b(?:alert|confirm|prompt)\s*\(/);
 });
 
 test('la autoridad existente conserva ventana abierta como texto y cerrada como plantilla', () => {
@@ -92,5 +132,5 @@ test('la automatización no introduce una autoridad nueva de entrega ni modifica
   assert.match(uxSource, /\/admin\/candidates\/' \+ encodeURIComponent\(candidateId\) \+ '\/status'/);
   assert.match(uxSource, /\/admin\/outreach\/approved\/prepare/);
   assert.doesNotMatch(uxSource, /graph\.facebook\.com|META_ACCESS_TOKEN|sendTemplateMessage/);
-  assert.doesNotMatch(webhookSource, /approvedBulkOutreachAutomation|autoOutreachOnApproval/);
+  assert.doesNotMatch(webhookSource, /approvedBulkOutreachAutomation|autoOutreachOnApproval|approvalOutreachReady/);
 });
