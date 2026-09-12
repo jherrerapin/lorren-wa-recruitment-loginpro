@@ -74,6 +74,22 @@ test('las coincidencias respetan vacante y rango de registro y abren la ficha de
   assert.match(installBlock, /input\.placeholder = 'Escribe nombre o documento'/);
 });
 
+test('la coincidencia del buscador usa solo la ficha y nunca la subruta open-whatsapp', () => {
+  const runtime = fs.readFileSync('src/public/lorren-live-search.js', 'utf8');
+  const view = fs.readFileSync('src/views/list.ejs', 'utf8');
+  const candidateResultBlock = runtime.match(
+    /function candidateRowResult[\s\S]*?function installLegacyRecruitmentSearch/
+  )?.[0] || '';
+
+  assert.match(view, /candidateWhatsappHref\(candidate\)[\s\S]*open-whatsapp/);
+  assert.match(view, /candidateDetailHref\(candidate\)[\s\S]*\/admin\/candidates\//);
+  assert.match(candidateResultBlock, /a\.link-detail\[href\^="\/admin\/candidates\/"\]/);
+  assert.match(candidateResultBlock, /detailPath = new URL\(href, window\.location\.origin\)\.pathname/);
+  assert.match(candidateResultBlock, /\^\\\/admin\\\/candidates\\\/\[\^\/\]\+\\\/?\$/);
+  assert.doesNotMatch(candidateResultBlock, /a\[href\*="\/candidates\/"\]/);
+  assert.doesNotMatch(candidateResultBlock, /open-whatsapp/);
+});
+
 test('admin movement labels are stored and displayed without mojibake', () => {
   const route = fs.readFileSync('src/routes/admin.js', 'utf8');
 
