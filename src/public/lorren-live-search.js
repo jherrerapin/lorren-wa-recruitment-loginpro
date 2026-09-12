@@ -386,11 +386,9 @@
   function vacancyLegacyResults(nextDocument) {
     const table = nextDocument.querySelector('#legacy-candidates-table');
     if (!table) return [];
-    return uniqueResults(
-      [...table.querySelectorAll('tbody tr')]
-        .map(candidateRowResult)
-        .filter(Boolean)
-    );
+    return [...table.querySelectorAll('tbody tr')]
+      .map(candidateRowResult)
+      .filter(Boolean);
   }
 
   function installVacancyRecruitmentSearches() {
