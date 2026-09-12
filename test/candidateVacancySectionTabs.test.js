@@ -72,7 +72,6 @@ test('Contactados, Contratados y Rechazados usan panel inline cuando no existe s
   assert.match(runtime, /parsed\.querySelector\('#legacy-candidates-table'\)/);
   assert.match(runtime, /document\.importNode\(sourceTable, true\)/);
   assert.match(runtime, /loadRemoteStatusSection\(target\.descriptor, target\.tab, rawVacancyId\)/);
-  assert.doesNotMatch(runtime, /window\.location\.(?:assign|replace)/);
 });
 
 test('si la carga inline falla conserva un fallback explícito a la ruta autorizada', () => {
@@ -115,6 +114,45 @@ test('cada pestaña con sección reutiliza el histórico de la vacante y conserv
   assert.match(runtime, /sourceToggle\.hidden = true/);
   assert.match(runtime, /searchParams\.get\(tabContextParam\(rawVacancyId\)\)/);
   assert.match(runtime, /installHistoryActions\(panel, descriptors, rawVacancyId\)/);
+});
+
+test('con rango de registro activo los estados locales usan la vista completa autorizada', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /function hasApplicantDateRange\(\)/);
+  assert.match(runtime, /params\.get\('dateFrom'\)/);
+  assert.match(runtime, /params\.get\('dateTo'\)/);
+  assert.match(runtime, /function replaceLocalStatusDescriptorsForDateRange\(localDescriptors, vacancyBody, rangeActive\)/);
+  assert.match(runtime, /const scope = EXPORT_SCOPE_BY_TAB\[descriptor\.key\] \|\| ''/);
+  assert.match(runtime, /remoteHref: `\/admin\?status=\$\{encodeURIComponent\(scope\)\}`/);
+  assert.match(runtime, /dateRangeBacked: true/);
+  assert.match(runtime, /const localDescriptors = replaceLocalStatusDescriptorsForDateRange\(rawLocalDescriptors, vacancyBody, rangeActive\)/);
+  assert.match(runtime, /if \(target\.descriptor\.remoteHref\) \{[\s\S]*loadRemoteStatusSection\(target\.descriptor, target\.tab, rawVacancyId\)/);
+  assert.match(runtime, /if \(rangeActive\) \{[\s\S]*hideCycleScopeForDateRange\(panel\)/);
+});
+
+test('el selector de fecha se monta inmediatamente bajo las pestañas de estado', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /function placeDateRangeControl\(panel, tabList\)/);
+  assert.match(runtime, /panel\.querySelector\('\.candidate-export-date-range'\)/);
+  assert.match(runtime, /tabList\.insertAdjacentElement\('afterend', controls\)/);
+  assert.match(runtime, /controls\.dataset\.vacancyTabRange = 'true'/);
+  assert.match(runtime, /new MutationObserver/);
+  assert.match(runtime, /installDateRangeIntegration\(panel, tabList, rawVacancyId\)/);
+  assert.match(runtime, /candidate-export-date-range\[data-vacancy-tab-range="true"\]/);
+});
+
+test('completar o quitar el rango recarga automáticamente la misma vacante y pestaña', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /panel\.addEventListener\('candidate-date-range-change'/);
+  assert.match(runtime, /const completeSelection = \(!dateFrom && !dateTo\) \|\| Boolean\(dateFrom && dateTo\)/);
+  assert.match(runtime, /if \(!completeSelection\) return/);
+  assert.match(runtime, /url\.searchParams\.set\('dateFrom', dateFrom\)/);
+  assert.match(runtime, /url\.searchParams\.set\('dateTo', dateTo\)/);
+  assert.match(runtime, /url\.searchParams\.set\(tabContextParam\(vacancyId\), activeKey\)/);
+  assert.match(runtime, /window\.location\.assign\(url\.pathname \+ url\.search \+ url\.hash\)/);
 });
 
 test('todas las pestañas de estado tienen scope de exportación contextual', () => {
