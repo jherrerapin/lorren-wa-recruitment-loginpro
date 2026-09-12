@@ -24,21 +24,19 @@
   });
   const GLOBAL_EXPORT_LABEL = Object.freeze({
     registered: 'registrados',
-    missing_cv_complete: 'pendientes HV',
+    missing_cv_complete: 'completos sin HV',
     approved: 'aprobados',
     contacted: 'contactados',
     contracted: 'contratados',
     rejected: 'rechazados',
     all: 'todos'
   });
-  const GLOBAL_COMBINABLE_EXPORT_SCOPES = Object.freeze([
-    'registered',
+  const GLOBAL_OPTIONAL_EXPORT_SCOPES = Object.freeze([
     'missing_cv_complete',
     'contacted'
   ]);
   const GLOBAL_EXPORT_OPTION_LABEL = Object.freeze({
-    registered: 'Registrados',
-    missing_cv_complete: 'Sin HV',
+    missing_cv_complete: 'Completos sin HV',
     contacted: 'Contactados'
   });
 
@@ -78,6 +76,7 @@
       .candidate-export-scope-options-title{font-size:11px;font-weight:700;color:#64748b}
       .candidate-export-scope-option{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#334155;cursor:pointer;white-space:nowrap}
       .candidate-export-scope-option input{margin:0;accent-color:#0d7a6b}
+      .candidate-export-scope-option input:disabled{cursor:not-allowed;opacity:.65}
       @media(max-width:768px){
         .candidate-export-date-range{align-items:stretch;gap:8px}
         .candidate-export-date-range.is-tab-context{padding:10px 14px}
@@ -164,9 +163,10 @@
 
   function selectedGlobalExtraScopes(bar) {
     if (bar?.dataset?.globalCandidateExport !== 'true') return [];
+    const activeScope = String(bar.dataset.globalCandidateExportScope || '');
     return Array.from(bar.querySelectorAll('input[data-global-export-extra-scope]:checked'))
       .map((input) => String(input.value || '').trim())
-      .filter((scope) => GLOBAL_COMBINABLE_EXPORT_SCOPES.includes(scope));
+      .filter((scope) => GLOBAL_OPTIONAL_EXPORT_SCOPES.includes(scope) && scope !== activeScope);
   }
 
   function selectedGlobalExportLabel(primaryScope, extraScopes = []) {
@@ -190,7 +190,7 @@
     scopedLink.dataset.rangeBaseHref = baseHref;
     scopedLink.dataset.rangeBaseLabel = baseLabel;
 
-    const url = new URL(baseHref, window.location.origin);
+    const url = new URL(panel ? baseHref : '/admin/export-global', window.location.origin);
     const extraScopes = panel ? [] : selectedGlobalExtraScopes(bar);
     url.searchParams.set('scope', context.scope);
     if (extraScopes.length) url.searchParams.set('includeScopes', extraScopes.join(','));
@@ -343,12 +343,24 @@
     if (extraScopes.length) current.searchParams.set('includeScopes', extraScopes.join(','));
     else current.searchParams.delete('includeScopes');
     window.history.replaceState({}, '', `${current.pathname}${current.search}${current.hash}`);
+
+    document.querySelectorAll('a[href^="/admin?"]').forEach((anchor) => {
+      let url;
+      try {
+        url = new URL(anchor.getAttribute('href') || '', window.location.origin);
+      } catch {
+        return;
+      }
+      if (url.pathname !== '/admin' || !url.searchParams.has('status')) return;
+      if (extraScopes.length) url.searchParams.set('includeScopes', extraScopes.join(','));
+      else url.searchParams.delete('includeScopes');
+      anchor.href = `${url.pathname}${url.search}${url.hash}`;
+    });
   }
 
   function buildGlobalScopeOptions(bar) {
     if (bar.dataset.globalCandidateExport !== 'true') return null;
     const activeScope = String(bar.dataset.globalCandidateExportScope || '');
-    if (!GLOBAL_COMBINABLE_EXPORT_SCOPES.includes(activeScope)) return null;
 
     const selectedFromUrl = new Set(
       String(new URL(window.location.href).searchParams.get('includeScopes') || '')
@@ -365,15 +377,15 @@
     title.textContent = 'Incluir también:';
     wrapper.appendChild(title);
 
-    GLOBAL_COMBINABLE_EXPORT_SCOPES.forEach((scope) => {
-      if (scope === activeScope) return;
+    GLOBAL_OPTIONAL_EXPORT_SCOPES.forEach((scope) => {
       const label = document.createElement('label');
       label.className = 'candidate-export-scope-option';
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.value = scope;
       input.setAttribute('data-global-export-extra-scope', scope);
-      input.checked = selectedFromUrl.has(scope);
+      input.checked = scope === activeScope || selectedFromUrl.has(scope);
+      input.disabled = scope === activeScope;
       const text = document.createElement('span');
       text.textContent = GLOBAL_EXPORT_OPTION_LABEL[scope] || scope;
       label.append(input, text);
