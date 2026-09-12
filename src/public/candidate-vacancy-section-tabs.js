@@ -179,7 +179,16 @@
     return section;
   }
 
-  function replaceLocalStatusDescriptorsForDateRange(localDescriptors, vacancyBody, rangeActive) {
+  function statusRouteHref(panel, key, scope) {
+    const filterBar = panel.querySelector('[data-vacancy-status-filters]');
+    const canonicalLink = [...(filterBar?.querySelectorAll('a[data-vacancy-status-scope]') || [])]
+      .find((anchor) => String(anchor.dataset.vacancyStatusScope || '').trim() === key);
+    if (canonicalLink) return canonicalLink.getAttribute('href') || '';
+    if (key === 'approved') return '/admin?status=all&approvedOnly=1';
+    return `/admin?status=${encodeURIComponent(scope)}`;
+  }
+
+  function replaceLocalStatusDescriptorsForDateRange(panel, localDescriptors, vacancyBody, rangeActive) {
     if (!rangeActive) return localDescriptors;
 
     const replacedKeys = new Set();
@@ -201,7 +210,7 @@
         ...descriptor,
         section,
         count: '',
-        remoteHref: `/admin?status=${encodeURIComponent(scope)}`,
+        remoteHref: statusRouteHref(panel, descriptor.key, scope),
         remoteState: 'idle',
         dateRangeBacked: true
       });
@@ -256,6 +265,16 @@
         url.searchParams.set(key, value);
       }
     });
+
+    const vacancyFilterNames = ['neighborhood', 'locality', 'transportMode'];
+    vacancyFilterNames.forEach((name) => {
+      const value = current.searchParams.get(`vf_${vacancyId}_${name}`);
+      if (value) url.searchParams.set(name, value);
+    });
+    const searchField = current.searchParams.get(`vs_${vacancyId}_field`);
+    const searchText = current.searchParams.get(`vs_${vacancyId}_text`);
+    if (searchField) url.searchParams.set('searchField', searchField);
+    if (searchText) url.searchParams.set('searchText', searchText);
     return url;
   }
 
@@ -503,7 +522,7 @@
         .filter((element) => element.classList?.contains('section'))
         .map(sectionDescriptor)
     ].filter(Boolean);
-    const localDescriptors = replaceLocalStatusDescriptorsForDateRange(rawLocalDescriptors, vacancyBody, rangeActive);
+    const localDescriptors = replaceLocalStatusDescriptorsForDateRange(panel, rawLocalDescriptors, vacancyBody, rangeActive);
     const localKeys = new Set(localDescriptors.map((descriptor) => descriptor.key));
     const navigationDescriptors = statusNavigationDescriptors(panel, vacancyBody, localKeys);
     const descriptors = [...localDescriptors, ...navigationDescriptors]
