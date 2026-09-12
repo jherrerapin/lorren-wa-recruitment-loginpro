@@ -282,10 +282,11 @@ function approvedRecruitmentScript() {
 
       for (let index = 0; index < selectedIds.length; index += 1) {
         const candidateId = selectedIds[index];
+        let statusUpdatedForCandidate = false;
         feedback.textContent = 'Procesando ' + (index + 1) + ' de ' + selectedIds.length + '...';
         try {
-          const statusUpdated = await applyCandidateStatus(candidateId, status, returnTo);
-          if (!statusUpdated) {
+          statusUpdatedForCandidate = await applyCandidateStatus(candidateId, status, returnTo);
+          if (!statusUpdatedForCandidate) {
             failed += 1;
             continue;
           }
@@ -299,7 +300,7 @@ function approvedRecruitmentScript() {
 
           completed += 1;
         } catch (_error) {
-          if (autoOutreachOnApproval) approvedPendingOutreach += 1;
+          if (autoOutreachOnApproval && statusUpdatedForCandidate) approvedPendingOutreach += 1;
           else failed += 1;
         }
       }
@@ -316,16 +317,23 @@ function approvedRecruitmentScript() {
               + ', con citación aceptada por Meta y movido' + (contacted === 1 ? '' : 's') + ' a Contactados.'
           );
         }
-        const pendingTotal = approvedPendingOutreach + failed;
-        if (pendingTotal > 0) {
-          target.searchParams.set(
-            'error',
-            approvedPendingOutreach
-              ? approvedPendingOutreach + ' candidato' + (approvedPendingOutreach === 1 ? '' : 's')
-                + ' quedó' + (approvedPendingOutreach === 1 ? '' : 'aron')
-                + ' en Aprobados porque no se confirmó la citación. Revisa Aprobados antes de reintentar.'
-              : failed + ' candidato' + (failed === 1 ? '' : 's') + ' no pudo cambiar a Aprobado.'
-          );
+        if (approvedPendingOutreach > 0 || failed > 0) {
+          const errorParts = [];
+          if (approvedPendingOutreach > 0) {
+            errorParts.push(
+              approvedPendingOutreach + ' candidato' + (approvedPendingOutreach === 1 ? '' : 's')
+                + (approvedPendingOutreach === 1 ? ' quedó' : ' quedaron')
+                + ' en Aprobados porque no se confirmó la citación.'
+            );
+          }
+          if (failed > 0) {
+            errorParts.push(
+              failed + ' candidato' + (failed === 1 ? '' : 's')
+                + (failed === 1 ? ' no pudo' : ' no pudieron') + ' cambiar a Aprobado.'
+            );
+          }
+          errorParts.push('Revisa Aprobados antes de reintentar.');
+          target.searchParams.set('error', errorParts.join(' '));
         }
       } else if (failed > 0) {
         target.searchParams.set(
