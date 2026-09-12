@@ -64,8 +64,8 @@
     return url;
   }
 
-  async function fetchFormDocument(form, signal) {
-    const response = await fetch(buildFormUrl(form), {
+  async function fetchDocument(url, signal) {
+    const response = await fetch(url.pathname + url.search, {
       cache: 'no-store',
       credentials: 'same-origin',
       headers: { Accept: 'text/html' },
@@ -74,6 +74,10 @@
     if (!response.ok) throw new Error(`live_search_http_${response.status}`);
     const html = await response.text();
     return new DOMParser().parseFromString(html, 'text/html');
+  }
+
+  async function fetchFormDocument(form, signal) {
+    return fetchDocument(buildFormUrl(form), signal);
   }
 
   function uniqueResults(items) {
@@ -268,11 +272,20 @@
       || container.querySelector('strong')?.textContent?.trim()
       || 'Candidato';
     const documentText = container.querySelector('.candidate-doc')?.textContent?.trim()
+      || cells[3]?.textContent?.trim()
+      || '';
+    const phoneText = container.querySelector('.candidate-phone')?.textContent?.trim()
       || cells[2]?.textContent?.trim()
       || '';
-    const phoneText = container.querySelector('.candidate-phone')?.textContent?.trim() || '';
     const meta = [documentText, phoneText].filter(Boolean).join(' · ');
-    return href ? { key: href, href, label: name, meta } : null;
+    return href ? {
+      key: href,
+      href,
+      label: name,
+      meta,
+      documentText,
+      documentDigits: digits(documentText)
+    } : null;
   }
 
   function installLegacyRecruitmentSearch() {
@@ -304,6 +317,82 @@
     ].map(candidateRowResult).filter(Boolean));
   }
 
+  function clearRetiredVacancyFilterParams() {
+    const current = new URL(window.location.href);
+    let changed = false;
+    for (const key of [...current.searchParams.keys()]) {
+      if (!key.startsWith('vf_')) continue;
+      current.searchParams.delete(key);
+      changed = true;
+    }
+    if (!changed) return false;
+    window.location.replace(`${current.pathname}${current.search}${current.hash}`);
+    return true;
+  }
+
+  function stripRetiredVacancyFilterInputs(root) {
+    root?.querySelectorAll?.('input[name^="vf_"], select[name^="vf_"]').forEach((control) => control.remove());
+  }
+
+  function retireVacancyOperationalFilters(panel, searchForm) {
+    if (!panel) return;
+    stripRetiredVacancyFilterInputs(panel);
+    panel.querySelectorAll('form.vacancy-filter-bar').forEach((form) => {
+      const isSearchForm = form === searchForm
+        || Boolean(form.querySelector('input[name^="vs_"][name$="_text"]'));
+      if (!isSearchForm) form.remove();
+    });
+  }
+
+  function setVacancySearchOptions(fieldSelect, vacancyId) {
+    if (!fieldSelect) return;
+    const page = new URL(window.location.href);
+    const requested = String(page.searchParams.get(`vs_${vacancyId}_field`) || '').trim();
+    const selectedField = requested === 'document' ? 'document' : 'name';
+
+    const nameOption = document.createElement('option');
+    nameOption.value = 'name';
+    nameOption.textContent = 'Nombre';
+    const documentOption = document.createElement('option');
+    documentOption.value = 'document';
+    documentOption.textContent = 'Documento';
+    fieldSelect.replaceChildren(nameOption, documentOption);
+    fieldSelect.value = selectedField;
+  }
+
+  function vacancyCandidateLookupUrl(vacancyId) {
+    const current = new URL(window.location.href);
+    const url = new URL('/admin', window.location.origin);
+    url.searchParams.set('status', 'all');
+    url.searchParams.set('vacancyId', vacancyId);
+    const dateFrom = current.searchParams.get('dateFrom');
+    const dateTo = current.searchParams.get('dateTo');
+    if (dateFrom) url.searchParams.set('dateFrom', dateFrom);
+    if (dateTo) url.searchParams.set('dateTo', dateTo);
+    return url;
+  }
+
+  function filterVacancyCandidateResults(items, query, field) {
+    if (field === 'document') {
+      const queryDigits = digits(query);
+      if (!queryDigits) return [];
+      return items.filter((item) => item.documentDigits && item.documentDigits.includes(queryDigits));
+    }
+    const normalizedQuery = fold(query);
+    if (!normalizedQuery) return [];
+    return items.filter((item) => fold(item.label).includes(normalizedQuery));
+  }
+
+  function vacancyLegacyResults(nextDocument) {
+    const table = nextDocument.querySelector('#legacy-candidates-table');
+    if (!table) return [];
+    return uniqueResults(
+      [...table.querySelectorAll('tbody tr')]
+        .map(candidateRowResult)
+        .filter(Boolean)
+    );
+  }
+
   function installVacancyRecruitmentSearches() {
     document.querySelectorAll('input[name^="vs_"][name$="_text"]').forEach((input) => {
       const form = input.form;
@@ -311,18 +400,34 @@
       const vacancyPanel = input.closest('[data-vacancy-panel]');
       const vacancyId = vacancyPanel?.getAttribute('data-vacancy-panel');
       if (!vacancyId) return;
-      attachTypeahead(input, {
+
+      retireVacancyOperationalFilters(vacancyPanel, form);
+      const fieldSelect = form.querySelector('select[name^="vs_"][name$="_field"]');
+      setVacancySearchOptions(fieldSelect, vacancyId);
+
+      const inputLabel = input.closest('.filter-field')?.querySelector('label');
+      if (inputLabel) inputLabel.textContent = 'Nombre o documento';
+      input.placeholder = 'Escribe nombre o documento';
+
+      const liveSearch = attachTypeahead(input, {
         minChars: 2,
         debounceMs: 300,
         loadingMessage: 'Buscando coincidencias…',
-        async source(_query, { signal }) {
-          const nextDocument = await fetchFormDocument(form, signal);
-          const panel = nextDocument.querySelector(`[data-vacancy-panel="${CSS.escape(vacancyId)}"]`);
-          return vacancyPanelResults(panel);
+        async source(query, { signal }) {
+          const nextDocument = await fetchDocument(vacancyCandidateLookupUrl(vacancyId), signal);
+          const candidates = vacancyLegacyResults(nextDocument);
+          const field = fieldSelect?.value === 'document' ? 'document' : 'name';
+          return filterVacancyCandidateResults(candidates, query, field);
         },
         onSelect(item) {
           if (item.href) window.location.assign(item.href);
         }
+      });
+
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        liveSearch?.search();
+        input.focus();
       });
     });
   }
@@ -489,6 +594,7 @@
 
   function install() {
     injectStyles();
+    if (window.location.pathname === '/admin' && clearRetiredVacancyFilterParams()) return;
     installLegacyRecruitmentSearch();
     installVacancyRecruitmentSearches();
     installAssignmentWorkerSearch();
