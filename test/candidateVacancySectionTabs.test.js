@@ -146,6 +146,17 @@ test('el rango reutiliza la ruta canónica de cada estado y conserva búsqueda y
   assert.match(runtime, /url\.searchParams\.set\('searchText', searchText\)/);
 });
 
+test('la carga inline conserva la proyección histórica de Aprobados', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /function projectRemoteStatusRows\(sourceTable, descriptor\)/);
+  assert.match(runtime, /descriptor\?\.key !== 'approved'/);
+  assert.match(runtime, /sourceTable\.querySelectorAll\('tbody tr'\)/);
+  assert.match(runtime, /row\.querySelector\('\.badge-aprobado'\)/);
+  assert.match(runtime, /if \(!row\.querySelector\('\.badge-aprobado'\)\) row\.remove\(\)/);
+  assert.match(runtime, /projectRemoteStatusRows\(sourceTable, descriptor\)/);
+});
+
 test('el selector de fecha se monta inmediatamente bajo las pestañas de estado', () => {
   const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
 
