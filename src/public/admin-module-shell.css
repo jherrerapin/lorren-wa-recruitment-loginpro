@@ -100,6 +100,12 @@
   outline: none;
 }
 
+/* Range replacement keeps one candidate list visible even when legacy row CSS sets display. */
+[data-vacancy-panel] .candidate-vacancy-section-panel > [hidden],
+[data-vacancy-panel] [data-vacancy-cycle-toggle][hidden] {
+  display: none !important;
+}
+
 @media (min-width: 901px) and (max-width: 1180px) {
   .admin-module-navbar .admin-module-nav-links {
     flex: 1 1 auto;
