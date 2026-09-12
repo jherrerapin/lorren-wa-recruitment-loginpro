@@ -97,11 +97,14 @@
       .candidate-vacancy-remote-status-content .legacy-table{width:100%;margin:0}
       .candidate-vacancy-remote-status-state{padding:18px;color:#64748b;font-size:12px}
       .candidate-vacancy-remote-status-error{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px;border:1px solid #fecaca;border-radius:8px;background:#fff7f7;color:#991b1b;font-size:12px}
+      .candidate-export-date-range[data-vacancy-tab-range="true"]{padding:12px 18px;margin:0;background:#fff;border-bottom:1px solid #eaecef}
+      .candidate-export-date-range[data-vacancy-tab-range="true"][hidden]{display:none!important}
       @media(max-width:768px){
         .candidate-vacancy-section-tabs{padding:10px 14px 0;gap:5px}
         .candidate-vacancy-section-tab{padding:9px 11px;min-height:42px}
         .candidate-vacancy-section-history-actions{justify-content:flex-start}
         .candidate-vacancy-remote-status-content{padding:0 14px 14px}
+        .candidate-export-date-range[data-vacancy-tab-range="true"]{padding:10px 14px}
       }
     `;
     document.head.appendChild(style);
@@ -141,6 +144,15 @@
     return index === -1 ? TAB_ORDER.length : index;
   }
 
+  function validDateParam(value) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''));
+  }
+
+  function hasApplicantDateRange() {
+    const params = new URL(window.location.href).searchParams;
+    return validDateParam(params.get('dateFrom')) || validDateParam(params.get('dateTo'));
+  }
+
   function buildRemoteStatusSection(label, key) {
     const section = document.createElement('div');
     section.className = 'section candidate-vacancy-remote-status-section';
@@ -165,6 +177,36 @@
 
     section.append(header, content);
     return section;
+  }
+
+  function replaceLocalStatusDescriptorsForDateRange(localDescriptors, vacancyBody, rangeActive) {
+    if (!rangeActive) return localDescriptors;
+
+    const replacedKeys = new Set();
+    const resolved = [];
+    for (const descriptor of localDescriptors) {
+      const scope = EXPORT_SCOPE_BY_TAB[descriptor.key] || '';
+      if (!scope) {
+        resolved.push(descriptor);
+        continue;
+      }
+
+      if (descriptor.section) descriptor.section.hidden = true;
+      if (replacedKeys.has(descriptor.key)) continue;
+      replacedKeys.add(descriptor.key);
+
+      const section = buildRemoteStatusSection(descriptor.label, descriptor.key);
+      vacancyBody.appendChild(section);
+      resolved.push({
+        ...descriptor,
+        section,
+        count: '',
+        remoteHref: `/admin?status=${encodeURIComponent(scope)}`,
+        remoteState: 'idle',
+        dateRangeBacked: true
+      });
+    }
+    return resolved;
   }
 
   function statusNavigationDescriptors(panel, vacancyBody, localKeys) {
@@ -315,6 +357,43 @@
     return anchor;
   }
 
+  function placeDateRangeControl(panel, tabList) {
+    const controls = panel.querySelector('.candidate-export-date-range');
+    if (!controls) return false;
+    if (controls.previousElementSibling !== tabList) tabList.insertAdjacentElement('afterend', controls);
+    controls.dataset.vacancyTabRange = 'true';
+    controls.hidden = !String(panel.dataset.activeVacancyExportScope || '');
+    return true;
+  }
+
+  function installDateRangeIntegration(panel, tabList, vacancyId) {
+    if (!placeDateRangeControl(panel, tabList)) {
+      const observer = new MutationObserver(() => {
+        if (placeDateRangeControl(panel, tabList)) observer.disconnect();
+      });
+      observer.observe(panel, { childList: true, subtree: true });
+      window.setTimeout(() => observer.disconnect(), 5000);
+    }
+
+    panel.addEventListener('candidate-date-range-change', (event) => {
+      const dateFrom = validDateParam(event.detail?.dateFrom) ? String(event.detail.dateFrom) : '';
+      const dateTo = validDateParam(event.detail?.dateTo) ? String(event.detail.dateTo) : '';
+      const completeSelection = (!dateFrom && !dateTo) || Boolean(dateFrom && dateTo);
+      if (!completeSelection) return;
+
+      const url = new URL(window.location.href);
+      if (dateFrom) url.searchParams.set('dateFrom', dateFrom);
+      else url.searchParams.delete('dateFrom');
+      if (dateTo) url.searchParams.set('dateTo', dateTo);
+      else url.searchParams.delete('dateTo');
+
+      const activeKey = String(panel.dataset.activeVacancyTab || '');
+      if (activeKey) url.searchParams.set(tabContextParam(vacancyId), activeKey);
+      url.hash = `vacancy-${vacancyId}`;
+      window.location.assign(url.pathname + url.search + url.hash);
+    });
+  }
+
   function updateContextualActions(panel, activeKey) {
     const expectedScope = EXPORT_SCOPE_BY_TAB[activeKey] || null;
     const managementActive = activeKey === 'interview-management';
@@ -322,6 +401,9 @@
 
     panel.dataset.activeVacancyTab = activeKey;
     panel.dataset.activeVacancyExportScope = expectedScope || '';
+
+    const rangeControl = panel.querySelector('.candidate-export-date-range');
+    if (rangeControl) rangeControl.hidden = !expectedScope;
 
     panel.querySelectorAll('.export-bar a[href*="/admin/export?"]').forEach((anchor) => {
       const scope = exportScope(anchor);
@@ -403,24 +485,31 @@
     return true;
   }
 
+  function hideCycleScopeForDateRange(panel) {
+    const cycleBar = panel.querySelector('[data-vacancy-cycle-scope]');
+    if (cycleBar) cycleBar.hidden = true;
+  }
+
   function installPanel(panel) {
     if (!panel || panel.dataset.sectionTabsReady === 'true') return;
     const vacancyBody = panel.querySelector('.vacancy-body');
     if (!vacancyBody) return;
 
+    const rangeActive = hasApplicantDateRange();
     const management = managementDescriptor(panel);
-    const localDescriptors = [
+    const rawLocalDescriptors = [
       management,
       ...[...vacancyBody.children]
         .filter((element) => element.classList?.contains('section'))
         .map(sectionDescriptor)
     ].filter(Boolean);
+    const localDescriptors = replaceLocalStatusDescriptorsForDateRange(rawLocalDescriptors, vacancyBody, rangeActive);
     const localKeys = new Set(localDescriptors.map((descriptor) => descriptor.key));
     const navigationDescriptors = statusNavigationDescriptors(panel, vacancyBody, localKeys);
     const descriptors = [...localDescriptors, ...navigationDescriptors]
       .sort((left, right) => descriptorOrder(left) - descriptorOrder(right));
 
-    if (localDescriptors.length < 2) return;
+    if (rawLocalDescriptors.length < 2) return;
     panel.dataset.sectionTabsReady = 'true';
 
     const rawVacancyId = String(panel.getAttribute('data-vacancy-panel') || 'vacancy');
@@ -481,6 +570,7 @@
     const vacancyHeader = panel.querySelector('.vacancy-header');
     if (vacancyHeader) vacancyHeader.insertAdjacentElement('afterend', tabList);
     else panel.prepend(tabList);
+    installDateRangeIntegration(panel, tabList, rawVacancyId);
 
     const activate = (targetIndex, options = {}) => {
       const target = tabs[targetIndex];
@@ -494,6 +584,7 @@
       });
       updateManagementLayout(panel, tabList, management?.section || null, activeKey);
       updateContextualActions(panel, activeKey);
+      placeDateRangeControl(panel, tabList);
       if (target.descriptor.remoteHref) {
         loadRemoteStatusSection(target.descriptor, target.tab, rawVacancyId);
       }
@@ -527,7 +618,9 @@
       : tabs.findIndex(({ descriptor }) => Boolean(descriptor.section));
     activate(Math.max(0, initialIndex));
 
-    if (!installHistoryActions(panel, descriptors, rawVacancyId)) {
+    if (rangeActive) {
+      hideCycleScopeForDateRange(panel);
+    } else if (!installHistoryActions(panel, descriptors, rawVacancyId)) {
       window.setTimeout(() => installHistoryActions(panel, descriptors, rawVacancyId), 0);
     }
   }
