@@ -102,6 +102,14 @@ test('la descarga contextual usa el scope de la pestaña activa y nunca scope al
   assert.match(runtime, /downloadButton\.hidden = false/);
 });
 
+test('la pestaña activa no se renderiza dentro de Incluir también', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /label\.hidden = isActiveScope/);
+  assert.match(runtime, /input\.disabled = isActiveScope/);
+  assert.match(runtime, /\.candidate-export-scope-option\[hidden\]\{display:none!important\}/);
+});
+
 test('solo se muestra un botón Descargar debajo del selector y los enlaces heredados se retiran del DOM', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
