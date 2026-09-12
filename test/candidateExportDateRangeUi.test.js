@@ -141,6 +141,8 @@ test('un rango completo carga todos los registros del estado dentro de la pesta√
   assert.match(tabsRuntime, /approved: Object\.freeze\(\{ status: 'all', approvedOnly: '1' \}\)/);
   assert.match(tabsRuntime, /function hasCompleteRegistrationRange\(\)/);
   assert.match(tabsRuntime, /hasCompleteRegistrationRange\(\) && RANGE_STATUS_ROUTE_BY_TAB\[activeKey\]/);
+  assert.match(tabsRuntime, /!localKeys\.has\('missing-cv'\)/);
+  assert.match(tabsRuntime, /buildRemoteStatusSection\('Completos sin HV', 'missing-cv'\)/);
   assert.match(tabsRuntime, /data-range-status-content/);
   assert.match(tabsRuntime, /filterApprovedRows\(sourceTable, descriptor\)/);
   assert.match(tabsRuntime, /sourceToggle\.hidden = true/);
