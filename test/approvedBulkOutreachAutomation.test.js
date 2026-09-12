@@ -6,7 +6,7 @@ import {
   MANUAL_OUTBOUND_TRANSPORT,
   resolveManualOutboundTransport
 } from '../src/services/manualOutboundDeliveryService.js';
-import { shouldSendApprovedOutreachForStatusChange } from '../src/routes/admin.js';
+import { shouldTriggerApprovedOutreach } from '../src/registerApprovedOutreachActions.js';
 
 function readSource(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
@@ -29,35 +29,33 @@ function renderBulkHtml() {
 }
 
 test('solo una transición real hacia APROBADO requiere citación automática', () => {
-  assert.equal(shouldSendApprovedOutreachForStatusChange('REGISTRADO', 'APROBADO'), true);
-  assert.equal(shouldSendApprovedOutreachForStatusChange('RECHAZADO', 'APROBADO'), true);
-  assert.equal(shouldSendApprovedOutreachForStatusChange('CONTACTADO', 'APROBADO'), true);
-  assert.equal(shouldSendApprovedOutreachForStatusChange('APROBADO', 'APROBADO'), false);
-  assert.equal(shouldSendApprovedOutreachForStatusChange('REGISTRADO', 'CONTACTADO'), false);
+  assert.equal(shouldTriggerApprovedOutreach('REGISTRADO', 'APROBADO'), true);
+  assert.equal(shouldTriggerApprovedOutreach('RECHAZADO', 'APROBADO'), true);
+  assert.equal(shouldTriggerApprovedOutreach('CONTACTADO', 'APROBADO'), true);
+  assert.equal(shouldTriggerApprovedOutreach('APROBADO', 'APROBADO'), false);
+  assert.equal(shouldTriggerApprovedOutreach('REGISTRADO', 'CONTACTADO'), false);
 });
 
-test('la autoridad backend de cambio de estado dispara la citación al aprobar', () => {
-  const source = readSource('src/routes/admin.js');
-  const statusStart = source.indexOf("router.post('/candidates/:id/status'");
-  const nextRoute = source.indexOf("router.get('/candidates/:id/open-whatsapp'", statusStart);
-  assert.ok(statusStart >= 0 && nextRoute > statusStart);
-  const statusRoute = source.slice(statusStart, nextRoute);
+test('el adaptador backend cubre los dos caminos administrativos que pueden aprobar', () => {
+  const source = readSource('src/registerApprovedOutreachActions.js');
 
-  assert.match(statusRoute, /shouldSendApprovedOutreachForStatusChange\(existingCandidate\.status, status\)/);
-  assert.match(statusRoute, /deliverApprovedInterviewOutreach\(prisma, req, existingCandidate\)/);
-  assert.match(statusRoute, /Candidato aprobado, citación aceptada por Meta y movido a Contactado/);
-  assert.match(statusRoute, /El candidato quedó Aprobado/);
+  assert.match(source, /'\/candidates\/:id\/status'/);
+  assert.match(source, /'\/candidates\/:id\/edit'/);
+  assert.match(source, /requestedStatus !== 'APROBADO'/);
+  assert.match(source, /shouldTriggerApprovedOutreach\(previousStatus, persistedStatus\)/);
+  assert.match(source, /invokeApprovedOutreachPrepare\(adminRouter, req, candidateId\)/);
+  assert.match(source, /finalStatus === 'CONTACTADO'/);
+  assert.match(source, /Candidato aprobado, citación aceptada por Meta y movido a Contactado/);
+  assert.match(source, /El candidato quedó Aprobado/);
 });
 
-test('la edición individual también usa la misma autoridad backend al pasar a APROBADO', () => {
-  const source = readSource('src/routes/admin.js');
-  const editStart = source.indexOf("router.post('/candidates/:id/edit'");
-  const nextRoute = source.indexOf("router.post('/candidates/:id/bot-pause'", editStart);
-  assert.ok(editStart >= 0 && nextRoute > editStart);
-  const editRoute = source.slice(editStart, nextRoute);
+test('el backend reutiliza directamente el handler canónico de prepare sin endpoint paralelo', () => {
+  const source = readSource('src/registerApprovedOutreachActions.js');
 
-  assert.match(editRoute, /shouldSendApprovedOutreachForStatusChange\(existingCandidate\.status, data\.status\)/);
-  assert.match(editRoute, /deliverApprovedInterviewOutreach\(prisma, req, approvedCandidate\)/);
+  assert.match(source, /findFinalRouteHandler\(adminRouter, '\/outreach\/approved\/prepare'\)/);
+  assert.match(source, /prepareLayer\.handle\(outreachReq, outreachRes/);
+  assert.doesNotMatch(source, /sendTemplateMessage|deliverManualOutboundText|graph\.facebook\.com|META_ACCESS_TOKEN/);
+  assert.doesNotMatch(source, /router\.(?:post|get)\('\/approve/);
 });
 
 test('el batch solo solicita el cambio de estado y no duplica el envío de WhatsApp', () => {
@@ -93,18 +91,15 @@ test('la autoridad canónica de outreach decide ventana abierta texto y cerrada 
   assert.equal(closed.whatsappWindowOpen, false);
 });
 
-test('el helper backend reutiliza entrega, plantilla y finalización CONTACTADO existentes', () => {
+test('prepare conserva precondición APROBADO y finalización CONTACTADO', () => {
   const source = readSource('src/routes/admin.js');
-  const helperStart = source.indexOf('export async function deliverApprovedInterviewOutreach');
-  const helperEnd = source.indexOf('function ensureDevRole', helperStart);
-  assert.ok(helperStart >= 0 && helperEnd > helperStart);
-  const helper = source.slice(helperStart, helperEnd);
-
-  assert.match(helper, /deliverManualOutboundText\(prisma/);
-  assert.match(helper, /expectedCandidateStatus:\s*'APROBADO'/);
-  assert.match(helper, /source:\s*'admin_interview_template'/);
-  assert.match(helper, /sendTemplateMessage\(phone/);
-  assert.match(helper, /finalizeApprovedInterviewOutreachHandoff/);
+  const prepareStart = source.indexOf("router.post('/outreach/approved/prepare'");
+  const prepareEnd = source.indexOf("router.get('/bot-knowledge'", prepareStart);
+  const prepare = source.slice(prepareStart, prepareEnd);
+  assert.match(prepare, /expectedCandidateStatus:\s*'APROBADO'/);
+  assert.match(prepare, /source:\s*'admin_interview_template'/);
+  assert.match(prepare, /sendTemplateMessage\(phone/);
+  assert.match(prepare, /finalizeApprovedInterviewOutreachHandoff/);
 
   const finalizerStart = source.indexOf('export async function finalizeApprovedInterviewOutreachHandoff');
   const finalizerEnd = source.indexOf('function parseVacancyBody', finalizerStart);
