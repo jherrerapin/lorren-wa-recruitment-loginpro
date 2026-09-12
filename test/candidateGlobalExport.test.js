@@ -105,7 +105,7 @@ test('carga global delega los estados a filterCandidatesForExport sin solaparlos
   assert.equal(observed.every((args) => args.orderBy?.createdAt === 'desc'), true);
 });
 
-test('Registrados, Sin HV y Contactados pueden unirse en una sola exportación sin duplicar candidatos', async () => {
+test('la pestaña actual puede sumar Completos sin HV y Contactados en el mismo Excel', async () => {
   const candidates = [
     completeCandidate({ id: 'registered-example', status: 'REGISTRADO' }),
     completeCandidate({
@@ -124,11 +124,11 @@ test('Registrados, Sin HV y Contactados pueden unirse en una sola exportación s
     }
   };
   const scopes = resolveGlobalCandidateExportScopes({
-    scope: 'registered',
+    scope: 'approved',
     includeScopes: 'missing_cv_complete,contacted'
   });
 
-  assert.deepEqual(scopes, ['registered', 'missing_cv_complete', 'contacted']);
+  assert.deepEqual(scopes, ['approved', 'missing_cv_complete', 'contacted']);
   const exported = await loadGlobalCandidateExportRows(prisma, {
     accessContext: { isDev: false, scope: 'ALL' },
     scopes,
@@ -139,25 +139,40 @@ test('Registrados, Sin HV y Contactados pueden unirse en una sola exportación s
   });
 
   assert.deepEqual(exported.map((candidate) => candidate.id), [
-    'registered-example',
     'missing-cv-example',
-    'contacted-example'
+    'contacted-example',
+    'approved-example'
   ]);
-  assert.match(globalCandidateExportFilename(scopes), /^candidatos_registrados_pendientes_hv_contactados_\d{4}-\d{2}-\d{2}\.xlsx$/);
+  assert.match(globalCandidateExportFilename(scopes), /^candidatos_aprobados_completos_sin_hv_contactados_\d{4}-\d{2}-\d{2}\.xlsx$/);
 });
 
-test('la selección combinada solo admite Registrados, Sin HV y Contactados', () => {
-  assert.deepEqual(resolveGlobalCandidateExportScopes({
-    scope: 'contacted',
-    includeScopes: ['registered', 'missing_cv_complete']
-  }), ['contacted', 'registered', 'missing_cv_complete']);
-  assert.equal(resolveGlobalCandidateExportScopes({
-    scope: 'registered',
-    includeScopes: 'approved'
-  }), null);
+test('Completos sin HV y Contactados pueden agregarse desde cualquier scope principal válido', () => {
+  const primaryScopes = [
+    'registered',
+    'missing_cv_complete',
+    'approved',
+    'contacted',
+    'contracted',
+    'rejected',
+    'all'
+  ];
+
+  for (const primaryScope of primaryScopes) {
+    const scopes = resolveGlobalCandidateExportScopes({
+      scope: primaryScope,
+      includeScopes: 'missing_cv_complete,contacted'
+    });
+    const expected = Array.from(new Set([primaryScope, 'missing_cv_complete', 'contacted']));
+    assert.deepEqual(scopes, expected, primaryScope);
+  }
+
   assert.equal(resolveGlobalCandidateExportScopes({
     scope: 'approved',
     includeScopes: 'registered'
+  }), null);
+  assert.equal(resolveGlobalCandidateExportScopes({
+    scope: 'approved',
+    includeScopes: 'rejected'
   }), null);
   assert.deepEqual(resolveGlobalCandidateExportScopes({ scope: 'approved' }), ['approved']);
 });
@@ -190,32 +205,36 @@ test('la vista global reutiliza un solo selector visual y descarga la pestaña a
   assert.doesNotMatch(runtime, /input\.type\s*=\s*['"]date['"]/);
 });
 
-test('la descarga permanece visible junto al selector y ofrece checks solo para los otros estados combinables', () => {
+test('cada pestaña muestra Completos sin HV y Contactados y usa la ruta global canónica', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
-  assert.match(runtime, /GLOBAL_COMBINABLE_EXPORT_SCOPES/);
-  assert.match(runtime, /registered: 'Registrados'/);
-  assert.match(runtime, /missing_cv_complete: 'Sin HV'/);
+  assert.match(runtime, /GLOBAL_OPTIONAL_EXPORT_SCOPES/);
+  assert.match(runtime, /missing_cv_complete: 'Completos sin HV'/);
   assert.match(runtime, /contacted: 'Contactados'/);
   assert.match(runtime, /data-global-export-extra-scope/);
-  assert.match(runtime, /scope === activeScope/);
+  assert.match(runtime, /input\.checked = scope === activeScope \|\| selectedFromUrl\.has\(scope\)/);
+  assert.match(runtime, /input\.disabled = scope === activeScope/);
+  assert.match(runtime, /GLOBAL_OPTIONAL_EXPORT_SCOPES\.forEach/);
+  assert.doesNotMatch(runtime, /if \(!GLOBAL_(?:COMBINABLE|OPTIONAL)_EXPORT_SCOPES\.includes\(activeScope\)\) return null/);
+  assert.match(runtime, /new URL\(panel \? baseHref : '\/admin\/export-global', window\.location\.origin\)/);
   assert.match(runtime, /url\.searchParams\.set\('includeScopes'/);
   assert.match(runtime, /controls\.appendChild\(globalLink\)/);
   assert.match(runtime, /scopedLink\.hidden = false/);
 });
 
-test('el rango global se conserva al cambiar de pestaña y al usar filtros GET', () => {
+test('el rango y las selecciones opcionales se conservan al cambiar de pestaña', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /let selectedStart = validIsoDate\(initialParams\.get\('dateFrom'\)\)/);
   assert.match(runtime, /let selectedEnd = validIsoDate\(initialParams\.get\('dateTo'\)\)/);
   assert.match(runtime, /function syncGlobalRangeNavigation\(bar, dateFrom, dateTo\)/);
-  assert.match(runtime, /bar\.dataset\.globalCandidateExport !== 'true'/);
+  assert.match(runtime, /function syncGlobalIncludeScopesNavigation\(bar\)/);
   assert.match(runtime, /window\.history\.replaceState/);
   assert.match(runtime, /a\[href\^="\/admin\?"\]/);
   assert.match(runtime, /url\.searchParams\.has\('status'\)/);
   assert.match(runtime, /setRangeParam\(url, 'dateFrom', dateFrom\)/);
   assert.match(runtime, /setRangeParam\(url, 'dateTo', dateTo\)/);
+  assert.match(runtime, /url\.searchParams\.set\('includeScopes', extraScopes\.join\(','\)\)/);
   assert.match(runtime, /form\[method="get"\]\[action="\/admin"\]/);
   assert.match(runtime, /setFormRangeInput\(form, 'dateFrom', dateFrom\)/);
   assert.match(runtime, /setFormRangeInput\(form, 'dateTo', dateTo\)/);
