@@ -50,6 +50,20 @@ test('el buscador de vacante ofrece solo Nombre y Documento y usa coincidencias 
   assert.match(matchBlock, /fold\(item\.label\)\.includes\(normalizedQuery\)/);
 });
 
+test('el typeahead conserva el nombre y no usa la fecha DEV como etiqueta de coincidencia', () => {
+  const runtime = fs.readFileSync('src/public/lorren-live-search.js', 'utf8');
+  const view = fs.readFileSync('src/views/list.ejs', 'utf8');
+  const candidateResultBlock = runtime.match(
+    /function candidateRowResult[\s\S]*?function installLegacyRecruitmentSearch/
+  )?.[0] || '';
+
+  assert.match(view, /<%= c\.fullName \|\| '—' %>[\s\S]*candidate-dev-meta">Fecha de registro:/);
+  assert.match(candidateResultBlock, /const directNameText = \[\.\.\.\(cells\[1\]\?\.childNodes \|\| \[\]\)\]/);
+  assert.match(candidateResultBlock, /node\.nodeType === 3/);
+  assert.match(candidateResultBlock, /\|\| directNameText/);
+  assert.doesNotMatch(candidateResultBlock, /cells\[1\]\?\.querySelector\('div,strong'\)/);
+});
+
 test('las coincidencias respetan vacante y rango de registro y abren la ficha del candidato', () => {
   const runtime = fs.readFileSync('src/public/lorren-live-search.js', 'utf8');
   const lookupBlock = runtime.match(
