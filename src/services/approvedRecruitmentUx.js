@@ -116,22 +116,6 @@ function approvedRecruitmentScript() {
     return decodeURIComponent(encodedCandidateId);
   }
 
-  function candidateIdFromStatusForm(form) {
-    if (!form) return '';
-    let url;
-    try {
-      url = new URL(form.getAttribute('action') || '', window.location.origin);
-    } catch {
-      return '';
-    }
-    const prefix = '/admin/candidates/';
-    const suffix = '/status';
-    if (!url.pathname.startsWith(prefix) || !url.pathname.endsWith(suffix)) return '';
-    const encodedCandidateId = url.pathname.slice(prefix.length, -suffix.length);
-    if (!encodedCandidateId || encodedCandidateId.includes('/')) return '';
-    return decodeURIComponent(encodedCandidateId);
-  }
-
   async function postCandidateStatus(candidateId, status, returnTo) {
     const body = new URLSearchParams();
     body.set('status', status);
@@ -145,89 +129,14 @@ function approvedRecruitmentScript() {
     const finalUrl = new URL(response.url || window.location.href, window.location.origin);
     const detailPrefix = '/admin/candidates/';
     const finalCandidateId = finalUrl.pathname.startsWith(detailPrefix)
-      ? finalUrl.pathname.slice(detailPrefix.length)
+      ? finalUrl.pathname.slice(detailPrefix.length).split('/')[0]
       : '';
     return {
-      ok: response.ok && Boolean(finalCandidateId) && !finalCandidateId.includes('/'),
-      finalUrl
+      ok: response.ok && Boolean(finalCandidateId),
+      finalUrl,
+      success: finalUrl.searchParams.get('success') || '',
+      error: finalUrl.searchParams.get('error') || ''
     };
-  }
-
-  async function triggerConfiguredApprovedOutreach(candidateId, vacancyId = '') {
-    const body = new URLSearchParams();
-    body.append('candidateIds', candidateId);
-    if (vacancyId) body.set('vacancyId', vacancyId);
-    const response = await fetch('/admin/outreach/approved/prepare', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-      body: body.toString()
-    });
-    if (!response.ok) return false;
-
-    const verificationUrl = new URL('/admin/outreach/approved/window-status', window.location.origin);
-    verificationUrl.searchParams.set('candidateIds', candidateId);
-    const verification = await fetch(verificationUrl.pathname + verificationUrl.search, {
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' }
-    });
-    if (!verification.ok) return false;
-    const payload = await verification.json().catch(() => null);
-    if (!payload?.ok || !Array.isArray(payload.candidates)) return false;
-    return !payload.candidates.some((candidate) => candidate?.candidateId === candidateId);
-  }
-
-  function installSingleCandidateApprovalAutomation() {
-    const forms = Array.from(document.querySelectorAll('form.status-form[action]'));
-    forms.forEach((form) => {
-      const candidateId = candidateIdFromStatusForm(form);
-      const statusSelect = form.querySelector('select[name="status"]');
-      if (!candidateId || !statusSelect || form.dataset.approvalOutreachReady === 'true') return;
-      form.dataset.approvalOutreachReady = 'true';
-
-      form.addEventListener('submit', async (event) => {
-        if (statusSelect.value !== 'APROBADO') return;
-        event.preventDefault();
-        if (form.dataset.approvalOutreachSubmitting === 'true') return;
-        form.dataset.approvalOutreachSubmitting = 'true';
-
-        const submit = form.querySelector('button[type="submit"], input[type="submit"]');
-        if (submit) submit.disabled = true;
-        statusSelect.disabled = true;
-        const returnTo = String(form.querySelector('input[name="returnTo"]')?.value || '/admin').trim() || '/admin';
-        let statusUpdated = false;
-
-        try {
-          const statusResult = await postCandidateStatus(candidateId, 'APROBADO', returnTo);
-          if (!statusResult.ok) {
-            window.location.assign(statusResult.finalUrl.pathname + statusResult.finalUrl.search);
-            return;
-          }
-          statusUpdated = true;
-
-          const outreachCompleted = await triggerConfiguredApprovedOutreach(candidateId);
-          const target = statusResult.finalUrl;
-          target.searchParams.delete('success');
-          target.searchParams.delete('error');
-          if (outreachCompleted) {
-            target.searchParams.set('success', 'Candidato aprobado, citación aceptada por Meta y movido a Contactado.');
-          } else {
-            target.searchParams.set('error', 'El candidato quedó Aprobado, pero no se confirmó la citación. Revisa el estado antes de reintentar.');
-          }
-          window.location.assign(target.pathname + target.search);
-        } catch (_error) {
-          const target = new URL(window.location.href);
-          target.searchParams.delete('success');
-          target.searchParams.set(
-            'error',
-            statusUpdated
-              ? 'El candidato quedó Aprobado, pero no se pudo confirmar la citación. Revisa el estado antes de reintentar.'
-              : 'No fue posible confirmar el cambio a Aprobado. Actualiza la ficha antes de reintentar.'
-          );
-          window.location.assign(target.pathname + target.search);
-        }
-      });
-    });
   }
 
   function buildFilteredCandidateCheckbox(candidateId) {
@@ -349,7 +258,7 @@ function approvedRecruitmentScript() {
       statusSelect.disabled = true;
       allCandidateCheckboxes().forEach((checkbox) => { checkbox.disabled = true; });
 
-      const autoOutreachOnApproval = status === 'APROBADO';
+      const approvalBatch = status === 'APROBADO';
       let completed = 0;
       let contacted = 0;
       let approvedPendingOutreach = 0;
@@ -358,32 +267,26 @@ function approvedRecruitmentScript() {
 
       for (let index = 0; index < selectedIds.length; index += 1) {
         const candidateId = selectedIds[index];
-        let statusUpdatedForCandidate = false;
         feedback.textContent = 'Procesando ' + (index + 1) + ' de ' + selectedIds.length + '...';
         try {
           const statusResult = await postCandidateStatus(candidateId, status, returnTo);
-          statusUpdatedForCandidate = statusResult.ok;
-          if (!statusUpdatedForCandidate) {
+          if (!statusResult.ok) {
             failed += 1;
-            if (!autoOutreachOnApproval) break;
+            if (!approvalBatch) break;
             continue;
           }
 
-          if (autoOutreachOnApproval) {
-            const outreachCompleted = await triggerConfiguredApprovedOutreach(candidateId, vacancyId);
-            if (outreachCompleted) contacted += 1;
-            else approvedPendingOutreach += 1;
+          if (approvalBatch) {
+            if (statusResult.error) approvedPendingOutreach += 1;
+            else if (statusResult.success) contacted += 1;
+            else completed += 1;
             continue;
           }
 
           completed += 1;
         } catch (_error) {
-          if (autoOutreachOnApproval && statusUpdatedForCandidate) {
-            approvedPendingOutreach += 1;
-          } else {
-            failed += 1;
-            if (!autoOutreachOnApproval) break;
-          }
+          failed += 1;
+          if (!approvalBatch) break;
         }
       }
 
@@ -391,32 +294,38 @@ function approvedRecruitmentScript() {
       target.searchParams.delete('success');
       target.searchParams.delete('error');
 
-      if (autoOutreachOnApproval) {
+      if (approvalBatch) {
+        const successParts = [];
         if (contacted > 0) {
-          target.searchParams.set(
-            'success',
-            contacted + ' candidato' + (contacted === 1 ? '' : 's') + ' aprobado' + (contacted === 1 ? '' : 's')
-              + ', con citación aceptada por Meta y movido' + (contacted === 1 ? '' : 's') + ' a Contactados.'
+          successParts.push(
+            contacted + ' candidato' + (contacted === 1 ? '' : 's')
+              + ' con citación aceptada por Meta y movido' + (contacted === 1 ? '' : 's') + ' a Contactados.'
           );
         }
+        if (completed > 0) {
+          successParts.push(
+            completed + ' candidato' + (completed === 1 ? '' : 's')
+              + (completed === 1 ? ' no requería' : ' no requerían') + ' una nueva transición a Aprobado.'
+          );
+        }
+        if (successParts.length) target.searchParams.set('success', successParts.join(' '));
+
         if (approvedPendingOutreach > 0 || failed > 0) {
           const errorParts = [];
           if (approvedPendingOutreach > 0) {
             errorParts.push(
               approvedPendingOutreach + ' candidato' + (approvedPendingOutreach === 1 ? '' : 's')
                 + (approvedPendingOutreach === 1 ? ' quedó' : ' quedaron')
-                + ' en Aprobados porque no se confirmó la citación.'
+                + ' en Aprobados porque el backend no confirmó la citación.'
             );
           }
           if (failed > 0) {
             errorParts.push(
               failed + ' candidato' + (failed === 1 ? '' : 's')
-                + (failed === 1 ? ' no pudo' : ' no pudieron') + ' cambiar a Aprobado.'
+                + (failed === 1 ? ' no pudo' : ' no pudieron') + ' completar el cambio de estado.'
             );
           }
-          errorParts.push(approvedPendingOutreach > 0
-            ? 'Revisa Aprobados antes de reintentar.'
-            : 'Revisa el listado antes de reintentar.');
+          errorParts.push('Revisa el listado antes de reintentar.');
           target.searchParams.set('error', errorParts.join(' '));
         }
       } else if (failed > 0) {
@@ -507,8 +416,6 @@ function approvedRecruitmentScript() {
     if (!vacancyId) return;
     installVacancyStatusFilters(panel, vacancyId);
   });
-
-  installSingleCandidateApprovalAutomation();
 })();
 </script>`;
 }
@@ -518,8 +425,7 @@ export function enhanceApprovedRecruitmentUx(html) {
   const withoutApprovedOutreachLinks = stripApprovedOutreachLinks(html);
   if (withoutApprovedOutreachLinks.includes(SCRIPT_MARK)) return withoutApprovedOutreachLinks;
   const hasRecruitmentSurface = withoutApprovedOutreachLinks.includes('legacy-candidates-table')
-    || withoutApprovedOutreachLinks.includes('data-vacancy-panel')
-    || /action=["']\/admin\/candidates\/[^"']+\/status["']/.test(withoutApprovedOutreachLinks);
+    || withoutApprovedOutreachLinks.includes('data-vacancy-panel');
   if (!hasRecruitmentSurface) return withoutApprovedOutreachLinks;
   if (!/<\/body>/i.test(withoutApprovedOutreachLinks)) return withoutApprovedOutreachLinks;
   return withoutApprovedOutreachLinks.replace(/<\/body>/i, `${approvedRecruitmentScript()}\n</body>`);
