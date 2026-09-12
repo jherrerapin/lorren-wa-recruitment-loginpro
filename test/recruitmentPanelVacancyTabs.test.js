@@ -14,27 +14,65 @@ test('recruitment dashboard renders vacancy tabs inside active city', () => {
   assert.match(view, /window\.location\.hash\.startsWith\('#vacancy-'\)/);
 });
 
-test('recruitment dashboard exposes vacancy filters for dev and normalizes duplicated option variants', () => {
-  const view = fs.readFileSync('src/views/list.ejs', 'utf8');
+test('la vista por vacante retira los filtros operativos de transporte y residencia de la UI activa', () => {
+  const runtime = fs.readFileSync('src/public/lorren-live-search.js', 'utf8');
+  const retiredFilterBlock = runtime.match(
+    /function clearRetiredVacancyFilterParams[\s\S]*?function setVacancySearchOptions/
+  )?.[0] || '';
 
-  assert.doesNotMatch(view, /if \(role === 'admin'\) \{ %>\s*<form method="get" action="\/admin" class="filter-strip vacancy-filter-bar">/);
-  assert.match(view, /function normalizeFilterOptionKey\(value\)/);
-  assert.match(view, /\.normalize\('NFD'\)/);
-  assert.match(view, /replace\(\/\[\\u0300-\\u036f\]\/g, ''\)/);
-  assert.match(view, /function normalizeFilterOptionLabel\(value\)/);
-  assert.match(view, /const key = normalizeFilterOptionKey\(label\);/);
-  assert.match(view, /normalizeFilterOptionKey\(candidateFilterValue\(candidate, field, vacancyOrCity\)\) === normalizeFilterOptionKey\(filters\[field\]\)/);
+  assert.match(retiredFilterBlock, /key\.startsWith\('vf_'\)/);
+  assert.match(retiredFilterBlock, /window\.location\.replace/);
+  assert.match(retiredFilterBlock, /input\[name\^="vf_"\], select\[name\^="vf_"\]/);
+  assert.match(retiredFilterBlock, /function retireVacancyOperationalFilters/);
+  assert.match(retiredFilterBlock, /form\.vacancy-filter-bar/);
+  assert.match(retiredFilterBlock, /if \(!isSearchForm\) form\.remove\(\)/);
 });
 
+test('el buscador de vacante ofrece solo Nombre y Documento y usa coincidencias progresivas', () => {
+  const runtime = fs.readFileSync('src/public/lorren-live-search.js', 'utf8');
+  const optionsBlock = runtime.match(
+    /function setVacancySearchOptions[\s\S]*?function vacancyCandidateLookupUrl/
+  )?.[0] || '';
+  const matchBlock = runtime.match(
+    /function filterVacancyCandidateResults[\s\S]*?function vacancyLegacyResults/
+  )?.[0] || '';
 
-test('vacancy forms preserve selected vacancy hash and hide locality outside Bogota', () => {
-  const view = fs.readFileSync('src/views/list.ejs', 'utf8');
+  assert.match(optionsBlock, /nameOption\.value = 'name'/);
+  assert.match(optionsBlock, /nameOption\.textContent = 'Nombre'/);
+  assert.match(optionsBlock, /documentOption\.value = 'document'/);
+  assert.match(optionsBlock, /documentOption\.textContent = 'Documento'/);
+  assert.doesNotMatch(optionsBlock, /phone|Celular/);
 
-  assert.match(view, /action="\/admin#vacancy-<%= v\.id %>" class="filter-strip vacancy-filter-bar"/);
-  assert.match(view, /\? \['transportMode', 'locality'\]\s*: \['transportMode', 'neighborhood'\]/);
-  assert.doesNotMatch(view, /: \['transportMode', 'neighborhood', 'locality'\]/);
+  assert.match(matchBlock, /field === 'document'/);
+  assert.match(matchBlock, /digits\(query\)/);
+  assert.match(matchBlock, /item\.documentDigits\.includes\(queryDigits\)/);
+  assert.match(matchBlock, /fold\(query\)/);
+  assert.match(matchBlock, /fold\(item\.label\)\.includes\(normalizedQuery\)/);
 });
 
+test('las coincidencias respetan vacante y rango de registro y abren la ficha del candidato', () => {
+  const runtime = fs.readFileSync('src/public/lorren-live-search.js', 'utf8');
+  const lookupBlock = runtime.match(
+    /function vacancyCandidateLookupUrl[\s\S]*?function filterVacancyCandidateResults/
+  )?.[0] || '';
+  const installBlock = runtime.match(
+    /function installVacancyRecruitmentSearches[\s\S]*?function workerCardResult/
+  )?.[0] || '';
+
+  assert.match(lookupBlock, /url\.searchParams\.set\('status', 'all'\)/);
+  assert.match(lookupBlock, /url\.searchParams\.set\('vacancyId', vacancyId\)/);
+  assert.match(lookupBlock, /current\.searchParams\.get\('dateFrom'\)/);
+  assert.match(lookupBlock, /current\.searchParams\.get\('dateTo'\)/);
+  assert.match(lookupBlock, /url\.searchParams\.set\('dateFrom', dateFrom\)/);
+  assert.match(lookupBlock, /url\.searchParams\.set\('dateTo', dateTo\)/);
+
+  assert.match(installBlock, /fetchDocument\(vacancyCandidateLookupUrl\(vacancyId\), signal\)/);
+  assert.match(installBlock, /filterVacancyCandidateResults\(candidates, query, field\)/);
+  assert.match(installBlock, /window\.location\.assign\(item\.href\)/);
+  assert.match(installBlock, /event\.preventDefault\(\)/);
+  assert.match(installBlock, /liveSearch\?\.search\(\)/);
+  assert.match(installBlock, /input\.placeholder = 'Escribe nombre o documento'/);
+});
 
 test('admin movement labels are stored and displayed without mojibake', () => {
   const route = fs.readFileSync('src/routes/admin.js', 'utf8');
