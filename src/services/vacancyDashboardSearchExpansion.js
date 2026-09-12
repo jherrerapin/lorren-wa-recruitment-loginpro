@@ -32,6 +32,7 @@ const RECRUITMENT_BULK_STATUSES = [
   'RECHAZADO'
 ];
 const COMPLETE_RANGE_LEGACY_SCOPES = new Set([
+  'approved',
   'contacted',
   'contracted',
   'rejected',
@@ -412,17 +413,20 @@ function hasCompleteApplicantDateRange(dateRange = {}) {
 
 function candidateMatchesCompleteLegacyScope(candidate = {}, scope = '', options = {}) {
   const status = String(candidate.status || '').trim().toUpperCase();
-  if (options.approvedOnly) return status === 'APROBADO';
+  if (options.approvedOnly || scope === 'approved') return status === 'APROBADO';
   if (scope === 'contacted') return status === 'CONTACTADO';
   if (scope === 'contracted') return status === 'CONTRATADO';
   if (scope === 'rejected') return status === 'RECHAZADO';
-  if (scope === 'all') return options.isDev || status !== 'NUEVO';
+  if (scope === 'all') {
+    if (status === 'RECHAZADO') return false;
+    return options.isDev || status !== 'NUEVO';
+  }
   return true;
 }
 
 async function loadCompleteLegacyDateRangeCandidates(req, query, dateRange, vacancyId) {
   const scope = normalizeString(query.status);
-  if (!vacancyId || !hasCompleteApplicantDateRange(dateRange) || !COMPLETE_RANGE_LEGACY_SCOPES.has(scope)) {
+  if (!hasCompleteApplicantDateRange(dateRange) || !COMPLETE_RANGE_LEGACY_SCOPES.has(scope)) {
     return null;
   }
 
@@ -432,7 +436,7 @@ async function loadCompleteLegacyDateRangeCandidates(req, query, dateRange, vaca
     where: {
       AND: [
         buildCandidateAccessWhere(accessContext),
-        { vacancyId },
+        ...(vacancyId ? [{ vacancyId }] : []),
         ...(createdAt ? [{ createdAt }] : [])
       ]
     },
@@ -670,6 +674,16 @@ export async function enhanceLegacyApplicantList(viewModel = {}, query = {}, req
   if (vacancyId) {
     const matchingIds = await candidateIdsForVacancy(visibleCandidates, vacancyId);
     visibleCandidates = visibleCandidates.filter((candidate) => matchingIds.has(candidate.id));
+  }
+
+  const search = {
+    field: normalizeString(query.searchField) === 'phone' ? 'phone' : 'document',
+    text: normalizeString(query.searchText)
+  };
+  if (search.text) {
+    visibleCandidates = visibleCandidates.filter((candidate) => (
+      candidateMatchesVacancyDashboardSearch(candidate, search)
+    ));
   }
 
   visibleCandidates = visibleCandidates
