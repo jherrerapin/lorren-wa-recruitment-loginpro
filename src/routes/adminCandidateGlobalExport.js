@@ -15,12 +15,12 @@ import {
 } from '../services/candidateExport.js';
 import { normalizeApplicantDateRange } from '../services/vacancyDashboardSearchExpansion.js';
 
-const OPTIONAL_GLOBAL_EXPORT_SCOPES = Object.freeze([
+const OPTIONAL_EXPORT_SCOPES = Object.freeze([
   'missing_cv_complete',
   'contacted'
 ]);
 
-const GLOBAL_EXPORT_FILENAME_LABEL = Object.freeze({
+const EXPORT_FILENAME_LABEL = Object.freeze({
   all: 'todos',
   registered: 'registrados',
   missing_cv_complete: 'completos_sin_hv',
@@ -78,7 +78,7 @@ export function resolveGlobalCandidateExportScopes(query = {}) {
   if (!CANDIDATE_EXPORT_SCOPES.includes(primaryScope)) return null;
 
   const requested = requestedIncludeScopes(query.includeScopes);
-  if (requested.some((scope) => !OPTIONAL_GLOBAL_EXPORT_SCOPES.includes(scope))) return null;
+  if (requested.some((scope) => !OPTIONAL_EXPORT_SCOPES.includes(scope))) return null;
 
   return Array.from(new Set([primaryScope, ...requested]));
 }
@@ -86,30 +86,41 @@ export function resolveGlobalCandidateExportScopes(query = {}) {
 export function globalCandidateExportFilename(scopes = []) {
   const normalized = Array.isArray(scopes) ? scopes.filter(Boolean) : [];
   if (normalized.length <= 1) return exportFilenameByScope(normalized[0] || 'all');
-  const labels = normalized.map((scope) => GLOBAL_EXPORT_FILENAME_LABEL[scope]).filter(Boolean);
+  const labels = normalized.map((scope) => EXPORT_FILENAME_LABEL[scope]).filter(Boolean);
   if (labels.length !== normalized.length) return exportFilenameByScope('all');
   return `candidatos_${labels.join('_')}_${formatDateForFilenameCO()}.xlsx`;
 }
 
-export function buildGlobalCandidateExportWhere(accessContext = {}, dateRange = {}) {
+export function buildGlobalCandidateExportWhere(accessContext = {}, dateRange = {}, vacancyId = '') {
+  const accessWhere = buildCandidateAccessWhere(accessContext);
   const createdAt = {};
   if (dateRange.start) createdAt.gte = dateRange.start;
   if (dateRange.end) createdAt.lte = dateRange.end;
+  const normalizedVacancyId = compact(vacancyId);
 
-  return {
-    ...buildCandidateAccessWhere(accessContext),
-    ...(Object.keys(createdAt).length ? { createdAt } : {})
-  };
+  if (!normalizedVacancyId) {
+    return {
+      ...accessWhere,
+      ...(Object.keys(createdAt).length ? { createdAt } : {})
+    };
+  }
+
+  const constraints = [];
+  if (Object.keys(accessWhere).length) constraints.push(accessWhere);
+  constraints.push({ vacancyId: normalizedVacancyId });
+  if (Object.keys(createdAt).length) constraints.push({ createdAt });
+  return constraints.length === 1 ? constraints[0] : { AND: constraints };
 }
 
 export async function loadGlobalCandidateExportRows(prisma, {
   accessContext,
   scope,
   scopes,
-  dateRange
+  dateRange,
+  vacancyId
 } = {}) {
   const rows = await prisma.candidate.findMany({
-    where: buildGlobalCandidateExportWhere(accessContext, dateRange),
+    where: buildGlobalCandidateExportWhere(accessContext, dateRange, vacancyId),
     orderBy: { createdAt: 'desc' },
     select: {
       fullName: true,
@@ -196,74 +207,80 @@ function applyWorkbookStyle(sheet) {
   });
 }
 
+async function handleCandidateExport(prisma, req, res) {
+  const scopes = resolveGlobalCandidateExportScopes(req.query);
+  if (!scopes) {
+    return res.status(400).send('Scope inválido.');
+  }
+
+  const dateRange = normalizeApplicantDateRange(req.query);
+  if (dateRange.error) return res.status(400).send(dateRange.error);
+
+  const accessContext = getRequestAccessContext(req);
+  const vacancyId = compact(req.query.vacancyId);
+  const candidates = await loadGlobalCandidateExportRows(prisma, {
+    accessContext,
+    scopes,
+    dateRange,
+    vacancyId
+  });
+
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet('Candidatos');
+  sheet.columns = [
+    { header: 'Fecha registro', key: 'createdAt', width: 20 },
+    { header: 'Nombre', key: 'fullName', width: 28 },
+    { header: 'Teléfono', key: 'phone', width: 20 },
+    { header: 'Doc. Tipo', key: 'documentType', width: 12 },
+    { header: 'Doc. Número', key: 'documentNumber', width: 18 },
+    { header: 'Edad', key: 'age', width: 8 },
+    { header: 'Sucursal', key: 'city', width: 18 },
+    { header: 'Vacante', key: 'vacancy', width: 28 },
+    { header: 'Barrio / Localidad', key: 'residence', width: 22 },
+    { header: 'Restricciones', key: 'medicalRestrictions', width: 22 },
+    { header: 'Transporte', key: 'transportMode', width: 16 },
+    { header: 'Tiene HV', key: 'hasCV', width: 10 }
+  ];
+
+  for (const candidate of candidates) {
+    const vacancyLabel = candidate.vacancy?.title || candidate.vacancy?.role || '';
+    const residence = getCandidateResidenceValue(candidate, candidate.vacancy)
+      || candidate.zone
+      || '';
+    const whatsappLink = buildWhatsAppLink(candidate.phone);
+    const row = sheet.addRow({
+      createdAt: formatDateTimeCO(candidate.createdAt),
+      fullName: candidate.fullName || '',
+      phone: candidate.phone || '',
+      documentType: candidate.documentType || '',
+      documentNumber: candidate.documentNumber || '',
+      age: candidate.age ?? '',
+      city: candidate.vacancy?.city || '',
+      vacancy: vacancyLabel,
+      residence,
+      medicalRestrictions: candidate.medicalRestrictions || '',
+      transportMode: candidate.transportMode || '',
+      hasCV: candidateHasCv(candidate) ? 'Sí' : 'No'
+    });
+    if (whatsappLink && candidate.phone) {
+      row.getCell('phone').value = { text: candidate.phone, hyperlink: whatsappLink };
+    }
+  }
+
+  applyWorkbookStyle(sheet);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${globalCandidateExportFilename(scopes)}"`);
+  await workbook.xlsx.write(res);
+  return res.end();
+}
+
 export function adminCandidateGlobalExportRouter(prisma) {
   const router = express.Router();
   router.use(requireAdminSession);
 
-  router.get('/export-global', async (req, res) => {
-    const scopes = resolveGlobalCandidateExportScopes(req.query);
-    if (!scopes) {
-      return res.status(400).send('Scope inválido.');
-    }
-
-    const dateRange = normalizeApplicantDateRange(req.query);
-    if (dateRange.error) return res.status(400).send(dateRange.error);
-
-    const accessContext = getRequestAccessContext(req);
-    const candidates = await loadGlobalCandidateExportRows(prisma, {
-      accessContext,
-      scopes,
-      dateRange
-    });
-
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet('Candidatos');
-    sheet.columns = [
-      { header: 'Fecha registro', key: 'createdAt', width: 20 },
-      { header: 'Nombre', key: 'fullName', width: 28 },
-      { header: 'Teléfono', key: 'phone', width: 20 },
-      { header: 'Doc. Tipo', key: 'documentType', width: 12 },
-      { header: 'Doc. Número', key: 'documentNumber', width: 18 },
-      { header: 'Edad', key: 'age', width: 8 },
-      { header: 'Sucursal', key: 'city', width: 18 },
-      { header: 'Vacante', key: 'vacancy', width: 28 },
-      { header: 'Barrio / Localidad', key: 'residence', width: 22 },
-      { header: 'Restricciones', key: 'medicalRestrictions', width: 22 },
-      { header: 'Transporte', key: 'transportMode', width: 16 },
-      { header: 'Tiene HV', key: 'hasCV', width: 10 }
-    ];
-
-    for (const candidate of candidates) {
-      const vacancyLabel = candidate.vacancy?.title || candidate.vacancy?.role || '';
-      const residence = getCandidateResidenceValue(candidate, candidate.vacancy)
-        || candidate.zone
-        || '';
-      const whatsappLink = buildWhatsAppLink(candidate.phone);
-      const row = sheet.addRow({
-        createdAt: formatDateTimeCO(candidate.createdAt),
-        fullName: candidate.fullName || '',
-        phone: candidate.phone || '',
-        documentType: candidate.documentType || '',
-        documentNumber: candidate.documentNumber || '',
-        age: candidate.age ?? '',
-        city: candidate.vacancy?.city || '',
-        vacancy: vacancyLabel,
-        residence,
-        medicalRestrictions: candidate.medicalRestrictions || '',
-        transportMode: candidate.transportMode || '',
-        hasCV: candidateHasCv(candidate) ? 'Sí' : 'No'
-      });
-      if (whatsappLink && candidate.phone) {
-        row.getCell('phone').value = { text: candidate.phone, hyperlink: whatsappLink };
-      }
-    }
-
-    applyWorkbookStyle(sheet);
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${globalCandidateExportFilename(scopes)}"`);
-    await workbook.xlsx.write(res);
-    return res.end();
-  });
+  router.get(['/export', '/export-global'], async (req, res) => (
+    handleCandidateExport(prisma, req, res)
+  ));
 
   return router;
 }

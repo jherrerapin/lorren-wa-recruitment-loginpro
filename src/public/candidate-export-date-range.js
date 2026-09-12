@@ -126,7 +126,8 @@
 
   function restoreRangeDecoratedLinks(bar) {
     bar.querySelectorAll(`${EXPORT_LINK_SELECTOR}[data-range-base-href]`).forEach((link) => {
-      link.href = link.dataset.rangeBaseHref;
+      const baseHref = String(link.dataset.rangeBaseHref || '').trim();
+      if (baseHref && baseHref !== 'undefined') link.setAttribute('href', baseHref);
       link.textContent = link.dataset.rangeBaseLabel || link.textContent;
       delete link.dataset.rangeBaseHref;
       delete link.dataset.rangeBaseLabel;
@@ -161,10 +162,10 @@
     return `desde ${formatRangeDate(dateFrom)}`;
   }
 
-  function selectedGlobalExtraScopes(bar) {
-    if (bar?.dataset?.globalCandidateExport !== 'true') return [];
-    const activeScope = String(bar.dataset.globalCandidateExportScope || '');
-    return Array.from(bar.querySelectorAll('input[data-global-export-extra-scope]:checked'))
+  function selectedExtraScopes(bar, panel) {
+    const root = panel || bar;
+    const activeScope = activeExportContext(panel, bar).scope;
+    return Array.from(root?.querySelectorAll?.('input[data-export-extra-scope]:checked') || [])
       .map((input) => String(input.value || '').trim())
       .filter((scope) => GLOBAL_OPTIONAL_EXPORT_SCOPES.includes(scope) && scope !== activeScope);
   }
@@ -185,14 +186,20 @@
     const scopedLink = links.find((link) => exportScope(link) === context.scope);
     if (!scopedLink) return;
 
-    const baseHref = scopedLink.getAttribute('href') || '';
+    const rawBaseHref = String(scopedLink.getAttribute('href') || '').trim();
+    const baseHref = rawBaseHref && rawBaseHref !== 'undefined' ? rawBaseHref : '/admin/export';
     const baseLabel = String(scopedLink.textContent || '').trim();
     scopedLink.dataset.rangeBaseHref = baseHref;
     scopedLink.dataset.rangeBaseLabel = baseLabel;
 
-    const url = new URL(panel ? baseHref : '/admin/export-global', window.location.origin);
-    const extraScopes = panel ? [] : selectedGlobalExtraScopes(bar);
+    const url = new URL(baseHref, window.location.origin);
+    url.pathname = '/admin/export';
+    const extraScopes = selectedExtraScopes(bar, panel);
     url.searchParams.set('scope', context.scope);
+    if (panel) {
+      const vacancyId = String(panel.getAttribute('data-vacancy-panel') || '').trim();
+      if (vacancyId) url.searchParams.set('vacancyId', vacancyId);
+    }
     if (extraScopes.length) url.searchParams.set('includeScopes', extraScopes.join(','));
     else url.searchParams.delete('includeScopes');
     if (dateFrom) url.searchParams.set('dateFrom', dateFrom);
@@ -336,14 +343,14 @@
     });
   }
 
-  function syncGlobalIncludeScopesNavigation(bar) {
-    if (bar.dataset.globalCandidateExport !== 'true') return;
+  function syncIncludeScopesNavigation(bar, panel) {
     const current = new URL(window.location.href);
-    const extraScopes = selectedGlobalExtraScopes(bar);
+    const extraScopes = selectedExtraScopes(bar, panel);
     if (extraScopes.length) current.searchParams.set('includeScopes', extraScopes.join(','));
     else current.searchParams.delete('includeScopes');
     window.history.replaceState({}, '', `${current.pathname}${current.search}${current.hash}`);
 
+    if (bar.dataset.globalCandidateExport !== 'true') return;
     document.querySelectorAll('a[href^="/admin?"]').forEach((anchor) => {
       let url;
       try {
@@ -358,10 +365,17 @@
     });
   }
 
-  function buildGlobalScopeOptions(bar) {
-    if (bar.dataset.globalCandidateExport !== 'true') return null;
-    const activeScope = String(bar.dataset.globalCandidateExportScope || '');
+  function syncScopeOptionState(wrapper, bar, panel) {
+    if (!wrapper) return;
+    const activeScope = activeExportContext(panel, bar).scope;
+    wrapper.querySelectorAll('input[data-export-extra-scope]').forEach((input) => {
+      const forcedByActiveTab = String(input.value || '') === activeScope;
+      input.checked = forcedByActiveTab || input.dataset.explicitSelection === 'true';
+      input.disabled = forcedByActiveTab;
+    });
+  }
 
+  function buildScopeOptions(bar, panel) {
     const selectedFromUrl = new Set(
       String(new URL(window.location.href).searchParams.get('includeScopes') || '')
         .split(',')
@@ -383,15 +397,15 @@
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.value = scope;
-      input.setAttribute('data-global-export-extra-scope', scope);
-      input.checked = scope === activeScope || selectedFromUrl.has(scope);
-      input.disabled = scope === activeScope;
+      input.setAttribute('data-export-extra-scope', scope);
+      input.dataset.explicitSelection = selectedFromUrl.has(scope) ? 'true' : 'false';
       const text = document.createElement('span');
       text.textContent = GLOBAL_EXPORT_OPTION_LABEL[scope] || scope;
       label.append(input, text);
       wrapper.appendChild(label);
     });
 
+    syncScopeOptionState(wrapper, bar, panel);
     return wrapper;
   }
 
@@ -518,8 +532,8 @@
 
     const panel = bar.closest('[data-vacancy-panel]');
     const vacancyId = String(panel?.getAttribute('data-vacancy-panel') || '');
-    const globalScopeOptions = !panel ? buildGlobalScopeOptions(bar) : null;
-    if (globalScopeOptions) controls.appendChild(globalScopeOptions);
+    const scopeOptions = buildScopeOptions(bar, panel);
+    controls.appendChild(scopeOptions);
     const globalLink = !panel ? bar.querySelector('[data-global-candidate-export-link]') : null;
     if (globalLink) controls.appendChild(globalLink);
     installHistoryRangeBehavior(controls, panel, vacancyId);
@@ -528,8 +542,10 @@
       updateContextualRangeDownload(bar, panel, selectedStart, selectedEnd);
     };
 
-    globalScopeOptions?.addEventListener('change', () => {
-      syncGlobalIncludeScopesNavigation(bar);
+    scopeOptions.addEventListener('change', (event) => {
+      const input = event.target.closest('input[data-export-extra-scope]');
+      if (input && !input.disabled) input.dataset.explicitSelection = input.checked ? 'true' : 'false';
+      syncIncludeScopesNavigation(bar, panel);
       refreshDownloadContext();
     });
 
@@ -690,6 +706,7 @@
     window.addEventListener('resize', positionPopover);
 
     panel?.addEventListener('candidate-vacancy-tab-change', () => {
+      syncScopeOptionState(scopeOptions, bar, panel);
       refreshDownloadContext();
       placeVacancyRangeControl(controls, panel, bar);
     });
@@ -697,7 +714,12 @@
     bar.addEventListener('click', (event) => {
       const link = event.target.closest(EXPORT_LINK_SELECTOR);
       if (!link || !bar.contains(link)) return;
-      const url = new URL(link.getAttribute('href'), window.location.origin);
+      const rawHref = String(link.getAttribute('href') || '').trim();
+      const url = new URL(rawHref && rawHref !== 'undefined' ? rawHref : '/admin/export', window.location.origin);
+      url.pathname = '/admin/export';
+      const extraScopes = selectedExtraScopes(bar, panel);
+      if (extraScopes.length) url.searchParams.set('includeScopes', extraScopes.join(','));
+      else url.searchParams.delete('includeScopes');
       if (selectedStart) url.searchParams.set('dateFrom', selectedStart);
       else url.searchParams.delete('dateFrom');
       if (selectedEnd) url.searchParams.set('dateTo', selectedEnd);
@@ -707,6 +729,7 @@
 
     updateTrigger();
     syncGlobalRangeNavigation(bar, selectedStart, selectedEnd);
+    syncScopeOptionState(scopeOptions, bar, panel);
     refreshDownloadContext();
     placeVacancyRangeControl(controls, panel, bar);
   }
@@ -739,7 +762,7 @@
       link.dataset.globalCandidateExportLink = 'true';
       bar.prepend(link);
     }
-    link.href = `/admin/export-global?scope=${encodeURIComponent(scope)}`;
+    link.href = `/admin/export?scope=${encodeURIComponent(scope)}`;
     link.textContent = `↓ Descargar ${label}`;
     return bar;
   }
