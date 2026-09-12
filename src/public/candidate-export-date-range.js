@@ -72,11 +72,13 @@
       .candidate-export-range-footer{display:flex;justify-content:flex-end;margin-top:10px;padding-top:9px;border-top:1px solid #edf0f3}
       .candidate-export-range-clear{border:0;background:transparent;color:#0d7a6b;font:inherit;font-size:11px;font-weight:700;cursor:pointer;padding:4px 6px}
       .candidate-export-range-clear:hover{text-decoration:underline}
+      .candidate-export-actions{display:flex;flex:1 1 100%;width:100%;align-items:center;gap:10px;flex-wrap:wrap}
       .candidate-export-scope-options{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 8px;border:1px solid #e1e4e8;border-radius:7px;background:#f8fafc}
       .candidate-export-scope-options-title{font-size:11px;font-weight:700;color:#64748b}
       .candidate-export-scope-option{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#334155;cursor:pointer;white-space:nowrap}
       .candidate-export-scope-option input{margin:0;accent-color:#0d7a6b}
       .candidate-export-scope-option input:disabled{cursor:not-allowed;opacity:.65}
+      .candidate-export-download{margin-left:auto;white-space:nowrap;text-align:center}
       @media(max-width:768px){
         .candidate-export-date-range{align-items:stretch;gap:8px}
         .candidate-export-date-range.is-tab-context{padding:10px 14px}
@@ -84,8 +86,9 @@
         .candidate-export-range-trigger{width:100%;min-width:0;min-height:42px}
         .candidate-export-range-popover{left:0;right:auto;width:min(360px,calc(100vw - 48px))}
         .candidate-export-range-day{min-height:38px}
+        .candidate-export-actions{align-items:stretch}
         .candidate-export-scope-options{width:100%}
-        .candidate-export-date-range>.export-btn{width:100%;text-align:center}
+        .candidate-export-download{width:100%;margin-left:0}
       }
     `;
     document.head.appendChild(style);
@@ -116,29 +119,6 @@
     return date ? RANGE_DATE_FORMATTER.format(date) : '';
   }
 
-  function exportScope(link) {
-    try {
-      return new URL(link.getAttribute('href') || '', window.location.origin).searchParams.get('scope');
-    } catch {
-      return null;
-    }
-  }
-
-  function restoreRangeDecoratedLinks(bar) {
-    bar.querySelectorAll(`${EXPORT_LINK_SELECTOR}[data-range-base-href]`).forEach((link) => {
-      const baseHref = String(link.dataset.rangeBaseHref || '').trim();
-      if (baseHref && baseHref !== 'undefined') link.setAttribute('href', baseHref);
-      link.textContent = link.dataset.rangeBaseLabel || link.textContent;
-      delete link.dataset.rangeBaseHref;
-      delete link.dataset.rangeBaseLabel;
-    });
-    bar.querySelectorAll(`${EXPORT_LINK_SELECTOR}[data-range-forced-hidden]`).forEach((link) => {
-      link.hidden = link.dataset.rangePreviousHidden === 'true';
-      delete link.dataset.rangeForcedHidden;
-      delete link.dataset.rangePreviousHidden;
-    });
-  }
-
   function activeExportContext(panel, bar) {
     if (!panel && bar?.dataset?.globalCandidateExportScope) {
       return {
@@ -156,12 +136,6 @@
     };
   }
 
-  function rangeLabel(dateFrom, dateTo) {
-    if (!dateFrom) return '';
-    if (dateTo) return `${formatRangeDate(dateFrom)} – ${formatRangeDate(dateTo)}`;
-    return `desde ${formatRangeDate(dateFrom)}`;
-  }
-
   function selectedExtraScopes(bar, panel) {
     const root = panel || bar;
     const activeScope = activeExportContext(panel, bar).scope;
@@ -170,30 +144,17 @@
       .filter((scope) => GLOBAL_OPTIONAL_EXPORT_SCOPES.includes(scope) && scope !== activeScope);
   }
 
-  function selectedGlobalExportLabel(primaryScope, extraScopes = []) {
-    return [primaryScope, ...extraScopes]
-      .map((scope) => GLOBAL_EXPORT_LABEL[scope] || GLOBAL_EXPORT_OPTION_LABEL[scope] || scope)
-      .filter(Boolean)
-      .join(' + ');
-  }
-
   function updateContextualRangeDownload(bar, panel, dateFrom, dateTo) {
-    restoreRangeDecoratedLinks(bar);
     const context = activeExportContext(panel, bar);
-    if (!context.scope) return;
+    const downloadButton = (panel || bar)?.querySelector?.('[data-contextual-candidate-download]');
+    if (!downloadButton) return;
+    if (!context.scope) {
+      downloadButton.hidden = true;
+      downloadButton.removeAttribute('href');
+      return;
+    }
 
-    const links = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
-    const scopedLink = links.find((link) => exportScope(link) === context.scope);
-    if (!scopedLink) return;
-
-    const rawBaseHref = String(scopedLink.getAttribute('href') || '').trim();
-    const baseHref = rawBaseHref && rawBaseHref !== 'undefined' ? rawBaseHref : '/admin/export';
-    const baseLabel = String(scopedLink.textContent || '').trim();
-    scopedLink.dataset.rangeBaseHref = baseHref;
-    scopedLink.dataset.rangeBaseLabel = baseLabel;
-
-    const url = new URL(baseHref, window.location.origin);
-    url.pathname = '/admin/export';
+    const url = new URL('/admin/export', window.location.origin);
     const extraScopes = selectedExtraScopes(bar, panel);
     url.searchParams.set('scope', context.scope);
     if (panel) {
@@ -201,23 +162,12 @@
       if (vacancyId) url.searchParams.set('vacancyId', vacancyId);
     }
     if (extraScopes.length) url.searchParams.set('includeScopes', extraScopes.join(','));
-    else url.searchParams.delete('includeScopes');
     if (dateFrom) url.searchParams.set('dateFrom', dateFrom);
-    else url.searchParams.delete('dateFrom');
     if (dateTo) url.searchParams.set('dateTo', dateTo);
-    else url.searchParams.delete('dateTo');
-    scopedLink.href = `${url.pathname}${url.search}${url.hash}`;
-    const selectedLabel = selectedGlobalExportLabel(context.scope, extraScopes) || context.label;
-    const selectedRangeLabel = dateFrom ? ` · ${rangeLabel(dateFrom, dateTo)}` : '';
-    scopedLink.textContent = `↓ Descargar ${selectedLabel}${selectedRangeLabel}`;
-    scopedLink.hidden = false;
 
-    const allLink = links.find((link) => exportScope(link) === 'all');
-    if (allLink && allLink !== scopedLink && (dateFrom || extraScopes.length)) {
-      allLink.dataset.rangeForcedHidden = 'true';
-      allLink.dataset.rangePreviousHidden = allLink.hidden ? 'true' : 'false';
-      allLink.hidden = true;
-    }
+    downloadButton.href = `${url.pathname}${url.search}${url.hash}`;
+    downloadButton.textContent = '↓ Descargar';
+    downloadButton.hidden = false;
   }
 
   function candidateRegisteredDate(row) {
@@ -451,6 +401,12 @@
     if (!initialExportLinks.length) return;
 
     bar.dataset.exportDateRangeReady = 'true';
+    initialExportLinks.forEach((link) => {
+      link.hidden = true;
+      link.setAttribute('aria-hidden', 'true');
+      link.tabIndex = -1;
+      link.dataset.contextualExportSource = 'true';
+    });
 
     const initialParams = new URL(window.location.href).searchParams;
     let selectedStart = validIsoDate(initialParams.get('dateFrom'));
@@ -533,9 +489,15 @@
     const panel = bar.closest('[data-vacancy-panel]');
     const vacancyId = String(panel?.getAttribute('data-vacancy-panel') || '');
     const scopeOptions = buildScopeOptions(bar, panel);
-    controls.appendChild(scopeOptions);
-    const globalLink = !panel ? bar.querySelector('[data-global-candidate-export-link]') : null;
-    if (globalLink) controls.appendChild(globalLink);
+    const actionRow = document.createElement('div');
+    actionRow.className = 'candidate-export-actions';
+    const downloadButton = document.createElement('a');
+    downloadButton.className = 'export-btn candidate-export-download';
+    downloadButton.dataset.contextualCandidateDownload = 'true';
+    downloadButton.textContent = '↓ Descargar';
+    downloadButton.setAttribute('aria-label', 'Descargar registros seleccionados');
+    actionRow.append(scopeOptions, downloadButton);
+    controls.appendChild(actionRow);
     installHistoryRangeBehavior(controls, panel, vacancyId);
 
     const refreshDownloadContext = () => {
@@ -709,22 +671,6 @@
       syncScopeOptionState(scopeOptions, bar, panel);
       refreshDownloadContext();
       placeVacancyRangeControl(controls, panel, bar);
-    });
-
-    bar.addEventListener('click', (event) => {
-      const link = event.target.closest(EXPORT_LINK_SELECTOR);
-      if (!link || !bar.contains(link)) return;
-      const rawHref = String(link.getAttribute('href') || '').trim();
-      const url = new URL(rawHref && rawHref !== 'undefined' ? rawHref : '/admin/export', window.location.origin);
-      url.pathname = '/admin/export';
-      const extraScopes = selectedExtraScopes(bar, panel);
-      if (extraScopes.length) url.searchParams.set('includeScopes', extraScopes.join(','));
-      else url.searchParams.delete('includeScopes');
-      if (selectedStart) url.searchParams.set('dateFrom', selectedStart);
-      else url.searchParams.delete('dateFrom');
-      if (selectedEnd) url.searchParams.set('dateTo', selectedEnd);
-      else url.searchParams.delete('dateTo');
-      link.href = `${url.pathname}${url.search}${url.hash}`;
     });
 
     updateTrigger();
