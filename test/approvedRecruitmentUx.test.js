@@ -158,12 +158,13 @@ test('la selección masiva filtrada ignora filas ocultas y contratados', () => {
   );
 });
 
-test('el enlace Mensajes a aprobados se contextualiza por vacante y sucursal', () => {
+test('Mensajes a aprobados desaparece del listado al quedar el envío ligado a Aprobar', () => {
   const html = '<html><body><div data-vacancy-panel="vac-123"><div class="vacancy-role">Auxiliar — Medellín</div><a href="/admin/outreach/approved">Mensajes a aprobados</a></div></body></html>';
   const enhanced = enhanceApprovedRecruitmentUx(html);
   assert.match(enhanced, /panel\.dataset\.vacancyPanel/);
-  assert.match(enhanced, /searchParams\.set\('city', city\)/);
-  assert.match(enhanced, /searchParams\.set\('vacancyId', vacancyId\)/);
+  assert.doesNotMatch(enhanced, /href=["']\/admin\/outreach\/approved["']/);
+  assert.doesNotMatch(enhanced, />Mensajes a aprobados<\/a>/);
+  assert.doesNotMatch(enhanced, /approvedOutreachHeaderLink/);
 });
 
 test('Outreach aprobado encadena Sucursal -> Vacante en el navegador', () => {

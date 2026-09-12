@@ -7,7 +7,7 @@ function approvedClientScriptBody(html = '') {
   return match?.[1] || '';
 }
 
-test('Mensajes a aprobados reutiliza el enlace existente y lo mueve al encabezado de la vacante', () => {
+test('Mensajes a aprobados se retira del encabezado porque la citación es automática', () => {
   const html = [
     '<html><body>',
     '<section class="vacancy-panel" data-vacancy-panel="vacancy-example-1">',
@@ -18,12 +18,11 @@ test('Mensajes a aprobados reutiliza el enlace existente y lo mueve al encabezad
     '</body></html>'
   ].join('');
 
-  const script = approvedClientScriptBody(enhanceApprovedRecruitmentUx(html));
+  const enhanced = enhanceApprovedRecruitmentUx(html);
+  const script = approvedClientScriptBody(enhanced);
 
-  assert.match(script, /url\.searchParams\.set\('vacancyId', vacancyId\)/);
-  assert.match(script, /const headerTarget = panel\.querySelector\('\.vacancy-badges'\) \|\| vacancyHeader/);
-  assert.match(script, /outreachLink\.dataset\.approvedOutreachHeaderLink = vacancyId/);
-  assert.match(script, /headerTarget\.appendChild\(outreachLink\)/);
-  assert.match(script, /if \(!outreachLink\) return/);
-  assert.doesNotMatch(script, /outreachLink\.cloneNode/);
+  assert.doesNotMatch(enhanced, /href=["']\/admin\/outreach\/approved["']/);
+  assert.doesNotMatch(enhanced, />Mensajes a aprobados<\/a>/);
+  assert.doesNotMatch(script, /approvedOutreachHeaderLink|headerTarget\.appendChild\(outreachLink\)|outreachLink\.cloneNode/);
+  assert.match(script, /installVacancyStatusFilters\(panel, vacancyId\)/);
 });
