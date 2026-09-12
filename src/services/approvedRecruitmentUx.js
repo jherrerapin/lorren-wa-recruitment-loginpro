@@ -288,6 +288,7 @@ function approvedRecruitmentScript() {
           statusUpdatedForCandidate = await applyCandidateStatus(candidateId, status, returnTo);
           if (!statusUpdatedForCandidate) {
             failed += 1;
+            if (!autoOutreachOnApproval) break;
             continue;
           }
 
@@ -300,8 +301,12 @@ function approvedRecruitmentScript() {
 
           completed += 1;
         } catch (_error) {
-          if (autoOutreachOnApproval && statusUpdatedForCandidate) approvedPendingOutreach += 1;
-          else failed += 1;
+          if (autoOutreachOnApproval && statusUpdatedForCandidate) {
+            approvedPendingOutreach += 1;
+          } else {
+            failed += 1;
+            if (!autoOutreachOnApproval) break;
+          }
         }
       }
 
@@ -332,7 +337,9 @@ function approvedRecruitmentScript() {
                 + (failed === 1 ? ' no pudo' : ' no pudieron') + ' cambiar a Aprobado.'
             );
           }
-          errorParts.push('Revisa Aprobados antes de reintentar.');
+          errorParts.push(approvedPendingOutreach > 0
+            ? 'Revisa Aprobados antes de reintentar.'
+            : 'Revisa el listado antes de reintentar.');
           target.searchParams.set('error', errorParts.join(' '));
         }
       } else if (failed > 0) {
