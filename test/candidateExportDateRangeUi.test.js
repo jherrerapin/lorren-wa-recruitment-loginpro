@@ -43,8 +43,8 @@ test('la UI usa un solo selector visual y un calendario propio para elegir inici
   assert.match(runtime, /candidate-export-range-popover/);
   assert.match(runtime, /candidate-export-range-grid/);
   assert.match(runtime, /Selecciona la fecha inicial y luego la fecha final/);
-  assert.match(runtime, /let selectedStart = '';/);
-  assert.match(runtime, /let selectedEnd = '';/);
+  assert.match(runtime, /let selectedStart = validIsoDate/);
+  assert.match(runtime, /let selectedEnd = validIsoDate/);
   assert.doesNotMatch(runtime, /input\.type\s*=\s*['"]date['"]/);
 });
 
@@ -76,7 +76,7 @@ test('el histórico reutiliza el mismo selector, filtra por fecha visible y acot
   assert.match(runtime, /pruneHiddenHistorySelections\(panel\)/);
 });
 
-test('quitar el rango restaura el histórico visible y notifica el cambio', () => {
+test('quitar el rango restaura el histórico visible y recalcula la descarga única', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /selectedStart = '';/);
@@ -84,10 +84,10 @@ test('quitar el rango restaura el histórico visible y notifica el cambio', () =
   assert.match(runtime, /emitRangeChange\(\);/);
   assert.match(runtime, /detail: \{ dateFrom: selectedStart, dateTo: selectedEnd \}/);
   assert.match(runtime, /const inRange = \(!dateFrom \|\| registeredDate >= dateFrom\)/);
-  assert.match(runtime, /restoreRangeDecoratedLinks\(bar\)/);
+  assert.match(runtime, /updateContextualRangeDownload\(bar, panel, selectedStart, selectedEnd\)/);
 });
 
-test('el rango usa el scope de la pestaña activa y nunca scope all para la descarga contextual', () => {
+test('la descarga contextual usa el scope de la pestaña activa y nunca scope all por defecto', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /TAB_EXPORT_SCOPE/);
@@ -98,18 +98,22 @@ test('el rango usa el scope de la pestaña activa y nunca scope all para la desc
   assert.match(runtime, /url\.searchParams\.set\('scope', context\.scope\)/);
   assert.match(runtime, /url\.searchParams\.set\('dateFrom', dateFrom\)/);
   assert.match(runtime, /url\.searchParams\.set\('dateTo', dateTo\)/);
-  assert.match(runtime, /const allLink = links\.find\(\(link\) => exportScope\(link\) === 'all'\)/);
-  assert.match(runtime, /allLink\.hidden = true/);
+  assert.match(runtime, /data-contextual-candidate-download/);
+  assert.match(runtime, /downloadButton\.hidden = false/);
 });
 
-test('el botón contextual muestra pestaña y rango seleccionado', () => {
+test('solo se muestra un botón Descargar debajo del selector y los enlaces heredados quedan ocultos', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
-  assert.match(runtime, /TAB_EXPORT_LABEL/);
-  assert.match(runtime, /contacted: 'contactados'/);
-  assert.match(runtime, /rejected: 'rechazados'/);
-  assert.match(runtime, /scopedLink\.textContent = `↓ Descargar \$\{context\.label\} · \$\{rangeLabel\(dateFrom, dateTo\)\}`/);
-  assert.match(runtime, /RANGE_DATE_FORMATTER/);
+  assert.match(runtime, /candidate-export-actions/);
+  assert.match(runtime, /candidate-export-download/);
+  assert.match(runtime, /downloadButton\.dataset\.contextualCandidateDownload = 'true'/);
+  assert.match(runtime, /downloadButton\.textContent = '↓ Descargar'/);
+  assert.match(runtime, /actionRow\.append\(scopeOptions, downloadButton\)/);
+  assert.match(runtime, /initialExportLinks\.forEach\(\(link\) =>/);
+  assert.match(runtime, /link\.hidden = true/);
+  assert.match(runtime, /link\.setAttribute\('aria-hidden', 'true'\)/);
+  assert.doesNotMatch(runtime, /scopedLink\.textContent/);
 });
 
 test('al cambiar de pestaña el mismo selector se mueve arriba y recalcula la descarga', () => {
@@ -166,13 +170,15 @@ test('la vista plana completa el rango en base de datos para estados que antes p
   assert.match(service, /if \(completeRangeCandidates\) candidates = completeRangeCandidates;/);
 });
 
-test('los enlaces generados después de instalar el calendario también reciben las fechas', () => {
+test('el único botón compone directamente scope, rango y extras sobre /admin/export', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
-  assert.match(runtime, /bar\.addEventListener\('click'/);
-  assert.match(runtime, /event\.target\.closest\(EXPORT_LINK_SELECTOR\)/);
-  assert.match(runtime, /url\.searchParams\.set\('dateFrom', selectedStart\)/);
-  assert.match(runtime, /url\.searchParams\.set\('dateTo', selectedEnd\)/);
+  assert.match(runtime, /new URL\('\/admin\/export', window\.location\.origin\)/);
+  assert.match(runtime, /url\.searchParams\.set\('scope', context\.scope\)/);
+  assert.match(runtime, /url\.searchParams\.set\('includeScopes', extraScopes\.join\(','\)\)/);
+  assert.match(runtime, /url\.searchParams\.set\('dateFrom', dateFrom\)/);
+  assert.match(runtime, /url\.searchParams\.set\('dateTo', dateTo\)/);
+  assert.match(runtime, /downloadButton\.href = `\$\{url\.pathname\}\$\{url\.search\}\$\{url\.hash\}`/);
 });
 
 test('el selector normaliza el orden del rango, permite quitarlo y no usa diálogos nativos', () => {
