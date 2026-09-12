@@ -278,6 +278,13 @@
     return url;
   }
 
+  function projectRemoteStatusRows(sourceTable, descriptor) {
+    if (!sourceTable || descriptor?.key !== 'approved') return;
+    sourceTable.querySelectorAll('tbody tr').forEach((row) => {
+      if (!row.querySelector('.badge-aprobado')) row.remove();
+    });
+  }
+
   function setRemoteTabCount(tab, descriptor, value) {
     const countValue = String(value);
     const sectionCount = descriptor.section?.querySelector('.section-count');
@@ -312,6 +319,7 @@
       const html = await response.text();
       const parsed = new DOMParser().parseFromString(html, 'text/html');
       const sourceTable = parsed.querySelector('#legacy-candidates-table');
+      projectRemoteStatusRows(sourceTable, descriptor);
       const rows = sourceTable ? sourceTable.querySelectorAll('tbody tr').length : 0;
       setRemoteTabCount(tab, descriptor, rows);
 
