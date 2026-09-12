@@ -212,6 +212,19 @@
       });
     });
 
+    if (hasCompleteRegistrationRange() && !localKeys.has('missing-cv') && !descriptors.some((item) => item.key === 'missing-cv')) {
+      const section = buildRemoteStatusSection('Completos sin HV', 'missing-cv');
+      vacancyBody.appendChild(section);
+      descriptors.push({
+        key: 'missing-cv',
+        label: 'Completos sin HV',
+        section,
+        count: '',
+        remoteHref: '',
+        remoteState: 'idle'
+      });
+    }
+
     filterBar.hidden = true;
     filterBar.style.setProperty('display', 'none', 'important');
     filterBar.setAttribute('aria-hidden', 'true');
