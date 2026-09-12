@@ -32,10 +32,12 @@
     all: 'todos'
   });
   const GLOBAL_OPTIONAL_EXPORT_SCOPES = Object.freeze([
+    'registered',
     'missing_cv_complete',
     'contacted'
   ]);
   const GLOBAL_EXPORT_OPTION_LABEL = Object.freeze({
+    registered: 'Registrados',
     missing_cv_complete: 'Completos sin HV',
     contacted: 'Contactados'
   });
@@ -318,10 +320,18 @@
   function syncScopeOptionState(wrapper, bar, panel) {
     if (!wrapper) return;
     const activeScope = activeExportContext(panel, bar).scope;
-    wrapper.querySelectorAll('input[data-export-extra-scope]').forEach((input) => {
-      const forcedByActiveTab = String(input.value || '') === activeScope;
-      input.checked = forcedByActiveTab || input.dataset.explicitSelection === 'true';
-      input.disabled = forcedByActiveTab;
+    wrapper.querySelectorAll('.candidate-export-scope-option').forEach((label) => {
+      const input = label.querySelector('input[data-export-extra-scope]');
+      if (!input) return;
+      const isActiveScope = String(input.value || '') === activeScope;
+      label.hidden = isActiveScope;
+      input.disabled = isActiveScope;
+      if (isActiveScope) {
+        input.checked = false;
+        input.dataset.explicitSelection = 'false';
+        return;
+      }
+      input.checked = input.dataset.explicitSelection === 'true';
     });
   }
 
@@ -401,12 +411,7 @@
     if (!initialExportLinks.length) return;
 
     bar.dataset.exportDateRangeReady = 'true';
-    initialExportLinks.forEach((link) => {
-      link.hidden = true;
-      link.setAttribute('aria-hidden', 'true');
-      link.tabIndex = -1;
-      link.dataset.contextualExportSource = 'true';
-    });
+    initialExportLinks.forEach((link) => link.remove());
 
     const initialParams = new URL(window.location.href).searchParams;
     let selectedStart = validIsoDate(initialParams.get('dateFrom'));
@@ -668,7 +673,9 @@
     window.addEventListener('resize', positionPopover);
 
     panel?.addEventListener('candidate-vacancy-tab-change', () => {
+      bar.querySelectorAll(EXPORT_LINK_SELECTOR).forEach((link) => link.remove());
       syncScopeOptionState(scopeOptions, bar, panel);
+      syncIncludeScopesNavigation(bar, panel);
       refreshDownloadContext();
       placeVacancyRangeControl(controls, panel, bar);
     });

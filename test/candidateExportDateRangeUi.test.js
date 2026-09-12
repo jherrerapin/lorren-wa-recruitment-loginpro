@@ -102,7 +102,7 @@ test('la descarga contextual usa el scope de la pestaña activa y nunca scope al
   assert.match(runtime, /downloadButton\.hidden = false/);
 });
 
-test('solo se muestra un botón Descargar debajo del selector y los enlaces heredados quedan ocultos', () => {
+test('solo se muestra un botón Descargar debajo del selector y los enlaces heredados se retiran del DOM', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /candidate-export-actions/);
@@ -110,9 +110,9 @@ test('solo se muestra un botón Descargar debajo del selector y los enlaces here
   assert.match(runtime, /downloadButton\.dataset\.contextualCandidateDownload = 'true'/);
   assert.match(runtime, /downloadButton\.textContent = '↓ Descargar'/);
   assert.match(runtime, /actionRow\.append\(scopeOptions, downloadButton\)/);
-  assert.match(runtime, /initialExportLinks\.forEach\(\(link\) =>/);
-  assert.match(runtime, /link\.hidden = true/);
-  assert.match(runtime, /link\.setAttribute\('aria-hidden', 'true'\)/);
+  assert.match(runtime, /initialExportLinks\.forEach\(\(link\) => link\.remove\(\)\)/);
+  assert.doesNotMatch(runtime, /link\.hidden = true/);
+  assert.doesNotMatch(runtime, /link\.setAttribute\('aria-hidden', 'true'\)/);
   assert.doesNotMatch(runtime, /scopedLink\.textContent/);
 });
 
@@ -123,6 +123,7 @@ test('al cambiar de pestaña el mismo selector se mueve arriba y recalcula la de
   assert.match(runtime, /candidate-vacancy-section-tabs/);
   assert.match(runtime, /tabList\.insertAdjacentElement\('afterend', controls\)/);
   assert.match(runtime, /candidate-vacancy-tab-change/);
+  assert.match(runtime, /syncIncludeScopesNavigation\(bar, panel\)/);
   assert.match(runtime, /refreshDownloadContext\(\)/);
   assert.match(runtime, /placeVacancyRangeControl\(controls, panel, bar\)/);
 });

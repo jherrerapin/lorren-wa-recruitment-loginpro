@@ -16,6 +16,7 @@ import {
 import { normalizeApplicantDateRange } from '../services/vacancyDashboardSearchExpansion.js';
 
 const OPTIONAL_EXPORT_SCOPES = Object.freeze([
+  'registered',
   'missing_cv_complete',
   'contacted'
 ]);
