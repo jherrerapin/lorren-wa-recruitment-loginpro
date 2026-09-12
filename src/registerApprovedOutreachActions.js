@@ -88,7 +88,7 @@ async function invokeApprovedOutreachPrepare(adminRouter, req, candidateId) {
   return renderData || {};
 }
 
-function installAutomaticApprovedOutreach(adminRouter, prismaClient) {
+export function installAutomaticApprovedOutreach(adminRouter, prismaClient) {
   const prepareLayer = findFinalRouteHandler(adminRouter, '/outreach/approved/prepare');
   if (!prepareLayer) return;
 
