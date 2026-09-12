@@ -191,10 +191,11 @@ test('la exportación global consume los scopes canónicos de candidatos', () =>
   }
 });
 
-test('la vista global reutiliza un solo selector visual y descarga la pestaña activa', () => {
+test('la vista global reutiliza un solo selector visual y descarga la pestaña activa por /admin/export', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
-  assert.match(runtime, /\/admin\/export-global\?scope=/);
+  assert.match(runtime, /\/admin\/export\?scope=/);
+  assert.doesNotMatch(runtime, /link\.href = `\/admin\/export-global\?scope=/);
   assert.match(runtime, /GLOBAL_EXPORT_LABEL/);
   assert.match(runtime, /approvedOnly \? 'approved' : requestedStatus/);
   assert.match(runtime, /globalCandidateExportLink/);
@@ -205,21 +206,34 @@ test('la vista global reutiliza un solo selector visual y descarga la pestaña a
   assert.doesNotMatch(runtime, /input\.type\s*=\s*['"]date['"]/);
 });
 
-test('cada pestaña muestra Completos sin HV y Contactados y usa la ruta global canónica', () => {
+test('cada pestaña muestra Completos sin HV y Contactados y compone un único Excel', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /GLOBAL_OPTIONAL_EXPORT_SCOPES/);
   assert.match(runtime, /missing_cv_complete: 'Completos sin HV'/);
   assert.match(runtime, /contacted: 'Contactados'/);
-  assert.match(runtime, /data-global-export-extra-scope/);
-  assert.match(runtime, /input\.checked = scope === activeScope \|\| selectedFromUrl\.has\(scope\)/);
-  assert.match(runtime, /input\.disabled = scope === activeScope/);
+  assert.match(runtime, /data-export-extra-scope/);
+  assert.match(runtime, /function buildScopeOptions\(bar, panel\)/);
+  assert.match(runtime, /function syncScopeOptionState\(wrapper, bar, panel\)/);
+  assert.match(runtime, /input\.disabled = forcedByActiveTab/);
+  assert.match(runtime, /input\.dataset\.explicitSelection/);
   assert.match(runtime, /GLOBAL_OPTIONAL_EXPORT_SCOPES\.forEach/);
-  assert.doesNotMatch(runtime, /if \(!GLOBAL_(?:COMBINABLE|OPTIONAL)_EXPORT_SCOPES\.includes\(activeScope\)\) return null/);
-  assert.match(runtime, /new URL\(panel \? baseHref : '\/admin\/export-global', window\.location\.origin\)/);
+  assert.match(runtime, /const extraScopes = selectedExtraScopes\(bar, panel\)/);
+  assert.match(runtime, /url\.pathname = '\/admin\/export'/);
   assert.match(runtime, /url\.searchParams\.set\('includeScopes'/);
-  assert.match(runtime, /controls\.appendChild\(globalLink\)/);
+  assert.match(runtime, /controls\.appendChild\(scopeOptions\)/);
   assert.match(runtime, /scopedLink\.hidden = false/);
+});
+
+test('la descarga por vacante conserva vacancyId, rango y checks de la pestaña', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /panel\.getAttribute\('data-vacancy-panel'\)/);
+  assert.match(runtime, /url\.searchParams\.set\('vacancyId', vacancyId\)/);
+  assert.match(runtime, /function vacancyRangeTarget\(panel, dateFrom, dateTo\)/);
+  assert.match(runtime, /syncIncludeScopesNavigation\(bar, panel\)/);
+  assert.match(runtime, /panel\?\.addEventListener\('candidate-vacancy-tab-change'/);
+  assert.match(runtime, /syncScopeOptionState\(scopeOptions, bar, panel\)/);
 });
 
 test('el rango y las selecciones opcionales se conservan al cambiar de pestaña', () => {
@@ -228,7 +242,7 @@ test('el rango y las selecciones opcionales se conservan al cambiar de pestaña'
   assert.match(runtime, /let selectedStart = validIsoDate\(initialParams\.get\('dateFrom'\)\)/);
   assert.match(runtime, /let selectedEnd = validIsoDate\(initialParams\.get\('dateTo'\)\)/);
   assert.match(runtime, /function syncGlobalRangeNavigation\(bar, dateFrom, dateTo\)/);
-  assert.match(runtime, /function syncGlobalIncludeScopesNavigation\(bar\)/);
+  assert.match(runtime, /function syncIncludeScopesNavigation\(bar, panel\)/);
   assert.match(runtime, /window\.history\.replaceState/);
   assert.match(runtime, /a\[href\^="\/admin\?"\]/);
   assert.match(runtime, /url\.searchParams\.has\('status'\)/);
@@ -239,6 +253,14 @@ test('el rango y las selecciones opcionales se conservan al cambiar de pestaña'
   assert.match(runtime, /setFormRangeInput\(form, 'dateFrom', dateFrom\)/);
   assert.match(runtime, /setFormRangeInput\(form, 'dateTo', dateTo\)/);
   assert.match(runtime, /syncGlobalRangeNavigation\(bar, selectedStart, selectedEnd\)/);
+});
+
+test('un href indefinido nunca se convierte en /undefined para la descarga', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /baseHref && baseHref !== 'undefined'/);
+  assert.match(runtime, /rawBaseHref && rawBaseHref !== 'undefined' \? rawBaseHref : '\/admin\/export'/);
+  assert.match(runtime, /rawHref && rawHref !== 'undefined' \? rawHref : '\/admin\/export'/);
 });
 
 test('el listado global usa el mismo rango Colombia sobre Candidate.createdAt', () => {
