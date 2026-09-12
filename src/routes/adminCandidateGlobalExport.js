@@ -10,22 +10,9 @@ import {
   CANDIDATE_EXPORT_SCOPES,
   candidateHasCv,
   exportFilenameByScope,
-  filterCandidatesForExport,
-  formatDateForFilenameCO
+  filterCandidatesForExport
 } from '../services/candidateExport.js';
 import { normalizeApplicantDateRange } from '../services/vacancyDashboardSearchExpansion.js';
-
-const COMBINABLE_GLOBAL_EXPORT_SCOPES = Object.freeze([
-  'registered',
-  'missing_cv_complete',
-  'contacted'
-]);
-
-const GLOBAL_EXPORT_FILENAME_LABEL = Object.freeze({
-  registered: 'registrados',
-  missing_cv_complete: 'pendientes_hv',
-  contacted: 'contactados'
-});
 
 function compact(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -61,34 +48,6 @@ function formatDateTimeCO(value) {
   }).format(date);
 }
 
-function requestedIncludeScopes(value) {
-  const rawValues = Array.isArray(value) ? value : [value];
-  return rawValues
-    .flatMap((entry) => compact(entry).split(','))
-    .map(compact)
-    .filter(Boolean);
-}
-
-export function resolveGlobalCandidateExportScopes(query = {}) {
-  const primaryScope = compact(query.scope) || 'all';
-  if (!CANDIDATE_EXPORT_SCOPES.includes(primaryScope)) return null;
-
-  const requested = requestedIncludeScopes(query.includeScopes);
-  if (!requested.length) return [primaryScope];
-  if (!COMBINABLE_GLOBAL_EXPORT_SCOPES.includes(primaryScope)) return null;
-  if (requested.some((scope) => !COMBINABLE_GLOBAL_EXPORT_SCOPES.includes(scope))) return null;
-
-  return Array.from(new Set([primaryScope, ...requested]));
-}
-
-export function globalCandidateExportFilename(scopes = []) {
-  const normalized = Array.isArray(scopes) ? scopes.filter(Boolean) : [];
-  if (normalized.length <= 1) return exportFilenameByScope(normalized[0] || 'all');
-  const labels = normalized.map((scope) => GLOBAL_EXPORT_FILENAME_LABEL[scope]).filter(Boolean);
-  if (labels.length !== normalized.length) return exportFilenameByScope('all');
-  return `candidatos_${labels.join('_')}_${formatDateForFilenameCO()}.xlsx`;
-}
-
 export function buildGlobalCandidateExportWhere(accessContext = {}, dateRange = {}) {
   const createdAt = {};
   if (dateRange.start) createdAt.gte = dateRange.start;
@@ -103,7 +62,6 @@ export function buildGlobalCandidateExportWhere(accessContext = {}, dateRange = 
 export async function loadGlobalCandidateExportRows(prisma, {
   accessContext,
   scope,
-  scopes,
   dateRange
 } = {}) {
   const rows = await prisma.candidate.findMany({
@@ -135,14 +93,9 @@ export async function loadGlobalCandidateExportRows(prisma, {
     }
   });
 
-  const requestedScopes = Array.isArray(scopes) && scopes.length
-    ? scopes
-    : [scope || 'all'];
-  const filterOptions = { isDev: Boolean(accessContext?.isDev) };
-
-  return rows.filter((candidate) => requestedScopes.some((currentScope) => (
-    filterCandidatesForExport([candidate], currentScope, filterOptions).length === 1
-  )));
+  return filterCandidatesForExport(rows, scope, {
+    isDev: Boolean(accessContext?.isDev)
+  });
 }
 
 function applyWorkbookStyle(sheet) {
@@ -199,8 +152,8 @@ export function adminCandidateGlobalExportRouter(prisma) {
   router.use(requireAdminSession);
 
   router.get('/export-global', async (req, res) => {
-    const scopes = resolveGlobalCandidateExportScopes(req.query);
-    if (!scopes) {
+    const scope = compact(req.query.scope) || 'all';
+    if (!CANDIDATE_EXPORT_SCOPES.includes(scope)) {
       return res.status(400).send('Scope inválido.');
     }
 
@@ -210,7 +163,7 @@ export function adminCandidateGlobalExportRouter(prisma) {
     const accessContext = getRequestAccessContext(req);
     const candidates = await loadGlobalCandidateExportRows(prisma, {
       accessContext,
-      scopes,
+      scope,
       dateRange
     });
 
@@ -258,7 +211,7 @@ export function adminCandidateGlobalExportRouter(prisma) {
 
     applyWorkbookStyle(sheet);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${globalCandidateExportFilename(scopes)}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${exportFilenameByScope(scope)}"`);
     await workbook.xlsx.write(res);
     return res.end();
   });

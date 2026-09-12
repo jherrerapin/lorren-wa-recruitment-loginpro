@@ -31,16 +31,6 @@
     rejected: 'rechazados',
     all: 'todos'
   });
-  const GLOBAL_COMBINABLE_EXPORT_SCOPES = Object.freeze([
-    'registered',
-    'missing_cv_complete',
-    'contacted'
-  ]);
-  const GLOBAL_EXPORT_OPTION_LABEL = Object.freeze({
-    registered: 'Registrados',
-    missing_cv_complete: 'Sin HV',
-    contacted: 'Contactados'
-  });
 
   function injectStyles() {
     if (document.getElementById(STYLE_ID)) return;
@@ -74,10 +64,6 @@
       .candidate-export-range-footer{display:flex;justify-content:flex-end;margin-top:10px;padding-top:9px;border-top:1px solid #edf0f3}
       .candidate-export-range-clear{border:0;background:transparent;color:#0d7a6b;font:inherit;font-size:11px;font-weight:700;cursor:pointer;padding:4px 6px}
       .candidate-export-range-clear:hover{text-decoration:underline}
-      .candidate-export-scope-options{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 8px;border:1px solid #e1e4e8;border-radius:7px;background:#f8fafc}
-      .candidate-export-scope-options-title{font-size:11px;font-weight:700;color:#64748b}
-      .candidate-export-scope-option{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#334155;cursor:pointer;white-space:nowrap}
-      .candidate-export-scope-option input{margin:0;accent-color:#0d7a6b}
       @media(max-width:768px){
         .candidate-export-date-range{align-items:stretch;gap:8px}
         .candidate-export-date-range.is-tab-context{padding:10px 14px}
@@ -85,8 +71,6 @@
         .candidate-export-range-trigger{width:100%;min-width:0;min-height:42px}
         .candidate-export-range-popover{left:0;right:auto;width:min(360px,calc(100vw - 48px))}
         .candidate-export-range-day{min-height:38px}
-        .candidate-export-scope-options{width:100%}
-        .candidate-export-date-range>.export-btn{width:100%;text-align:center}
       }
     `;
     document.head.appendChild(style);
@@ -162,24 +146,10 @@
     return `desde ${formatRangeDate(dateFrom)}`;
   }
 
-  function selectedGlobalExtraScopes(bar) {
-    if (bar?.dataset?.globalCandidateExport !== 'true') return [];
-    return Array.from(bar.querySelectorAll('input[data-global-export-extra-scope]:checked'))
-      .map((input) => String(input.value || '').trim())
-      .filter((scope) => GLOBAL_COMBINABLE_EXPORT_SCOPES.includes(scope));
-  }
-
-  function selectedGlobalExportLabel(primaryScope, extraScopes = []) {
-    return [primaryScope, ...extraScopes]
-      .map((scope) => GLOBAL_EXPORT_LABEL[scope] || GLOBAL_EXPORT_OPTION_LABEL[scope] || scope)
-      .filter(Boolean)
-      .join(' + ');
-  }
-
   function updateContextualRangeDownload(bar, panel, dateFrom, dateTo) {
     restoreRangeDecoratedLinks(bar);
     const context = activeExportContext(panel, bar);
-    if (!context.scope) return;
+    if (!dateFrom || !context.scope) return;
 
     const links = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
     const scopedLink = links.find((link) => exportScope(link) === context.scope);
@@ -191,22 +161,16 @@
     scopedLink.dataset.rangeBaseLabel = baseLabel;
 
     const url = new URL(baseHref, window.location.origin);
-    const extraScopes = panel ? [] : selectedGlobalExtraScopes(bar);
     url.searchParams.set('scope', context.scope);
-    if (extraScopes.length) url.searchParams.set('includeScopes', extraScopes.join(','));
-    else url.searchParams.delete('includeScopes');
-    if (dateFrom) url.searchParams.set('dateFrom', dateFrom);
-    else url.searchParams.delete('dateFrom');
+    url.searchParams.set('dateFrom', dateFrom);
     if (dateTo) url.searchParams.set('dateTo', dateTo);
     else url.searchParams.delete('dateTo');
     scopedLink.href = `${url.pathname}${url.search}${url.hash}`;
-    const selectedLabel = selectedGlobalExportLabel(context.scope, extraScopes) || context.label;
-    const selectedRangeLabel = dateFrom ? ` · ${rangeLabel(dateFrom, dateTo)}` : '';
-    scopedLink.textContent = `↓ Descargar ${selectedLabel}${selectedRangeLabel}`;
+    scopedLink.textContent = `↓ Descargar ${context.label} · ${rangeLabel(dateFrom, dateTo)}`;
     scopedLink.hidden = false;
 
     const allLink = links.find((link) => exportScope(link) === 'all');
-    if (allLink && allLink !== scopedLink && (dateFrom || extraScopes.length)) {
+    if (allLink && allLink !== scopedLink) {
       allLink.dataset.rangeForcedHidden = 'true';
       allLink.dataset.rangePreviousHidden = allLink.hidden ? 'true' : 'false';
       allLink.hidden = true;
@@ -336,53 +300,6 @@
     });
   }
 
-  function syncGlobalIncludeScopesNavigation(bar) {
-    if (bar.dataset.globalCandidateExport !== 'true') return;
-    const current = new URL(window.location.href);
-    const extraScopes = selectedGlobalExtraScopes(bar);
-    if (extraScopes.length) current.searchParams.set('includeScopes', extraScopes.join(','));
-    else current.searchParams.delete('includeScopes');
-    window.history.replaceState({}, '', `${current.pathname}${current.search}${current.hash}`);
-  }
-
-  function buildGlobalScopeOptions(bar) {
-    if (bar.dataset.globalCandidateExport !== 'true') return null;
-    const activeScope = String(bar.dataset.globalCandidateExportScope || '');
-    if (!GLOBAL_COMBINABLE_EXPORT_SCOPES.includes(activeScope)) return null;
-
-    const selectedFromUrl = new Set(
-      String(new URL(window.location.href).searchParams.get('includeScopes') || '')
-        .split(',')
-        .map((scope) => scope.trim())
-        .filter(Boolean)
-    );
-    const wrapper = document.createElement('div');
-    wrapper.className = 'candidate-export-scope-options';
-    wrapper.setAttribute('aria-label', 'Incluir otros estados en el mismo Excel');
-
-    const title = document.createElement('span');
-    title.className = 'candidate-export-scope-options-title';
-    title.textContent = 'Incluir también:';
-    wrapper.appendChild(title);
-
-    GLOBAL_COMBINABLE_EXPORT_SCOPES.forEach((scope) => {
-      if (scope === activeScope) return;
-      const label = document.createElement('label');
-      label.className = 'candidate-export-scope-option';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.value = scope;
-      input.setAttribute('data-global-export-extra-scope', scope);
-      input.checked = selectedFromUrl.has(scope);
-      const text = document.createElement('span');
-      text.textContent = GLOBAL_EXPORT_OPTION_LABEL[scope] || scope;
-      label.append(input, text);
-      wrapper.appendChild(label);
-    });
-
-    return wrapper;
-  }
-
   function tabContextParam(vacancyId) {
     return `vacancyTab_${vacancyId}`;
   }
@@ -506,20 +423,11 @@
 
     const panel = bar.closest('[data-vacancy-panel]');
     const vacancyId = String(panel?.getAttribute('data-vacancy-panel') || '');
-    const globalScopeOptions = !panel ? buildGlobalScopeOptions(bar) : null;
-    if (globalScopeOptions) controls.appendChild(globalScopeOptions);
-    const globalLink = !panel ? bar.querySelector('[data-global-candidate-export-link]') : null;
-    if (globalLink) controls.appendChild(globalLink);
     installHistoryRangeBehavior(controls, panel, vacancyId);
 
     const refreshDownloadContext = () => {
       updateContextualRangeDownload(bar, panel, selectedStart, selectedEnd);
     };
-
-    globalScopeOptions?.addEventListener('change', () => {
-      syncGlobalIncludeScopesNavigation(bar);
-      refreshDownloadContext();
-    });
 
     const emitRangeChange = () => {
       controls.dataset.dateFrom = selectedStart;
