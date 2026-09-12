@@ -262,8 +262,11 @@
   }
 
   function candidateRowResult(container) {
-    const link = container.querySelector('a.link-detail, a[href*="/candidate"], a[href*="/candidates/"]');
+    const link = container.querySelector('a.link-detail[href^="/admin/candidates/"]');
     const href = link?.getAttribute('href') || '';
+    if (!href) return null;
+    const detailPath = new URL(href, window.location.origin).pathname;
+    if (!/^\/admin\/candidates\/[^/]+\/?$/.test(detailPath)) return null;
     const cells = container.tagName === 'TR' ? [...container.children] : [];
     const name = container.querySelector('.candidate-name')?.textContent?.trim()
       || container.querySelector('.vacancy-title')?.textContent?.trim()
@@ -278,14 +281,14 @@
       || cells[2]?.textContent?.trim()
       || '';
     const meta = [documentText, phoneText].filter(Boolean).join(' · ');
-    return href ? {
+    return {
       key: href,
       href,
       label: name,
       meta,
       documentText,
       documentDigits: digits(documentText)
-    } : null;
+    };
   }
 
   function installLegacyRecruitmentSearch() {
@@ -299,7 +302,6 @@
       async source(_query, { signal }) {
         const nextDocument = await fetchFormDocument(form, signal);
         return [...nextDocument.querySelectorAll('tbody tr')]
-          .filter((row) => row.querySelector('a.link-detail, a[href*="/candidate"], a[href*="/candidates/"]'))
           .map(candidateRowResult)
           .filter(Boolean);
       },
