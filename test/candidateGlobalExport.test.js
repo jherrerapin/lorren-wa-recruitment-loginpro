@@ -206,7 +206,7 @@ test('la vista global reutiliza un solo selector visual y descarga la pestaña a
   assert.doesNotMatch(runtime, /input\.type\s*=\s*['"]date['"]/);
 });
 
-test('cada pestaña muestra Completos sin HV y Contactados y compone un único Excel', () => {
+test('cada pestaña ofrece checks opcionales y un único botón para componer el Excel', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
   assert.match(runtime, /GLOBAL_OPTIONAL_EXPORT_SCOPES/);
@@ -219,10 +219,12 @@ test('cada pestaña muestra Completos sin HV y Contactados y compone un único E
   assert.match(runtime, /input\.dataset\.explicitSelection/);
   assert.match(runtime, /GLOBAL_OPTIONAL_EXPORT_SCOPES\.forEach/);
   assert.match(runtime, /const extraScopes = selectedExtraScopes\(bar, panel\)/);
-  assert.match(runtime, /url\.pathname = '\/admin\/export'/);
+  assert.match(runtime, /new URL\('\/admin\/export', window\.location\.origin\)/);
   assert.match(runtime, /url\.searchParams\.set\('includeScopes'/);
-  assert.match(runtime, /controls\.appendChild\(scopeOptions\)/);
-  assert.match(runtime, /scopedLink\.hidden = false/);
+  assert.match(runtime, /actionRow\.append\(scopeOptions, downloadButton\)/);
+  assert.match(runtime, /downloadButton\.textContent = '↓ Descargar'/);
+  assert.match(runtime, /initialExportLinks\.forEach\(\(link\) =>/);
+  assert.match(runtime, /link\.hidden = true/);
 });
 
 test('la descarga por vacante conserva vacancyId, rango y checks de la pestaña', () => {
@@ -255,12 +257,12 @@ test('el rango y las selecciones opcionales se conservan al cambiar de pestaña'
   assert.match(runtime, /syncGlobalRangeNavigation\(bar, selectedStart, selectedEnd\)/);
 });
 
-test('un href indefinido nunca se convierte en /undefined para la descarga', () => {
+test('la descarga ya no deriva su destino de href heredados o indefinidos', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
-  assert.match(runtime, /baseHref && baseHref !== 'undefined'/);
-  assert.match(runtime, /rawBaseHref && rawBaseHref !== 'undefined' \? rawBaseHref : '\/admin\/export'/);
-  assert.match(runtime, /rawHref && rawHref !== 'undefined' \? rawHref : '\/admin\/export'/);
+  assert.match(runtime, /new URL\('\/admin\/export', window\.location\.origin\)/);
+  assert.match(runtime, /downloadButton\.href = `\$\{url\.pathname\}\$\{url\.search\}\$\{url\.hash\}`/);
+  assert.doesNotMatch(runtime, /rawBaseHref|rawHref|\/undefined/);
 });
 
 test('el listado global usa el mismo rango Colombia sobre Candidate.createdAt', () => {
