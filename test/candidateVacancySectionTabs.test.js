@@ -122,13 +122,28 @@ test('con rango de registro activo los estados locales usan la vista completa au
   assert.match(runtime, /function hasApplicantDateRange\(\)/);
   assert.match(runtime, /params\.get\('dateFrom'\)/);
   assert.match(runtime, /params\.get\('dateTo'\)/);
-  assert.match(runtime, /function replaceLocalStatusDescriptorsForDateRange\(localDescriptors, vacancyBody, rangeActive\)/);
+  assert.match(runtime, /function replaceLocalStatusDescriptorsForDateRange\(panel, localDescriptors, vacancyBody, rangeActive\)/);
   assert.match(runtime, /const scope = EXPORT_SCOPE_BY_TAB\[descriptor\.key\] \|\| ''/);
-  assert.match(runtime, /remoteHref: `\/admin\?status=\$\{encodeURIComponent\(scope\)\}`/);
+  assert.match(runtime, /remoteHref: statusRouteHref\(panel, descriptor\.key, scope\)/);
   assert.match(runtime, /dateRangeBacked: true/);
-  assert.match(runtime, /const localDescriptors = replaceLocalStatusDescriptorsForDateRange\(rawLocalDescriptors, vacancyBody, rangeActive\)/);
+  assert.match(runtime, /const localDescriptors = replaceLocalStatusDescriptorsForDateRange\(panel, rawLocalDescriptors, vacancyBody, rangeActive\)/);
   assert.match(runtime, /if \(target\.descriptor\.remoteHref\) \{[\s\S]*loadRemoteStatusSection\(target\.descriptor, target\.tab, rawVacancyId\)/);
   assert.match(runtime, /if \(rangeActive\) \{[\s\S]*hideCycleScopeForDateRange\(panel\)/);
+});
+
+test('el rango reutiliza la ruta canónica de cada estado y conserva búsqueda y filtros de la vacante', () => {
+  const runtime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(runtime, /function statusRouteHref\(panel, key, scope\)/);
+  assert.match(runtime, /canonicalLink\.getAttribute\('href'\)/);
+  assert.match(runtime, /key === 'approved'/);
+  assert.match(runtime, /status=all&approvedOnly=1/);
+  assert.match(runtime, /`vf_\$\{vacancyId\}_\$\{name\}`/);
+  assert.match(runtime, /url\.searchParams\.set\(name, value\)/);
+  assert.match(runtime, /`vs_\$\{vacancyId\}_field`/);
+  assert.match(runtime, /`vs_\$\{vacancyId\}_text`/);
+  assert.match(runtime, /url\.searchParams\.set\('searchField', searchField\)/);
+  assert.match(runtime, /url\.searchParams\.set\('searchText', searchText\)/);
 });
 
 test('el selector de fecha se monta inmediatamente bajo las pestañas de estado', () => {
