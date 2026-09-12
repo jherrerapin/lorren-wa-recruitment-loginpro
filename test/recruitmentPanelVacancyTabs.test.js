@@ -85,7 +85,7 @@ test('la coincidencia del buscador usa solo la ficha y nunca la subruta open-wha
   assert.match(view, /candidateDetailHref\(candidate\)[\s\S]*\/admin\/candidates\//);
   assert.match(candidateResultBlock, /a\.link-detail\[href\^="\/admin\/candidates\/"\]/);
   assert.match(candidateResultBlock, /detailPath = new URL\(href, window\.location\.origin\)\.pathname/);
-  assert.match(candidateResultBlock, /\^\\\/admin\\\/candidates\\\/\[\^\/\]\+\\\/?\$/);
+  assert.ok(candidateResultBlock.includes("if (!/^\\/admin\\/candidates\\/[^/]+\\/?$/.test(detailPath)) return null;"));
   assert.doesNotMatch(candidateResultBlock, /a\[href\*="\/candidates\/"\]/);
   assert.doesNotMatch(candidateResultBlock, /open-whatsapp/);
 });
