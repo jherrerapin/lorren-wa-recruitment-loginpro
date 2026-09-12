@@ -112,12 +112,58 @@ test('el botón contextual muestra pestaña y rango seleccionado', () => {
   assert.match(runtime, /RANGE_DATE_FORMATTER/);
 });
 
-test('al cambiar de pestaña el rango se recalcula contra el nuevo estado activo', () => {
+test('al cambiar de pestaña el mismo selector se mueve arriba y recalcula la descarga', () => {
   const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
 
+  assert.match(runtime, /function placeVacancyRangeControl\(controls, panel, bar\)/);
+  assert.match(runtime, /candidate-vacancy-section-tabs/);
+  assert.match(runtime, /tabList\.insertAdjacentElement\('afterend', controls\)/);
   assert.match(runtime, /candidate-vacancy-tab-change/);
-  assert.match(runtime, /refreshDownloadContext/);
-  assert.match(runtime, /panel\?\.addEventListener\('candidate-vacancy-tab-change', refreshDownloadContext\)/);
+  assert.match(runtime, /refreshDownloadContext\(\)/);
+  assert.match(runtime, /placeVacancyRangeControl\(controls, panel, bar\)/);
+});
+
+test('completar o quitar el rango aplica automáticamente y conserva la pestaña activa', () => {
+  const runtime = fs.readFileSync('src/public/candidate-export-date-range.js', 'utf8');
+
+  assert.match(runtime, /function vacancyRangeTarget\(panel, dateFrom, dateTo\)/);
+  assert.match(runtime, /vacancyTab_\$\{vacancyId\}/);
+  assert.match(runtime, /const rangeComplete = \(!selectedStart && !selectedEnd\) \|\| \(selectedStart && selectedEnd\)/);
+  assert.match(runtime, /window\.location\.assign\(vacancyRangeTarget\(panel, selectedStart, selectedEnd\)\)/);
+  assert.doesNotMatch(runtime, /Aplicar rango|Aplicar fecha|Filtrar fechas/);
+});
+
+test('un rango completo carga todos los registros del estado dentro de la pestaña y oculta ver todos', () => {
+  const tabsRuntime = fs.readFileSync('src/public/candidate-vacancy-section-tabs.js', 'utf8');
+
+  assert.match(tabsRuntime, /RANGE_STATUS_ROUTE_BY_TAB/);
+  assert.match(tabsRuntime, /'missing-cv': Object\.freeze\(\{ status: 'missing_cv_complete' \}\)/);
+  assert.match(tabsRuntime, /approved: Object\.freeze\(\{ status: 'all', approvedOnly: '1' \}\)/);
+  assert.match(tabsRuntime, /function hasCompleteRegistrationRange\(\)/);
+  assert.match(tabsRuntime, /hasCompleteRegistrationRange\(\) && RANGE_STATUS_ROUTE_BY_TAB\[activeKey\]/);
+  assert.match(tabsRuntime, /!localKeys\.has\('missing-cv'\)/);
+  assert.match(tabsRuntime, /buildRemoteStatusSection\('Completos sin HV', 'missing-cv'\)/);
+  assert.match(tabsRuntime, /data-range-status-content/);
+  assert.match(tabsRuntime, /filterApprovedRows\(sourceTable, descriptor\)/);
+  assert.match(tabsRuntime, /sourceToggle\.hidden = true/);
+  assert.match(tabsRuntime, /return true;/);
+});
+
+test('la vista plana completa el rango en base de datos para estados que antes podían quedar truncados', () => {
+  const service = fs.readFileSync('src/services/vacancyDashboardSearchExpansion.js', 'utf8');
+  const loader = service.match(/async function loadCompleteLegacyDateRangeCandidates[\s\S]*?\n}\n\nexport function applyApplicantDateRangeToVacancyLists/)?.[0] || '';
+
+  assert.match(service, /COMPLETE_RANGE_LEGACY_SCOPES/);
+  assert.match(service, /'contacted'/);
+  assert.match(service, /'contracted'/);
+  assert.match(service, /'rejected'/);
+  assert.match(service, /function hasCompleteApplicantDateRange\(dateRange = \{\}\)/);
+  assert.match(loader, /applicantCreatedAtWhere\(dateRange\)/);
+  assert.match(loader, /buildCandidateAccessWhere\(accessContext\)/);
+  assert.match(loader, /\{ vacancyId \}/);
+  assert.match(loader, /approvedOnly/);
+  assert.doesNotMatch(loader, /\btake\s*:/);
+  assert.match(service, /if \(completeRangeCandidates\) candidates = completeRangeCandidates;/);
 });
 
 test('los enlaces generados después de instalar el calendario también reciben las fechas', () => {

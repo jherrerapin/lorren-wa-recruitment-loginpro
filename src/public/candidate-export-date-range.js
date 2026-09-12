@@ -38,6 +38,7 @@
     style.id = STYLE_ID;
     style.textContent = `
       .candidate-export-date-range{position:relative;display:flex;flex:1 1 100%;width:100%;align-items:center;gap:10px;flex-wrap:wrap;padding:0 0 10px;margin:0 0 2px;border-bottom:1px solid #e1e4e8}
+      .candidate-export-date-range.is-tab-context{padding:12px 18px;margin:0;border-bottom:1px solid #e1e4e8;background:#fff}
       .candidate-export-date-range-title{font-size:12px;font-weight:700;color:#475569}
       .candidate-export-range-trigger{display:inline-flex;align-items:center;justify-content:space-between;gap:12px;min-width:250px;min-height:36px;padding:7px 10px;border:1px solid #e1e4e8;border-radius:7px;background:#fff;color:#1a1d23;font:inherit;font-size:12px;font-weight:600;cursor:pointer;text-align:left}
       .candidate-export-range-trigger:hover{background:#f8fafc;border-color:#cbd5e1}
@@ -65,6 +66,7 @@
       .candidate-export-range-clear:hover{text-decoration:underline}
       @media(max-width:768px){
         .candidate-export-date-range{align-items:stretch;gap:8px}
+        .candidate-export-date-range.is-tab-context{padding:10px 14px}
         .candidate-export-date-range-title{width:100%}
         .candidate-export-range-trigger{width:100%;min-width:0;min-height:42px}
         .candidate-export-range-popover{left:0;right:auto;width:min(360px,calc(100vw - 48px))}
@@ -298,6 +300,42 @@
     });
   }
 
+  function tabContextParam(vacancyId) {
+    return `vacancyTab_${vacancyId}`;
+  }
+
+  function placeVacancyRangeControl(controls, panel, bar) {
+    if (!panel) return;
+    const activeKey = String(panel.dataset.activeVacancyTab || '');
+    const tabList = panel.querySelector('.candidate-vacancy-section-tabs');
+    const isCandidateStatusTab = Boolean(TAB_EXPORT_SCOPE[activeKey]);
+
+    if (!isCandidateStatusTab || !tabList) {
+      controls.hidden = true;
+      controls.classList.remove('is-tab-context');
+      if (!bar.contains(controls)) bar.prepend(controls);
+      return;
+    }
+
+    controls.hidden = false;
+    controls.classList.add('is-tab-context');
+    tabList.insertAdjacentElement('afterend', controls);
+  }
+
+  function vacancyRangeTarget(panel, dateFrom, dateTo) {
+    const target = new URL(window.location.href);
+    setRangeParam(target, 'dateFrom', dateFrom);
+    setRangeParam(target, 'dateTo', dateTo);
+
+    const vacancyId = String(panel?.getAttribute('data-vacancy-panel') || '');
+    const activeKey = String(panel?.dataset?.activeVacancyTab || '');
+    if (vacancyId && TAB_EXPORT_SCOPE[activeKey]) {
+      target.searchParams.set(tabContextParam(vacancyId), activeKey);
+      target.hash = `vacancy-${vacancyId}`;
+    }
+    return `${target.pathname}${target.search}${target.hash}`;
+  }
+
   function installExportRange(bar) {
     if (!bar || bar.dataset.exportDateRangeReady === 'true') return;
     const initialExportLinks = [...bar.querySelectorAll(EXPORT_LINK_SELECTOR)];
@@ -401,8 +439,12 @@
         detail: { dateFrom: selectedStart, dateTo: selectedEnd }
       }));
 
-      const globalRangeComplete = bar.dataset.globalCandidateExport === 'true'
-        && ((!selectedStart && !selectedEnd) || (selectedStart && selectedEnd));
+      const rangeComplete = (!selectedStart && !selectedEnd) || (selectedStart && selectedEnd);
+      if (panel && rangeComplete) {
+        window.location.assign(vacancyRangeTarget(panel, selectedStart, selectedEnd));
+        return;
+      }
+      const globalRangeComplete = bar.dataset.globalCandidateExport === 'true' && rangeComplete;
       if (globalRangeComplete) window.location.reload();
     };
 
@@ -543,7 +585,10 @@
     });
     window.addEventListener('resize', positionPopover);
 
-    panel?.addEventListener('candidate-vacancy-tab-change', refreshDownloadContext);
+    panel?.addEventListener('candidate-vacancy-tab-change', () => {
+      refreshDownloadContext();
+      placeVacancyRangeControl(controls, panel, bar);
+    });
 
     bar.addEventListener('click', (event) => {
       const link = event.target.closest(EXPORT_LINK_SELECTOR);
@@ -559,6 +604,7 @@
     updateTrigger();
     syncGlobalRangeNavigation(bar, selectedStart, selectedEnd);
     refreshDownloadContext();
+    placeVacancyRangeControl(controls, panel, bar);
   }
 
   function installGlobalExportBar() {

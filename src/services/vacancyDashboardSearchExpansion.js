@@ -31,6 +31,12 @@ const RECRUITMENT_BULK_STATUSES = [
   'CONTACTADO',
   'RECHAZADO'
 ];
+const COMPLETE_RANGE_LEGACY_SCOPES = new Set([
+  'contacted',
+  'contracted',
+  'rejected',
+  'all'
+]);
 
 export function historicalBulkCandidateStatuses(role = '') {
   return role === 'dev'
@@ -400,6 +406,86 @@ function applicantCreatedAtWhere(dateRange = {}) {
   return Object.keys(createdAt).length ? createdAt : null;
 }
 
+function hasCompleteApplicantDateRange(dateRange = {}) {
+  return Boolean(dateRange.dateFrom && dateRange.dateTo && dateRange.isActive && !dateRange.error);
+}
+
+function candidateMatchesCompleteLegacyScope(candidate = {}, scope = '', options = {}) {
+  const status = String(candidate.status || '').trim().toUpperCase();
+  if (options.approvedOnly) return status === 'APROBADO';
+  if (scope === 'contacted') return status === 'CONTACTADO';
+  if (scope === 'contracted') return status === 'CONTRATADO';
+  if (scope === 'rejected') return status === 'RECHAZADO';
+  if (scope === 'all') return options.isDev || status !== 'NUEVO';
+  return true;
+}
+
+async function loadCompleteLegacyDateRangeCandidates(req, query, dateRange, vacancyId) {
+  const scope = normalizeString(query.status);
+  if (!vacancyId || !hasCompleteApplicantDateRange(dateRange) || !COMPLETE_RANGE_LEGACY_SCOPES.has(scope)) {
+    return null;
+  }
+
+  const accessContext = getRequestAccessContext(req);
+  const createdAt = applicantCreatedAtWhere(dateRange);
+  const candidates = await prisma.candidate.findMany({
+    where: {
+      AND: [
+        buildCandidateAccessWhere(accessContext),
+        { vacancyId },
+        ...(createdAt ? [{ createdAt }] : [])
+      ]
+    },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      vacancyId: true,
+      fullName: true,
+      phone: true,
+      documentType: true,
+      documentNumber: true,
+      age: true,
+      neighborhood: true,
+      locality: true,
+      zone: true,
+      status: true,
+      rejectionReason: true,
+      rejectionDetails: true,
+      medicalRestrictions: true,
+      transportMode: true,
+      interviewNotes: true,
+      cvOriginalName: true,
+      cvMimeType: true,
+      cvStorageKey: true,
+      gender: true,
+      createdAt: true,
+      botPaused: true,
+      botPausedAt: true,
+      botPauseReason: true,
+      currentStep: true,
+      lastInboundAt: true,
+      lastOutboundAt: true,
+      devLastSeenAt: true,
+      vacancy: {
+        select: {
+          id: true,
+          title: true,
+          role: true,
+          city: true
+        }
+      }
+    }
+  });
+
+  const approvedOnly = String(query.approvedOnly || '') === '1';
+  return candidates
+    .filter((candidate) => candidateMatchesCompleteLegacyScope(candidate, scope, {
+      approvedOnly,
+      isDev: accessContext.isDev
+    }))
+    .map(decorateSearchCandidate);
+}
+
 export function applyApplicantDateRangeToVacancyLists(viewModel = {}, dateRange = {}) {
   for (const city of viewModel.cities || []) {
     for (const vacancy of city.vacancies || []) {
@@ -565,10 +651,17 @@ async function candidateIdsForVacancy(candidates = [], vacancyId = '') {
 }
 
 export async function enhanceLegacyApplicantList(viewModel = {}, query = {}, req = {}) {
-  const candidates = Array.isArray(viewModel.candidates) ? [...viewModel.candidates] : [];
+  let candidates = Array.isArray(viewModel.candidates) ? [...viewModel.candidates] : [];
   const accessContext = getRequestAccessContext(req);
   const dateRange = normalizeApplicantDateRange(query);
   const vacancyId = normalizeString(query.vacancyId);
+  const completeRangeCandidates = await loadCompleteLegacyDateRangeCandidates(
+    req,
+    query,
+    dateRange,
+    vacancyId
+  );
+  if (completeRangeCandidates) candidates = completeRangeCandidates;
 
   let visibleCandidates = accessContext.isDev
     ? candidates
