@@ -15,16 +15,20 @@ import {
 } from '../services/candidateExport.js';
 import { normalizeApplicantDateRange } from '../services/vacancyDashboardSearchExpansion.js';
 
-const COMBINABLE_GLOBAL_EXPORT_SCOPES = Object.freeze([
-  'registered',
+const OPTIONAL_GLOBAL_EXPORT_SCOPES = Object.freeze([
   'missing_cv_complete',
   'contacted'
 ]);
 
 const GLOBAL_EXPORT_FILENAME_LABEL = Object.freeze({
+  all: 'todos',
   registered: 'registrados',
-  missing_cv_complete: 'pendientes_hv',
-  contacted: 'contactados'
+  missing_cv_complete: 'completos_sin_hv',
+  approved: 'aprobados',
+  new: 'nuevos',
+  contacted: 'contactados',
+  contracted: 'contratados',
+  rejected: 'rechazados'
 });
 
 function compact(value) {
@@ -74,9 +78,7 @@ export function resolveGlobalCandidateExportScopes(query = {}) {
   if (!CANDIDATE_EXPORT_SCOPES.includes(primaryScope)) return null;
 
   const requested = requestedIncludeScopes(query.includeScopes);
-  if (!requested.length) return [primaryScope];
-  if (!COMBINABLE_GLOBAL_EXPORT_SCOPES.includes(primaryScope)) return null;
-  if (requested.some((scope) => !COMBINABLE_GLOBAL_EXPORT_SCOPES.includes(scope))) return null;
+  if (requested.some((scope) => !OPTIONAL_GLOBAL_EXPORT_SCOPES.includes(scope))) return null;
 
   return Array.from(new Set([primaryScope, ...requested]));
 }
