@@ -41,7 +41,7 @@ test('aprobar desde Registrados o Pendientes HV encadena el outreach configurado
   assert.doesNotThrow(() => new Function(script));
 });
 
-test('el batch verifica el estado backend y continúa procesando aunque una citación falle', () => {
+test('solo la aprobación automática continúa el lote ante fallo individual', () => {
   const script = renderBulkScript();
 
   assert.match(script, /\/admin\/outreach\/approved\/window-status/);
@@ -49,7 +49,8 @@ test('el batch verifica el estado backend y continúa procesando aunque una cita
   assert.match(script, /for \(let index = 0; index < selectedIds\.length; index \+= 1\)/);
   assert.match(script, /approvedPendingOutreach \+= 1/);
   assert.match(script, /failed \+= 1/);
-  assert.match(script, /continue;/);
+  assert.match(script, /if \(!autoOutreachOnApproval\) break;/);
+  assert.match(script, /if \(autoOutreachOnApproval\)[\s\S]*continue;/);
   assert.doesNotMatch(script, /bulk_status_request_failed/);
   assert.doesNotMatch(script, /\b(?:alert|confirm|prompt)\s*\(/);
 });
