@@ -78,6 +78,7 @@
       .candidate-export-scope-options{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 8px;border:1px solid #e1e4e8;border-radius:7px;background:#f8fafc}
       .candidate-export-scope-options-title{font-size:11px;font-weight:700;color:#64748b}
       .candidate-export-scope-option{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:#334155;cursor:pointer;white-space:nowrap}
+      .candidate-export-scope-option[hidden]{display:none!important}
       .candidate-export-scope-option input{margin:0;accent-color:#0d7a6b}
       .candidate-export-scope-option input:disabled{cursor:not-allowed;opacity:.65}
       .candidate-export-download{margin-left:auto;white-space:nowrap;text-align:center}
