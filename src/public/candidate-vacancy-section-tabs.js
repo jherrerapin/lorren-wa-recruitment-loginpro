@@ -190,7 +190,7 @@
       if (!STATUS_TAB_KEYS.has(key) || localKeys.has(key)) return;
       const label = String(anchor.textContent || key).trim();
 
-      if (REMOTE_STATUS_KEYS.has(key)) {
+      if (REMOTE_STATUS_KEYS.has(key) || (hasCompleteRegistrationRange() && RANGE_STATUS_ROUTE_BY_TAB[key])) {
         const section = buildRemoteStatusSection(label, key);
         vacancyBody.appendChild(section);
         descriptors.push({
