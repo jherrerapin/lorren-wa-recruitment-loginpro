@@ -7,6 +7,14 @@
   const TAB_CONTEXT_PREFIX = 'vacancyTab_';
   const STATUS_TAB_KEYS = new Set(['registered', 'approved', 'contacted', 'contracted', 'rejected']);
   const REMOTE_STATUS_KEYS = new Set(['contacted', 'contracted', 'rejected']);
+  const RANGE_STATUS_ROUTE_BY_TAB = Object.freeze({
+    registered: Object.freeze({ status: 'registered' }),
+    'missing-cv': Object.freeze({ status: 'missing_cv_complete' }),
+    approved: Object.freeze({ status: 'all', approvedOnly: '1' }),
+    contacted: Object.freeze({ status: 'contacted' }),
+    contracted: Object.freeze({ status: 'contracted' }),
+    rejected: Object.freeze({ status: 'rejected' })
+  });
   const TAB_ORDER = [
     'interview-management',
     'interviews',
@@ -76,6 +84,11 @@
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
+  }
+
+  function hasCompleteRegistrationRange() {
+    const params = new URL(window.location.href).searchParams;
+    return Boolean(params.get('dateFrom') && params.get('dateTo'));
   }
 
   function injectStyles() {
@@ -206,7 +219,12 @@
   }
 
   function buildRemoteStatusUrl(descriptor, vacancyId) {
-    const url = new URL(descriptor.remoteHref || '/admin', window.location.origin);
+    const rangeRoute = RANGE_STATUS_ROUTE_BY_TAB[descriptor?.key];
+    const url = new URL(descriptor?.remoteHref || '/admin', window.location.origin);
+    if (!descriptor?.remoteHref && rangeRoute) {
+      url.searchParams.set('status', rangeRoute.status);
+      if (rangeRoute.approvedOnly) url.searchParams.set('approvedOnly', rangeRoute.approvedOnly);
+    }
     url.searchParams.set('vacancyId', vacancyId);
     const current = new URL(window.location.href);
     current.searchParams.forEach((value, key) => {
@@ -230,9 +248,41 @@
     if (tabCount) tabCount.textContent = countValue;
   }
 
+  function rangeStatusContent(descriptor) {
+    if (descriptor?.remoteHref) {
+      return descriptor.section?.querySelector('.candidate-vacancy-remote-status-content') || null;
+    }
+    const section = descriptor?.section;
+    if (!section) return null;
+
+    let content = section.querySelector('[data-range-status-content]');
+    if (!content) {
+      content = document.createElement('div');
+      content.className = 'candidate-vacancy-remote-status-content';
+      content.dataset.rangeStatusContent = descriptor.key;
+      section.appendChild(content);
+    }
+
+    Array.from(section.children).forEach((child) => {
+      if (child === content || child.classList?.contains('section-header')) return;
+      child.hidden = true;
+    });
+    return content;
+  }
+
+  function filterApprovedRows(sourceTable, descriptor) {
+    if (descriptor?.key !== 'approved' || !sourceTable) return;
+    sourceTable.querySelectorAll('tbody tr').forEach((row) => {
+      if (!row.querySelector('.badge-aprobado')) row.remove();
+    });
+  }
+
   async function loadRemoteStatusSection(descriptor, tab, vacancyId) {
-    if (!descriptor?.remoteHref || descriptor.remoteState === 'loading' || descriptor.remoteState === 'loaded') return;
-    const content = descriptor.section?.querySelector('.candidate-vacancy-remote-status-content');
+    const rangeStatusActive = hasCompleteRegistrationRange() && Boolean(RANGE_STATUS_ROUTE_BY_TAB[descriptor?.key]);
+    if ((!descriptor?.remoteHref && !rangeStatusActive) || descriptor.remoteState === 'loading' || descriptor.remoteState === 'loaded') return;
+    const content = rangeStatusActive
+      ? rangeStatusContent(descriptor)
+      : descriptor.section?.querySelector('.candidate-vacancy-remote-status-content');
     if (!content) return;
 
     descriptor.remoteState = 'loading';
@@ -251,6 +301,7 @@
       const html = await response.text();
       const parsed = new DOMParser().parseFromString(html, 'text/html');
       const sourceTable = parsed.querySelector('#legacy-candidates-table');
+      filterApprovedRows(sourceTable, descriptor);
       const rows = sourceTable ? sourceTable.querySelectorAll('tbody tr').length : 0;
       setRemoteTabCount(tab, descriptor, rows);
 
@@ -258,7 +309,7 @@
         const empty = document.createElement('div');
         empty.className = 'empty-state';
         const message = document.createElement('p');
-        message.textContent = `No hay candidatos ${descriptor.label.toLowerCase()} en esta vacante.`;
+        message.textContent = `No hay candidatos ${descriptor.label.toLowerCase()} en esta vacante para el rango seleccionado.`;
         empty.appendChild(message);
         content.replaceChildren(empty);
         descriptor.remoteState = 'loaded';
@@ -375,6 +426,12 @@
   function installHistoryActions(panel, descriptors, vacancyId) {
     const sourceToggle = panel.querySelector('[data-vacancy-cycle-toggle]');
     if (!sourceToggle || sourceToggle.dataset.sectionTabsRehomed === 'true') return false;
+
+    if (hasCompleteRegistrationRange()) {
+      sourceToggle.hidden = true;
+      sourceToggle.dataset.sectionTabsRehomed = 'true';
+      return true;
+    }
 
     const actionLabel = String(sourceToggle.textContent || '').trim();
 
@@ -494,7 +551,7 @@
       });
       updateManagementLayout(panel, tabList, management?.section || null, activeKey);
       updateContextualActions(panel, activeKey);
-      if (target.descriptor.remoteHref) {
+      if (target.descriptor.remoteHref || (hasCompleteRegistrationRange() && RANGE_STATUS_ROUTE_BY_TAB[activeKey])) {
         loadRemoteStatusSection(target.descriptor, target.tab, rawVacancyId);
       }
       if (options.focus) target.tab.focus();
