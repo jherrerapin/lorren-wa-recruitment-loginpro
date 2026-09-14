@@ -4,6 +4,25 @@ function getReleaseDate() {
   return process.env.LOREN_V2_RELEASE_DATE || DEFAULT_RELEASE_DATE;
 }
 
+function hasPanelSession(req = {}) {
+  return Boolean(req.userRole || req.role || req.session?.userRole);
+}
+
+function isHtmlNavigation(req = {}) {
+  if (req.method !== 'GET' || typeof req.accepts !== 'function') return false;
+  return Boolean(req.accepts('html'));
+}
+
+function rejectPanelAccess(req, res, message) {
+  const authenticated = hasPanelSession(req);
+  if (isHtmlNavigation(req) && typeof res.redirect === 'function') {
+    return res.redirect(authenticated ? '/admin' : '/login');
+  }
+  return res.status(authenticated ? 403 : 401).send(
+    authenticated ? message : 'Debes iniciar sesión.'
+  );
+}
+
 export function isLorenV2Released(now = new Date()) {
   if (process.env.LOREN_V2_ENABLED === 'false') return false;
   const releaseDate = new Date(`${getReleaseDate()}T00:00:00-05:00`);
@@ -55,28 +74,28 @@ export function canManageLorenV2(source = {}, now = new Date()) {
 
 export function requireLorenV2(req, res, next) {
   if (!canSeeLorenV2(req)) {
-    return res.status(403).send('Modulo no disponible para este perfil.');
+    return rejectPanelAccess(req, res, 'Modulo no disponible para este perfil.');
   }
   return next();
 }
 
 export function requireMetaAds(req, res, next) {
   if (!canSeeMetaAds(req)) {
-    return res.status(403).send('No tienes permiso para consultar Meta Ads.');
+    return rejectPanelAccess(req, res, 'No tienes permiso para consultar Meta Ads.');
   }
   return next();
 }
 
 export function requireCvAnalysis(req, res, next) {
   if (!canSeeCvAnalysis(req)) {
-    return res.status(403).send('No tienes permiso para analizar hojas de vida.');
+    return rejectPanelAccess(req, res, 'No tienes permiso para analizar hojas de vida.');
   }
   return next();
 }
 
 export function requireLorenV2Write(req, res, next) {
   if (!canManageLorenV2(req)) {
-    return res.status(403).send('Este perfil solo puede consultar Estadísticas.');
+    return rejectPanelAccess(req, res, 'Este perfil solo puede consultar Estadísticas.');
   }
   return next();
 }
