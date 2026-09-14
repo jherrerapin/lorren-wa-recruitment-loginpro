@@ -38,7 +38,7 @@ function compact(value) {
 
 function requireAdminSession(req, res, next) {
   if (req.userRole || req.session?.userRole) return next();
-  return res.status(401).send('Debes iniciar sesión.');
+  return res.redirect('/login');
 }
 
 function getRequestAccessContext(req = {}) {
@@ -277,9 +277,8 @@ async function handleCandidateExport(prisma, req, res) {
 
 export function adminCandidateGlobalExportRouter(prisma) {
   const router = express.Router();
-  router.use(requireAdminSession);
 
-  router.get(['/export', '/export-global'], async (req, res) => (
+  router.get(['/export', '/export-global'], requireAdminSession, async (req, res) => (
     handleCandidateExport(prisma, req, res)
   ));
 
