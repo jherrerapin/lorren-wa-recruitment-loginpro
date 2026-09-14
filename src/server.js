@@ -24,7 +24,7 @@ import { workerPortalRouter } from './routes/workerPortal.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 import { lorenV2Router } from './routes/lorenV2.js';
 import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
-import { dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
+import { adminHtmlBridgeMiddleware, dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
 import { referralAttributionMiddleware } from './services/referralAttribution.js';
 import { interviewCoordinationHandoffMiddleware } from './services/botAutomationPolicy.js';
@@ -429,6 +429,7 @@ app.use(express.urlencoded({ extended: true }));
 
 const { middleware: adminSessionMiddleware, config: adminSessionConfig } = createAdminSessionMiddleware();
 const destroySession = createAdminLogoutHandler({ config: adminSessionConfig });
+app.use(adminHtmlBridgeMiddleware);
 app.use(adminSessionMiddleware);
 
 app.use(dispatchAuditMiddleware(prisma));
