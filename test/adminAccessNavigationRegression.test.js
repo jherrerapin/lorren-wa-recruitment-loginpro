@@ -81,7 +81,7 @@ test('las rutas de exportación siguen protegidas y una sesión vencida vuelve a
   }
 });
 
-test('una navegación HTML a Estadísticas evita páginas crudas de sesión o permiso', async () => {
+test('Estadísticas redirige una sesión vencida y presenta un 403 usable si falta permiso', async () => {
   const app = express();
   app.use((req, _res, next) => {
     const mode = req.query.mode;
@@ -109,18 +109,27 @@ test('una navegación HTML a Estadísticas evita páginas crudas de sesión o pe
       redirect: 'manual',
       headers: { accept: 'text/html' }
     });
-    assert.equal(forbidden.status, 302);
-    assert.equal(forbidden.headers.get('location'), '/admin');
+    const body = await forbidden.text();
+    assert.equal(forbidden.status, 403);
+    assert.match(forbidden.headers.get('content-type') || '', /text\/html/);
+    assert.equal(forbidden.headers.get('cache-control'), 'no-store');
+    assert.match(body, /Acceso no disponible/);
+    assert.match(body, /Este módulo no está habilitado para tu perfil\./);
+    assert.match(body, /href="\/admin"/);
+    assert.match(body, /Volver al panel/);
+    assert.doesNotMatch(body, /^Modulo no disponible para este perfil\.$/);
   } finally {
     await close(server);
   }
 });
 
-test('las guardas de submódulos usan la misma navegación segura sin conceder acceso', async () => {
+test('las guardas de submódulos muestran el mismo aviso sin conceder acceso', () => {
   const middlewares = [requireMetaAds, requireCvAnalysis];
   for (const middleware of middlewares) {
-    const redirects = [];
     let nextCalled = false;
+    let statusCode = null;
+    let body = null;
+    const headers = new Map();
     const req = {
       method: 'GET',
       userRole: 'admin',
@@ -132,15 +141,27 @@ test('las guardas de submódulos usan la misma navegación segura sin conceder a
       accepts: (type) => type === 'html' ? 'html' : false
     };
     const res = {
-      redirect: (location) => {
-        redirects.push(location);
-        return location;
+      redirect: () => assert.fail('Un perfil autenticado sin permiso debe ver el aviso 403'),
+      set: (name, value) => {
+        headers.set(String(name).toLowerCase(), value);
+        return res;
       },
-      status: () => ({ send: () => assert.fail('La navegación HTML debe redirigir') })
+      status: (status) => {
+        statusCode = status;
+        return {
+          send: (value) => {
+            body = value;
+            return value;
+          }
+        };
+      }
     };
 
     middleware(req, res, () => { nextCalled = true; });
-    assert.deepEqual(redirects, ['/admin']);
+    assert.equal(statusCode, 403);
+    assert.equal(headers.get('cache-control'), 'no-store');
+    assert.match(body, /Acceso no disponible/);
+    assert.match(body, /Volver al panel/);
     assert.equal(nextCalled, false);
   }
 });
