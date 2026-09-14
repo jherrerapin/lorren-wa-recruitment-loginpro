@@ -275,6 +275,25 @@ test('clientes no HTML conservan el status y el cuerpo técnico original', async
   }
 });
 
+test('un 403 JSON conserva su contrato incluso si el navegador acepta HTML', async () => {
+  const app = express();
+  attachSession(app);
+  installAdminPresentationBridge(app);
+  app.get('/admin/api-denied', (_req, res) => res.status(403).json({ error: 'forbidden' }));
+
+  const server = await listen(app);
+  try {
+    const response = await request(server, '/admin/api-denied');
+    const body = await response.text();
+    assert.equal(response.status, 403);
+    assert.match(response.headers.get('content-type') || '', /application\/json/);
+    assert.deepEqual(JSON.parse(body), { error: 'forbidden' });
+    assert.doesNotMatch(body, /Acceso no disponible/);
+  } finally {
+    await close(server);
+  }
+});
+
 test('una respuesta 403 que ya es una página HTML no se reemplaza por el aviso genérico', async () => {
   const app = express();
   attachSession(app);
