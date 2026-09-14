@@ -1,9 +1,13 @@
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
 
 import { adminCandidateGlobalExportRouter } from '../src/routes/adminCandidateGlobalExport.js';
-import { dispatchAuditMiddleware } from '../src/services/dispatchAuditMiddleware.js';
+import {
+  adminHtmlBridgeMiddleware,
+  dispatchAuditMiddleware
+} from '../src/services/dispatchAuditMiddleware.js';
 import {
   requireCvAnalysis,
   requireLorenV2,
@@ -47,12 +51,21 @@ function attachSession(app, resolver = () => sessionFixture()) {
 }
 
 function installAdminPresentationBridge(app) {
+  app.use(adminHtmlBridgeMiddleware);
+}
+
+function installOperationalAudit(app) {
   app.use(dispatchAuditMiddleware({}));
 }
 
-async function request(server, path, { accept = 'text/html', redirect = 'manual' } = {}) {
+async function request(server, path, {
+  accept = 'text/html',
+  redirect = 'manual',
+  method = 'GET'
+} = {}) {
   const { port } = server.address();
   return fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
     redirect,
     headers: { accept }
   });
@@ -124,6 +137,7 @@ test('el 403 operativo reportado deja de ser texto plano sin cambiar la autoriza
   const app = express();
   attachSession(app);
   installAdminPresentationBridge(app);
+  installOperationalAudit(app);
   app.get('/admin/operaciones/clientes', (_req, res) => {
     assert.fail('La guarda operativa debió bloquear antes de llegar a la ruta');
     res.send('unexpected');
@@ -168,6 +182,7 @@ test('los aliases administrativos de operaciones reciben la misma presentación'
   const app = express();
   attachSession(app);
   installAdminPresentationBridge(app);
+  installOperationalAudit(app);
   app.get('/operaciones/admin-worker', (_req, res) => {
     assert.fail('La guarda operativa debió bloquear el alias antes de llegar a la ruta');
     res.send('unexpected');
@@ -207,6 +222,42 @@ test('las guardas de Meta Ads y Análisis HV reutilizan la misma autoridad visua
   }
 });
 
+test('la presentación temprana cubre denegaciones emitidas por la autoridad de sesión', async () => {
+  const app = express();
+  installAdminPresentationBridge(app);
+  app.use((req, res, next) => {
+    req.session = sessionFixture({ devImpersonation: { targetUserId: 'TEST-user' } });
+    if (req.path === '/account/profile') {
+      return res.status(403).send('No puedes editar el perfil mientras estás en una vista impersonada.');
+    }
+    return next();
+  });
+
+  const server = await listen(app);
+  try {
+    const response = await request(server, '/account/profile');
+    const body = await response.text();
+    assert.equal(response.status, 403);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.match(body, /Acceso no disponible/);
+    assert.match(body, /No puedes editar el perfil mientras estás en una vista impersonada\./);
+    assert.match(body, /Volver al panel/);
+  } finally {
+    await close(server);
+  }
+});
+
+test('server instala la presentación antes del middleware de sesión', () => {
+  const source = readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+  const bridgeIndex = source.indexOf('app.use(adminHtmlBridgeMiddleware);');
+  const sessionIndex = source.indexOf('app.use(adminSessionMiddleware);');
+  const auditIndex = source.indexOf('app.use(dispatchAuditMiddleware(prisma));');
+
+  assert.ok(bridgeIndex >= 0, 'Debe existir una única instalación temprana de la presentación.');
+  assert.ok(sessionIndex > bridgeIndex, 'La presentación debe envolver también respuestas emitidas por la sesión.');
+  assert.ok(auditIndex > sessionIndex, 'La auditoría y permisos operativos siguen ejecutándose después de la sesión.');
+});
+
 test('clientes no HTML conservan el status y el cuerpo técnico original', async () => {
   const app = express();
   attachSession(app);
@@ -239,6 +290,22 @@ test('una respuesta 403 que ya es una página HTML no se reemplaza por el aviso 
     assert.equal(response.status, 403);
     assert.match(body, /Denegación especializada/);
     assert.doesNotMatch(body, /No tienes acceso a esta sección o acción con tu perfil actual\./);
+  } finally {
+    await close(server);
+  }
+});
+
+test('rutas públicas fuera del panel no reciben la presentación administrativa', async () => {
+  const app = express();
+  installAdminPresentationBridge(app);
+  app.get('/operaciones/portal/restringido', (_req, res) => res.status(403).send('Acceso público restringido.'));
+
+  const server = await listen(app);
+  try {
+    const response = await request(server, '/operaciones/portal/restringido');
+    assert.equal(response.status, 403);
+    assert.equal(await response.text(), 'Acceso público restringido.');
+    assert.equal(response.headers.get('cache-control'), null);
   } finally {
     await close(server);
   }
