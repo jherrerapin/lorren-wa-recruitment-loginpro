@@ -437,7 +437,10 @@ function isHtmlResponse(body, res) {
 
 function isAdminBrowserNavigation(req = {}) {
   const path = requestPath(req);
-  if (!path.startsWith('/admin') && !path.startsWith('/operaciones/admin-')) return false;
+  const isPanelPath = path.startsWith('/admin')
+    || path.startsWith('/operaciones/admin-')
+    || path.startsWith('/account/');
+  if (!isPanelPath) return false;
   const accept = String(req.headers?.accept || '').toLowerCase();
   return accept.includes('text/html');
 }
@@ -555,6 +558,11 @@ function installAdminHtmlBridge(req, res) {
     const withProgrammingCopy = normalizeProgrammingPresentation(withPayrollUsers, req);
     return originalSend(injectProgrammingContactsScript(withProgrammingCopy, req));
   };
+}
+
+export function adminHtmlBridgeMiddleware(req, res, next) {
+  installAdminHtmlBridge(req, res);
+  return next();
 }
 
 export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
