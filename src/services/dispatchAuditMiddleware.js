@@ -451,8 +451,13 @@ function hasPanelSession(req = {}) {
 
 function isPlainAccessDenial(body, res) {
   const statusCode = Number(res.statusCode || 0);
+  const contentType = String(res.getHeader?.('Content-Type') || '').toLowerCase();
+  const structuredBody = Boolean(contentType)
+    && !contentType.includes('text/plain')
+    && !contentType.includes('text/html');
   return (statusCode === 401 || statusCode === 403)
     && typeof body === 'string'
+    && !structuredBody
     && !isHtmlDocumentBody(body);
 }
 
@@ -538,7 +543,7 @@ function injectProgrammingContactsScript(html, req) {
 }
 
 function installAdminHtmlBridge(req, res) {
-  if (res.__adminHtmlBridgeInstalled) return;
+  if (!res || typeof res.send !== 'function' || res.__adminHtmlBridgeInstalled) return;
   res.__adminHtmlBridgeInstalled = true;
   const originalSend = res.send.bind(res);
   res.send = (body) => {
