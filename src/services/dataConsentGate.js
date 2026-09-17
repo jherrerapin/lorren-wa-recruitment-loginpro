@@ -108,6 +108,14 @@ function startsWithExplicitConsent(text = '') {
   return /^(si|sip|claro|correcto|de acuerdo|acepto|autorizo|consiento|estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso)\b/.test(normalized);
 }
 
+function startsWithUnaccentedConditionalConsentQuestion(text = '') {
+  const raw = String(text || '').trim();
+  const normalized = normalizeConsentDecisionText(raw);
+  return /^si\s+autorizo\b/.test(normalized)
+    && !/^sí(?:\s|[,.;:!?¿])/i.test(raw)
+    && isQuestionLike(raw);
+}
+
 function startsWithExplicitVacancyConfirmation(text = '') {
   return /^(si|sii|sip|claro|correcto|exacto|esa es|esa si|esta si|esa misma|si esa|si esta|si es|de acuerdo|confirmo|confirmado|me interesa|estoy interesado|estoy interesada|quiero aplicar|quiero postularme)\b/.test(text);
 }
@@ -193,7 +201,10 @@ export function isConsentAcceptance(text = '') {
   const raw = String(text || '').trim();
   const normalized = normalizeConsentDecisionText(raw);
   if (!normalized || hasExplicitConsentRejection(raw)) return false;
-  if (raw.startsWith('¿') && isQuestionLike(raw)) return false;
+  if (
+    (raw.startsWith('¿') && isQuestionLike(raw))
+    || startsWithUnaccentedConditionalConsentQuestion(raw)
+  ) return false;
   if (isQuestionLike(text) && !startsWithExplicitConsent(normalized)) return false;
   return hasAny(normalized, [
     /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
