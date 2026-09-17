@@ -2118,9 +2118,19 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       candidateUpdates: vacancyFirstGateDecision.candidateUpdates
     });
   }
-  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY) {
+  const vacancyInformationIncludesCandidateData = Boolean(
+    vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY
+    && vacancyFirstGateDecision.reason === 'ACTIVE_VACANCY_INFORMATION_ANSWER'
+    && hasDataIntent
+  );
+
+  if (
+    vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY
+    && !vacancyInformationIncludesCandidateData
+  ) {
     const applied = await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
     if (!applied.applied) return;
+    await persistUnderstoodFieldsBeforeGateReturn();
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -2133,6 +2143,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT) {
     const applied = await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
     if (!applied.applied) return;
+    await persistUnderstoodFieldsBeforeGateReturn();
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -2146,6 +2157,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       currentStep: ConversationStep.GREETING_SENT
     });
     if (!applied.applied) return;
+    await persistUnderstoodFieldsBeforeGateReturn();
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -2172,6 +2184,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     currentVacancy = vacancyFirstGateDecision.vacancy || await loadVacancyContext(prisma, vacancyFirstGateDecision.vacancyId);
     normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
     debugTrace.normalized_fields = normalizedData;
+    await persistUnderstoodFieldsBeforeGateReturn();
     const candidateState = {
       ...candidate,
       vacancyId: vacancyFirstGateDecision.vacancyId,
@@ -2540,16 +2553,16 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return;
   }
 
-  async function applyDecisionsAndUpdate() {
+  async function applyDecisionsAndUpdate(fields = normalizedData) {
     const current = await prisma.candidate.findUnique({ where: { id: candidate.id } });
     const explicitCorrection = /\b(corrijo|correccion|corrección|quise decir|actualizo|de hecho|mejor|perd[oó]n|en realidad|más bien|mas bien)\b/i.test(cleanText);
     const allowOverwriteFields = inferNaturalOverwriteFields(cleanText, normalizedData, current, candidate.currentStep);
     if (explicitCorrection) {
-      Object.keys(normalizedData).forEach((field) => {
+      Object.keys(fields).forEach((field) => {
         if (!allowOverwriteFields.includes(field)) allowOverwriteFields.push(field);
       });
     }
-    const decisions = splitFieldDecisions(normalizedData, current, { sourceByField, allowOverwriteFields });
+    const decisions = splitFieldDecisions(fields, current, { sourceByField, allowOverwriteFields });
     debugTrace.persisted_fields.push(...decisions.persistedFields);
     debugTrace.consolidated_fields?.push(...(decisions.consolidatedFields || []));
     debugTrace.rejected_fields.push(...decisions.rejectedFields);
@@ -2571,6 +2584,21 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
     const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
     return { updatedCandidate, decisions };
+  }
+
+  async function persistUnderstoodFieldsBeforeGateReturn() {
+    if (!hasDataIntent || !Object.keys(normalizedData).length) return candidate;
+
+    // Género conserva exactamente su flujo existente; esta corrección solo evita
+    // perder entidades de perfil ya comprendidas cuando vacancy-first responde.
+    const profileFields = Object.fromEntries(
+      Object.entries(normalizedData).filter(([field]) => field !== 'gender')
+    );
+    if (!Object.keys(profileFields).length) return candidate;
+
+    const { updatedCandidate } = await applyDecisionsAndUpdate(profileFields);
+    candidate = updatedCandidate || candidate;
+    return candidate;
   }
 
   const routeAfterConfirmation = async (updatedCandidate) => {
