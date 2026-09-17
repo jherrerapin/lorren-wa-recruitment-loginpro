@@ -60,6 +60,9 @@ function createHarness({ existingInbound = null, candidateOverrides = {}, active
   };
 
   const prisma = {
+    async $transaction(callback) {
+      return callback(prisma);
+    },
     candidate: {
       async findUnique({ where }) {
         if (where?.phone === candidate.phone || where?.id === candidate.id) return clone(candidate);
@@ -177,6 +180,29 @@ function createHarness({ existingInbound = null, candidateOverrides = {}, active
       calls.sends.push({ phone, body });
       return { messages: [{ id: 'wamid.reply.test' }] };
     },
+    deliverAutomaticOutboundText: async (prismaClient, input, dependencies) => {
+      await dependencies.beforeSend();
+      const response = await dependencies.sendText(input.to, input.body);
+      const sentAt = new Date('2026-08-25T14:05:04.000Z');
+      await prismaClient.message.create({
+        data: {
+          candidateId: input.candidateId,
+          direction: 'OUTBOUND',
+          messageType: 'TEXT',
+          body: input.body,
+          rawPayload: {
+            ...input.rawPayload,
+            delivery: { state: 'SENT', sentAt: sentAt.toISOString() }
+          },
+          waMessageId: response.messages[0].id
+        }
+      });
+      await prismaClient.candidate.update({
+        where: { id: input.candidateId },
+        data: { lastOutboundAt: sentAt }
+      });
+      return { sent: true, suppressed: false };
+    },
     next: (error) => {
       assert.equal(error, undefined);
       calls.next += 1;
@@ -244,7 +270,8 @@ test('replay #901: una negativa final durante el handoff se cierra y recibe resp
     }],
     sendText: harness.sendText,
     completeCandidateNoInterestTransition,
-    cancelActiveInterviewBookings
+    cancelActiveInterviewBookings,
+    deliverAutomaticOutboundText: harness.deliverAutomaticOutboundText
   });
 
   await middleware({ body: {} }, {}, harness.next);
@@ -281,7 +308,8 @@ test('replay #901: el retiro cancela una reserva activa mediante su autoridad ca
     }],
     sendText: harness.sendText,
     completeCandidateNoInterestTransition,
-    cancelActiveInterviewBookings
+    cancelActiveInterviewBookings,
+    deliverAutomaticOutboundText: harness.deliverAutomaticOutboundText
   });
 
   await middleware({ body: {} }, {}, harness.next);
@@ -313,13 +341,15 @@ test('replay #901: una corrección afirmativa posterior conserva el handoff acti
       type: 'text',
       text: { body: 'Sí deseo continuar' }
     }],
-    sendText: harness.sendText
+    sendText: harness.sendText,
+    deliverAutomaticOutboundText: harness.deliverAutomaticOutboundText
   });
 
   await middleware({ body: {} }, {}, harness.next);
 
   assert.equal(harness.calls.sends.length, 1);
-  assert.match(harness.calls.sends[0].body, /proceso continúa activo/i);
+  assert.match(harness.calls.sends[0].body, /registramos que deseas continuar/i);
+  assert.match(harness.calls.sends[0].body, /mantener o reprogramar/i);
   assert.match(harness.calls.sends[0].body, /\+57 300 765 4321/);
   assert.equal(harness.candidate.status, 'CONTACTADO');
   assert.equal(harness.candidate.botPaused, true);
@@ -347,7 +377,8 @@ test('replay #901: retiro y corrección en el mismo turno lógico producen una s
       type: 'text',
       text: { body: 'Sí deseo continuar' }
     }],
-    sendText: harness.sendText
+    sendText: harness.sendText,
+    deliverAutomaticOutboundText: harness.deliverAutomaticOutboundText
   });
 
   await middleware({ body: {} }, {}, harness.next);
@@ -359,6 +390,49 @@ test('replay #901: retiro y corrección en el mismo turno lógico producen una s
   ));
   assert.equal(handledInbound.length, 2);
   assert.ok(handledInbound.every((message) => message.respondedAt));
+});
+
+test('replay #901: una explicación intermedia no oculta el retiro que luego se corrige', async () => {
+  const harness = createHarness({
+    candidateOverrides: { reminderState: 'SKIPPED' },
+    existingInbound: {
+      id: 'message-previous-optout',
+      candidateId: 'candidate-handoff-test',
+      waMessageId: 'wamid.previous.optout',
+      direction: 'INBOUND',
+      messageType: 'TEXT',
+      body: 'No deseo continuar',
+      rawPayload: {},
+      respondedAt: new Date('2026-08-25T14:03:00.000Z'),
+      createdAt: new Date('2026-08-25T14:03:00.000Z')
+    }
+  });
+  harness.messages.push({
+    id: 'message-intermediate-explanation',
+    candidateId: 'candidate-handoff-test',
+    waMessageId: 'wamid.intermediate.explanation',
+    direction: 'INBOUND',
+    messageType: 'TEXT',
+    body: 'Tuve una dificultad personal',
+    rawPayload: {},
+    respondedAt: null,
+    createdAt: new Date('2026-08-25T14:04:00.000Z')
+  });
+  const middleware = interviewCoordinationHandoffMiddleware(harness.prisma, {
+    extractMessages: () => [{
+      id: 'wamid.correction.after.explanation.test',
+      from: '573001234567',
+      type: 'text',
+      text: { body: 'Sí deseo continuar' }
+    }],
+    sendText: harness.sendText,
+    deliverAutomaticOutboundText: harness.deliverAutomaticOutboundText
+  });
+
+  await middleware({ body: {} }, {}, harness.next);
+
+  assert.equal(harness.calls.sends.length, 1);
+  assert.match(harness.calls.sends[0].body, /registramos que deseas continuar/i);
 });
 
 test('una confirmación de asistencia no se convierte en reanudación ni respuesta automática', async () => {
