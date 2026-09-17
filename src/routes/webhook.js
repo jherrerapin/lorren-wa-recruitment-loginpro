@@ -550,7 +550,6 @@ function getPrimaryEngineAction(actions = []) {
     'confirm_booking',
     'reschedule',
     'offer_interview',
-    'mark_female_pipeline',
     'mark_rejected',
     'request_cv',
     'request_confirmation',
