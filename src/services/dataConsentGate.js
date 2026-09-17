@@ -88,7 +88,9 @@ function hasAny(text = '', patterns = []) {
 }
 
 function normalizeConsentDecisionText(value = '') {
-  return normalize(value).replace(/\bsi{2,}\b/g, 'si');
+  return normalize(value)
+    .replace(/\bsi{2,}\b/g, 'si')
+    .replace(/^si\s+autoriza(?:s)?\b/, 'si autorizo');
 }
 
 function isQuestionLike(text = '') {
@@ -188,8 +190,10 @@ function hasExplicitConsentAcceptance(text = '') {
 }
 
 export function isConsentAcceptance(text = '') {
-  const normalized = normalizeConsentDecisionText(text);
-  if (!normalized || hasExplicitConsentRejection(text)) return false;
+  const raw = String(text || '').trim();
+  const normalized = normalizeConsentDecisionText(raw);
+  if (!normalized || hasExplicitConsentRejection(raw)) return false;
+  if (raw.startsWith('¿') && isQuestionLike(raw)) return false;
   if (isQuestionLike(text) && !startsWithExplicitConsent(normalized)) return false;
   return hasAny(normalized, [
     /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
