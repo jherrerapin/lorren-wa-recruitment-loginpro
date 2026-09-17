@@ -28,6 +28,7 @@ import { adminHtmlBridgeMiddleware, dispatchAuditMiddleware } from './services/d
 import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
 import { referralAttributionMiddleware } from './services/referralAttribution.js';
 import { interviewCoordinationHandoffMiddleware } from './services/botAutomationPolicy.js';
+import { completeCandidateNoInterestTransition } from './services/candidateStateService.js';
 import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
@@ -621,7 +622,9 @@ app.get('/logout', destroySession);
 app.use(wrapAsyncRouter(dispatchMultiShiftRequestsRouter()));
 app.use('/webhook', campaignAttributionMiddleware(prisma));
 app.use('/webhook', referralAttributionMiddleware(prisma));
-app.use('/webhook', interviewCoordinationHandoffMiddleware(prisma));
+app.use('/webhook', interviewCoordinationHandoffMiddleware(prisma, {
+  completeCandidateNoInterestTransition
+}));
 app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/operaciones', wrapAsyncRouter(publicDispatchClientRouter()));
