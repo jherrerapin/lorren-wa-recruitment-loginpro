@@ -153,8 +153,7 @@ export function buildCandidateStateForModel(candidate = {}, vacancy = null, rece
       readyForScheduling: readiness.readyForScheduling,
       readyForDone: readiness.readyForDone,
       missingFields: readiness.missingFields,
-      blockedReasons: readiness.blockedReasons,
-      femalePipeline: candidate.gender === 'FEMALE'
+      blockedReasons: readiness.blockedReasons
     },
     profile: {
       fullName: buildFieldState(candidate.fullName),
@@ -247,16 +246,8 @@ Si la evidencia es ambigua o solo viene del nombre, NO extraigas genero y NO lo 
 Extraelo en extractedFields como "gender": "MALE" | "FEMALE" | "OTHER" solo cuando exista esa evidencia textual.`;
   }
 
-  if (gender === 'FEMALE') {
-    return `GENERO: Femenino.
-FLUJO ESPECIAL:
-- Recolecta datos y hoja de vida normalmente.
-- NO ofrezcas ni menciones agendamiento automatico.
-- Cuando haya datos + HV, usa "mark_female_pipeline" y cierra de forma calida.`;
-  }
-
   if (!schedulingEnabled) {
-    return `GENERO: ${gender === 'MALE' ? 'Masculino' : 'Otro'}.
+    return `GENERO: ${gender === 'MALE' ? 'Masculino' : gender === 'FEMALE' ? 'Femenino' : 'Otro'}.
 FLUJO SOLO POSTULACION:
 - Recolecta datos y hoja de vida.
 - Cuando ya exista datos + HV, cierra el proceso con nextStep "DONE".
@@ -293,13 +284,6 @@ INSTRUCCION CRITICA DE DISPONIBILIDAD:
 - Esta vacante no esta abierta para recibir personal en este momento.
 - No ofrezcas entrevistas ni agendamiento.
 - No avances a captura automaticamente. Solo continua si backend ya marco consentimiento contextual para registro de perfil; nunca ofrezcas entrevista ni agenda.`;
-  }
-
-  if (candidate.gender === 'FEMALE') {
-    return `
-INSTRUCCION CRITICA DE AGENDA:
-Aunque la vacante tenga agenda habilitada, una candidata femenina NO debe pasar por agendamiento automatico.
-Si ya tiene datos + hoja de vida, usa "mark_female_pipeline".`;
   }
 
   if (!['ASK_CV', 'SCHEDULING', 'SCHEDULED', 'CONFIRMING_DATA', 'COLLECTING_DATA'].includes(currentStep)) {
@@ -458,7 +442,6 @@ ACCIONES DISPONIBLES:
 - "confirm_booking"       -> candidato acepto el horario
 - "reschedule"            -> ofrecer siguiente slot valido
 - "request_cv"            -> pedir hoja de vida
-- "mark_female_pipeline"  -> candidata femenina completa: datos + CV listos
 - "mark_no_interest"      -> candidato ya no quiere continuar
 - "pause_bot"             -> requiere atencion humana. data: { reason }. Si lo usas porque falta informacion segura para responder, deja "reply" como string vacío.
 - "nothing"               -> no se requiere accion del sistema
@@ -471,7 +454,7 @@ REGLAS CRITICAS:
 - Si no hubo progreso real, no repitas la misma estructura del bot anterior; reformula y aporta algo mas util.
 - Nunca pidas el genero de forma directa; detectalo solo si el candidato lo expresa con evidencia lingüistica clara y no por el nombre.
 - Si el mensaje del candidato suena a cierre humano, desistimiento o pausa, adaptate al contexto.
-- Nunca propongas DONE, ASK_CV, SCHEDULING, SCHEDULED, offer_interview, confirm_booking ni mark_female_pipeline si READINESS indica campos faltantes o HV faltante; después de confirmar interés por una vacante asignada, pide solo los campos faltantes de READINESS en un mensaje natural y no vuelvas a pedir campos ya capturados ni datos no requeridos por el sistema.
+- Nunca propongas DONE, ASK_CV, SCHEDULING, SCHEDULED, offer_interview ni confirm_booking si READINESS indica campos faltantes o HV faltante; después de confirmar interés por una vacante asignada, pide solo los campos faltantes de READINESS en un mensaje natural y no vuelvas a pedir campos ya capturados ni datos no requeridos por el sistema.
 
 Devuelve SOLO el JSON. Sin texto antes ni despues.`;
 }
@@ -952,7 +935,6 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
   const explicitPauseExcludedActionTypes = new Set([
     'mark_no_interest',
     'mark_rejected',
-    'mark_female_pipeline',
     'offer_interview',
     'confirm_booking',
     'reschedule'
@@ -966,12 +948,6 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
     if (!options.skipStateUpdate) {
       pendingUpdate.reminderScheduledFor = null;
       pendingUpdate.reminderState = 'CANCELLED';
-    }
-    if (reason === 'female_candidate') {
-      pendingUpdate.botPaused = true;
-      pendingUpdate.botPausedAt = new Date();
-      pendingUpdate.botPauseReason = 'Candidata femenina pendiente de revision humana';
-      setStep(ConversationStep.DONE, { terminal: true });
     }
   };
   const getSchedulingBlockReason = (actionType) => evaluateSchedulingGuard({
@@ -1038,32 +1014,6 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
           }
 
           setStep(ConversationStep.CONFIRMING_DATA);
-          break;
-
-        case 'mark_female_pipeline':
-          if (candidateAfterMerge.gender !== Gender.FEMALE) {
-            console.warn('[ACT_SKIPPED]', {
-              action: action.type,
-              reason: 'female_pipeline_without_valid_gender_evidence',
-              candidateId: candidate.id
-            });
-            ignoreModelNextStep = true;
-            break;
-          }
-          if (!readinessAfterMerge.readyForDone) {
-            blockedActions.push({ action: action.type, reason: `not_ready_for_done:${readinessAfterMerge.missingForDone.join(',')}` });
-            ignoreModelNextStep = true;
-            setStep(readinessAfterMerge.readyForCvRequest ? ConversationStep.ASK_CV : ConversationStep.COLLECTING_DATA);
-            break;
-          }
-          pendingUpdate.gender = Gender.FEMALE;
-          pendingUpdate.status = CandidateStatus.REGISTRADO;
-          pendingUpdate.botPaused = true;
-          pendingUpdate.botPausedAt = new Date();
-          pendingUpdate.botPauseReason = 'Candidata femenina pendiente de revision humana';
-          pendingUpdate.reminderScheduledFor = null;
-          pendingUpdate.reminderState = 'SKIPPED';
-          setStep(ConversationStep.DONE, { terminal: true });
           break;
 
         case 'mark_rejected':
@@ -1177,8 +1127,6 @@ export async function act({ actions, candidate, vacancy = null, extractedFields 
   if (!finalStep && !ignoreModelNextStep && nextStep && Object.values(ConversationStep).includes(nextStep)) {
     if (preserveCompletedRegistration && nextStep !== ConversationStep.DONE) {
       finalStep = ConversationStep.DONE;
-    } else if (candidateAfterMerge.gender === Gender.FEMALE && [ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(nextStep)) {
-      blockScheduling('model_next_step', 'female_candidate');
     } else {
       finalStep = nextStep;
     }
