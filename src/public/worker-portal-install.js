@@ -3,6 +3,20 @@
 (() => {
   const normalizedPath = window.location.pathname.replace(/\/+$/, '') || '/';
   if (normalizedPath !== '/operaciones/portal') return;
+
+  const HANDOFF_SCRIPT_PATH = '/public/worker-portal-session-handoff.js';
+
+  function ensureSessionHandoffScript() {
+    if (document.querySelector(`script[src^="${HANDOFF_SCRIPT_PATH}"]`)) return;
+    const script = document.createElement('script');
+    script.src = `${HANDOFF_SCRIPT_PATH}?v=${encodeURIComponent(window.LorrenBiometricAssetRelease || 'current')}`;
+    script.async = false;
+    script.dataset.workerPortalSessionHandoff = 'true';
+    document.head.append(script);
+  }
+
+  ensureSessionHandoffScript();
+
   if (window.LorrenAndroidPresence) {
     document.getElementById('portal-install-cta')?.remove();
     const nativeDialog = document.getElementById('portal-install-dialog');
