@@ -15,18 +15,28 @@ async function read(url) {
   return readFile(url, 'utf8');
 }
 
-test('Nearby conserva el status nativo en diagnóstico local sin cambiar el error público', async () => {
+test('Nearby conserva el status nativo y capacidades locales sin cambiar el error público', async () => {
   const [manager, nativePresence] = await Promise.all([
     read(managerPath),
     read(nativePresencePath)
   ]);
 
+  assert.match(manager, /import android\.content\.pm\.PackageManager;/);
+  assert.match(manager, /import android\.os\.Build;/);
+  assert.match(manager, /import com\.google\.android\.gms\.common\.GoogleApiAvailability;/);
   assert.match(manager, /import com\.google\.android\.gms\.common\.api\.ApiException;/);
+
+  assert.match(
+    manager,
+    /private void emitEnvironmentDiagnostic\(String actor\)[\s\S]{0,900}CAP_ANDROID_SDK_[\s\S]{0,220}FEATURE_BLUETOOTH[\s\S]{0,320}FEATURE_BLUETOOTH_LE[\s\S]{0,320}CAP_PLAY_SERVICES[\s\S]{0,180}isGooglePlayServicesAvailable/
+  );
+  assert.match(manager, /READY_REQUESTED"\);\s*emitEnvironmentDiagnostic\("AUX"\);/);
+  assert.match(manager, /SCAN_REQUESTED"\);\s*emitEnvironmentDiagnostic\("ENC"\);/);
+
   assert.match(
     manager,
     /private static Integer statusCode\(Exception error\)[\s\S]{0,220}error instanceof ApiException[\s\S]{0,120}getStatusCode\(\)/
   );
-
   assert.match(
     manager,
     /startAdvertising\([\s\S]{0,700}addOnFailureListener\(error -> \{[\s\S]{0,180}emitDiagnostic\("AUX", "ADVERTISING_FAILED", error\);[\s\S]{0,120}failReady\("advertising_failed"\)/
@@ -39,15 +49,13 @@ test('Nearby conserva el status nativo en diagnóstico local sin cambiar el erro
     manager,
     /CONNECTION_FAILED[\s\S]{0,180}result\.getStatus\(\)\.getStatusCode\(\)/
   );
-  assert.match(
-    manager,
-    /CONNECTION_REQUEST_FAILED", error/
-  );
+  assert.match(manager, /CONNECTION_REQUEST_FAILED", error/);
 
   assert.match(
     manager,
     /private void emitDiagnostic\(String actor, String stage, Integer statusCode\)[\s\S]{0,260}if \(statusCode != null\) event\.put\("statusCode", statusCode\)/
   );
+  assert.doesNotMatch(manager, /Build\.(?:MODEL|MANUFACTURER|DEVICE|FINGERPRINT)/);
   assert.doesNotMatch(manager, /event\.put\("(?:message|exception|stackTrace)"/);
   assert.doesNotMatch(manager, /error\.getMessage\(\)|printStackTrace\(/);
 
