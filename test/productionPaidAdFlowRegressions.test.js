@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolveVacancyFirstGate, VacancyFirstGateAction } from '../src/services/vacancyFirstGate.js';
 import { isAffirmativeVacancyConfirmation, APPLICATION_INTEREST_PENDING_MODE, DATA_CONSENT_PENDING_MODE } from '../src/services/dataConsentGate.js';
-import { isApplicationFollowUpQuestion } from '../src/routes/webhook.js';
+import { isApplicationFollowUpQuestion, processText } from '../src/routes/webhook.js';
 import { resolveCampaignForReferral } from '../src/services/campaignAttribution.js';
 import { getMultilineWindowMs } from '../src/services/multiline.js';
+import { createDebugTrace } from '../src/services/debugTrace.js';
+import { runConversationCase } from './helpers/conversationHarness.js';
+import { baseOperations, baseVacancies } from './fixtures/conversationCases.js';
 
 // Regresiones derivadas de conversaciones reales de pauta observadas el 8 de agosto de 2026.
 const vacancy = {
@@ -31,6 +34,36 @@ function candidate(overrides = {}) {
     vacancyId: null,
     botResumeMode: null,
     dataConsentStatus: 'PENDING',
+    ...overrides
+  };
+}
+
+function replayCandidate(overrides = {}) {
+  return {
+    ...candidate(),
+    phone: '573000000900',
+    fullName: null,
+    documentType: null,
+    documentNumber: null,
+    age: null,
+    gender: 'UNKNOWN',
+    neighborhood: null,
+    locality: null,
+    medicalRestrictions: null,
+    transportMode: null,
+    experienceInfo: null,
+    experienceTime: null,
+    cvData: null,
+    cvOriginalName: null,
+    cvMimeType: null,
+    reminderState: 'NONE',
+    reminderScheduledFor: null,
+    botPaused: false,
+    botPausedAt: null,
+    botPauseReason: null,
+    lastInboundAt: null,
+    lastOutboundAt: null,
+    createdAt: new Date('2026-09-01T12:00:00.000Z'),
     ...overrides
   };
 }
@@ -141,4 +174,84 @@ test('Meta: confirmación con interés explícito prepara consentimiento y no re
   assert.match(source, /explicitApplicationInterest = Boolean\(analyzeConversationTurn\(body\)\.interest\)/);
   assert.match(source, /campaign_vacancy_confirmed_interest/);
   assert.match(source, /buildVacancyInfoReply\(vacancy, \{ includeInterestPrompt: false \}\)/);
+});
+
+test('replay #901: resolver la vacante no descarta las entidades del mismo turno', async () => {
+  const result = await runConversationCase({
+    id: 'audit-901-vacancy-and-profile-same-turn',
+    steps: ['Mi nombre es Ana Torres, CC 1234567890, tengo 28 años, vivo en barrio Jordan, me movilizo en bicicleta, sin restricciones médicas. Me interesa auxiliar de cargue y descargue en Ibagué.'],
+    candidate: replayCandidate({
+      id: 'candidate-audit-901-entities',
+      phone: '573000000901',
+      currentStep: 'MENU'
+    }),
+    vacancies: baseVacancies,
+    operations: baseOperations,
+    expect: {
+      candidate: {
+        vacancyId: 'vac-post',
+        fullName: 'Ana Torres',
+        documentType: 'CC',
+        documentNumber: '1234567890',
+        age: 28,
+        neighborhood: 'Jordan',
+        transportMode: 'Bicicleta',
+        medicalRestrictions: 'Sin restricciones médicas',
+        gender: 'UNKNOWN'
+      },
+      lastReplyIncludes: ['autorizo']
+    }
+  }, {
+    processText,
+    createDebugTrace,
+    recognizeCurrentEnginePrompt: true
+  });
+
+  assert.deepEqual(result.debugTraces[0].persisted_fields.sort(), [
+    'age',
+    'documentNumber',
+    'documentType',
+    'fullName',
+    'medicalRestrictions',
+    'neighborhood',
+    'transportMode'
+  ]);
+});
+
+test('replay #901: responde la pregunta y después retoma únicamente los datos pendientes', async () => {
+  const result = await runConversationCase({
+    id: 'audit-901-question-and-profile-same-turn',
+    steps: ['Me llamo Luis Rojas, CC 987654321 y tengo 34 años. ¿Cuál es el horario?'],
+    candidate: replayCandidate({
+      id: 'candidate-audit-901-question-data',
+      phone: '573000000902',
+      vacancyId: 'vac-post',
+      dataConsentStatus: 'ACCEPTED',
+      dataConsentVersion: 'lorren-v2-2026-07-v3'
+    }),
+    vacancies: baseVacancies,
+    operations: baseOperations,
+    expect: {
+      candidate: {
+        fullName: 'Luis Rojas',
+        documentType: 'CC',
+        documentNumber: '987654321',
+        age: 34,
+        currentStep: 'COLLECTING_DATA'
+      },
+      lastReplyIncludes: ['Pago por turno', 'barrio', 'restricciones', 'transporte'],
+      lastReplyNotIncludes: ['nombre completo', 'tipo de documento', 'número de documento', 'edad']
+    }
+  }, {
+    processText,
+    createDebugTrace,
+    recognizeCurrentEnginePrompt: true
+  });
+
+  assert.deepEqual(result.debugTraces[0].persisted_fields.sort(), [
+    'age',
+    'documentNumber',
+    'documentType',
+    'fullName'
+  ]);
 });
