@@ -17,8 +17,24 @@
     return String(window.navigator.userAgent || '');
   }
 
+  function platformHint() {
+    return String(window.navigator.userAgentData?.platform || window.navigator.platform || '');
+  }
+
+  function isChromiumAndroidDesktopMode() {
+    const userAgentValue = userAgent();
+    const platformValue = platformHint();
+    return Number(window.navigator.maxTouchPoints || 0) > 1
+      && /Linux|X11/i.test(`${userAgentValue} ${platformValue}`)
+      && /Chrome|Chromium|Edg|SamsungBrowser/i.test(userAgentValue)
+      && !/Firefox|FxiOS|OPR\//i.test(userAgentValue);
+  }
+
   function isAndroid() {
-    return /Android/i.test(userAgent());
+    return Boolean(window.LorrenAndroidPresence)
+      || /Android/i.test(userAgent())
+      || /Android/i.test(platformHint())
+      || isChromiumAndroidDesktopMode();
   }
 
   function isNativeAndroidApp() {
