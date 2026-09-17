@@ -313,7 +313,11 @@ async function answerInterviewCoordinationDecision(prisma, candidate, from, inbo
   await prisma.candidate.update({
     where: { id: candidate.id },
     data: continuing
-      ? { lastOutboundAt: sentAt }
+      ? {
+        reminderScheduledFor: null,
+        reminderState: 'CANCELLED',
+        lastOutboundAt: sentAt
+      }
       : {
         currentStep: 'DONE',
         reminderScheduledFor: null,
