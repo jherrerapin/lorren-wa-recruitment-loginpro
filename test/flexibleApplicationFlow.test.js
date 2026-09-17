@@ -33,6 +33,9 @@ test('consentimiento reconoce intención natural sin frase única', () => {
   assert.equal(isConsentAcceptance('Pueden usar mis datos para la postulación'), true);
   assert.equal(isConsentAcceptance('Doy mi consentimiento, continuemos'), true);
   assert.equal(isConsentAcceptance('Siiiiii'), true);
+  assert.equal(isConsentAcceptance('SÍÍÍÍ, autorizo'), true);
+  assert.equal(isConsentAcceptance('Siiiiiiempre'), false);
+  assert.equal(isConsentAcceptance('No autorizo, siiiii'), false);
   assert.equal(isConsentRejection('No doy permiso para usar mis datos'), true);
 });
 
