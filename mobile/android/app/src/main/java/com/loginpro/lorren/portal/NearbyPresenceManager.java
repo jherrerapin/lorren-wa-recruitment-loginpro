@@ -1,11 +1,15 @@
 package com.loginpro.lorren.portal;
 
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 
 import androidx.annotation.NonNull;
 
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.common.api.ApiException;
 import com.google.android.gms.nearby.Nearby;
 import com.google.android.gms.nearby.connection.AdvertisingOptions;
 import com.google.android.gms.nearby.connection.ConnectionInfo;
@@ -52,6 +56,7 @@ final class NearbyPresenceManager {
 
     private enum Role { IDLE, READY, LEADER }
 
+    private final Context applicationContext;
     private final ConnectionsClient connectionsClient;
     private final EventSink eventSink;
     private final CredentialProvider credentialProvider;
@@ -77,7 +82,8 @@ final class NearbyPresenceManager {
     private Runnable leaderCompleteTimeout;
 
     NearbyPresenceManager(Context context, EventSink eventSink, CredentialProvider credentialProvider) {
-        this.connectionsClient = Nearby.getConnectionsClient(context.getApplicationContext());
+        this.applicationContext = context.getApplicationContext();
+        this.connectionsClient = Nearby.getConnectionsClient(applicationContext);
         this.eventSink = eventSink;
         this.credentialProvider = credentialProvider;
     }
@@ -114,7 +120,11 @@ final class NearbyPresenceManager {
                         connectedLeaderEndpointId = endpointId;
                     }
                 } else {
-                    emitDiagnostic(role == Role.LEADER ? "ENC" : "AUX", "CONNECTION_FAILED");
+                    emitDiagnostic(
+                        role == Role.LEADER ? "ENC" : "AUX",
+                        "CONNECTION_FAILED",
+                        result.getStatus().getStatusCode()
+                    );
                     if (role == Role.LEADER) leaderConnectionEndpoints.remove(endpointId);
                 }
             }
@@ -163,10 +173,11 @@ final class NearbyPresenceManager {
 
     synchronized void startReady(String serviceRequestId) {
         String normalizedService = requiredToken(serviceRequestId, "serviceRequestId");
-        stopAllInternal(false, true); 
+        stopAllInternal(false, true);
         role = Role.READY;
         readyServiceRequestId = normalizedService;
         emitDiagnostic("AUX", "READY_REQUESTED");
+        emitEnvironmentDiagnostic("AUX");
 
         AdvertisingOptions options = new AdvertisingOptions.Builder().setStrategy(STRATEGY).build();
         connectionsClient.startAdvertising("LorrenAux", SERVICE_ID, connectionLifecycleCallback, options)
@@ -178,7 +189,8 @@ final class NearbyPresenceManager {
                     }
                 }
             })
-            .addOnFailureListener(e -> {
+            .addOnFailureListener(error -> {
+                emitDiagnostic("AUX", "ADVERTISING_FAILED", error);
                 failReady("advertising_failed");
             });
     }
@@ -239,7 +251,7 @@ final class NearbyPresenceManager {
                 emitDiagnostic("ENC", "ENDPOINT_FOUND");
                 connectionsClient.requestConnection("LorrenLeader", endpointId, connectionLifecycleCallback)
                     .addOnSuccessListener(unused -> emitDiagnostic("ENC", "CONNECTION_REQUEST"))
-                    .addOnFailureListener(e -> emitDiagnostic("ENC", "CONNECTION_REQUEST_FAILED"));
+                    .addOnFailureListener(error -> emitDiagnostic("ENC", "CONNECTION_REQUEST_FAILED", error));
             }
         }
 
@@ -267,6 +279,7 @@ final class NearbyPresenceManager {
         leaderConnectionEndpoints.clear();
 
         emitDiagnostic("ENC", "SCAN_REQUESTED");
+        emitEnvironmentDiagnostic("ENC");
 
         if (expectedProofCount == 0) {
             challengeSentAt = System.currentTimeMillis();
@@ -287,7 +300,10 @@ final class NearbyPresenceManager {
                     }
                 }
             })
-            .addOnFailureListener(e -> failLeaderStart("discovery_failed"));
+            .addOnFailureListener(error -> {
+                emitDiagnostic("ENC", "DISCOVERY_FAILED", error);
+                failLeaderStart("discovery_failed");
+            });
     }
 
     private void sendChallengeToAuxiliary(String endpointId) {
@@ -415,7 +431,7 @@ final class NearbyPresenceManager {
 
         // IMPORTANTE: Aquí pasamos (false, false) para apagar la antena
         // PERO conservar las pruebas en memoria para que el JS las recoja tras el GPS.
-        stopAllInternal(false, false); 
+        stopAllInternal(false, false);
     }
 
     // =========================================================================
@@ -498,6 +514,34 @@ final class NearbyPresenceManager {
         return normalized;
     }
 
+    private void emitEnvironmentDiagnostic(String actor) {
+        PackageManager packageManager = applicationContext.getPackageManager();
+        emitDiagnostic(actor, "CAP_ANDROID_SDK_" + Build.VERSION.SDK_INT);
+        emitDiagnostic(
+            actor,
+            packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)
+                ? "CAP_BT_CLASSIC_YES"
+                : "CAP_BT_CLASSIC_NO"
+        );
+        emitDiagnostic(
+            actor,
+            packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
+                ? "CAP_BT_LE_YES"
+                : "CAP_BT_LE_NO"
+        );
+        emitDiagnostic(
+            actor,
+            "CAP_PLAY_SERVICES",
+            GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(applicationContext)
+        );
+    }
+
+    private static Integer statusCode(Exception error) {
+        return error instanceof ApiException
+            ? ((ApiException) error).getStatusCode()
+            : null;
+    }
+
     private String safeCredential() {
         String credential = credentialProvider.credential();
         if (credential == null) return "";
@@ -519,9 +563,18 @@ final class NearbyPresenceManager {
     }
 
     private void emitDiagnostic(String actor, String stage) {
+        emitDiagnostic(actor, stage, (Integer) null);
+    }
+
+    private void emitDiagnostic(String actor, String stage, Exception error) {
+        emitDiagnostic(actor, stage, statusCode(error));
+    }
+
+    private void emitDiagnostic(String actor, String stage, Integer statusCode) {
         emit("diagnostic", event -> {
             event.put("actor", actor);
             event.put("stage", stage);
+            if (statusCode != null) event.put("statusCode", statusCode);
         });
     }
 
