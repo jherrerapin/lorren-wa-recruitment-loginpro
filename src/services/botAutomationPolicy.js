@@ -105,6 +105,23 @@ export function isInterviewCoordinationQuestion(value = '') {
   return /\b(quiero|necesito|quisiera)\s+(cambiar|saber|confirmar|preguntar|reprogramar)\b/.test(normalized);
 }
 
+export function isInterviewCoordinationOptOut(value = '') {
+  const normalized = normalizeComparableText(value);
+  return /^(?:no deseo continuar|no quiero continuar|ya no deseo continuar|ya no quiero continuar|no me interesa|prefiero no continuar|mejor no continuar)$/.test(normalized);
+}
+
+function isInterviewCoordinationContinuation(value = '') {
+  const normalized = normalizeComparableText(value);
+  return /^(?:si deseo continuar|si quiero continuar|deseo continuar|quiero continuar|si me interesa|me interesa continuar)$/.test(normalized);
+}
+
+function hasPreviousInterviewCoordinationOptOut(recentMessages = []) {
+  const previousInbound = [...recentMessages]
+    .reverse()
+    .find((message) => String(message?.direction || '').toUpperCase() === 'INBOUND');
+  return isInterviewCoordinationOptOut(previousInbound?.body || '');
+}
+
 export function resolveInterviewCoordinationOutreachContext(recentMessages = []) {
   const delivered = deliveredInterviewOutreachMessages(recentMessages)[0] || null;
   const body = String(delivered?.body || '').trim();
@@ -272,6 +289,46 @@ async function answerInterviewCoordinationQuestion(prisma, candidate, from, inbo
   return { handled: true, replied: true, body: finalBody };
 }
 
+async function answerInterviewCoordinationDecision(prisma, candidate, from, inboundMessage, { continuing = false } = {}, dependencies = {}) {
+  const recentMessages = await loadRecentHandoffMessages(prisma, candidate.id);
+  const outreachContext = resolveInterviewCoordinationOutreachContext(recentMessages);
+  const body = continuing
+    ? appendInterviewCoordinationReferral('Gracias por aclararlo. Tu proceso continúa activo.', outreachContext.coordinatorPhone)
+    : 'Entendido. Cerramos tu participación en este proceso y no enviaremos más recordatorios automáticos. Si después deseas retomarlo, puedes volver a escribirnos.';
+  const sendText = dependencies.sendText || sendTextMessage;
+  await sendText(from, body);
+
+  const sentAt = new Date();
+  await persistOutboundConversationMessage(prisma, {
+    candidateId: candidate.id,
+    messageType: MessageType.TEXT,
+    body,
+    rawPayload: {
+      source: continuing ? 'interview_coordination_handoff_continuation' : 'interview_coordination_handoff_opt_out',
+      decision: continuing ? 'continue_after_explicit_correction' : 'close_after_explicit_opt_out',
+      actor: 'BOT',
+      handoffPreserved: true
+    }
+  });
+  await prisma.candidate.update({
+    where: { id: candidate.id },
+    data: continuing
+      ? { lastOutboundAt: sentAt }
+      : {
+        currentStep: 'DONE',
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED',
+        lastOutboundAt: sentAt
+      }
+  });
+  await markConversationMessagesResponded(prisma, {
+    messageIds: [inboundMessage.id],
+    respondedAt: sentAt
+  });
+
+  return { handled: true, replied: true, body };
+}
+
 export function interviewCoordinationHandoffMiddleware(prismaInput, dependencies = {}) {
   const prisma = requireHandoffPrisma(prismaInput);
   return async function interviewCoordinationHandoff(req, _res, next) {
@@ -281,7 +338,10 @@ export function interviewCoordinationHandoffMiddleware(prismaInput, dependencies
         if (message?.type !== 'text') continue;
         const from = String(message?.from || '').trim();
         const body = String(message?.text?.body || '').trim();
-        if (!from || !isInterviewCoordinationQuestion(body)) continue;
+        const isQuestion = isInterviewCoordinationQuestion(body);
+        const isOptOut = isInterviewCoordinationOptOut(body);
+        const isContinuation = isInterviewCoordinationContinuation(body);
+        if (!from || (!isQuestion && !isOptOut && !isContinuation)) continue;
 
         const candidate = await prisma.candidate.findUnique({
           where: { phone: from },
@@ -301,11 +361,24 @@ export function interviewCoordinationHandoffMiddleware(prismaInput, dependencies
             reminderState: true
           }
         });
-        if (!shouldAnswerInterviewCoordinationHandoffQuestion(candidate, { isQuestion: true })) continue;
+        const isHandoff = Boolean(
+          candidate?.botPaused
+          && String(candidate?.botResumeMode || '').trim() === INTERVIEW_COORDINATION_HANDOFF_MODE
+        );
+        if (!isHandoff) continue;
+
+        if (isContinuation) {
+          const recentMessages = await loadRecentHandoffMessages(prisma, candidate.id);
+          if (!hasPreviousInterviewCoordinationOptOut(recentMessages)) continue;
+        }
 
         const inbound = await persistHandoffInbound(prisma, candidate, message, body);
         if (!inbound.handled || inbound.alreadyResponded) continue;
-        await answerInterviewCoordinationQuestion(prisma, candidate, from, body, inbound.message, dependencies);
+        if (isOptOut || isContinuation) {
+          await answerInterviewCoordinationDecision(prisma, candidate, from, inbound.message, { continuing: isContinuation }, dependencies);
+        } else if (shouldAnswerInterviewCoordinationHandoffQuestion(candidate, { isQuestion })) {
+          await answerInterviewCoordinationQuestion(prisma, candidate, from, body, inbound.message, dependencies);
+        }
       }
       return next();
     } catch (error) {
