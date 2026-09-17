@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {
   INTERVIEW_COORDINATION_HANDOFF_REPLY_POLICY,
   interviewCoordinationHandoffMiddleware,
-  isInterviewCoordinationOptOut,
   isInterviewCoordinationQuestion,
   resolveInterviewCoordinationOutreachContext
 } from '../src/services/botAutomationPolicy.js';
+import { completeCandidateNoInterestTransition } from '../src/services/candidateStateService.js';
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
@@ -68,6 +68,22 @@ function createHarness({ existingInbound = null, candidateOverrides = {} } = {})
         calls.candidateUpdates.push(clone(data));
         Object.assign(candidate, clone(data));
         return clone(candidate);
+      },
+      async updateMany({ where, data }) {
+        if (where.id !== candidate.id) return { count: 0 };
+        const matchesSnapshot = Object.entries(where)
+          .filter(([field]) => field !== 'id')
+          .every(([field, expected]) => {
+            const actual = candidate[field];
+            if (actual instanceof Date || expected instanceof Date) {
+              return new Date(actual).getTime() === new Date(expected).getTime();
+            }
+            return actual === expected;
+          });
+        if (!matchesSnapshot) return { count: 0 };
+        calls.candidateUpdates.push(clone(data));
+        Object.assign(candidate, clone(data));
+        return { count: 1 };
       }
     },
     vacancy: {
@@ -215,7 +231,8 @@ test('replay #901: una negativa final durante el handoff se cierra y recibe resp
       type: 'text',
       text: { body: 'No deseo continuar' }
     }],
-    sendText: harness.sendText
+    sendText: harness.sendText,
+    completeCandidateNoInterestTransition
   });
 
   await middleware({ body: {} }, {}, harness.next);
@@ -328,8 +345,6 @@ test('la política reconoce preguntas y recupera el contexto de la citación ent
   assert.equal(isInterviewCoordinationQuestion('¿A qué hora debo llegar?'), true);
   assert.equal(isInterviewCoordinationQuestion('Dirección por favor'), true);
   assert.equal(isInterviewCoordinationQuestion('Confirmo asistencia'), false);
-  assert.equal(isInterviewCoordinationOptOut('No deseo continuar'), true);
-  assert.equal(isInterviewCoordinationOptOut('Sí deseo continuar'), false);
 
   const context = resolveInterviewCoordinationOutreachContext([{
     direction: 'OUTBOUND',
