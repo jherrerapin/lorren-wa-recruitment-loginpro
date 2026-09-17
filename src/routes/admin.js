@@ -3067,18 +3067,6 @@ export function adminRouter(prisma) {
     if (gender) adminStatusFields.gender = gender;
     if (req.userRole === 'dev') adminStatusFields.interviewNotes = normalizeString(raw.interviewNotes);
 
-    if (canEditGender && gender === Gender.FEMALE) {
-      const hasCv = candidateHasCv(existingCandidate);
-      if (hasCv || [ConversationStep.ASK_CV, ConversationStep.DONE, ConversationStep.SCHEDULING, ConversationStep.SCHEDULED].includes(existingCandidate.currentStep)) {
-        adminStatusFields.botPaused = true;
-        adminStatusFields.botPausedAt = new Date();
-        adminStatusFields.botPausedBy = req.userRole || 'admin';
-        adminStatusFields.botPauseReason = 'Candidata femenina pendiente de revision humana';
-        adminStatusFields.reminderScheduledFor = null;
-        adminStatusFields.reminderState = 'SKIPPED';
-      }
-    }
-
     const data = { ...candidateCoreFields, ...adminStatusFields };
     await prisma.candidate.update({ where: { id }, data });
     if (existingCandidate.status !== data.status && data.status) {
