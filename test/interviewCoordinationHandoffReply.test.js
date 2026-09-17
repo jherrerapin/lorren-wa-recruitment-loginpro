@@ -12,7 +12,7 @@ function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
 
-function createHarness({ existingInbound = null } = {}) {
+function createHarness({ existingInbound = null, candidateOverrides = {} } = {}) {
   const candidate = {
     id: 'candidate-handoff-test',
     phone: '573001234567',
@@ -28,7 +28,8 @@ function createHarness({ existingInbound = null } = {}) {
     reminderScheduledFor: null,
     reminderState: 'CANCELLED',
     lastInboundAt: new Date('2026-08-25T13:00:00.000Z'),
-    lastOutboundAt: new Date('2026-08-25T14:00:00.000Z')
+    lastOutboundAt: new Date('2026-08-25T14:00:00.000Z'),
+    ...candidateOverrides
   };
   const messages = [{
     id: 'outbound-citation-test',
@@ -236,6 +237,7 @@ test('replay #901: una negativa final durante el handoff se cierra y recibe resp
 
 test('replay #901: una corrección afirmativa posterior conserva el handoff activo', async () => {
   const harness = createHarness({
+    candidateOverrides: { reminderState: 'SKIPPED' },
     existingInbound: {
       id: 'message-previous-optout',
       candidateId: 'candidate-handoff-test',
@@ -266,6 +268,8 @@ test('replay #901: una corrección afirmativa posterior conserva el handoff acti
   assert.equal(harness.candidate.status, 'CONTACTADO');
   assert.equal(harness.candidate.botPaused, true);
   assert.equal(harness.candidate.botResumeMode, 'interview_coordination_handoff');
+  assert.equal(harness.candidate.reminderState, 'CANCELLED');
+  assert.equal(harness.candidate.reminderScheduledFor, null);
 
   const inbound = harness.messages.find((message) => message.waMessageId === 'wamid.correction.test');
   assert.ok(inbound?.respondedAt);
