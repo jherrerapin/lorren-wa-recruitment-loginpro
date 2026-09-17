@@ -36,7 +36,7 @@ import {
 import { deleteConversationMessagesForCandidate } from '../services/conversationMessageRepository.js';
 import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
 import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
-import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
+import { ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import {
   CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS,
   pauseCandidateAutomationFromAdmin,
