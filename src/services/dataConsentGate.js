@@ -111,9 +111,13 @@ function startsWithExplicitConsent(text = '') {
 function startsWithUnaccentedConditionalConsentQuestion(text = '') {
   const raw = String(text || '').trim();
   const normalized = normalizeConsentDecisionText(raw);
+  const remainder = normalized.replace(/^si\s+autorizo\b/, '').trim();
   return /^si\s+autorizo\b/.test(normalized)
     && !/^sí(?:\s|[,.;:!?¿])/i.test(raw)
-    && isQuestionLike(raw);
+    && (
+      /[?¿]/.test(raw)
+      || /^(?:que\s+(?:pasa|hacen|haran)|como|cuando|donde|por\s+que|para\s+que|cual|quien)\b/.test(remainder)
+    );
 }
 
 function startsWithExplicitVacancyConfirmation(text = '') {
