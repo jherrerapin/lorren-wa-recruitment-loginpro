@@ -87,6 +87,10 @@ function hasAny(text = '', patterns = []) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+function normalizeConsentDecisionText(value = '') {
+  return normalize(value).replace(/\bsi{2,}\b/g, 'si');
+}
+
 function isQuestionLike(text = '') {
   const raw = String(text || '').trim();
   const normalized = normalize(raw);
@@ -98,7 +102,8 @@ function isQuestionLike(text = '') {
 }
 
 function startsWithExplicitConsent(text = '') {
-  return /^(si+|sip|claro|correcto|de acuerdo|acepto|autorizo|consiento|estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso)\b/.test(text);
+  const normalized = normalizeConsentDecisionText(text);
+  return /^(si|sip|claro|correcto|de acuerdo|acepto|autorizo|consiento|estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso)\b/.test(normalized);
 }
 
 function startsWithExplicitVacancyConfirmation(text = '') {
@@ -183,16 +188,16 @@ function hasExplicitConsentAcceptance(text = '') {
 }
 
 export function isConsentAcceptance(text = '') {
-  const normalized = normalize(text);
+  const normalized = normalizeConsentDecisionText(text);
   if (!normalized || hasExplicitConsentRejection(text)) return false;
   if (isQuestionLike(text) && !startsWithExplicitConsent(normalized)) return false;
   return hasAny(normalized, [
     /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
-    /\b(si+|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo|consiento)\b/,
+    /\b(si|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo|consiento)\b/,
     /\b(estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso|tienen mi permiso|autorizacion concedida)\b/,
     /\b(pueden|puede)\s+(usar|tratar|manejar|procesar|guardar)\s+(mis|los)\s+datos\b/,
     /\b(pueden|puede)\s+continuar\s+con\s+(mis|los)\s+datos\b/,
-    /\b(si+|sip|claro|correcto|de acuerdo|dale|ok|listo|continuemos|sigamos)\b$/
+    /\b(si|sip|claro|correcto|de acuerdo|dale|ok|listo|continuemos|sigamos)\b$/
   ]);
 }
 
