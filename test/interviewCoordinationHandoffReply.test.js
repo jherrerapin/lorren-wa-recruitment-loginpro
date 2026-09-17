@@ -7,12 +7,13 @@ import {
   resolveInterviewCoordinationOutreachContext
 } from '../src/services/botAutomationPolicy.js';
 import { completeCandidateNoInterestTransition } from '../src/services/candidateStateService.js';
+import { cancelActiveInterviewBookings } from '../src/services/interviewBookingStateService.js';
 
 function clone(value) {
   return value === undefined ? undefined : structuredClone(value);
 }
 
-function createHarness({ existingInbound = null, candidateOverrides = {} } = {}) {
+function createHarness({ existingInbound = null, candidateOverrides = {}, activeBooking = null } = {}) {
   const candidate = {
     id: 'candidate-handoff-test',
     phone: '573001234567',
@@ -54,6 +55,7 @@ function createHarness({ existingInbound = null, candidateOverrides = {} } = {})
   const calls = {
     sends: [],
     candidateUpdates: [],
+    bookingUpdates: [],
     next: 0
   };
 
@@ -83,6 +85,15 @@ function createHarness({ existingInbound = null, candidateOverrides = {} } = {})
         if (!matchesSnapshot) return { count: 0 };
         calls.candidateUpdates.push(clone(data));
         Object.assign(candidate, clone(data));
+        return { count: 1 };
+      }
+    },
+    interviewBooking: {
+      async updateMany({ where, data }) {
+        if (!activeBooking || activeBooking.candidateId !== where.candidateId) return { count: 0 };
+        if (!where.status.in.includes(activeBooking.status)) return { count: 0 };
+        calls.bookingUpdates.push(clone(data));
+        Object.assign(activeBooking, clone(data));
         return { count: 1 };
       }
     },
@@ -232,7 +243,8 @@ test('replay #901: una negativa final durante el handoff se cierra y recibe resp
       text: { body: 'No deseo continuar' }
     }],
     sendText: harness.sendText,
-    completeCandidateNoInterestTransition
+    completeCandidateNoInterestTransition,
+    cancelActiveInterviewBookings
   });
 
   await middleware({ body: {} }, {}, harness.next);
@@ -250,6 +262,33 @@ test('replay #901: una negativa final durante el handoff se cierra y recibe resp
   assert.ok(inbound?.respondedAt);
   const reply = harness.messages.find((message) => message.rawPayload?.source === 'interview_coordination_handoff_opt_out');
   assert.equal(reply?.rawPayload?.decision, 'close_after_explicit_opt_out');
+});
+
+test('replay #901: el retiro cancela una reserva activa mediante su autoridad canónica', async () => {
+  const activeBooking = {
+    id: 'booking-active-test',
+    candidateId: 'candidate-handoff-test',
+    status: 'CONFIRMED',
+    reminderWindowClosed: false
+  };
+  const harness = createHarness({ activeBooking });
+  const middleware = interviewCoordinationHandoffMiddleware(harness.prisma, {
+    extractMessages: () => [{
+      id: 'wamid.optout.with.booking.test',
+      from: '573001234567',
+      type: 'text',
+      text: { body: 'No deseo continuar' }
+    }],
+    sendText: harness.sendText,
+    completeCandidateNoInterestTransition,
+    cancelActiveInterviewBookings
+  });
+
+  await middleware({ body: {} }, {}, harness.next);
+
+  assert.equal(activeBooking.status, 'CANCELLED');
+  assert.equal(activeBooking.reminderWindowClosed, true);
+  assert.equal(harness.calls.bookingUpdates.length, 1);
 });
 
 test('replay #901: una corrección afirmativa posterior conserva el handoff activo', async () => {
@@ -292,6 +331,34 @@ test('replay #901: una corrección afirmativa posterior conserva el handoff acti
   assert.ok(inbound?.respondedAt);
   const reply = harness.messages.find((message) => message.rawPayload?.source === 'interview_coordination_handoff_continuation');
   assert.equal(reply?.rawPayload?.decision, 'continue_after_explicit_correction');
+});
+
+test('replay #901: retiro y corrección en el mismo turno lógico producen una sola decisión', async () => {
+  const harness = createHarness();
+  const middleware = interviewCoordinationHandoffMiddleware(harness.prisma, {
+    extractMessages: () => [{
+      id: 'wamid.same-turn.optout.test',
+      from: '573001234567',
+      type: 'text',
+      text: { body: 'No deseo continuar' }
+    }, {
+      id: 'wamid.same-turn.correction.test',
+      from: '573001234567',
+      type: 'text',
+      text: { body: 'Sí deseo continuar' }
+    }],
+    sendText: harness.sendText
+  });
+
+  await middleware({ body: {} }, {}, harness.next);
+
+  assert.equal(harness.calls.sends.length, 1);
+  assert.match(harness.calls.sends[0].body, /proceso continúa activo/i);
+  const handledInbound = harness.messages.filter((message) => (
+    ['wamid.same-turn.optout.test', 'wamid.same-turn.correction.test'].includes(message.waMessageId)
+  ));
+  assert.equal(handledInbound.length, 2);
+  assert.ok(handledInbound.every((message) => message.respondedAt));
 });
 
 test('una confirmación de asistencia no se convierte en reanudación ni respuesta automática', async () => {
