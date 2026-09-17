@@ -98,7 +98,7 @@ function isQuestionLike(text = '') {
 }
 
 function startsWithExplicitConsent(text = '') {
-  return /^(si|sii|sip|claro|correcto|de acuerdo|acepto|autorizo|consiento|estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso)\b/.test(text);
+  return /^(si+|sip|claro|correcto|de acuerdo|acepto|autorizo|consiento|estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso)\b/.test(text);
 }
 
 function startsWithExplicitVacancyConfirmation(text = '') {
@@ -188,11 +188,11 @@ export function isConsentAcceptance(text = '') {
   if (isQuestionLike(text) && !startsWithExplicitConsent(normalized)) return false;
   return hasAny(normalized, [
     /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
-    /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo|consiento)\b/,
+    /\b(si+|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo|consiento)\b/,
     /\b(estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso|tienen mi permiso|autorizacion concedida)\b/,
     /\b(pueden|puede)\s+(usar|tratar|manejar|procesar|guardar)\s+(mis|los)\s+datos\b/,
     /\b(pueden|puede)\s+continuar\s+con\s+(mis|los)\s+datos\b/,
-    /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo|continuemos|sigamos)\b$/
+    /\b(si+|sip|claro|correcto|de acuerdo|dale|ok|listo|continuemos|sigamos)\b$/
   ]);
 }
 
