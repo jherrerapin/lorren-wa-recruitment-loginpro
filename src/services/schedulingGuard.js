@@ -16,7 +16,6 @@ export function evaluateSchedulingGuard({ candidate = {}, vacancy = null, nextSl
   if (vacancy && vacancy.isActive !== true) reasons.push('vacancy_inactive');
   if (vacancy && vacancy.acceptingApplications !== true) reasons.push('vacancy_not_accepting_applications');
   if (!nextSlot?.slot) reasons.push('missing_valid_slot');
-  if (candidate.gender === 'FEMALE') reasons.push('female_candidate');
   if (candidate.status && BLOCKED_STATUSES.has(String(candidate.status))) reasons.push(`blocked_status:${candidate.status}`);
   if (actionType === 'confirm_booking' && !acceptedOfferedSlot) reasons.push('candidate_did_not_accept_offered_slot');
 
