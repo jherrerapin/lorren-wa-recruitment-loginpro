@@ -1,6 +1,7 @@
 import { MessageDirection, MessageType } from '@prisma/client';
 import { buildContextualReply } from './contextualReply.js';
 import { sanitizeForRawPayload } from './debugTrace.js';
+import { detectConversationIntent } from './conversationIntent.js';
 import {
   findInboundConversationMessage,
   markConversationMessagesResponded,
@@ -105,21 +106,18 @@ export function isInterviewCoordinationQuestion(value = '') {
   return /\b(quiero|necesito|quisiera)\s+(cambiar|saber|confirmar|preguntar|reprogramar)\b/.test(normalized);
 }
 
-export function isInterviewCoordinationOptOut(value = '') {
-  const normalized = normalizeComparableText(value);
-  return /^(?:no deseo continuar|no quiero continuar|ya no deseo continuar|ya no quiero continuar|no me interesa|prefiero no continuar|mejor no continuar)$/.test(normalized);
-}
-
-function isInterviewCoordinationContinuation(value = '') {
-  const normalized = normalizeComparableText(value);
-  return /^(?:si deseo continuar|si quiero continuar|deseo continuar|quiero continuar|si me interesa|me interesa continuar)$/.test(normalized);
+function classifyInterviewCoordinationDecision(value = '') {
+  return detectConversationIntent(value, {
+    currentStep: 'DONE',
+    isDoneStep: true
+  });
 }
 
 function hasPreviousInterviewCoordinationOptOut(recentMessages = []) {
   const previousInbound = [...recentMessages]
     .reverse()
     .find((message) => String(message?.direction || '').toUpperCase() === 'INBOUND');
-  return isInterviewCoordinationOptOut(previousInbound?.body || '');
+  return classifyInterviewCoordinationDecision(previousInbound?.body || '') === 'no_interest';
 }
 
 export function resolveInterviewCoordinationOutreachContext(recentMessages = []) {
@@ -310,21 +308,36 @@ async function answerInterviewCoordinationDecision(prisma, candidate, from, inbo
       handoffPreserved: true
     }
   });
-  await prisma.candidate.update({
-    where: { id: candidate.id },
-    data: continuing
-      ? {
+  if (continuing) {
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: {
         reminderScheduledFor: null,
         reminderState: 'CANCELLED',
         lastOutboundAt: sentAt
       }
-      : {
-        currentStep: 'DONE',
-        reminderScheduledFor: null,
-        reminderState: 'SKIPPED',
-        lastOutboundAt: sentAt
+    });
+  } else {
+    const completeNoInterest = dependencies.completeCandidateNoInterestTransition;
+    if (typeof completeNoInterest !== 'function') {
+      throw new TypeError('interview_coordination_no_interest_transition_required');
+    }
+    const transition = await completeNoInterest(prisma, {
+      candidateId: candidate.id,
+      expected: {
+        currentStep: candidate.currentStep,
+        reminderScheduledFor: candidate.reminderScheduledFor,
+        reminderState: candidate.reminderState
       }
-  });
+    });
+    if (transition.count !== 1) {
+      throw new Error('interview_coordination_no_interest_state_conflict');
+    }
+    await prisma.candidate.update({
+      where: { id: candidate.id },
+      data: { lastOutboundAt: sentAt }
+    });
+  }
   await markConversationMessagesResponded(prisma, {
     messageIds: [inboundMessage.id],
     respondedAt: sentAt
@@ -343,8 +356,9 @@ export function interviewCoordinationHandoffMiddleware(prismaInput, dependencies
         const from = String(message?.from || '').trim();
         const body = String(message?.text?.body || '').trim();
         const isQuestion = isInterviewCoordinationQuestion(body);
-        const isOptOut = isInterviewCoordinationOptOut(body);
-        const isContinuation = isInterviewCoordinationContinuation(body);
+        const decisionIntent = classifyInterviewCoordinationDecision(body);
+        const isOptOut = decisionIntent === 'no_interest';
+        const isContinuation = decisionIntent === 'confirmation_yes' || decisionIntent === 'apply_intent';
         if (!from || (!isQuestion && !isOptOut && !isContinuation)) continue;
 
         const candidate = await prisma.candidate.findUnique({
