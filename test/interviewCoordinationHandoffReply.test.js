@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   INTERVIEW_COORDINATION_HANDOFF_REPLY_POLICY,
   interviewCoordinationHandoffMiddleware,
+  isInterviewCoordinationOptOut,
   isInterviewCoordinationQuestion,
   resolveInterviewCoordinationOutreachContext
 } from '../src/services/botAutomationPolicy.js';
@@ -204,6 +205,74 @@ test('replay seudonimizado: responde la duda del handoff, remite al gestor y con
   assert.equal(reply.direction, 'OUTBOUND');
 });
 
+test('replay #901: una negativa final durante el handoff se cierra y recibe respuesta', async () => {
+  const harness = createHarness();
+  const middleware = interviewCoordinationHandoffMiddleware(harness.prisma, {
+    extractMessages: () => [{
+      id: 'wamid.optout.test',
+      from: '573001234567',
+      type: 'text',
+      text: { body: 'No deseo continuar' }
+    }],
+    sendText: harness.sendText
+  });
+
+  await middleware({ body: {} }, {}, harness.next);
+
+  assert.equal(harness.calls.next, 1);
+  assert.equal(harness.calls.sends.length, 1);
+  assert.match(harness.calls.sends[0].body, /cerramos tu participación/i);
+  assert.equal(harness.candidate.currentStep, 'DONE');
+  assert.equal(harness.candidate.botPaused, true);
+  assert.equal(harness.candidate.botResumeMode, 'interview_coordination_handoff');
+  assert.equal(harness.candidate.reminderState, 'SKIPPED');
+  assert.equal(harness.candidate.reminderScheduledFor, null);
+
+  const inbound = harness.messages.find((message) => message.waMessageId === 'wamid.optout.test');
+  assert.ok(inbound?.respondedAt);
+  const reply = harness.messages.find((message) => message.rawPayload?.source === 'interview_coordination_handoff_opt_out');
+  assert.equal(reply?.rawPayload?.decision, 'close_after_explicit_opt_out');
+});
+
+test('replay #901: una corrección afirmativa posterior conserva el handoff activo', async () => {
+  const harness = createHarness({
+    existingInbound: {
+      id: 'message-previous-optout',
+      candidateId: 'candidate-handoff-test',
+      waMessageId: 'wamid.previous.optout',
+      direction: 'INBOUND',
+      messageType: 'TEXT',
+      body: 'No deseo continuar',
+      rawPayload: {},
+      respondedAt: new Date('2026-08-25T14:04:00.000Z'),
+      createdAt: new Date('2026-08-25T14:04:00.000Z')
+    }
+  });
+  const middleware = interviewCoordinationHandoffMiddleware(harness.prisma, {
+    extractMessages: () => [{
+      id: 'wamid.correction.test',
+      from: '573001234567',
+      type: 'text',
+      text: { body: 'Sí deseo continuar' }
+    }],
+    sendText: harness.sendText
+  });
+
+  await middleware({ body: {} }, {}, harness.next);
+
+  assert.equal(harness.calls.sends.length, 1);
+  assert.match(harness.calls.sends[0].body, /proceso continúa activo/i);
+  assert.match(harness.calls.sends[0].body, /\+57 300 765 4321/);
+  assert.equal(harness.candidate.status, 'CONTACTADO');
+  assert.equal(harness.candidate.botPaused, true);
+  assert.equal(harness.candidate.botResumeMode, 'interview_coordination_handoff');
+
+  const inbound = harness.messages.find((message) => message.waMessageId === 'wamid.correction.test');
+  assert.ok(inbound?.respondedAt);
+  const reply = harness.messages.find((message) => message.rawPayload?.source === 'interview_coordination_handoff_continuation');
+  assert.equal(reply?.rawPayload?.decision, 'continue_after_explicit_correction');
+});
+
 test('una confirmación de asistencia no se convierte en reanudación ni respuesta automática', async () => {
   const harness = createHarness();
   const middleware = interviewCoordinationHandoffMiddleware(harness.prisma, {
@@ -255,6 +324,8 @@ test('la política reconoce preguntas y recupera el contexto de la citación ent
   assert.equal(isInterviewCoordinationQuestion('¿A qué hora debo llegar?'), true);
   assert.equal(isInterviewCoordinationQuestion('Dirección por favor'), true);
   assert.equal(isInterviewCoordinationQuestion('Confirmo asistencia'), false);
+  assert.equal(isInterviewCoordinationOptOut('No deseo continuar'), true);
+  assert.equal(isInterviewCoordinationOptOut('Sí deseo continuar'), false);
 
   const context = resolveInterviewCoordinationOutreachContext([{
     direction: 'OUTBOUND',
