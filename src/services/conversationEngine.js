@@ -254,7 +254,7 @@ FLUJO SOLO POSTULACION:
 - NO menciones entrevistas ni uses acciones de agenda.`;
   }
 
-  return `GENERO: ${gender === 'MALE' ? 'Masculino' : 'Otro'}.
+  return `GENERO: ${gender === 'MALE' ? 'Masculino' : gender === 'FEMALE' ? 'Femenino' : 'Otro'}.
 FLUJO POSTULACION + ENTREVISTA:
 - Recolecta datos y hoja de vida.
 - Cuando ya exista datos + HV y haya un slot valido, usa "offer_interview".
