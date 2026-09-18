@@ -257,53 +257,43 @@ test('replay #901: responde la pregunta y después retoma únicamente los datos 
 });
 
 
-test('replay #901: structured experience label inside data block is not treated as question', async () => {
-  const candidate = {
-    id: 'candidate-replay-structured-data',
-    status: 'IN_PROCESS',
-    stage: 'collecting_data',
-    full_name: null,
-    email: null,
-    age: null,
-    city: null,
-    experience: null,
-    transport: null,
-    document_number: null,
-    cv_url: null,
-    selected_vacancy_id: 'vacancy-1',
-  };
-
-  const { deps, outboundMessages } = createDeps({
-    candidate,
-    parsedFields: {
-      fullName: 'Nombre Seudónimo',
-      email: 'persona@example.invalid',
-      age: 31,
-      city: 'Ciudad Ejemplo',
-      experience: 'Dos años en ventas',
-      transport: 'Transporte público',
-      documentNumber: 'DOC-SEUDONIMO',
-    },
-  });
-  const { handleIncomingMessage } = createIncomingMessageHandler(deps);
-
-  const result = await handleIncomingMessage({
-    channel: 'whatsapp',
-    from: '+00000000000',
-    text: [
-      'Nombre: Nombre Seudónimo',
-      'Correo: persona@example.invalid',
-      'Edad: 31',
-      'Ciudad: Ciudad Ejemplo',
-      'Qué experiencia tengo: Dos años en ventas',
-      'Transporte: Transporte público',
-      'Documento: DOC-SEUDONIMO',
-    ].join('\n'),
-    messageId: 'msg-replay-structured-data',
+test('replay #901: una etiqueta de experiencia dentro del bloque de datos no se trata como pregunta', async () => {
+  const result = await runConversationCase({
+    id: 'audit-901-structured-experience-label',
+    steps: [
+      'Me llamo Ana Torres. Cédula de ciudadanía 1234567890. Edad 29 años. Barrio Jordan. No cuento con restricciones médicas. Medio de transporte bicicleta. Experiencia 3 meses certificados. Qué experiencia tengo: cargue y descargue, auxiliar de bodega.'
+    ],
+    candidate: replayCandidate({
+      id: 'candidate-audit-901-structured-label',
+      phone: '573000000903',
+      currentStep: 'COLLECTING_DATA',
+      vacancyId: 'vac-post',
+      dataConsentStatus: 'ACCEPTED',
+      dataConsentVersion: 'lorren-v2-2026-07-v3',
+      experienceSummary: null
+    }),
+    vacancies: baseVacancies,
+    operations: baseOperations,
+    expect: {
+      candidate: {
+        fullName: 'Ana Torres',
+        documentType: 'CC',
+        documentNumber: '1234567890',
+        age: 29,
+        neighborhood: 'Jordan',
+        medicalRestrictions: 'Sin restricciones médicas',
+        transportMode: 'Bicicleta',
+        experienceInfo: 'Sí',
+        experienceTime: '3 meses'
+      },
+      lastReplyIncludes: ['confirma estos datos'],
+      lastReplyNotIncludes: ['requisitos registrados', 'te cuento sobre']
+    }
+  }, {
+    processText,
+    createDebugTrace,
+    recognizeCurrentEnginePrompt: true
   });
 
-  assert.equal(result.ok, true);
-  assert.equal(candidate.full_name, 'Nombre Seudónimo');
-  assert.equal(candidate.experience, 'Dos años en ventas');
-  assert.doesNotMatch(outboundMessages.at(-1)?.text || '', /requisitos de la vacante/i);
+  assert.ok(result.debugTraces[0].persisted_fields.includes('experienceSummary'));
 });
