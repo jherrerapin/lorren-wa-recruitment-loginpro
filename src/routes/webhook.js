@@ -2366,6 +2366,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   const askedVacancyQuestion = Boolean(
     currentVacancy
     && isQuestionLike(cleanText)
+    && (
+      /[?¿]/.test(cleanText)
+      || ['faq', 'info_request'].includes(resolvedIntent)
+    )
     && !isSchedulingConfirmationIntent(cleanText)
     && !isSchedulingRescheduleIntent(cleanText)
     && !isDocumentValidationQuestion(cleanText)
