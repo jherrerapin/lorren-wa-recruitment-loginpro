@@ -255,3 +255,55 @@ test('replay #901: responde la pregunta y después retoma únicamente los datos 
     'fullName'
   ]);
 });
+
+
+test('replay #901: structured experience label inside data block is not treated as question', async () => {
+  const candidate = {
+    id: 'candidate-replay-structured-data',
+    status: 'IN_PROCESS',
+    stage: 'collecting_data',
+    full_name: null,
+    email: null,
+    age: null,
+    city: null,
+    experience: null,
+    transport: null,
+    document_number: null,
+    cv_url: null,
+    selected_vacancy_id: 'vacancy-1',
+  };
+
+  const { deps, outboundMessages } = createDeps({
+    candidate,
+    parsedFields: {
+      fullName: 'Nombre Seudónimo',
+      email: 'persona@example.invalid',
+      age: 31,
+      city: 'Ciudad Ejemplo',
+      experience: 'Dos años en ventas',
+      transport: 'Transporte público',
+      documentNumber: 'DOC-SEUDONIMO',
+    },
+  });
+  const { handleIncomingMessage } = createIncomingMessageHandler(deps);
+
+  const result = await handleIncomingMessage({
+    channel: 'whatsapp',
+    from: '+00000000000',
+    text: [
+      'Nombre: Nombre Seudónimo',
+      'Correo: persona@example.invalid',
+      'Edad: 31',
+      'Ciudad: Ciudad Ejemplo',
+      'Qué experiencia tengo: Dos años en ventas',
+      'Transporte: Transporte público',
+      'Documento: DOC-SEUDONIMO',
+    ].join('\n'),
+    messageId: 'msg-replay-structured-data',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(candidate.full_name, 'Nombre Seudónimo');
+  assert.equal(candidate.experience, 'Dos años en ventas');
+  assert.doesNotMatch(outboundMessages.at(-1)?.text || '', /requisitos de la vacante/i);
+});
