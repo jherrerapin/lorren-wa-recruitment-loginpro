@@ -7,6 +7,10 @@ import {
   isPostCompletionAck
 } from '../src/services/conversationIntent.js';
 import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
+import { processText } from '../src/routes/webhook.js';
+import { createDebugTrace } from '../src/services/debugTrace.js';
+import { runConversationCase } from './helpers/conversationHarness.js';
+import { baseOperations, baseVacancies } from './fixtures/conversationCases.js';
 import {
   ContextualAllowedAction,
   evaluateContextualResponseGate,
@@ -71,6 +75,59 @@ test('una protesta sobre datos ya enviados no se convierte en nombre aunque el n
     assert.equal(sanitized.fields.fullName, undefined, text);
     assert.equal(sanitized.rejectedFields[0]?.reason, 'already_sent_statement_is_not_identity', text);
   }
+});
+
+test('replay #901: la protesta no llega a persistencia como nombre del candidato', async () => {
+  const result = await runConversationCase({
+    id: 'audit-901-name-protest',
+    steps: ['Yaselos mandé\nAño 29'],
+    candidate: {
+      id: 'candidate-audit-name-protest',
+      phone: '573000000905',
+      status: 'NUEVO',
+      currentStep: 'COLLECTING_DATA',
+      vacancyId: 'vac-post',
+      fullName: null,
+      documentType: null,
+      documentNumber: '1000000000',
+      age: null,
+      gender: 'UNKNOWN',
+      neighborhood: 'Madrid Cundinamarca',
+      locality: null,
+      medicalRestrictions: null,
+      transportMode: 'Bicicleta',
+      experienceInfo: 'No',
+      experienceTime: '0',
+      experienceSummary: null,
+      cvData: null,
+      cvOriginalName: null,
+      cvMimeType: null,
+      reminderState: 'NONE',
+      reminderScheduledFor: null,
+      botPaused: false,
+      botPausedAt: null,
+      botPauseReason: null,
+      botResumeMode: null,
+      dataConsentStatus: 'ACCEPTED',
+      dataConsentVersion: 'lorren-v2-2026-07-v3',
+      lastInboundAt: null,
+      lastOutboundAt: null,
+      createdAt: new Date('2026-09-01T12:00:00.000Z')
+    },
+    vacancies: baseVacancies,
+    operations: baseOperations,
+    expect: {
+      candidate: { fullName: null, currentStep: 'COLLECTING_DATA' },
+      lastReplyIncludes: ['nombre completo']
+    }
+  }, {
+    processText,
+    createDebugTrace,
+    recognizeCurrentEnginePrompt: true
+  });
+
+  assert.equal(result.debugTraces[0].normalized_fields.fullName, undefined);
+  assert.equal(result.debugTraces[0].persisted_fields.includes('fullName'), false);
 });
 
 test('analiza una pregunta e interés como actos simultáneos y accionables', () => {
