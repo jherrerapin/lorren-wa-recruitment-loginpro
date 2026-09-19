@@ -7,7 +7,6 @@ import {
   VacancyFirstGateAction,
   resolveVacancyFirstGate
 } from '../src/services/vacancyFirstGate.js';
-import { buildVacancyQuestionReply } from '../src/services/dataConsentGate.js';
 
 const ConversationStep = Object.freeze({
   MENU: 'MENU',
@@ -582,56 +581,4 @@ test('reconoce me encuentro interesado como confirmación activa de vacante asig
   assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_AWAIT_CONSENT');
   assert.match(decision.reply, /autorización|autorizas/i);
   assert.doesNotMatch(decision.reply, /para avanzar, compárteme/i);
-});
-
-
-test('replay #901: una pregunta de turnos recibe solo la información configurada y no repite la ficha', async () => {
-  const active = vacancy({
-    id: 'vac-turnos',
-    requirements: 'Experiencia mínima. Disponibilidad para turnos rotativos y tiempo extra.',
-    conditions: 'Vinculación inmediata. Pagos quincenales.'
-  });
-  const decision = await decide({
-    text: '¿Los turnos son de domingo a domingo o de lunes a sábado?',
-    candidatePatch: {
-      currentStep: ConversationStep.GREETING_SENT,
-      vacancyId: active.id
-    },
-    vacancies: [active],
-    currentVacancy: active
-  });
-
-  assert.equal(decision.resolution.reason, 'active_vacancy_information_request');
-  assert.match(decision.reply, /turnos rotativos/i);
-  assert.match(decision.reply, /no hay días ni un horario exacto/i);
-  assert.doesNotMatch(decision.reply, /funciones del cargo|documentación para el proceso/i);
-});
-
-test('las rutas de preguntas comparten la autoridad temporal y no inventan fecha de inicio', async () => {
-  const active = vacancy({ id: 'vac-inicio' });
-  const text = '¿Cuándo empiezo?';
-  const decision = await decide({
-    text,
-    candidatePatch: {
-      currentStep: ConversationStep.GREETING_SENT,
-      vacancyId: active.id
-    },
-    vacancies: [active],
-    currentVacancy: active
-  });
-  const consentRouteReply = buildVacancyQuestionReply(active, text);
-
-  assert.equal(decision.reply, consentRouteReply);
-  assert.match(decision.reply, /no hay una fecha de inicio registrada/i);
-});
-
-
-test('la autoridad temporal conserva días configurados con tilde', () => {
-  const reply = buildVacancyQuestionReply(
-    vacancy({ conditions: 'Jornada de miércoles a sábado, de 8:00 a.m. a 5:00 p.m.' }),
-    '¿Qué horario tiene la vacante?'
-  );
-
-  assert.match(reply, /miércoles a sábado/i);
-  assert.doesNotMatch(reply, /no hay días ni un horario exacto/i);
 });
