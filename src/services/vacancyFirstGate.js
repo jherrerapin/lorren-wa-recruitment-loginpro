@@ -393,6 +393,9 @@ export function hasRecentSameBotDecision({ recentMessages = [], replyKind = '', 
     const actor = String(payload.actor || 'BOT');
     if (actor === 'RECRUITER' || actor === 'ADMIN') return false;
     const source = String(payload.source || '');
+    if (replyKind === 'DATA_CONSENT_PROMPT' && source === 'data_consent_prompt') {
+      return messageCreatedAtMs(message) >= since;
+    }
     if (source && source !== 'vacancy_first_gate' && !source.startsWith('bot_')) return false;
     return payload.replyKind === replyKind && payload.reason === reason && messageCreatedAtMs(message) >= since;
   });
@@ -406,7 +409,11 @@ function preventRepeatDecision(decision, { recentMessages = [], inboundText = ''
   if (!decision?.replyKind || !decision?.reason) return decision;
   const repeated = hasRecentSameBotDecision({ recentMessages, replyKind: decision.replyKind, reason: decision.reason, windowMinutes: 10 });
   const turn = analyzeConversationTurn(inboundText, { currentStep });
-  if (!repeated || turn.actionable || hasMaterialVacancyEvidence(inboundText, city)) return decision;
+  const repeatsInterestWhileConsentPending = decision.replyKind === 'DATA_CONSENT_PROMPT'
+    && turn.interest
+    && !turn.question
+    && !turn.data;
+  if (!repeated || (turn.actionable && !repeatsInterestWhileConsentPending) || hasMaterialVacancyEvidence(inboundText, city)) return decision;
   return {
     action: VacancyFirstGateAction.SUPPRESS_REPLY,
     reason: 'REPEAT_PREVENTED',
@@ -751,7 +758,7 @@ export async function resolveVacancyFirstGate({
     if (currentStep === GREETING_SENT && currentVacancy && intent.affirmative) {
       if (requiresConsentBeforeCollection(candidate)) {
         const informationAnswer = buildVacancyInformationAnswer(currentVacancy, inboundText);
-        return {
+        return preventRepeatDecision({
           action: VacancyFirstGateAction.REPLY,
           reason: 'ACTIVE_VACANCY_CONFIRMED_AWAIT_CONSENT',
           replyKind: 'DATA_CONSENT_PROMPT',
@@ -765,7 +772,7 @@ export async function resolveVacancyFirstGate({
             reminderState: 'SKIPPED'
           },
           reply: [informationAnswer, buildDataConsentPromptReply()].filter(Boolean).join('\n\n')
-        };
+        }, { recentMessages, inboundText, city: vacancyCity(currentVacancy), currentStep });
       }
       const informationAnswer = buildVacancyInformationAnswer(currentVacancy, inboundText);
       const dataPrompt = buildActiveDataPrompt(candidate, currentVacancy);
@@ -810,7 +817,7 @@ export async function resolveVacancyFirstGate({
       const initialTurn = analyzeConversationTurn(inboundText);
       if (initialTurn.interest) {
         const informationAnswer = buildVacancyInformationAnswer(resolution.vacancy, inboundText);
-        return {
+        return preventRepeatDecision({
           action: VacancyFirstGateAction.REPLY,
           reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT',
           replyKind: 'DATA_CONSENT_PROMPT',
@@ -829,7 +836,7 @@ export async function resolveVacancyFirstGate({
             buildDataConsentPromptReply()
           ].filter(Boolean).join('\n\n'),
           resolution
-        };
+        }, { recentMessages, inboundText, city: resolution.city, currentStep });
       }
       return {
         action: VacancyFirstGateAction.REPLY,
