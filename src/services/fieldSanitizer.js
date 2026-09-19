@@ -13,6 +13,7 @@
 
 import { hasAmbiguousGenderEvidence, hasStrongGenderEvidence } from './genderEvidencePolicy.js';
 import { classifyAgeEvidence } from './ageEvidence.js';
+import { isAlreadySentIntent } from './conversationIntent.js';
 
 const DEFAULT_MIN_CONFIDENCE = 0.72;
 const CORE_IDENTITY_FIELDS = new Set(['fullName', 'documentType', 'documentNumber', 'age']);
@@ -385,6 +386,7 @@ function looksLikeResidenceValue(value = '') {
 
 function sanitizeFullName(value, evidence, text, context, turnType) {
   if (!looksLikePersonalName(value)) return { ok: false, reason: 'invalid_name_shape' };
+  if (isAlreadySentIntent(value)) return { ok: false, reason: 'already_sent_statement_is_not_identity' };
 
   const fieldContext = fieldWasPending('fullName', context) || lastQuestionAskedForField('fullName', context);
   const identityCue = hasNameEvidenceCue(text);
