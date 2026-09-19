@@ -75,6 +75,20 @@ test('una protesta sobre datos ya enviados no se convierte en nombre aunque el n
     assert.equal(sanitized.fields.fullName, undefined, text);
     assert.equal(sanitized.rejectedFields[0]?.reason, 'already_sent_statement_is_not_identity', text);
   }
+
+  const mixedTurn = sanitizeCandidateFieldsForConversation({
+    fields: { fullName: 'Ana Torres' },
+    evidence: {
+      fullName: { snippet: 'Nombre: Ana Torres', confidence: 0.9, source: 'local_parser' }
+    },
+    text: 'Ya los puse\nNombre: Ana Torres',
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      missingFields: ['fullName']
+    },
+    turnType: null
+  });
+  assert.equal(mixedTurn.fields.fullName, 'Ana Torres');
 });
 
 test('replay #901: la protesta no llega a persistencia como nombre del candidato', async () => {
