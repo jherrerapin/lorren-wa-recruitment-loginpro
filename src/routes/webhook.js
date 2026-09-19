@@ -1,4 +1,5 @@
 import { requestDataConsent, buildDataConsentPromptReply } from '../services/dataConsentGate.js';
+import { buildVacancyTimingReply } from '../services/vacancyPublicInfo.js';
 import express from 'express';
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendImageMessage, sendTextMessage } from '../services/whatsapp.js';
@@ -389,6 +390,8 @@ function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
   const availabilityLead = isVacancyOpen(vacancy)
     ? `Te cuento sobre ${vacancy?.title || vacancy?.role || 'la vacante'}`
     : `Te cuento sobre ${vacancy?.title || vacancy?.role || 'la vacante'} y te aclaro que por ahora no esta recibiendo personal`;
+  const timingReply = buildVacancyTimingReply(vacancy, text);
+  if (timingReply) return timingReply;
   if (/(donde|direccion|ubicacion|queda|sector)/.test(n)) {
     if (vacancy?.schedulingEnabled && interviewAddress && candidate?.currentStep === ConversationStep.SCHEDULED) {
       return `${availabilityLead} La dirección de entrevista registrada es ${interviewAddress}.`;
@@ -404,7 +407,7 @@ function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
   if (/(requisit|document|edad|experien|perfil)/.test(n) && vacancy?.requirements) {
     return `${availabilityLead} Los requisitos registrados para esta vacante son: ${vacancy.requirements}.`;
   }
-  if (/(pago|salario|sueldo|turno|horario|condicion|prestacion|beneficio|contrato)/.test(n)) {
+  if (/(pago|salario|sueldo|condicion|prestacion|beneficio|contrato)/.test(n)) {
     if (vacancy?.conditions) return `${availabilityLead} Las condiciones registradas para esta vacante son: ${vacancy.conditions}.`;
     return buildUnavailableVacancyInfoReply(vacancy);
   }
