@@ -1901,7 +1901,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   const shouldEvaluateContextualGate = Boolean(
     candidate.currentStep === ConversationStep.SCHEDULED
     || candidate.currentStep === ConversationStep.DONE
-    || preliminaryContextualIntent === 'ASK_APPLICATION_STATUS'
+    || (
+      preliminaryContextualIntent === 'ASK_APPLICATION_STATUS'
+      && Boolean(candidate.vacancyId || currentVacancy?.id)
+    )
     || (currentVacancy && !currentVacancy.schedulingEnabled && contextualReadiness.readyForDone)
     || (!contextualReadiness.missingFields.length && contextualReadiness.hasValidCv && candidate.vacancyId)
   );
