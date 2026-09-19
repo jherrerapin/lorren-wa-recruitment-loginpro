@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {
   analyzeConversationTurn,
   detectConversationIntent,
+  isAlreadySentIntent,
   isPostCompletionAck
 } from '../src/services/conversationIntent.js';
+import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
 import {
   ContextualAllowedAction,
   evaluateContextualResponseGate,
@@ -49,6 +51,26 @@ test('detecta agradecimiento post cierre', () => {
 test('detecta intención de CV y fallback a provide_data', () => {
   assert.equal(detectConversationIntent('te envío mi hoja de vida'), 'cv_intent');
   assert.equal(detectConversationIntent('CC 1234567890, barrio jordán'), 'provide_data');
+});
+
+test('una protesta sobre datos ya enviados no se convierte en nombre aunque el nombre esté pendiente', () => {
+  for (const text of ['Ya se los mandé', 'Yaselos mandé', 'Ya te los envié', 'Ya compartí esos datos']) {
+    assert.equal(isAlreadySentIntent(text), true, text);
+    const sanitized = sanitizeCandidateFieldsForConversation({
+      fields: { fullName: text },
+      evidence: {
+        fullName: { snippet: text, confidence: 0.9, source: 'local_parser' }
+      },
+      text,
+      context: {
+        currentStep: 'COLLECTING_DATA',
+        missingFields: ['fullName']
+      },
+      turnType: null
+    });
+    assert.equal(sanitized.fields.fullName, undefined, text);
+    assert.equal(sanitized.rejectedFields[0]?.reason, 'already_sent_statement_is_not_identity', text);
+  }
 });
 
 test('analiza una pregunta e interés como actos simultáneos y accionables', () => {
