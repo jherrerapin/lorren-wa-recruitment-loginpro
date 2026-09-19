@@ -3,9 +3,14 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
 import {
+  buildDataConsentPromptReply,
   dataConsentGateMiddleware,
   parseConsentPendingMode
 } from '../src/services/dataConsentGate.js';
+import {
+  VacancyFirstGateAction,
+  resolveVacancyFirstGate
+} from '../src/services/vacancyFirstGate.js';
 import { CONSENT_PROMPT_IDEMPOTENCY_REPLAYS } from './conversation-replay/consentPromptIdempotencyReplay.js';
 
 const originalAxiosPost = axios.post;
@@ -138,6 +143,44 @@ async function executeReplay(replay) {
 function countBodiesMatching(bodies = [], pattern) {
   return bodies.filter((body) => pattern.test(body)).length;
 }
+
+
+test('replay #901: un segundo interés inmediato no repite el aviso entre gates', async () => {
+  const vacancy = {
+    id: 'TEST-VACANCY-REPEATED-CONSENT',
+    title: 'Auxiliar de Operación',
+    role: 'Auxiliar de Operación',
+    city: 'Neiva',
+    isActive: true,
+    acceptingApplications: true,
+    operation: { city: { name: 'Neiva' } }
+  };
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: {
+      id: 'TEST-CANDIDATE-REPEATED-CONSENT',
+      phone: 'TEST-PHONE-REPEATED-CONSENT',
+      vacancyId: vacancy.id,
+      currentStep: 'GREETING_SENT',
+      dataConsentStatus: 'PENDING',
+      botResumeMode: 'awaiting_data_consent'
+    },
+    currentVacancy: vacancy,
+    inboundText: 'Me interesa',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [{
+      direction: 'OUTBOUND',
+      body: buildDataConsentPromptReply(),
+      createdAt: new Date(),
+      rawPayload: { source: 'data_consent_prompt', consentVersion: 'lorren-v2-2026-07-v3' }
+    }],
+    vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.SUPPRESS_REPLY);
+  assert.equal(decision.reason, 'REPEAT_PREVENTED');
+  assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
+});
 
 test('replay CONV-065: el mismo waMessageId solicita consentimiento una sola vez', async () => {
   const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'conv-065-consent-prompt-webhook-retry-v1');
