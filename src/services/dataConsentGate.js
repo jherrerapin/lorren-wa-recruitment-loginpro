@@ -164,6 +164,9 @@ function isExplicitConsentRevocation(text = '') {
   const normalized = stripConsentCourtesyPrefix(text);
   if (!normalized || isConsentRightsQuestion(text)) return false;
   if (isDirectConsentWithdrawal(normalized)) return true;
+  const describesFutureRevocationRight = /\b(?:puedo|podre|tengo derecho a)\s+(?:solicitar|pedir)\b.*\b(?:revocatoria|revocacion)\b/.test(normalized);
+  const containsDirectRevocationVerb = /\b(?:revoco|retiro|revoquen|revoque|retiren|retire)\b/.test(normalized);
+  if (describesFutureRevocationRight && !containsDirectRevocationVerb) return false;
   return hasAny(normalized, [
     /\b(cancelar|cancelen|cancele|detener|detengan|detenga|parar|paren|pare)\b.*\b(postulacion|proceso|tratamiento|datos)\b/,
     /\b(eliminar|eliminen|elimine|borrar|borren|borre|suprimir|supriman|suprima)\b.*\b(datos|informacion|registro)\b/,
