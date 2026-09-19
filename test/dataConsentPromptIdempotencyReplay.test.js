@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import axios from 'axios';
 import {
   buildDataConsentPromptReply,
+  DATA_CONSENT_VERSION,
   dataConsentGateMiddleware,
   parseConsentPendingMode
 } from '../src/services/dataConsentGate.js';
@@ -172,13 +173,46 @@ test('replay #901: un segundo interés inmediato no repite el aviso entre gates'
       direction: 'OUTBOUND',
       body: buildDataConsentPromptReply(),
       createdAt: new Date(),
-      rawPayload: { source: 'data_consent_prompt', consentVersion: 'lorren-v2-2026-07-v3' }
+      rawPayload: { source: 'data_consent_prompt', consentVersion: DATA_CONSENT_VERSION }
     }],
     vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
   });
 
   assert.equal(decision.action, VacancyFirstGateAction.SUPPRESS_REPLY);
   assert.equal(decision.reason, 'REPEAT_PREVENTED');
+  assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
+});
+
+
+test('una versión anterior del aviso no oculta la versión canónica vigente', async () => {
+  const vacancy = {
+    id: 'TEST-VACANCY-CONSENT-VERSION',
+    title: 'Auxiliar de Operación',
+    city: 'Neiva',
+    isActive: true,
+    acceptingApplications: true,
+    operation: { city: { name: 'Neiva' } }
+  };
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: {
+      id: 'TEST-CANDIDATE-CONSENT-VERSION',
+      vacancyId: vacancy.id,
+      currentStep: 'GREETING_SENT',
+      dataConsentStatus: 'PENDING'
+    },
+    currentVacancy: vacancy,
+    inboundText: 'Me interesa',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [{
+      direction: 'OUTBOUND',
+      createdAt: new Date(),
+      rawPayload: { source: 'data_consent_prompt', consentVersion: 'version-anterior' }
+    }],
+    vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
 });
 
