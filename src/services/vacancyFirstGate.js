@@ -3,7 +3,7 @@ import { analyzeConversationTurn } from './conversationIntent.js';
 import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply } from './dataConsentGate.js';
 import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
-import { buildProfessionalVacancyPresentation, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
+import { buildProfessionalVacancyPresentation, buildVacancyTimingReply, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 
 const ConversationStep = Object.freeze({
   MENU: 'MENU',
@@ -175,6 +175,8 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
   if (!turn.vacancyInformationRequest && !turn.question) return '';
 
   const normalized = normalizeResolverText(inboundText);
+  const timingReply = buildVacancyTimingReply(vacancy, inboundText);
+  if (timingReply) return timingReply;
   const title = vacancyTitle(vacancy);
   const city = vacancyCity(vacancy);
   const location = city ? ` en ${city}` : '';
@@ -223,7 +225,7 @@ if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehi
       : `La información disponible no especifica documentos adicionales para ${title}${location}.`;
   }
 
-  if (/\b(salario|sueldo|pago|horario|turno|beneficio|beneficios|condiciones|contrato|prestaciones)\b/.test(normalized)) {
+  if (/\b(salario|sueldo|pago|beneficio|beneficios|condiciones|contrato|prestaciones)\b/.test(normalized)) {
     return conditions
       ? `Las condiciones para ${title}${location} son: ${conditions}.`
       : `La información disponible no especifica ese detalle para ${title}${location}.`;
