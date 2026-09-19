@@ -582,3 +582,37 @@ test('reconoce me encuentro interesado como confirmación activa de vacante asig
   assert.match(decision.reply, /autorización|autorizas/i);
   assert.doesNotMatch(decision.reply, /para avanzar, compárteme/i);
 });
+
+
+test('replay #901: una respuesta corta de residencia pide solo el cargo y se conserva en el turno siguiente', async () => {
+  const activeSiberia = vacancy({
+    id: 'vac-siberia',
+    title: 'Auxiliar Cargue y Descargue Siberia',
+    role: 'Auxiliar de bodega cargue y descargue',
+    city: 'Bogota',
+    operation: bogotaOperation,
+    operationAddress: 'Parques logísticos de Siberia, cerca de Madrid'
+  });
+
+  const residenceTurn = await decide({
+    text: 'De Madrid Cundinamarca',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    vacancies: [activeSiberia]
+  });
+
+  assert.equal(residenceTurn.reason, 'RESIDENCE_CAPTURED_VACANCY_NEEDED');
+  assert.match(residenceTurn.reply, /cargo|vacante/i);
+  assert.doesNotMatch(residenceTurn.reply, /desde qué ciudad/i);
+
+  const roleTurn = await decide({
+    text: 'Para bodega',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    vacancies: [activeSiberia],
+    recentMessages: [
+      { direction: 'INBOUND', body: 'De Madrid Cundinamarca' }
+    ]
+  });
+
+  assert.equal(roleTurn.vacancyId, 'vac-siberia');
+  assert.equal(roleTurn.resolution.reason, 'matched_active_vacancy');
+});
