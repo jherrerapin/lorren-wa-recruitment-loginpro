@@ -1,4 +1,4 @@
-import { getCandidateReadiness } from './readinessGuard.js';
+import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
 import { formatInterviewDate } from './interviewScheduler.js';
 import { buildInterviewDocumentsSentence, sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 import { classifyOutboundActor, inferOutboundActorFromSource, isManualOutboundSource } from './manualSourcePolicy.js';
@@ -177,9 +177,15 @@ function buildLogisticsReply({ semanticIntent, vacancy = null, activeInterviewBo
   return null;
 }
 
-function buildApplicationStatusReply({ candidate = {}, vacancy = null, activeInterviewBooking = null } = {}) {
+function buildApplicationStatusReply({ candidate = {}, vacancy = null, activeInterviewBooking = null, readiness = null } = {}) {
   if (activeInterviewBooking?.scheduledAt) {
     return `Tu entrevista sigue registrada para ${formatInterviewDate(new Date(activeInterviewBooking.scheduledAt))}. Si hay algún cambio, te lo informaremos por este medio.`;
+  }
+  if (readiness && (!readiness.coreDataComplete || !readiness.hasValidCv)) {
+    return [
+      'Aún no puedo confirmar cuándo te contactará el equipo porque tu registro todavía está incompleto.',
+      buildMissingFieldReply(readiness)
+    ].filter(Boolean).join(' ');
   }
   if (candidate.currentStep === 'DONE' || ['REGISTRADO', 'VALIDANDO', 'APROBADO', 'CONTACTADO', 'CONTRATADO'].includes(String(candidate.status || ''))) {
     return 'Tu postulación continúa registrada. El equipo de selección revisará el proceso y te contactará por este medio si hay una novedad.';
@@ -255,7 +261,7 @@ export function inferContextualSemanticIntent({
     if (/\b(quien|persona|contacto|preguntar|recibe|recepcion)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_CONTACT_PERSON';
     if (/\b(hora|horario|cuando|fecha|dia)\b/.test(normalized) && hasInterviewTopic) return 'ASK_INTERVIEW_TIME';
 
-    if (/\b(como\s+va|estado\s+de|alguna\s+novedad|hay\s+novedad|mi\s+proceso|mi\s+postulacion|me\s+habia\s+postulado|me\s+postule|que\s+ha\s+pasado|cuando\s+me\s+llaman|me\s+van\s+a\s+llamar|sigue\s+registrad[oa])\b/.test(normalized)) {
+    if (/\b(como\s+va|estado\s+de|alguna\s+novedad|hay\s+novedad|mi\s+proceso|mi\s+postulacion|me\s+habia\s+postulado|me\s+postule|que\s+ha\s+pasado|cuando\s+me\s+(?:llaman|contactan|contactaran)|me\s+van\s+a\s+(?:llamar|contactar)|cuando\s+se\s+comunican\s+conmigo|sigue\s+registrad[oa])\b/.test(normalized)) {
       return 'ASK_APPLICATION_STATUS';
     }
 
@@ -341,7 +347,7 @@ export function evaluateContextualResponseGate({
         reason: 'Candidate asked for process status and the active appointment provides an authoritative answer.',
         responsePurpose: ContextualResponsePurpose.LOGISTICS_ANSWER,
         requiresHumanReview: false,
-        reply: buildApplicationStatusReply({ candidate, vacancy, activeInterviewBooking: activeBooking })
+        reply: buildApplicationStatusReply({ candidate, vacancy, activeInterviewBooking: activeBooking, readiness: resolvedReadiness })
       });
     }
 
@@ -414,7 +420,7 @@ export function evaluateContextualResponseGate({
         allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,
         reason: 'Candidate main flow is complete and asked for application status; answer from the persisted process state without reopening collection.',
         responsePurpose: ContextualResponsePurpose.LOGISTICS_ANSWER,
-        reply: buildApplicationStatusReply({ candidate, vacancy, activeInterviewBooking: activeBooking }),
+        reply: buildApplicationStatusReply({ candidate, vacancy, activeInterviewBooking: activeBooking, readiness: resolvedReadiness }),
         metadata: { postCompletionContext: true }
       });
     }
@@ -432,6 +438,16 @@ export function evaluateContextualResponseGate({
       allowedAction: ContextualAllowedAction.NO_REPLY,
       reason: 'Candidate has no real pending action; suppressing automatic flow continuation.',
       responsePurpose: ContextualResponsePurpose.NONE
+    });
+  }
+
+  if (semanticIntent === 'ASK_APPLICATION_STATUS') {
+    return decision({
+      shouldReply: true,
+      allowedAction: ContextualAllowedAction.ANSWER_FROM_ASSIGNED_CONTEXT,
+      reason: 'Candidate asked for application status while the registration still has a deterministic pending action.',
+      responsePurpose: ContextualResponsePurpose.LOGISTICS_ANSWER,
+      reply: buildApplicationStatusReply({ candidate, vacancy, activeInterviewBooking: activeBooking, readiness: resolvedReadiness })
     });
   }
 
