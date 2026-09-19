@@ -624,3 +624,14 @@ test('las rutas de preguntas comparten la autoridad temporal y no inventan fecha
   assert.equal(decision.reply, consentRouteReply);
   assert.match(decision.reply, /no hay una fecha de inicio registrada/i);
 });
+
+
+test('la autoridad temporal conserva días configurados con tilde', () => {
+  const reply = buildVacancyQuestionReply(
+    vacancy({ conditions: 'Jornada de miércoles a sábado, de 8:00 a.m. a 5:00 p.m.' }),
+    '¿Qué horario tiene la vacante?'
+  );
+
+  assert.match(reply, /miércoles a sábado/i);
+  assert.doesNotMatch(reply, /no hay días ni un horario exacto/i);
+});
