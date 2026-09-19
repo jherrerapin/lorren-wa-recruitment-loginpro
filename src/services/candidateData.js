@@ -98,6 +98,12 @@ function normalizeMunicipalityResidence(value = '') {
   for (const [municipality, residence] of Object.entries(MUNICIPALITY_RESIDENCE_VALUES)) {
     if (new RegExp(`\\b${municipality}\\b`).test(normalized)) return residence;
   }
+
+  const explicitDepartment = normalized.match(/^(?:municipio\\s+de\\s+)?([a-zñ]+(?:\\s+[a-zñ]+){0,2})\\s+cundinamarca$/);
+  if (explicitDepartment?.[1] && looksLikeLocationChunk(explicitDepartment[1])) {
+    return `${capitalizeWords(explicitDepartment[1])} Cundinamarca`;
+  }
+
   return null;
 }
 
@@ -847,6 +853,11 @@ export function parseNaturalData(text = '') {
   if (!result.locality) {
     const standaloneBogotaLocality = normalizeBogotaLocalidad(cleanLocationValue(compact));
     if (standaloneBogotaLocality) result.locality = standaloneBogotaLocality;
+  }
+
+  if (!result.neighborhood && !result.locality) {
+    const standaloneMunicipality = normalizeMunicipalityResidence(cleanLocationValue(compact));
+    if (standaloneMunicipality) result.neighborhood = standaloneMunicipality;
   }
 
   if (!result.neighborhood || !result.locality) {
