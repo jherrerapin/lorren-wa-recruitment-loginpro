@@ -1,6 +1,6 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
 import { analyzeConversationTurn } from './conversationIntent.js';
-import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply } from './dataConsentGate.js';
+import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply, DATA_CONSENT_VERSION } from './dataConsentGate.js';
 import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
 import { buildProfessionalVacancyPresentation, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
@@ -393,7 +393,11 @@ export function hasRecentSameBotDecision({ recentMessages = [], replyKind = '', 
     const actor = String(payload.actor || 'BOT');
     if (actor === 'RECRUITER' || actor === 'ADMIN') return false;
     const source = String(payload.source || '');
-    if (replyKind === 'DATA_CONSENT_PROMPT' && source === 'data_consent_prompt') {
+    if (
+      replyKind === 'DATA_CONSENT_PROMPT'
+      && source === 'data_consent_prompt'
+      && payload.consentVersion === DATA_CONSENT_VERSION
+    ) {
       return messageCreatedAtMs(message) >= since;
     }
     if (source && source !== 'vacancy_first_gate' && !source.startsWith('bot_')) return false;
