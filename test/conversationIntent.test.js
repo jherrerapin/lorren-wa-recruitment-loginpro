@@ -81,6 +81,12 @@ test('replay #901: la protesta no llega a persistencia como nombre del candidato
   const result = await runConversationCase({
     id: 'audit-901-name-protest',
     steps: ['Yaselos mandé\nAño 29'],
+    preMessages: [{
+      direction: 'OUTBOUND',
+      messageType: 'TEXT',
+      body: 'Gracias, registré lo que compartiste. Para completar el proceso aún faltan: nombre completo, tipo de documento, edad, restricciones medicas.',
+      rawPayload: { source: 'bot_flow', actor: 'BOT' }
+    }],
     candidate: {
       id: 'candidate-audit-name-protest',
       phone: '573000000905',
@@ -117,7 +123,7 @@ test('replay #901: la protesta no llega a persistencia como nombre del candidato
     vacancies: baseVacancies,
     operations: baseOperations,
     expect: {
-      candidate: { fullName: null, currentStep: 'COLLECTING_DATA' },
+      candidate: { fullName: null, age: 29, currentStep: 'COLLECTING_DATA' },
       lastReplyIncludes: ['nombre completo']
     }
   }, {
@@ -127,7 +133,9 @@ test('replay #901: la protesta no llega a persistencia como nombre del candidato
   });
 
   assert.equal(result.debugTraces[0].normalized_fields.fullName, undefined);
+  assert.equal(result.debugTraces[0].normalized_fields.age, 29);
   assert.equal(result.debugTraces[0].persisted_fields.includes('fullName'), false);
+  assert.equal(result.debugTraces[0].persisted_fields.includes('age'), true);
 });
 
 test('analiza una pregunta e interés como actos simultáneos y accionables', () => {
