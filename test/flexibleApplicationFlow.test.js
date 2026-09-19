@@ -53,6 +53,13 @@ test('una pregunta hipotética sobre datos no se registra como autorización', (
   assert.equal(isConsentAcceptance('Sí autorizo, ¿qué sigue?'), true);
 });
 
+test('una autorización que describe el derecho de revocatoria no se convierte en rechazo', () => {
+  const authorization = 'Autorizo a LoginPro a tratar mis datos personales para gestionar mi postulación. Entiendo que puedo solicitar la corrección o revocatoria de esta autorización.';
+  assert.equal(isConsentAcceptance(authorization), true);
+  assert.equal(isConsentRejection(authorization), false);
+  assert.equal(isConsentRejection('Revoco la autorización para tratar mis datos'), true);
+});
+
 test('las dudas sobre autorización se responden antes de retomar el consentimiento', () => {
   assert.match(buildConsentQuestionReply('¿Para qué van a usar mis datos?'), /gestionar la postulación/i);
   assert.match(buildConsentQuestionReply('¿Puedo revocar después?'), /revocatoria/i);
