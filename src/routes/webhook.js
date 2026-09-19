@@ -1891,9 +1891,17 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     );
 
   const contextualReadiness = getCandidateReadiness(candidate, currentVacancy);
+  const preliminaryContextualIntent = inferContextualSemanticIntent({
+    text: cleanText,
+    resolvedIntent,
+    interviewIntent: null,
+    isQuestion: isQuestionLike(cleanText),
+    hasDataIntent
+  });
   const shouldEvaluateContextualGate = Boolean(
     candidate.currentStep === ConversationStep.SCHEDULED
     || candidate.currentStep === ConversationStep.DONE
+    || preliminaryContextualIntent === 'ASK_APPLICATION_STATUS'
     || (currentVacancy && !currentVacancy.schedulingEnabled && contextualReadiness.readyForDone)
     || (!contextualReadiness.missingFields.length && contextualReadiness.hasValidCv && candidate.vacancyId)
   );
