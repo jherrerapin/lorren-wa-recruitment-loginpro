@@ -14,7 +14,7 @@ import { isSupervisorPhone } from './adminSupervisor.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
 import { cancelActiveInterviewBookings } from './interviewBookingStateService.js';
 import { cancelReminderOnInbound } from './reminder.js';
-import { buildProfessionalVacancyPresentation, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
+import { buildProfessionalVacancyPresentation, buildVacancyTimingReply, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 import {
   compareAndSwapConversationMessagePayload,
   findInboundConversationMessage,
@@ -1021,6 +1021,8 @@ function buildVacancyInfoReply(vacancy = {}, { includeInterestPrompt = true } = 
 export function buildVacancyQuestionReply(vacancy = {}, text = '') {
   if (!vacancy || !isQuestionLike(text)) return '';
   const normalized = normalize(text);
+  const timingReply = buildVacancyTimingReply(vacancy, text);
+  if (timingReply) return timingReply;
   const lead = `Sobre la vacante de ${vacancyTitle(vacancy)}`;
 
   if (/\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized)) {
@@ -1035,7 +1037,7 @@ export function buildVacancyQuestionReply(vacancy = {}, text = '') {
       ? `${lead}, las condiciones son: ${cleanConfiguredFragment(vacancy.conditions)}.`
       : 'La información disponible de esta vacante no especifica el salario.';
   }
-  if (/\b(horario|turno|jornada|contrato|prestacion|beneficio|condicion)\b/.test(normalized)) {
+  if (/\b(contrato|prestacion|beneficio|condicion)\b/.test(normalized)) {
     return cleanConfiguredFragment(vacancy.conditions)
       ? `${lead}, las condiciones son: ${cleanConfiguredFragment(vacancy.conditions)}.`
       : 'La información disponible de esta vacante no especifica ese detalle.';
