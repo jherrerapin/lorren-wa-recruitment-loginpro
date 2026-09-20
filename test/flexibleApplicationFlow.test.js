@@ -81,31 +81,31 @@ test('durante el consentimiento responde con datos de la vacante sin inventar', 
   assert.match(buildVacancyQuestionReply(vacancy, '¿Y si no tengo moto?'), /Técnico o tecnólogo/i);
 });
 
-test('un archivo enviado antes del consentimiento queda bloqueado sin depender de una vacante', () => {
+test('un archivo enviado antes del consentimiento sigue a la persistencia canónica sin autorizar la postulación', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'MENU', botResumeMode: null },
     { type: 'document', document: { id: 'media-1', filename: 'hoja-de-vida.pdf' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'attachment_before_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
-test('datos personales enviados espontáneamente se bloquean antes del consentimiento', () => {
+test('datos personales espontáneos pueden persistirse sin equivaler a consentimiento', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'MENU', botResumeMode: null },
     { type: 'text', text: { body: 'Me llamo Persona Prueba y mi cédula es 1020304050' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
-test('un perfil futuro sin vacancyId también exige consentimiento antes de capturar datos', () => {
+test('un perfil futuro conserva datos espontáneos y mantiene pendiente el consentimiento funcional', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'GREETING_SENT', botResumeMode: 'future_profile_capture' },
     { type: 'text', text: { body: 'Me llamo Persona Prueba' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'capture_mode_without_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
 test('un candidato con autorización aceptada no vuelve a ser bloqueado por el gate', () => {
