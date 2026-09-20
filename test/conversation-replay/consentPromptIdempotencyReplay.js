@@ -62,9 +62,10 @@ export const CONSENT_PROMPT_IDEMPOTENCY_REPLAYS = Object.freeze([
     ]],
     expected: {
       outboundMessages: 1,
-      inboundClaims: 2,
+      inboundClaims: 1,
       consentPromptCount: 1,
-      finalPending: true
+      finalPending: true,
+      remainingMessages: 1
     }
   },
   {
@@ -125,12 +126,12 @@ export const CONSENT_PROMPT_IDEMPOTENCY_REPLAYS = Object.freeze([
       }
     }]],
     expected: {
-      outboundMessages: 1,
-      inboundClaims: 1,
+      outboundMessages: 0,
+      inboundClaims: 0,
       consentPromptCount: 0,
       finalPending: true,
-      cvResendRequired: true
+      cvResendRequired: false,
+      remainingMessages: 1
     }
   }
 ]);
-
