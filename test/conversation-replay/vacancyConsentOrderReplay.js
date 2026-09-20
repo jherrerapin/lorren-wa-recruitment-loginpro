@@ -15,7 +15,7 @@ export const VACANCY_CONSENT_ORDER_REPLAYS = Object.freeze([
     expected: {
       reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
       replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
-      includes: ['condiciones registradas', '(te interesa continuar|deseas postularte)'],
+      includes: ['salario y horario registrados', '(te interesa continuar|deseas postularte)'],
       excludes: ['nombre completo', 'documento', 'edad', 'transporte', 'hoja de vida'],
       currentStep: 'GREETING_SENT',
       botResumeMode: 'awaiting_application_interest'
@@ -37,7 +37,7 @@ export const VACANCY_CONSENT_ORDER_REPLAYS = Object.freeze([
     expected: {
       reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
       replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
-      includes: ['requisitos registrados', '(te interesa continuar|deseas postularte)'],
+      includes: ['experiencia relacionada y disponibilidad operativa', '(te interesa continuar|deseas postularte)'],
       excludes: ['nombre completo', 'documento', 'edad', 'transporte', 'hoja de vida'],
       currentStep: 'GREETING_SENT',
       botResumeMode: 'awaiting_application_interest'
@@ -57,12 +57,12 @@ export const VACANCY_CONSENT_ORDER_REPLAYS = Object.freeze([
     },
     inboundText: 'Quiero postularme a auxiliar de bodega en Neiva.',
     expected: {
-      reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST',
-      replyKind: 'ACTIVE_VACANCY_INTEREST_PROMPT',
-      includes: ['(te comparto la información|encontré la vacante)', '(te interesa continuar|deseas postularte)'],
-      excludes: ['nombre completo', 'documento', 'edad', 'transporte', 'hoja de vida', 'Autorizo a LoginPro'],
+      reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT',
+      replyKind: 'DATA_CONSENT_PROMPT',
+      includes: ['Auxiliar de Bodega Neiva', 'Para continuar con tu postulación', 'Autorizo a LoginPro'],
+      excludes: ['nombre completo', 'número de documento', 'edad', 'medio de transporte'],
       currentStep: 'GREETING_SENT',
-      botResumeMode: 'awaiting_application_interest'
+      botResumeMode: 'awaiting_data_consent'
     }
   }
 ]);
