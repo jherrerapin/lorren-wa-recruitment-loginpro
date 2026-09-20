@@ -115,7 +115,7 @@ test('producción: DONE entiende quiero saber sobre mi proceso', () => {
   assert.equal(isApplicationFollowUpQuestion('Quisiera saber de mi postulación'), true);
 });
 
-test('Meta: campaign_name exacto puede resolver IDs nuevos sin usar ad_name difuso', () => {
+test('Meta: IDs objetivos desconocidos no se sustituyen por campaign_name descriptivo', () => {
   const campaigns = [
     { id: 'camp-neiva', code: 'INTERNO-NEIVA', name: 'Líder Operación Neiva Agosto 2026' },
     { id: 'camp-otra', code: 'INTERNO-OTRA', name: 'Otra campaña' }
@@ -123,8 +123,8 @@ test('Meta: campaign_name exacto puede resolver IDs nuevos sin usar ad_name difu
   const exact = resolveCampaignForReferral(campaigns, { referral: {
     campaign_id: '120999999999', ad_id: '238999999999', campaign_name: 'Líder Operación Neiva Agosto 2026', ad_name: 'Anuncio cualquiera'
   }});
-  assert.equal(exact.campaign.id, 'camp-neiva');
-  assert.equal(exact.matchMode, 'campaign_name_exact_with_objective_metadata');
+  assert.equal(exact.campaign, null);
+  assert.equal(exact.reason, 'objective_metadata_without_exact_campaign_match');
 
   const unsafe = resolveCampaignForReferral(campaigns, { referral: {
     campaign_id: '120999999999', ad_id: '238999999999', ad_name: 'Líder Operación Neiva Agosto 2026'
@@ -160,7 +160,7 @@ test('producción: interés explícito al resolver vacante pasa directamente a c
   assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT');
   assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
   assert.match(decision.reply, /Vacante: Líder de Operación/i);
-  assert.match(decision.reply, /Antes de recibir o guardar datos personales/i);
+  assert.match(decision.reply, /Para continuar con tu postulación[\\s\\S]*autorizas/i);
   assert.doesNotMatch(decision.reply, /¿Te interesa continuar con esta vacante\?/i);
 });
 
