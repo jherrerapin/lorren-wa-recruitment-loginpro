@@ -2956,16 +2956,26 @@ async function waitForMixedTurnDocument(prisma, documentMessage) {
 }
 
 async function markMixedTurnDocumentState(prisma, messageId, state) {
-  if (!messageId) return;
-  await mergeConversationMessagePayload(prisma, {
-    messageId,
-    patch: {
-      logicalTurn: {
-        kind: 'text_with_cv_document',
-        state
+  if (!messageId) return false;
+  try {
+    await mergeConversationMessagePayload(prisma, {
+      messageId,
+      patch: {
+        logicalTurn: {
+          kind: 'text_with_cv_document',
+          state
+        }
       }
-    }
-  });
+    });
+    return true;
+  } catch (error) {
+    console.warn('[MIXED_TURN_DOCUMENT_STATE_ERROR]', JSON.stringify({
+      messageId,
+      state,
+      error: summarizeError(error)
+    }));
+    return false;
+  }
 }
 
 async function tryAcquireMultilineProcessing(prisma, candidateId, scheduling = {}) {
@@ -3303,20 +3313,22 @@ export function webhookRouter(prisma) {
                     inboundCreatedAt,
                     getMultilineWindowMs()
                   );
-                  await markMixedTurnDocumentState(prisma, inbound.id, 'CV_SAVED');
-                  await sleep(getMultilineWindowMs());
-                  const pendingTextsAfterWindow = selectAdjacentMixedTurnTexts(
-                    await fetchPendingTextBatch(prisma, candidate.id),
-                    inboundCreatedAt,
-                    getMultilineWindowMs()
-                  );
-                  const replyOwner = resolveMixedTurnReplyOwner({
-                    pendingTexts: [...pendingTextsAtSave, ...pendingTextsAfterWindow],
-                    attachmentState: 'CV_SAVED'
-                  });
-                  if (replyOwner === 'text_batch') {
-                    debugTrace.mixed_turn_reply_owner = 'text_batch';
-                    continue;
+                  const coordinationMarked = await markMixedTurnDocumentState(prisma, inbound.id, 'CV_SAVED');
+                  if (coordinationMarked) {
+                    await sleep(getMultilineWindowMs());
+                    const pendingTextsAfterWindow = selectAdjacentMixedTurnTexts(
+                      await fetchPendingTextBatch(prisma, candidate.id),
+                      inboundCreatedAt,
+                      getMultilineWindowMs()
+                    );
+                    const replyOwner = resolveMixedTurnReplyOwner({
+                      pendingTexts: [...pendingTextsAtSave, ...pendingTextsAfterWindow],
+                      attachmentState: 'CV_SAVED'
+                    });
+                    if (replyOwner === 'text_batch') {
+                      debugTrace.mixed_turn_reply_owner = 'text_batch';
+                      continue;
+                    }
                   }
                 } else {
                   debugTrace.cv_saved = false;
