@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { resolveVacancyFirstGate, VacancyFirstGateAction } from '../src/services/vacancyFirstGate.js';
 import { isAffirmativeVacancyConfirmation, APPLICATION_INTEREST_PENDING_MODE, DATA_CONSENT_PENDING_MODE } from '../src/services/dataConsentGate.js';
-import { isApplicationFollowUpQuestion, processText } from '../src/routes/webhook.js';
+import {
+  isApplicationFollowUpQuestion,
+  processText,
+  resolveMixedTurnReplyOwner,
+  selectAdjacentMixedTurnTexts
+} from '../src/routes/webhook.js';
 import { resolveCampaignForReferral } from '../src/services/campaignAttribution.js';
 import { getMultilineWindowMs } from '../src/services/multiline.js';
 import { createDebugTrace } from '../src/services/debugTrace.js';
@@ -144,6 +149,44 @@ test('latencia: configuración heredada de 60s queda limitada a máximo 20s', ()
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
     if (previousReasoning === undefined) delete process.env.LORREN_REASONING_WINDOW_MS; else process.env.LORREN_REASONING_WINDOW_MS = previousReasoning;
   }
+});
+
+
+test('replay #901: texto y HV consecutivos comparten una sola respuesta lógica', () => {
+  const texts = [{
+    id: 'message-profile-test',
+    createdAt: new Date('2026-09-08T18:10:01.000Z'),
+    body: 'Nombre y tipo de documento de prueba'
+  }];
+  const adjacent = selectAdjacentMixedTurnTexts(
+    texts,
+    new Date('2026-09-08T18:10:09.000Z'),
+    20_000
+  );
+
+  assert.deepEqual(adjacent.map((message) => message.id), ['message-profile-test']);
+  assert.equal(resolveMixedTurnReplyOwner({
+    pendingTexts: adjacent,
+    attachmentState: 'CV_SAVED'
+  }), 'text_batch');
+});
+
+test('defensa: una HV fuera de la ventana conserva su respuesta independiente', () => {
+  const texts = [{
+    id: 'message-earlier-test',
+    createdAt: new Date('2026-09-08T18:09:30.000Z')
+  }];
+  const adjacent = selectAdjacentMixedTurnTexts(
+    texts,
+    new Date('2026-09-08T18:10:09.000Z'),
+    20_000
+  );
+
+  assert.equal(adjacent.length, 0);
+  assert.equal(resolveMixedTurnReplyOwner({
+    pendingTexts: adjacent,
+    attachmentState: 'CV_SAVED'
+  }), 'attachment');
 });
 
 
