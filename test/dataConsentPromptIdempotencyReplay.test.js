@@ -229,7 +229,7 @@ test('replay CONV-065: el mismo waMessageId solicita consentimiento una sola vez
   assert.deepEqual(observed.deliveries.map((item) => item.remainingMessages), [0, 0]);
 });
 
-test('replay CONV-062: dos fragmentos se reclaman pero solo el primero construye el aviso', async () => {
+test('replay CONV-062: el interés se reclama y el dato adyacente sigue al webhook canónico', async () => {
   const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'conv-062-fragmented-interest-single-prompt-v1');
   const observed = await executeReplay(replay);
   const pending = parseConsentPendingMode(observed.getCandidate().botResumeMode);
@@ -238,8 +238,9 @@ test('replay CONV-062: dos fragmentos se reclaman pero solo el primero construye
   assert.equal(observed.metrics.inboundClaims, replay.expected.inboundClaims);
   assert.equal(countBodiesMatching(observed.sentBodies, /Autorizo a LoginPro/i), replay.expected.consentPromptCount);
   assert.equal(pending.pending, replay.expected.finalPending);
-  assert.deepEqual(observed.deliveries[0].statuses, [200]);
-  assert.equal(observed.deliveries[0].remainingMessages, 0);
+  assert.deepEqual(observed.deliveries[0].statuses, []);
+  assert.equal(observed.deliveries[0].nextCalls, 1);
+  assert.equal(observed.deliveries[0].remainingMessages, replay.expected.remainingMessages);
 });
 
 test('replay CONV-034: una pregunta pendiente se responde una vez ante reintento', async () => {
@@ -258,7 +259,7 @@ test('replay CONV-034: una pregunta pendiente se responde una vez ante reintento
   assert.deepEqual(observed.deliveries.map((item) => item.statuses), [[200], [200]]);
 });
 
-test('replay CONV-008: un adjunto pendiente conserva reenvío de CV sin repetir consentimiento', async () => {
+test('replay CONV-008: un adjunto pendiente queda para persistencia sin repetir consentimiento', async () => {
   const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'conv-008-pending-attachment-no-second-prompt-v1');
   const observed = await executeReplay(replay);
   const pending = parseConsentPendingMode(observed.getCandidate().botResumeMode);
@@ -268,7 +269,8 @@ test('replay CONV-008: un adjunto pendiente conserva reenvío de CV sin repetir 
   assert.equal(countBodiesMatching(observed.sentBodies, /Autorizo a LoginPro/i), replay.expected.consentPromptCount);
   assert.equal(pending.pending, replay.expected.finalPending);
   assert.equal(pending.cvResendRequired, replay.expected.cvResendRequired);
-  assert.deepEqual(observed.deliveries[0].statuses, [200]);
-  assert.equal(observed.deliveries[0].remainingMessages, 0);
+  assert.deepEqual(observed.deliveries[0].statuses, []);
+  assert.equal(observed.deliveries[0].nextCalls, 1);
+  assert.equal(observed.deliveries[0].remainingMessages, replay.expected.remainingMessages);
+  assert.equal(observed.getClaimedInboundIds().has('TEST-WAMID-CONV-008-PENDING-ATTACHMENT'), false);
 });
-
