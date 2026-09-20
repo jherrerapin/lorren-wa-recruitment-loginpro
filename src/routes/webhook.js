@@ -2898,6 +2898,76 @@ async function fetchPendingTextBatch(prisma, candidateId) {
   });
 }
 
+export function selectAdjacentMixedTurnTexts(messages = [], attachmentCreatedAt, windowMs = getMultilineWindowMs()) {
+  const attachmentAt = new Date(attachmentCreatedAt).getTime();
+  const safeWindowMs = Number(windowMs);
+  if (!Number.isFinite(attachmentAt) || !Number.isFinite(safeWindowMs) || safeWindowMs < 0) return [];
+  return (Array.isArray(messages) ? messages : []).filter((message) => {
+    const createdAt = new Date(message?.createdAt).getTime();
+    return Number.isFinite(createdAt) && Math.abs(createdAt - attachmentAt) <= safeWindowMs;
+  });
+}
+
+export function resolveMixedTurnReplyOwner({ pendingTexts = [], attachmentState = '' } = {}) {
+  return attachmentState === 'CV_SAVED' && pendingTexts.length > 0
+    ? 'text_batch'
+    : 'attachment';
+}
+
+function mixedTurnAttachmentState(message = {}) {
+  return String(message?.rawPayload?.logicalTurn?.state || '');
+}
+
+async function findAdjacentMixedTurnDocument(prisma, candidateId, pendingTextBatch = []) {
+  if (!pendingTextBatch.length || typeof prisma?.message?.findFirst !== 'function') return null;
+  const windowMs = getMultilineWindowMs();
+  const firstAt = new Date(pendingTextBatch[0].createdAt).getTime();
+  const lastAt = new Date(pendingTextBatch[pendingTextBatch.length - 1].createdAt).getTime();
+  if (!Number.isFinite(firstAt) || !Number.isFinite(lastAt)) return null;
+  return prisma.message.findFirst({
+    where: {
+      candidateId,
+      direction: MessageDirection.INBOUND,
+      messageType: MessageType.DOCUMENT,
+      respondedAt: null,
+      createdAt: {
+        gte: new Date(firstAt - windowMs),
+        lte: new Date(lastAt + windowMs)
+      }
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, createdAt: true, rawPayload: true }
+  });
+}
+
+async function waitForMixedTurnDocument(prisma, documentMessage) {
+  let current = documentMessage;
+  const windowMs = getMultilineWindowMs();
+  const deadline = Date.now() + windowMs;
+  while (current && !['CV_SAVED', 'FAILED'].includes(mixedTurnAttachmentState(current))) {
+    if (Date.now() >= deadline || typeof prisma?.message?.findUnique !== 'function') break;
+    await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
+    current = await prisma.message.findUnique({
+      where: { id: documentMessage.id },
+      select: { id: true, createdAt: true, rawPayload: true }
+    });
+  }
+  return current;
+}
+
+async function markMixedTurnDocumentState(prisma, messageId, state) {
+  if (!messageId) return;
+  await mergeConversationMessagePayload(prisma, {
+    messageId,
+    patch: {
+      logicalTurn: {
+        kind: 'text_with_cv_document',
+        state
+      }
+    }
+  });
+}
+
 async function tryAcquireMultilineProcessing(prisma, candidateId, scheduling = {}) {
   const acquired = await acquireCandidateMultilineBatch(prisma, {
     candidateId,
@@ -2995,6 +3065,11 @@ export function webhookRouter(prisma) {
           const pendingBatch = await fetchPendingTextBatch(prisma, candidate.id);
           if (!pendingBatch.length) continue;
 
+          const adjacentDocument = await findAdjacentMixedTurnDocument(prisma, candidate.id, pendingBatch);
+          const mixedTurnDocument = adjacentDocument
+            ? await waitForMixedTurnDocument(prisma, adjacentDocument)
+            : null;
+
           const consolidatedText = consolidateTextMessages(pendingBatch);
           const anchorMessage = pendingBatch[pendingBatch.length - 1];
           let candidateForBatch = await prisma.candidate.findUnique({ where: { id: candidate.id } });
@@ -3012,7 +3087,10 @@ export function webhookRouter(prisma) {
             });
             await markPotentialDuplicateByDocument(prisma, candidate.id);
             await markConversationMessagesResponded(prisma, {
-              messageIds: pendingBatch.map((item) => item.id),
+              messageIds: [
+                ...pendingBatch.map((item) => item.id),
+                ...(mixedTurnAttachmentState(mixedTurnDocument) === 'CV_SAVED' ? [mixedTurnDocument.id] : [])
+              ],
               respondedAt: new Date()
             });
           } catch (error) {
@@ -3032,6 +3110,10 @@ export function webhookRouter(prisma) {
         const inboundBody = buildInboundBody(message);
         const inbound = await saveInboundMessage(prisma, candidate.id, message, inboundBody, inboundType, from);
         if (!inbound.isNew) continue;
+        const inboundMessageRecord = inbound.id && typeof prisma?.message?.findUnique === 'function'
+          ? await prisma.message.findUnique({ where: { id: inbound.id }, select: { createdAt: true } })
+          : null;
+        const inboundCreatedAt = inboundMessageRecord?.createdAt || new Date();
 
         await cancelReminderOnInbound(prisma, candidate.id);
 
@@ -3216,6 +3298,26 @@ export function webhookRouter(prisma) {
                     originalName: filename
                   });
                   debugTrace.cv_saved = true;
+                  const pendingTextsAtSave = selectAdjacentMixedTurnTexts(
+                    await fetchPendingTextBatch(prisma, candidate.id),
+                    inboundCreatedAt,
+                    getMultilineWindowMs()
+                  );
+                  await markMixedTurnDocumentState(prisma, inbound.id, 'CV_SAVED');
+                  await sleep(getMultilineWindowMs());
+                  const pendingTextsAfterWindow = selectAdjacentMixedTurnTexts(
+                    await fetchPendingTextBatch(prisma, candidate.id),
+                    inboundCreatedAt,
+                    getMultilineWindowMs()
+                  );
+                  const replyOwner = resolveMixedTurnReplyOwner({
+                    pendingTexts: [...pendingTextsAtSave, ...pendingTextsAfterWindow],
+                    attachmentState: 'CV_SAVED'
+                  });
+                  if (replyOwner === 'text_batch') {
+                    debugTrace.mixed_turn_reply_owner = 'text_batch';
+                    continue;
+                  }
                 } else {
                   debugTrace.cv_saved = false;
                   const requiresHumanReview = shouldEscalateHumanReview({ attachmentAnalysis: analysis })
@@ -3291,6 +3393,7 @@ export function webhookRouter(prisma) {
                   }
                 }
               } catch (error) {
+                await markMixedTurnDocumentState(prisma, inbound.id, 'FAILED');
                 debugTrace.cv_download_failed = true;
                 debugTrace.error_summary = summarizeError(error);
                 console.error('[CV_ERROR]', JSON.stringify({ phone: from, error: debugTrace.error_summary }));
