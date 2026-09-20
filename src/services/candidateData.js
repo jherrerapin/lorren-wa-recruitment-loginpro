@@ -50,7 +50,7 @@ const EXTRA_MALE_GENDER_PATTERNS = [
   /\b(?:ya\s+)?(?:estoy|quedo|me encuentro)\s+(?:postulado|inscrito|registrado)\b/i
 ];
 const NO_MEDICAL_RESTRICTION_PATTERNS = [
-  /^(?:sin\s+restriccion(?:es)?(?:\s+medicas?)?|ninguna\s+restriccion(?:\s+medica)?|ninguna)$/i,
+  /^(?:sin\s+restriccion(?:es)?(?:\s+medicas?)?|ninguna\s+restriccion(?:es)?(?:\s+medicas?)?|ninguna)$/i,
   /^(?:no\s+tengo|no\s+cuento\s+con)\s+(?:ninguna\s+)?(?:restriccion(?:es)?(?:\s+medicas?)?|limitacion(?:es)?(?:\s+medicas?)?)$/i,
   /^restriccion(?:es)?(?:\s+medicas?)?\s*:?\s*(?:ninguna|no\s+tengo|sin\s+restricciones?)$/i,
   /^no,\s*ninguna$/i,
@@ -98,6 +98,12 @@ function normalizeMunicipalityResidence(value = '') {
   for (const [municipality, residence] of Object.entries(MUNICIPALITY_RESIDENCE_VALUES)) {
     if (new RegExp(`\\b${municipality}\\b`).test(normalized)) return residence;
   }
+
+  const explicitDepartment = normalized.match(/^(?:municipio\s+de\s+)?([a-zñ]+(?:\s+[a-zñ]+){0,2})\s+cundinamarca$/);
+  if (explicitDepartment?.[1] && looksLikeLocationChunk(explicitDepartment[1])) {
+    return `${capitalizeWords(explicitDepartment[1])} Cundinamarca`;
+  }
+
   return null;
 }
 
@@ -106,14 +112,14 @@ function normalizeResidenceValue(value = '') {
 }
 
 export function looksLikeNoMedicalRestrictionsText(text = '', options = {}) {
-  const normalized = normalizeLooseText(text);
+  const normalized = normalizeLooseText(text).replace(/\bningun(?:a|o)?\b/g, 'ninguna');
   if (!normalized) return false;
 
   if (NO_MEDICAL_RESTRICTION_PATTERNS.some((pattern) => pattern.test(normalized))) {
     return true;
   }
 
-  if (/\b(?:sin\s+restriccion(?:es)?(?:\s+medicas?)?|no\s+tengo\s+(?:ninguna\s+)?restriccion(?:es)?(?:\s+medicas?)?|no\s+cuento\s+con\s+(?:ninguna\s+)?restriccion(?:es)?(?:\s+medicas?)?|ninguna\s+restriccion(?:\s+medica)?|restriccion(?:es)?(?:\s+medicas?)?\s*:?\s*(?:ninguna|no\s+tengo|sin\s+restricciones?)|estoy\s+sano(?:a)?|(?:^|\s)(?:sano|sana)(?:\s|$))\b/.test(normalized)) {
+  if (/\b(?:sin\s+restriccion(?:es)?(?:\s+medicas?)?|no\s+tengo\s+(?:ninguna\s+)?restriccion(?:es)?(?:\s+medicas?)?|no\s+cuento\s+con\s+(?:ninguna\s+)?restriccion(?:es)?(?:\s+medicas?)?|ninguna\s+restriccion(?:es)?(?:\s+medicas?)?|restriccion(?:es)?(?:\s+medicas?)?\s*:?\s*(?:ninguna|no\s+tengo|sin\s+restricciones?)|estoy\s+sano(?:a)?|(?:^|\s)(?:sano|sana)(?:\s|$))\b/.test(normalized)) {
     return true;
   }
 
@@ -847,6 +853,11 @@ export function parseNaturalData(text = '') {
   if (!result.locality) {
     const standaloneBogotaLocality = normalizeBogotaLocalidad(cleanLocationValue(compact));
     if (standaloneBogotaLocality) result.locality = standaloneBogotaLocality;
+  }
+
+  if (!result.neighborhood && !result.locality) {
+    const standaloneMunicipality = normalizeMunicipalityResidence(cleanLocationValue(compact));
+    if (standaloneMunicipality) result.neighborhood = standaloneMunicipality;
   }
 
   if (!result.neighborhood || !result.locality) {

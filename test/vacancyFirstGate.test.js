@@ -168,25 +168,30 @@ test('ibague-greeting: etapa inicial con saludo y cargo deja resolver vacante ac
   assert.equal(decision.resolution.reason, 'matched_active_vacancy');
 });
 
-test('B/E: Bogotá ambiguo o bodega sin vacantes activas bloquea captura y ofrece registro futuro opcional', async () => {
-  for (const text of [
-    'Desde Bogotá tengo experiencia en lo que me pongan a desempeñar',
-    'Escribo desde Bogotá para trabajo de bodega'
-  ]) {
-    const decision = await decide({
-      text,
-      candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
-      vacancies: [vacancy({ id: 'vac-ibague', city: 'Ibague', operation: ibagueOperation })]
-    });
+test('B/E: Bogotá como residencia conserva lo entendido y pide solo el contexto realmente pendiente', async () => {
+  const ibagueOnly = [vacancy({ id: 'vac-ibague', city: 'Ibague', operation: ibagueOperation })];
 
-    assert.equal(decision.action, VacancyFirstGateAction.REPLY);
-    assert.equal(decision.reason, 'CITY_WITHOUT_ACTIVE_VACANCIES');
-    assert.equal(decision.candidateUpdates.botResumeMode, FUTURE_PROFILE_OFFER_MODE);
-    assert.match(decision.reply, /no tengo vacantes activas|no veo operaciones activas/i);
-    assert.match(decision.reply, /perfil registrado|futuras aperturas/i);
-    assertNoPersonalDataRequest(decision.reply);
-    assertNoPublicityOrPhoto(decision.reply);
-  }
+  const residenceOnly = await decide({
+    text: 'Desde Bogotá tengo experiencia en lo que me pongan a desempeñar',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    vacancies: ibagueOnly
+  });
+  assert.equal(residenceOnly.reason, 'RESIDENCE_CAPTURED_VACANCY_NEEDED');
+  assert.match(residenceOnly.reply, /cargo|vacante/i);
+  assert.doesNotMatch(residenceOnly.reply, /desde qué ciudad/i);
+  assertNoPersonalDataRequest(residenceOnly.reply);
+  assertNoPublicityOrPhoto(residenceOnly.reply);
+
+  const residenceAndRole = await decide({
+    text: 'Escribo desde Bogotá para trabajo de bodega',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    vacancies: ibagueOnly
+  });
+  assert.equal(residenceAndRole.reason, 'RESIDENCE_AND_ROLE_CAPTURED_TARGET_NEEDED');
+  assert.match(residenceAndRole.reply, /operación|zona|anuncio|lugar/i);
+  assert.doesNotMatch(residenceAndRole.reply, /desde qué ciudad|qué cargo/i);
+  assertNoPersonalDataRequest(residenceAndRole.reply);
+  assertNoPublicityOrPhoto(residenceAndRole.reply);
 });
 
 test('saludo inicial pide ciudad y vacante con tono natural', async () => {
@@ -198,13 +203,15 @@ test('saludo inicial pide ciudad y vacante con tono natural', async () => {
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
   assert.equal(decision.reason, 'VACANCY_NOT_RESOLVED');
-  assert.equal(decision.reply, 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante?');
+  assert.match(decision.reply, /Hola, gracias por comunicarte con LoginPro/i);
+  assert.match(decision.reply, /ciudad/i);
+  assert.match(decision.reply, /cargo|vacante/i);
   assert.doesNotMatch(decision.reply, /convocatoria real|no asumir/i);
   assertNoPersonalDataRequest(decision.reply);
   assertNoPublicityOrPhoto(decision.reply);
 });
 
-test('C: GREETING_SENT + Bogotá con vacantes activas pide cargo sin recolectar residencia antes del consentimiento', async () => {
+test('C: GREETING_SENT conserva Bogotá como residencia y pide únicamente el cargo', async () => {
   const activeBogota = vacancy({
     id: 'vac-bog-active',
     title: 'Auxiliar de Bodega Bogota',
@@ -219,7 +226,7 @@ test('C: GREETING_SENT + Bogotá con vacantes activas pide cargo sin recolectar 
   });
 
   assert.equal(decision.action, VacancyFirstGateAction.REPLY);
-  assert.equal(decision.reason, 'CITY_WITH_ACTIVE_VACANCIES_ROLE_AMBIGUOUS');
+  assert.equal(decision.reason, 'RESIDENCE_CAPTURED_VACANCY_NEEDED');
   assert.doesNotMatch(decision.reply, /localidad|barrio|residencia|d[oó]nde vives/i);
   assert.match(decision.reply, /cargo|vacante/i);
   assertNoPersonalDataRequest(decision.reply);
@@ -581,4 +588,38 @@ test('reconoce me encuentro interesado como confirmación activa de vacante asig
   assert.equal(decision.reason, 'ACTIVE_VACANCY_CONFIRMED_AWAIT_CONSENT');
   assert.match(decision.reply, /autorización|autorizas/i);
   assert.doesNotMatch(decision.reply, /para avanzar, compárteme/i);
+});
+
+
+test('replay #901: una respuesta corta de residencia pide solo el cargo y se conserva en el turno siguiente', async () => {
+  const activeSiberia = vacancy({
+    id: 'vac-siberia',
+    title: 'Auxiliar Cargue y Descargue Siberia',
+    role: 'Auxiliar de bodega cargue y descargue',
+    city: 'Bogota',
+    operation: bogotaOperation,
+    operationAddress: 'Parques logísticos de Siberia, cerca de Madrid'
+  });
+
+  const residenceTurn = await decide({
+    text: 'De Madrid Cundinamarca',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    vacancies: [activeSiberia]
+  });
+
+  assert.equal(residenceTurn.reason, 'RESIDENCE_CAPTURED_VACANCY_NEEDED');
+  assert.match(residenceTurn.reply, /cargo|vacante/i);
+  assert.doesNotMatch(residenceTurn.reply, /desde qué ciudad/i);
+
+  const roleTurn = await decide({
+    text: 'Para bodega',
+    candidatePatch: { currentStep: ConversationStep.GREETING_SENT },
+    vacancies: [activeSiberia],
+    recentMessages: [
+      { direction: 'INBOUND', body: 'De Madrid Cundinamarca' }
+    ]
+  });
+
+  assert.equal(roleTurn.vacancyId, 'vac-siberia');
+  assert.equal(roleTurn.resolution.reason, 'matched_active_vacancy');
 });

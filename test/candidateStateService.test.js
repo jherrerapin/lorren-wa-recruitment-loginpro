@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resumeCandidateAutomationOnInbound } from '../src/services/candidateStateService.js';
+import {
+  completeCandidateNoInterestTransition,
+  resumeCandidateAutomationOnInbound
+} from '../src/services/candidateStateService.js';
 
 function sameValue(left, right) {
   if (left instanceof Date || right instanceof Date) {
@@ -160,5 +163,52 @@ test('rechaza cliente, candidato, fecha y snapshot de pausa inválidos', async (
       expected: { ...expectedSnapshot, botPausedAt: false }
     }),
     /candidate_expected_bot_paused_at_invalid/
+  );
+});
+
+
+test('registra retiro tardío aunque el flujo ya hubiera completado DONE', async () => {
+  const completedCandidate = {
+    id: 'candidate-completed-before-opt-out',
+    currentStep: 'DONE',
+    reminderScheduledFor: null,
+    reminderState: 'CANCELLED'
+  };
+  const { client, getState } = createHarness(completedCandidate);
+
+  const result = await completeCandidateNoInterestTransition(client, {
+    candidateId: completedCandidate.id,
+    expected: {
+      currentStep: completedCandidate.currentStep,
+      reminderScheduledFor: completedCandidate.reminderScheduledFor,
+      reminderState: completedCandidate.reminderState
+    }
+  });
+
+  assert.equal(result.count, 1);
+  assert.equal(getState().currentStep, 'DONE');
+  assert.equal(getState().reminderScheduledFor, null);
+  assert.equal(getState().reminderState, 'SKIPPED');
+});
+
+test('mantiene idempotencia cuando el retiro ya estaba registrado', async () => {
+  const alreadyClosedCandidate = {
+    id: 'candidate-already-opted-out',
+    currentStep: 'DONE',
+    reminderScheduledFor: null,
+    reminderState: 'SKIPPED'
+  };
+  const { client } = createHarness(alreadyClosedCandidate);
+
+  await assert.rejects(
+    () => completeCandidateNoInterestTransition(client, {
+      candidateId: alreadyClosedCandidate.id,
+      expected: {
+        currentStep: alreadyClosedCandidate.currentStep,
+        reminderScheduledFor: alreadyClosedCandidate.reminderScheduledFor,
+        reminderState: alreadyClosedCandidate.reminderState
+      }
+    }),
+    /candidate_no_interest_already_done/
   );
 });

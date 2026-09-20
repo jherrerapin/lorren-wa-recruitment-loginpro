@@ -224,7 +224,8 @@ export function classifyLocationMention(text = '', location = '') {
     new RegExp(`\\b(?:te\\s+escribo|les\\s+escribo|escribo|te\\s+hablo|les\\s+hablo|hablo)\\s+desde\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
     new RegExp(`\\bdesde\\s+(?:el\\s+)?municipio\\s+de\\s+${locationPattern}\\b`),
     new RegExp(`\\b(?:mi\\s+)?(?:ciudad|municipio|lugar)\\s+de\\s+residencia\\s+(?:es|queda)?\\s*(?:en\\s+)?${locationPattern}\\b`),
-    new RegExp(`\\b(?:mi\\s+)?residencia\\s+(?:es|queda)\\s+(?:en\\s+)?${locationPattern}\\b`)
+    new RegExp(`\\b(?:mi\\s+)?residencia\\s+(?:es|queda)\\s+(?:en\\s+)?${locationPattern}\\b`),
+    new RegExp(`^(?:de|desde)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`)
   ];
 
   let lastExplicit = 'unspecified';

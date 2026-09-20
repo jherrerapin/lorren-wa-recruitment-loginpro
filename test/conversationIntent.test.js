@@ -3,8 +3,14 @@ import assert from 'node:assert/strict';
 import {
   analyzeConversationTurn,
   detectConversationIntent,
+  isAlreadySentIntent,
   isPostCompletionAck
 } from '../src/services/conversationIntent.js';
+import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
+import { processText } from '../src/routes/webhook.js';
+import { createDebugTrace } from '../src/services/debugTrace.js';
+import { runConversationCase } from './helpers/conversationHarness.js';
+import { baseOperations, baseVacancies } from './fixtures/conversationCases.js';
 import {
   ContextualAllowedAction,
   evaluateContextualResponseGate,
@@ -49,6 +55,101 @@ test('detecta agradecimiento post cierre', () => {
 test('detecta intención de CV y fallback a provide_data', () => {
   assert.equal(detectConversationIntent('te envío mi hoja de vida'), 'cv_intent');
   assert.equal(detectConversationIntent('CC 1234567890, barrio jordán'), 'provide_data');
+});
+
+test('una protesta sobre datos ya enviados no se convierte en nombre aunque el nombre esté pendiente', () => {
+  for (const text of ['Ya se los mandé', 'Yaselos mandé', 'Ya te los envié', 'Ya compartí esos datos']) {
+    assert.equal(isAlreadySentIntent(text), true, text);
+    const sanitized = sanitizeCandidateFieldsForConversation({
+      fields: { fullName: text },
+      evidence: {
+        fullName: { snippet: text, confidence: 0.9, source: 'local_parser' }
+      },
+      text,
+      context: {
+        currentStep: 'COLLECTING_DATA',
+        missingFields: ['fullName']
+      },
+      turnType: null
+    });
+    assert.equal(sanitized.fields.fullName, undefined, text);
+    assert.equal(sanitized.rejectedFields[0]?.reason, 'already_sent_statement_is_not_identity', text);
+  }
+
+  const mixedTurn = sanitizeCandidateFieldsForConversation({
+    fields: { fullName: 'Ana Torres' },
+    evidence: {
+      fullName: { snippet: 'Nombre: Ana Torres', confidence: 0.9, source: 'local_parser' }
+    },
+    text: 'Ya los puse\nNombre: Ana Torres',
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      missingFields: ['fullName']
+    },
+    turnType: null
+  });
+  assert.equal(mixedTurn.fields.fullName, 'Ana Torres');
+});
+
+test('replay #901: la protesta no llega a persistencia como nombre del candidato', async () => {
+  const result = await runConversationCase({
+    id: 'audit-901-name-protest',
+    steps: ['Yaselos mandé\nAño 29'],
+    preMessages: [{
+      direction: 'OUTBOUND',
+      messageType: 'TEXT',
+      body: 'Gracias, registré lo que compartiste. Para completar el proceso aún faltan: nombre completo, tipo de documento, edad, restricciones medicas.',
+      rawPayload: { source: 'bot_flow', actor: 'BOT' }
+    }],
+    candidate: {
+      id: 'candidate-audit-name-protest',
+      phone: '573000000905',
+      status: 'NUEVO',
+      currentStep: 'COLLECTING_DATA',
+      vacancyId: 'vac-post',
+      fullName: null,
+      documentType: null,
+      documentNumber: '1000000000',
+      age: null,
+      gender: 'UNKNOWN',
+      neighborhood: 'Madrid Cundinamarca',
+      locality: null,
+      medicalRestrictions: null,
+      transportMode: 'Bicicleta',
+      experienceInfo: 'No',
+      experienceTime: '0',
+      experienceSummary: null,
+      cvData: null,
+      cvOriginalName: null,
+      cvMimeType: null,
+      reminderState: 'NONE',
+      reminderScheduledFor: null,
+      botPaused: false,
+      botPausedAt: null,
+      botPauseReason: null,
+      botResumeMode: null,
+      dataConsentStatus: 'ACCEPTED',
+      dataConsentVersion: 'lorren-v2-2026-07-v3',
+      lastInboundAt: null,
+      lastOutboundAt: null,
+      createdAt: new Date('2026-09-01T12:00:00.000Z')
+    },
+    vacancies: baseVacancies,
+    operations: baseOperations,
+    expect: {
+      candidate: { fullName: null, age: 29, currentStep: 'COLLECTING_DATA' },
+      lastReplyIncludes: ['nombre completo']
+    }
+  }, {
+    processText,
+    createDebugTrace,
+    recognizeCurrentEnginePrompt: true
+  });
+
+  assert.equal(result.debugTraces[0].normalized_fields.fullName, undefined);
+  assert.equal(result.debugTraces[0].normalized_fields.age, 29);
+  assert.equal(result.debugTraces[0].persisted_fields.includes('fullName'), false);
+  assert.equal(result.debugTraces[0].persisted_fields.includes('age'), true);
 });
 
 test('analiza una pregunta e interés como actos simultáneos y accionables', () => {

@@ -1,9 +1,9 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
 import { analyzeConversationTurn } from './conversationIntent.js';
-import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply } from './dataConsentGate.js';
+import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply, DATA_CONSENT_VERSION } from './dataConsentGate.js';
 import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
-import { buildProfessionalVacancyPresentation, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
+import { buildProfessionalVacancyPresentation, buildVacancyTimingReply, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 
 const ConversationStep = Object.freeze({
   MENU: 'MENU',
@@ -175,6 +175,8 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
   if (!turn.vacancyInformationRequest && !turn.question) return '';
 
   const normalized = normalizeResolverText(inboundText);
+  const timingReply = buildVacancyTimingReply(vacancy, inboundText);
+  if (timingReply) return timingReply;
   const title = vacancyTitle(vacancy);
   const city = vacancyCity(vacancy);
   const location = city ? ` en ${city}` : '';
@@ -223,7 +225,7 @@ if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehi
       : `La información disponible no especifica documentos adicionales para ${title}${location}.`;
   }
 
-  if (/\b(salario|sueldo|pago|horario|turno|beneficio|beneficios|condiciones|contrato|prestaciones)\b/.test(normalized)) {
+  if (/\b(salario|sueldo|pago|beneficio|beneficios|condiciones|contrato|prestaciones)\b/.test(normalized)) {
     return conditions
       ? `Las condiciones para ${title}${location} son: ${conditions}.`
       : `La información disponible no especifica ese detalle para ${title}${location}.`;
@@ -393,6 +395,13 @@ export function hasRecentSameBotDecision({ recentMessages = [], replyKind = '', 
     const actor = String(payload.actor || 'BOT');
     if (actor === 'RECRUITER' || actor === 'ADMIN') return false;
     const source = String(payload.source || '');
+    if (
+      replyKind === 'DATA_CONSENT_PROMPT'
+      && source === 'data_consent_prompt'
+      && payload.consentVersion === DATA_CONSENT_VERSION
+    ) {
+      return messageCreatedAtMs(message) >= since;
+    }
     if (source && source !== 'vacancy_first_gate' && !source.startsWith('bot_')) return false;
     return payload.replyKind === replyKind && payload.reason === reason && messageCreatedAtMs(message) >= since;
   });
@@ -406,7 +415,11 @@ function preventRepeatDecision(decision, { recentMessages = [], inboundText = ''
   if (!decision?.replyKind || !decision?.reason) return decision;
   const repeated = hasRecentSameBotDecision({ recentMessages, replyKind: decision.replyKind, reason: decision.reason, windowMinutes: 10 });
   const turn = analyzeConversationTurn(inboundText, { currentStep });
-  if (!repeated || turn.actionable || hasMaterialVacancyEvidence(inboundText, city)) return decision;
+  const repeatsInterestWhileConsentPending = decision.replyKind === 'DATA_CONSENT_PROMPT'
+    && turn.interest
+    && !turn.question
+    && !turn.data;
+  if (!repeated || (turn.actionable && !repeatsInterestWhileConsentPending) || hasMaterialVacancyEvidence(inboundText, city)) return decision;
   return {
     action: VacancyFirstGateAction.SUPPRESS_REPLY,
     reason: 'REPEAT_PREVENTED',
@@ -751,7 +764,7 @@ export async function resolveVacancyFirstGate({
     if (currentStep === GREETING_SENT && currentVacancy && intent.affirmative) {
       if (requiresConsentBeforeCollection(candidate)) {
         const informationAnswer = buildVacancyInformationAnswer(currentVacancy, inboundText);
-        return {
+        return preventRepeatDecision({
           action: VacancyFirstGateAction.REPLY,
           reason: 'ACTIVE_VACANCY_CONFIRMED_AWAIT_CONSENT',
           replyKind: 'DATA_CONSENT_PROMPT',
@@ -765,7 +778,7 @@ export async function resolveVacancyFirstGate({
             reminderState: 'SKIPPED'
           },
           reply: [informationAnswer, buildDataConsentPromptReply()].filter(Boolean).join('\n\n')
-        };
+        }, { recentMessages, inboundText, city: vacancyCity(currentVacancy), currentStep });
       }
       const informationAnswer = buildVacancyInformationAnswer(currentVacancy, inboundText);
       const dataPrompt = buildActiveDataPrompt(candidate, currentVacancy);
@@ -810,7 +823,7 @@ export async function resolveVacancyFirstGate({
       const initialTurn = analyzeConversationTurn(inboundText);
       if (initialTurn.interest) {
         const informationAnswer = buildVacancyInformationAnswer(resolution.vacancy, inboundText);
-        return {
+        return preventRepeatDecision({
           action: VacancyFirstGateAction.REPLY,
           reason: 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT',
           replyKind: 'DATA_CONSENT_PROMPT',
@@ -829,7 +842,7 @@ export async function resolveVacancyFirstGate({
             buildDataConsentPromptReply()
           ].filter(Boolean).join('\n\n'),
           resolution
-        };
+        }, { recentMessages, inboundText, city: resolution.city, currentStep });
       }
       return {
         action: VacancyFirstGateAction.REPLY,

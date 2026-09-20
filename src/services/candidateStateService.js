@@ -758,7 +758,11 @@ export async function completeCandidateNoInterestTransition(client, input = {}) 
   const candidateId = requireCandidateId(input.candidateId);
   const expected = normalizeNoInterestSnapshot(input.expected);
 
-  if (expected.currentStep === ConversationStep.DONE) {
+  if (
+    expected.currentStep === ConversationStep.DONE
+    && expected.reminderScheduledFor === null
+    && expected.reminderState === ReminderState.SKIPPED
+  ) {
     throw new TypeError('candidate_no_interest_already_done');
   }
 

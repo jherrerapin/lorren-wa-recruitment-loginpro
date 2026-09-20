@@ -81,7 +81,17 @@ export class GeographyNormalizationService {
   normalizeBogotaLocalidad(value) {
     const normalized = normalizeComparableText(value);
     if (!normalized || NON_DATA_LOCATION_TEXT.has(normalized)) return null;
-    return NORMALIZED_BOGOTA_LOCALIDAD_ALIASES[normalized] || null;
+    const exact = NORMALIZED_BOGOTA_LOCALIDAD_ALIASES[normalized];
+    if (exact) return exact;
+
+    const padded = ` ${normalized} `;
+    const embeddedMatches = new Set(
+      Object.entries(NORMALIZED_BOGOTA_LOCALIDAD_ALIASES)
+        .filter(([alias]) => padded.includes(` ${alias} `))
+        .map(([, locality]) => locality)
+    );
+
+    return embeddedMatches.size === 1 ? [...embeddedMatches][0] : null;
   }
 }
 

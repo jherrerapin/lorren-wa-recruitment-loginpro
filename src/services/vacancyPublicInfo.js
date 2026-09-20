@@ -32,6 +32,42 @@ export function getConfiguredExperienceRequirementText(vacancy = {}) {
   return '';
 }
 
+function normalizePublicQuestion(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function configuredScheduleText(vacancy = {}) {
+  const fragments = [vacancy?.requirements, vacancy?.conditions]
+    .flatMap((value) => String(value || '').split(/\r?\n|[.;]+/))
+    .map((value) => cleanConfiguredFragment(value).replace(/^[-*]\s*/, ''))
+    .filter((value) => /\b(horario|turno|jornada|rotativ|diurn|nocturn|lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|tiempo extra)\w*\b/i.test(value));
+  return [...new Set(fragments)].join('; ');
+}
+
+export function buildVacancyTimingReply(vacancy = {}, text = '') {
+  const normalized = normalizePublicQuestion(text);
+  const asksStartDate = /\b(cuando|fecha)\b.*\b(?:empez|empiez|inici|arranc|comienz|comens|pies)\w*/.test(normalized);
+  if (asksStartDate) {
+    return 'No hay una fecha de inicio registrada para esta vacante; esa fecha solo puede confirmarse cuando avance el proceso.';
+  }
+
+  if (!/\b(horarios?|turnos?|jornadas?|dias? de trabajo)\b/.test(normalized)) return '';
+  const schedule = configuredScheduleText(vacancy);
+  if (!schedule) {
+    return 'La información registrada de esta vacante no especifica los días ni el horario de trabajo.';
+  }
+
+  const hasExactDaysOrHours = /\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo|\d{1,2}\s*(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|\d+\s+horas?)\b/i.test(schedule);
+  return hasExactDaysOrHours
+    ? `Lo registrado sobre la jornada es: ${schedule}.`
+    : `Solo tengo registrado sobre la jornada: ${schedule}. No hay días ni un horario exacto configurados.`;
+}
+
 export function getConfiguredPublicRequirementSentences(vacancy = {}, requirementsText = '') {
   const requirements = String(requirementsText || '').trim();
   const age = getConfiguredAgeRequirementText(vacancy);

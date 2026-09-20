@@ -6,6 +6,12 @@ function extractMessage(payload = {}, role = 'user') {
   return payload?.messages?.find((message) => message.role === role)?.content || '';
 }
 
+function extractResponsesInput(payload = {}, role = 'user') {
+  const item = payload?.input?.find((entry) => entry?.role === role);
+  const part = item?.content?.find((entry) => entry?.type === 'input_text');
+  return String(part?.text || '');
+}
+
 function parseJsonSection(prompt = '', header = '') {
   const start = prompt.indexOf(header);
   if (start < 0) return null;
@@ -372,6 +378,28 @@ export function installOpenAIMock({ whatsappMock, responder, calls, recognizeCur
               }
             }
           ]
+        }
+      };
+    }
+
+    if (String(url).includes('/responses')) {
+      const userText = extractResponsesInput(payload, 'user');
+      let context = {};
+      try { context = JSON.parse(userText); } catch {}
+      const reply = String(context?.fallbackText || '').trim()
+        || 'No tengo información adicional registrada para responder ese punto.';
+      if (Array.isArray(calls)) calls.push({ type: 'contextual_reply' });
+      return {
+        data: {
+          output: [{
+            content: [{
+              parsed: {
+                reply,
+                escalateHuman: Boolean(context?.requiresHumanReview),
+                reason: 'test_responses_mock'
+              }
+            }]
+          }]
         }
       };
     }

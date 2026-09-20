@@ -33,3 +33,14 @@ export function consolidateTextMessages(messages = []) {
     .filter(Boolean)
     .join('\n');
 }
+
+export function selectAdjacentTurnMessages(messages = [], anchorCreatedAt, windowMs = getMultilineWindowMs()) {
+  const anchorAt = new Date(anchorCreatedAt).getTime();
+  const safeWindowMs = Number(windowMs);
+  if (!Number.isFinite(anchorAt) || !Number.isFinite(safeWindowMs) || safeWindowMs < 0) return [];
+
+  return (Array.isArray(messages) ? messages : []).filter((message) => {
+    const createdAt = new Date(message?.createdAt).getTime();
+    return Number.isFinite(createdAt) && Math.abs(createdAt - anchorAt) <= safeWindowMs;
+  });
+}

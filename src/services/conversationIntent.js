@@ -78,6 +78,13 @@ const ALREADY_SENT_PATTERNS = [
   /\beso ya lo mande\b/
 ];
 
+export function isAlreadySentIntent(text = '') {
+  const normalized = normalizeText(text);
+  return matchesAny(ALREADY_SENT_PATTERNS, normalized)
+    || /(?:^|\b)ya\s*(?:se|te|les)?\s*(?:lo|los|la|las)\s*(?:envie|mande|comparti|di)\b/.test(normalized)
+    || /(?:^|\b)ya\s*(?:envie|mande|comparti|di)\s*(?:eso|esos datos|mis datos|la informacion|el documento|mi hv)?\b/.test(normalized);
+}
+
 const CHANGE_INTENT_PATTERNS = [
   /\botra vacante\b/,
   /\botro cargo\b/,
@@ -172,7 +179,7 @@ export function detectConversationIntent(text = '', options = {}) {
   if (matchesAny(NO_INTEREST_PATTERNS, normalized)) return 'no_interest';
   if (matchesAny(DEFER_PATTERNS, normalized)) return 'defer_intent';
   if (matchesAny(OBJECTION_PATTERNS, normalized)) return 'objection';
-  if (matchesAny(ALREADY_SENT_PATTERNS, normalized)) return 'already_sent';
+  if (isAlreadySentIntent(normalized)) return 'already_sent';
   if (matchesAny(CHANGE_INTENT_PATTERNS, normalized)) return 'change_intent';
 
   if (pureGreeting) {
