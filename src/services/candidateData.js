@@ -99,7 +99,7 @@ function normalizeMunicipalityResidence(value = '') {
     if (new RegExp(`\\b${municipality}\\b`).test(normalized)) return residence;
   }
 
-  const explicitDepartment = normalized.match(/^(?:municipio\\s+de\\s+)?([a-zñ]+(?:\\s+[a-zñ]+){0,2})\\s+cundinamarca$/);
+  const explicitDepartment = normalized.match(/^(?:municipio\s+de\s+)?([a-zñ]+(?:\s+[a-zñ]+){0,2})\s+cundinamarca$/);
   if (explicitDepartment?.[1] && looksLikeLocationChunk(explicitDepartment[1])) {
     return `${capitalizeWords(explicitDepartment[1])} Cundinamarca`;
   }
