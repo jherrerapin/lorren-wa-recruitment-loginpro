@@ -207,7 +207,8 @@ test('producción: interés explícito al resolver vacante pasa directamente a c
   assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_CONSENT');
   assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
   assert.match(decision.reply, /Vacante: Líder de Operación/i);
-  assert.match(decision.reply, /Para continuar con tu postulación[\\s\\S]*autorizas/i);
+  assert.match(decision.reply, /Para continuar con tu postulación/i);
+  assert.match(decision.reply, /si autorizas a LoginPro a tratar tus datos/i);
   assert.doesNotMatch(decision.reply, /¿Te interesa continuar con esta vacante\?/i);
 });
 
@@ -251,7 +252,8 @@ test('replay #901: resolver la vacante no descarta las entidades del mismo turno
   }, {
     processText,
     createDebugTrace,
-    recognizeCurrentEnginePrompt: true
+    recognizeCurrentEnginePrompt: true,
+    useInboundMessageId: true
   });
 
   assert.deepEqual(result.debugTraces[0].persisted_fields.sort(), [
