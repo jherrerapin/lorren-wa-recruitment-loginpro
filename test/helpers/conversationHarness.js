@@ -33,17 +33,20 @@ function nextTimestamp() {
 
 async function seedInbound(prisma, candidateId, body) {
   const createdAt = nextTimestamp();
-  await prisma.message.create({
+  const waMessageId = `harness-inbound-${inboundSequence}`;
+  const inbound = await prisma.message.create({
     data: {
       candidateId,
       direction: 'INBOUND',
       messageType: 'TEXT',
+      waMessageId,
       body,
       rawPayload: { body, source: 'candidate' },
       createdAt
     }
   });
   await prisma.candidate.update({ where: { id: candidateId }, data: { lastInboundAt: createdAt } });
+  return inbound;
 }
 
 function buildPrismaForCase(conversationCase) {
@@ -73,10 +76,17 @@ function candidateVisibleReplies(candidate, whatsappMock) {
   return whatsappMock.sentMessages.filter((message) => String(message?.to || '').trim() === phone);
 }
 
+function visibleReplyBody(message = {}) {
+  return message.body
+    || message?.payload?.interactive?.body?.text
+    || message?.payload?.text?.body
+    || '';
+}
+
 function assertCaseExpectations(conversationCase, prisma, whatsappMock) {
   const candidate = prisma.state.candidates[0];
   const candidateReplies = candidateVisibleReplies(candidate, whatsappMock);
-  const lastReply = candidateReplies.at(-1)?.body || '';
+  const lastReply = visibleReplyBody(candidateReplies.at(-1));
   if (conversationCase.expect?.candidate) {
     for (const [field, value] of Object.entries(conversationCase.expect.candidate)) {
       assert.deepEqual(candidate[field], value, `${conversationCase.id}: ${field} no coincide`);
@@ -200,10 +210,13 @@ export async function runConversationCase(conversationCase, options = {}) {
   try {
     for (const step of conversationCase.steps) {
       const candidate = prisma.state.candidates[0];
-      await seedInbound(prisma, candidate.id, step);
+      const inbound = await seedInbound(prisma, candidate.id, step);
       const freshCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
       const debugTrace = options.createDebugTrace({ phone: candidate.phone, currentStepBefore: freshCandidate.currentStep });
-      await options.processText(prisma, freshCandidate, candidate.phone, step, debugTrace, {});
+      const processOptions = options.useInboundMessageId
+        ? { inboundMessageId: inbound.waMessageId }
+        : {};
+      await options.processText(prisma, freshCandidate, candidate.phone, step, debugTrace, processOptions);
       debugTraces.push(structuredClone(debugTrace));
     }
     if (options.assertExpectations !== false) assertCaseExpectations(conversationCase, prisma, whatsappMock);
