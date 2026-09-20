@@ -169,6 +169,10 @@ test('replay #901: texto y HV consecutivos comparten una sola respuesta lógica'
     pendingTexts: adjacent,
     attachmentState: 'CV_SAVED'
   }), 'text_batch');
+  assert.equal(resolveMixedTurnReplyOwner({
+    pendingTexts: adjacent,
+    attachmentState: ''
+  }), 'attachment');
 });
 
 test('defensa: una HV fuera de la ventana conserva su respuesta independiente', () => {
