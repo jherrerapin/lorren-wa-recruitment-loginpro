@@ -2105,6 +2105,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
   if (vacancyFirstGateDecision.replyKind === 'DATA_CONSENT_PROMPT') {
     if (!options.inboundMessageId) return;
+    currentVacancy = vacancyFirstGateDecision.vacancy || currentVacancy;
+    normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
+    debugTrace.normalized_fields = normalizedData;
+    await persistUnderstoodFieldsBeforeGateReturn();
     const information = String(vacancyFirstGateDecision.reply || '')
       .replace(buildDataConsentPromptReply(), '').trim();
     if (information) {
