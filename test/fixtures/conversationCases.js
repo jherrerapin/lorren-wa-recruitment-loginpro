@@ -348,9 +348,10 @@ export const conversationCases = [
     operations: [OP_BOG],
     expect: {
       candidate: {
-        vacancyId: 'vac-siberia'
+        vacancyId: 'vac-siberia',
+        neighborhood: 'Madrid Cundinamarca'
       },
-      absentFields: ['fullName', 'neighborhood'],
+      absentFields: ['fullName'],
       lastReplyIncludes: ['Auxiliar Cargue y Descargue Siberia'],
       lastReplyNotIncludes: ['Para asociar bien tu proceso', 'Si quieres continuar, cuentame tus datos en el orden que prefieras']
     }
