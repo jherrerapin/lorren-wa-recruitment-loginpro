@@ -3101,7 +3101,7 @@ export function webhookRouter(prisma) {
             await markConversationMessagesResponded(prisma, {
               messageIds: [
                 ...pendingBatch.map((item) => item.id),
-                ...(mixedTurnAttachmentState(mixedTurnDocument) === 'CV_SAVED' ? [mixedTurnDocument.id] : [])
+                ...(['CV_SAVED', 'FAILED'].includes(mixedTurnAttachmentState(mixedTurnDocument)) ? [mixedTurnDocument.id] : [])
               ],
               respondedAt: new Date()
             });
@@ -3398,10 +3398,25 @@ export function webhookRouter(prisma) {
                   }
                 }
               } catch (error) {
-                await markMixedTurnDocumentState(prisma, inbound.id, 'FAILED');
+                const coordinationMarked = await markMixedTurnDocumentState(prisma, inbound.id, 'FAILED');
                 debugTrace.cv_download_failed = true;
                 debugTrace.error_summary = summarizeError(error);
                 console.error('[CV_ERROR]', JSON.stringify({ phone: from, error: debugTrace.error_summary }));
+                if (coordinationMarked) {
+                  await sleep(getMultilineWindowMs());
+                  const pendingTextsAfterWindow = selectAdjacentTurnMessages(
+                    await fetchPendingTextBatch(prisma, candidate.id),
+                    inboundCreatedAt,
+                    getMultilineWindowMs()
+                  );
+                  const refreshedDocument = typeof prisma?.message?.findUnique === 'function'
+                    ? await prisma.message.findUnique({ where: { id: inbound.id }, select: { respondedAt: true } })
+                    : null;
+                  if (pendingTextsAfterWindow.length > 0 || refreshedDocument?.respondedAt) {
+                    debugTrace.mixed_turn_reply_owner = 'text_batch';
+                    continue;
+                  }
+                }
                 if (!automationBlocked) {
                   await reply(prisma, candidate.id, from, 'No pude descargar tu hoja de vida en este momento. Inténtalo nuevamente en unos minutos.', '', { source: 'bot_flow' });
                 }
