@@ -221,7 +221,7 @@ El objetivo es marcar `RESCHEDULED` solo cuando existe una nueva reserva. El run
 
 ### Recordatorio de entrevista
 
-El requisito de producto es una hora antes. Los cuarenta minutos presentes en código o documentación heredada constituyen una migración pendiente que debe actualizar política y pruebas de manera coordinada.
+El requisito de producto y la implementación conversacional vigente son una hora antes. La política, las respuestas naturales y las pruebas deben conservar ese mismo valor.
 
 ### Recordatorio de abandono
 

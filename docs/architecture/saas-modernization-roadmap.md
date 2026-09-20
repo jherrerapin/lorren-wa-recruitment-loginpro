@@ -135,7 +135,7 @@ Entrevista:
 - registrar `NO_RESPONSE` cuando falten cinco minutos sin respuesta;
 - conservar respuestas tardías y aplicar la política configurada.
 
-El runtime y documentación heredada todavía usan cuarenta minutos en algunos puntos. Esa diferencia es deuda explícita: deberá migrarse junto con pruebas y configuración, no ocultarse como comportamiento ya vigente.
+El runtime y la documentación usan una hora como autoridad única. Cualquier valor distinto debe tratarse como una regresión de contrato.
 
 ## 6. Estrategia arquitectónica
 
