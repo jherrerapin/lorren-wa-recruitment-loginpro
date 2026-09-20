@@ -140,7 +140,15 @@ test('rechaza clientes y snapshots inválidos antes de escribir', async () => {
     [createClient(snapshot), { ...valid, expected: 'invalid' }, /candidate_no_interest_reminder_scheduled_for_required/],
     [createClient(snapshot), { ...valid, candidateId: '' }, /candidate_id_required/],
     [createClient(snapshot), { ...valid, expected: { ...valid.expected, currentStep: 'INVALID' } }, /candidate_no_interest_current_step_invalid/],
-    [createClient(snapshot), { ...valid, expected: { ...valid.expected, currentStep: ConversationStep.DONE } }, /candidate_no_interest_already_done/],
+    [createClient(snapshot), {
+      ...valid,
+      expected: {
+        ...valid.expected,
+        currentStep: ConversationStep.DONE,
+        reminderState: ReminderState.SKIPPED,
+        reminderScheduledFor: null
+      }
+    }, /candidate_no_interest_already_done/],
     [createClient(snapshot), { ...valid, expected: { ...valid.expected, reminderState: 'INVALID' } }, /candidate_no_interest_reminder_state_invalid/],
     [createClient(snapshot), { ...valid, expected: { ...valid.expected, reminderScheduledFor: true } }, /candidate_no_interest_reminder_scheduled_for_invalid/],
     [createClient(snapshot), { ...valid, expected: { ...valid.expected, reminderScheduledFor: 'not-a-date' } }, /candidate_no_interest_reminder_scheduled_for_invalid/]

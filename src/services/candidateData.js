@@ -855,7 +855,7 @@ export function parseNaturalData(text = '') {
     if (standaloneBogotaLocality) result.locality = standaloneBogotaLocality;
   }
 
-  if (!result.neighborhood && !result.locality) {
+  if (!result.neighborhood && !result.locality && /\bcundinamarca\b/i.test(compact)) {
     const standaloneMunicipality = normalizeMunicipalityResidence(cleanLocationValue(compact));
     if (standaloneMunicipality) result.neighborhood = standaloneMunicipality;
   }

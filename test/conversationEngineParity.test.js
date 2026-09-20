@@ -132,7 +132,7 @@ test('agenda sin horarios conserva la autoridad determinística en ambos modos',
   assert.equal(withEngine.openAi.byType.conversation_engine || 0, 0);
 });
 
-test('ciudad sin vacantes bloquea captura y ofrece registro futuro en ambos modos', () => {
+test('residencia con cargo no cruza a otra ciudad ni abre captura en ambos modos', () => {
   const [withoutEngine] = runMode('false', ['parity-city-without-active-vacancies']);
   const [withEngine] = runMode('true', ['parity-city-without-active-vacancies']);
 
@@ -140,7 +140,7 @@ test('ciudad sin vacantes bloquea captura y ofrece registro futuro en ambos modo
   for (const snapshot of [withoutEngine, withEngine]) {
     assert.equal(snapshot.candidate.currentStep, 'GREETING_SENT');
     assert.equal(snapshot.candidate.vacancyId, null);
-    assert.equal(snapshot.candidate.botResumeMode, 'future_profile_offer');
+    assert.equal(snapshot.candidate.botResumeMode, null);
     assert.deepEqual(snapshot.candidate.capturedFields, []);
     assert.equal(snapshot.candidate.hasCv, false);
     assert.deepEqual(snapshot.outbound.sources, ['vacancy_first_gate']);

@@ -154,8 +154,9 @@ test('Bogotá + cargo genérico no resuelve vacante inactiva de Siberia sin evid
   });
 
   assert.equal(resolution.resolved, false);
-  assert.equal(resolution.city, 'Bogota');
-  assert.equal(resolution.reason, 'city_without_active_vacancies');
+  assert.equal(resolution.city, null);
+  assert.equal(resolution.residenceLocation, 'Bogota');
+  assert.equal(resolution.reason, 'no_active_vacancies');
 });
 
 test('Siberia explícito puede usar vacante inactiva solo como contexto, no como asignación activa', async () => {
