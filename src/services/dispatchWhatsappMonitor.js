@@ -1,13 +1,14 @@
 import { buildDispatchServiceDateWhere, dispatchServiceDateKey, todayIsoDateCO } from './dispatchDate.js';
 import { DISPATCH_WHATSAPP_WINDOW_MS } from './dispatchWhatsappAdminAlerts.js';
-import { buildDispatchAssignmentMessageBody } from './dispatchWhatsappCloudClient.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const UNMATCHED_INBOUND_LOOKBACK_MS = 24 * 60 * 60 * 1000;
 const DISPATCH_WHATSAPP_MESSAGE_ENTITY = 'DISPATCH_WHATSAPP_MESSAGE';
-const MESSAGE_HISTORY_LIMIT = 20;
+const MESSAGE_HISTORY_LIMIT = 100;
 const MESSAGE_BODY_LIMIT = 4000;
 const PROVIDER_DIAGNOSTIC_LIMIT = 500;
+const OUTBOUND_HISTORY_PAGE_SIZE = 50;
+const OUTBOUND_HISTORY_MAX_PAGE_SIZE = 100;
 const PROVIDER_STATUS_RANK = new Map([
   ['ACCEPTED', 0],
   ['SENT', 1],
@@ -31,6 +32,15 @@ function normalizePhone(value) {
 
 export function normalizeDispatchWhatsappMonitorPhone(value) {
   return normalizePhone(value);
+}
+
+function formatDispatchPhone(value) {
+  const phone = normalizePhone(value);
+  if (!phone) return 'Sin número';
+  if (/^57\d{10}$/.test(phone)) {
+    return `+57 ${phone.slice(2, 5)} ${phone.slice(5, 8)} ${phone.slice(8)}`;
+  }
+  return `+${phone}`;
 }
 
 function phoneIssue(value) {
@@ -146,22 +156,42 @@ function possibleInboundMatch(phone, unmatchedInbound = []) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-async function loadWorkerNamesByPhone(prismaClient) {
+function workerPhoneWhere(phones = []) {
+  const normalized = [...new Set(phones.map(normalizePhone).filter(Boolean))];
+  if (!normalized.length) return null;
+  const suffixes = [...new Set(normalized.map((phone) => phone.slice(-10)).filter(Boolean))];
+  return {
+    OR: suffixes.map((suffix) => ({ phone: { endsWith: suffix } }))
+  };
+}
+
+async function loadWorkersByPhone(prismaClient, phones = []) {
   const result = new Map();
-  if (!prismaClient?.dispatchWorker?.findMany) return result;
+  const where = workerPhoneWhere(phones);
+  if (!where || !prismaClient?.dispatchWorker?.findMany) return result;
   const workers = await prismaClient.dispatchWorker.findMany({
-    where: { phone: { not: null } },
-    select: { fullName: true, phone: true }
+    where,
+    select: { id: true, fullName: true, phone: true }
   });
   for (const worker of workers) {
     const phone = normalizePhone(worker?.phone);
-    const name = text(worker?.fullName);
-    if (!phone || !name) continue;
-    const names = result.get(phone) || new Set();
-    names.add(name);
-    result.set(phone, names);
+    if (!phone) continue;
+    const bucket = result.get(phone) || [];
+    bucket.push({ id: worker.id, fullName: text(worker.fullName) || 'Auxiliar', phone });
+    result.set(phone, bucket);
   }
-  return new Map([...result.entries()].map(([phone, names]) => [phone, [...names].sort((a, b) => a.localeCompare(b, 'es'))]));
+  for (const [phone, bucket] of result.entries()) {
+    result.set(phone, bucket.sort((a, b) => a.fullName.localeCompare(b.fullName, 'es')));
+  }
+  return result;
+}
+
+async function loadWorkerNamesByPhone(prismaClient, phones = []) {
+  const workersByPhone = await loadWorkersByPhone(prismaClient, phones);
+  return new Map([...workersByPhone.entries()].map(([phone, workers]) => [
+    phone,
+    [...new Set(workers.map((worker) => worker.fullName))]
+  ]));
 }
 
 function auditAction(direction) {
@@ -219,6 +249,7 @@ export async function recordDispatchWhatsappMessageAudit({
           providerStatus: normalizedDirection === 'OUTBOUND' && normalizedProviderMessageId ? 'ACCEPTED' : null,
           providerStatusAt: normalizedDirection === 'OUTBOUND' && normalizedProviderMessageId ? eventDate.toISOString() : null,
           providerDiagnostic: null,
+          deliveryWatchdogStatus: null,
           source: source || null,
           occurredAt: eventDate.toISOString()
         },
@@ -272,7 +303,10 @@ export async function recordDispatchWhatsappProviderStatusAudit({
           ...metadata,
           providerStatus: normalizedStatus,
           providerStatusAt: statusAt.toISOString(),
-          providerDiagnostic: diagnostic
+          providerDiagnostic: diagnostic,
+          deliveryWatchdogStatus: ['DELIVERED', 'READ', 'FAILED'].includes(normalizedStatus)
+            ? null
+            : (text(metadata.deliveryWatchdogStatus) || null)
         }
       }
     });
@@ -288,6 +322,7 @@ function auditMessageFromRow(row) {
   const direction = String(metadata.direction || (row.action?.endsWith('INBOUND') ? 'INBOUND' : 'OUTBOUND')).toUpperCase();
   const providerStatus = text(metadata.providerStatus) || null;
   const providerDiagnostic = text(metadata.providerDiagnostic) || null;
+  const deliveryState = text(metadata.deliveryWatchdogStatus) || providerStatus || null;
   const baseBody = text(metadata.body) || '(mensaje sin texto)';
   const providerLine = direction === 'OUTBOUND' && providerStatus
     ? `[Meta: ${providerStatus}]${providerDiagnostic ? ` ${providerDiagnostic}` : ''}`
@@ -302,6 +337,7 @@ function auditMessageFromRow(row) {
     messageId: text(metadata.messageId) || null,
     providerMessageId: text(metadata.providerMessageId) || null,
     providerStatus,
+    deliveryState,
     providerStatusAt: isoDate(metadata.providerStatusAt),
     providerDiagnostic,
     persisted: true,
@@ -320,7 +356,7 @@ async function loadPersistedMessagesByPhone(prismaClient, phones = []) {
       action: { in: ['DISPATCH_WHATSAPP_INBOUND', 'DISPATCH_WHATSAPP_OUTBOUND'] }
     },
     orderBy: { createdAt: 'desc' },
-    take: Math.min(1000, Math.max(100, uniquePhones.length * MESSAGE_HISTORY_LIMIT * 2))
+    take: Math.min(2000, Math.max(200, uniquePhones.length * MESSAGE_HISTORY_LIMIT * 2))
   });
   for (const row of rows) {
     const phone = normalizePhone(row.entityLabel);
@@ -349,17 +385,31 @@ function hasInboundNear(messages, value, toleranceMs = 5000) {
   });
 }
 
+function legacyOutboundStatus(link) {
+  const status = String(link?.status || '').trim().toUpperCase();
+  if (['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(status)) return status;
+  return null;
+}
+
+function legacyDeliveryState(link) {
+  const status = String(link?.status || '').trim().toUpperCase();
+  if (['SENT', 'DELIVERED', 'READ', 'FAILED', 'DELIVERY_UNKNOWN', 'CONFIRMED'].includes(status)) return status;
+  return null;
+}
+
 function addLegacyLinkMessages(messages, link, assignment) {
   if (link.providerMessageId && assignment && !messages.some((message) => sameEvidenceId(message, link.providerMessageId))) {
     messages.push({
       id: `legacy-out:${link.id}`,
       direction: 'OUTBOUND',
-      body: `${buildDispatchAssignmentMessageBody(assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
-      messageType: 'INTERACTIVE',
+      body: 'Mensaje de asignación enviado. El contenido original no quedó almacenado en la auditoría histórica.',
+      messageType: 'UNKNOWN',
       at: isoDate(link.createdAt),
       source: 'RECONSTRUIDO_ASIGNACION',
       messageId: null,
       providerMessageId: link.providerMessageId,
+      providerStatus: legacyOutboundStatus(link),
+      deliveryState: legacyDeliveryState(link),
       persisted: false,
       reconstructed: true
     });
@@ -375,6 +425,8 @@ function addLegacyLinkMessages(messages, link, assignment) {
       source: 'RECONSTRUIDO_RESPUESTA',
       messageId: link.confirmationMessageId,
       providerMessageId: null,
+      providerStatus: null,
+      deliveryState: 'CONFIRMED',
       persisted: false,
       reconstructed: true
     });
@@ -396,6 +448,8 @@ function addLegacyLinkMessages(messages, link, assignment) {
       source: 'RECONSTRUIDO_AUTO_REPLY',
       messageId: null,
       providerMessageId: null,
+      providerStatus: null,
+      deliveryState: null,
       persisted: false,
       reconstructed: true
     });
@@ -413,6 +467,8 @@ function finalizeMessageHistory(messages, { lastInboundAt, evidenceId = 'phone' 
       source: 'EVIDENCIA_VENTANA',
       messageId: null,
       providerMessageId: null,
+      providerStatus: null,
+      deliveryState: null,
       persisted: false,
       reconstructed: true
     });
@@ -435,6 +491,7 @@ export async function loadDispatchWhatsappPhoneConversation({ prismaClient, phon
   if (!normalizedPhone) {
     return {
       phone: '',
+      phoneDisplay: 'Sin número',
       phoneIssue: 'MISSING',
       hasEvidence: false,
       workerNames: [],
@@ -456,7 +513,7 @@ export async function loadDispatchWhatsappPhoneConversation({ prismaClient, phon
           where: { phone: normalizedPhone },
           include: { assignment: { include: { worker: true, serviceRequest: true } } },
           orderBy: { createdAt: 'asc' },
-          take: 100
+          take: 200
         })
       : []
   ]);
@@ -491,6 +548,7 @@ export async function loadDispatchWhatsappPhoneConversation({ prismaClient, phon
 
   return {
     phone: normalizedPhone,
+    phoneDisplay: formatDispatchPhone(normalizedPhone),
     phoneIssue: phoneIssue(normalizedPhone),
     hasEvidence: Boolean(messageHistory.length || window.lastInboundAt || links.length),
     workerNames,
@@ -629,7 +687,9 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
       lastInboundAt: validDate(row?.lastInboundAt)?.toISOString() || null
     }))
     .filter((row) => row.phone && row.lastInboundAt && !assignedPhones.has(row.phone));
-  const workerNamesByPhone = unmatchedInboundBase.length ? await loadWorkerNamesByPhone(prismaClient) : new Map();
+  const workerNamesByPhone = unmatchedInboundBase.length
+    ? await loadWorkerNamesByPhone(prismaClient, unmatchedInboundBase.map((row) => row.phone))
+    : new Map();
   const unmatchedInbound = unmatchedInboundBase.map((row) => {
     const workerNames = workerNamesByPhone.get(row.phone) || [];
     return {
@@ -657,6 +717,7 @@ export async function loadDispatchWhatsappTomorrowAssignmentMonitor({ prismaClie
       workerId: assignment.workerId,
       workerName: text(worker.fullName) || 'Auxiliar',
       phone,
+      phoneDisplay: formatDispatchPhone(phone),
       phoneIssue: phoneIssue(worker.phone),
       possibleInboundPhone: possibleMatch?.phone || null,
       possibleInboundAt: possibleMatch?.lastInboundAt || null,
@@ -715,37 +776,55 @@ function normalizeOutboundHistoryDate(value, now = new Date()) {
   return candidate;
 }
 
-function maskDispatchPhone(value) {
-  const phone = normalizePhone(value);
-  if (!phone) return 'Sin número';
-  if (phone.length <= 4) return phone;
-  return `•••• ${phone.slice(-4)}`;
+function positiveInteger(value, fallback, maximum = Number.MAX_SAFE_INTEGER) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, maximum);
+}
+
+function legacyHistoryProviderStatus(status) {
+  const normalized = String(status || '').trim().toUpperCase();
+  return ['SENT', 'DELIVERED', 'READ', 'FAILED'].includes(normalized) ? normalized : null;
+}
+
+function legacyHistoryDeliveryState(status) {
+  const normalized = String(status || '').trim().toUpperCase();
+  return ['SENT', 'DELIVERED', 'READ', 'FAILED', 'DELIVERY_UNKNOWN', 'CONFIRMED'].includes(normalized)
+    ? normalized
+    : null;
 }
 
 export async function loadDispatchWhatsappOutboundHistoryByDate({
   prismaClient,
   dateKey,
   now = new Date(),
-  limit = 500
+  page = 1,
+  pageSize = OUTBOUND_HISTORY_PAGE_SIZE
 } = {}) {
   if (!prismaClient) throw new Error('prismaClient es requerido');
   const normalizedDate = normalizeOutboundHistoryDate(dateKey, now);
+  const normalizedPage = positiveInteger(page, 1, 1000);
+  const normalizedPageSize = positiveInteger(pageSize, OUTBOUND_HISTORY_PAGE_SIZE, OUTBOUND_HISTORY_MAX_PAGE_SIZE);
   const nextDate = addIsoDays(normalizedDate, 1);
   const range = {
     gte: new Date(`${normalizedDate}T05:00:00.000Z`),
     lt: new Date(`${nextDate}T05:00:00.000Z`)
   };
-  const take = Math.min(500, Math.max(1, Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 500));
-  const [rows, confirmationRows] = await Promise.all([
+  const auditWhere = {
+    entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
+    action: 'DISPATCH_WHATSAPP_OUTBOUND',
+    createdAt: range
+  };
+  const auditThrough = normalizedPage * normalizedPageSize;
+  const [auditTotal, rows, confirmationRows] = await Promise.all([
+    typeof prismaClient?.devAuditEvent?.count === 'function'
+      ? prismaClient.devAuditEvent.count({ where: auditWhere })
+      : 0,
     prismaClient?.devAuditEvent?.findMany
       ? prismaClient.devAuditEvent.findMany({
-          where: {
-            entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
-            action: 'DISPATCH_WHATSAPP_OUTBOUND',
-            createdAt: range
-          },
+          where: auditWhere,
           orderBy: { createdAt: 'desc' },
-          take
+          take: auditThrough
         })
       : [],
     prismaClient?.dispatchWhatsappConfirmation?.findMany
@@ -755,24 +834,51 @@ export async function loadDispatchWhatsappOutboundHistoryByDate({
             assignment: {
               include: {
                 worker: true,
-                serviceRequest: { include: { operationPoint: true } }
+                serviceRequest: true
               }
             }
           },
-          orderBy: { createdAt: 'desc' },
-          take
+          orderBy: { createdAt: 'desc' }
         })
       : []
   ]);
-  const workerNamesByPhone = rows.length ? await loadWorkerNamesByPhone(prismaClient) : new Map();
-  const auditedProviderIds = new Set(rows.map((row) => text(row?.metadata?.providerMessageId)).filter(Boolean));
+
+  const legacyProviderIds = [...new Set((confirmationRows || []).map((row) => text(row?.providerMessageId)).filter(Boolean))];
+  const auditedLegacyEvidence = legacyProviderIds.length && prismaClient?.devAuditEvent?.findMany
+    ? await prismaClient.devAuditEvent.findMany({
+        where: {
+          entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
+          action: 'DISPATCH_WHATSAPP_OUTBOUND',
+          entityId: { in: legacyProviderIds.map((providerMessageId) => `dispatch-wa:outbound:${providerMessageId}`) }
+        },
+        select: { entityId: true }
+      })
+    : [];
+  const auditedProviderIdsAnywhere = new Set((auditedLegacyEvidence || [])
+    .map((row) => String(row?.entityId || '').replace(/^dispatch-wa:outbound:/, ''))
+    .filter(Boolean));
+
+  const legacyRows = (confirmationRows || []).filter((row) => (
+    text(row?.providerMessageId)
+    && !auditedProviderIdsAnywhere.has(text(row.providerMessageId))
+    && row?.assignment
+    && row.assignment?.serviceRequest?.source !== 'DEV_TEST'
+  ));
+  const auditPhones = rows.map((row) => normalizePhone(row?.metadata?.phone || row?.entityLabel)).filter(Boolean);
+  const workersByPhone = auditPhones.length ? await loadWorkersByPhone(prismaClient, auditPhones) : new Map();
   const auditedItems = rows.map((row) => {
     const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
     const phone = normalizePhone(metadata.phone || row.entityLabel);
-    const workerNames = workerNamesByPhone.get(phone) || [];
+    const workers = workersByPhone.get(phone) || [];
+    const workerNames = [...new Set(workers.map((worker) => worker.fullName))];
+    const providerStatus = text(metadata.providerStatus).toUpperCase() || null;
+    const deliveryState = text(metadata.deliveryWatchdogStatus).toUpperCase() || providerStatus;
     return {
       id: row.entityId || row.id,
-      phoneMasked: maskDispatchPhone(phone),
+      phone,
+      phoneDisplay: formatDispatchPhone(phone),
+      phoneMasked: phone ? `•••• ${phone.slice(-4)}` : 'Sin número',
+      workerId: workers.length === 1 ? workers[0].id : null,
       workerName: workerNames.length ? workerNames.join(' / ') : null,
       workerNames,
       body: text(metadata.body) || '(mensaje sin texto)',
@@ -780,56 +886,72 @@ export async function loadDispatchWhatsappOutboundHistoryByDate({
       source: text(metadata.source) || text(row.actorSource) || 'AUDIT',
       at: isoDate(metadata.occurredAt || row.createdAt),
       providerMessageId: text(metadata.providerMessageId) || null,
-      providerStatus: text(metadata.providerStatus).toUpperCase() || null,
+      providerStatus,
+      deliveryState,
       providerStatusAt: isoDate(metadata.providerStatusAt),
       providerDiagnostic: text(metadata.providerDiagnostic) || null,
+      humanConfirmed: false,
       reconstructed: false
     };
   });
-  const reconstructedItems = (confirmationRows || [])
-    .filter((row) => (
-      text(row?.providerMessageId)
-      && !auditedProviderIds.has(text(row.providerMessageId))
-      && row?.assignment
-      && row.assignment?.serviceRequest?.source !== 'DEV_TEST'
-    ))
-    .map((row) => {
-      const assignment = row.assignment;
-      const phone = normalizePhone(row.phone || assignment?.worker?.phone);
-      const workerName = text(assignment?.worker?.fullName) || null;
-      return {
-        id: `legacy-out:${row.id}`,
-        phoneMasked: maskDispatchPhone(phone),
-        workerName,
-        workerNames: workerName ? [workerName] : [],
-        body: `${buildDispatchAssignmentMessageBody(assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
-        messageType: 'UNKNOWN',
-        source: 'RECONSTRUIDO_ASIGNACION',
-        at: isoDate(row.createdAt),
-        providerMessageId: text(row.providerMessageId) || null,
-        providerStatus: null,
-        providerStatusAt: null,
-        providerDiagnostic: null,
-        reconstructed: true
-      };
-    });
-  const items = [...auditedItems, ...reconstructedItems]
+  const reconstructedItems = legacyRows.map((row) => {
+    const assignment = row.assignment;
+    const phone = normalizePhone(row.phone || assignment?.worker?.phone);
+    const workerName = text(assignment?.worker?.fullName) || null;
+    const providerStatus = legacyHistoryProviderStatus(row.status);
+    const deliveryState = legacyHistoryDeliveryState(row.status);
+    return {
+      id: `legacy-out:${row.id}`,
+      phone,
+      phoneDisplay: formatDispatchPhone(phone),
+      phoneMasked: phone ? `•••• ${phone.slice(-4)}` : 'Sin número',
+      workerId: assignment?.worker?.id || assignment?.workerId || null,
+      workerName,
+      workerNames: workerName ? [workerName] : [],
+      body: 'Mensaje de asignación enviado. El contenido original no quedó almacenado en la auditoría histórica.',
+      messageType: 'UNKNOWN',
+      source: 'RECONSTRUIDO_ASIGNACION',
+      at: isoDate(row.createdAt),
+      providerMessageId: text(row.providerMessageId) || null,
+      providerStatus,
+      deliveryState,
+      providerStatusAt: null,
+      providerDiagnostic: null,
+      humanConfirmed: String(row.status || '').toUpperCase() === 'CONFIRMED',
+      reconstructed: true
+    };
+  });
+
+  const allAvailable = [...auditedItems, ...reconstructedItems]
     .filter((item) => item.at)
-    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
-    .slice(0, take);
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+  const offset = (normalizedPage - 1) * normalizedPageSize;
+  const items = allAvailable.slice(offset, offset + normalizedPageSize);
+  const total = Number(auditTotal || 0) + legacyRows.length;
   const statusCount = (status) => items.filter((item) => item.providerStatus === status).length;
   return {
     dateKey: normalizedDate,
     generatedAt: now.toISOString(),
     range: { start: range.gte.toISOString(), end: range.lt.toISOString() },
     items,
+    pagination: {
+      page: normalizedPage,
+      pageSize: normalizedPageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / normalizedPageSize)),
+      hasPrevious: normalizedPage > 1,
+      hasNext: normalizedPage * normalizedPageSize < total
+    },
     summary: {
-      total: items.length,
+      total,
+      pageCount: items.length,
       accepted: statusCount('ACCEPTED'),
       sent: statusCount('SENT'),
       delivered: statusCount('DELIVERED'),
       read: statusCount('READ'),
       failed: statusCount('FAILED'),
+      deliveryUnknown: items.filter((item) => item.deliveryState === 'DELIVERY_UNKNOWN').length,
+      confirmed: items.filter((item) => item.deliveryState === 'CONFIRMED' || item.humanConfirmed).length,
       historical: items.filter((item) => item.reconstructed).length,
       withoutProviderStatus: items.filter((item) => !item.providerStatus).length
     },
