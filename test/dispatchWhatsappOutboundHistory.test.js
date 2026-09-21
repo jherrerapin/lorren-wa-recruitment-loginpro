@@ -6,6 +6,7 @@ import {
   loadDispatchWhatsappPhoneConversation
 } from '../src/services/dispatchWhatsappMonitor.js';
 import { loadDispatchWhatsappConversationInbox } from '../src/routes/dispatchWhatsappNotifications.js';
+import { sendDispatchWhatsappMessage } from '../src/services/dispatchWhatsappAssignmentService.js';
 import { runDispatchDeliveryWatchdog } from '../src/services/dispatchWhatsappAdminAlerts.js';
 
 const NOW = new Date('2026-09-21T12:00:00.000Z');
@@ -134,6 +135,89 @@ function inboxPrisma({ rows = [], confirmations = [], workers = [], windows = []
       findMany: async () => workers
     }
   };
+}
+
+async function withOperationalMetaEnv(run) {
+  const keys = [
+    'DISPATCH_META_GRAPH_VERSION',
+    'DISPATCH_META_ACCESS_TOKEN',
+    'DISPATCH_META_PHONE_NUMBER_ID',
+    'DISPATCH_META_VERIFY_TOKEN',
+    'DISPATCH_META_APP_SECRET',
+    'DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME',
+    'DISPATCH_META_TEMPLATE_LANGUAGE',
+    'DISPATCH_META_DUPLICATE_SEND_WINDOW_MS'
+  ];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, {
+    DISPATCH_META_GRAPH_VERSION: 'v23.0',
+    DISPATCH_META_ACCESS_TOKEN: 'TEST-token-not-real',
+    DISPATCH_META_PHONE_NUMBER_ID: 'TEST-phone-id',
+    DISPATCH_META_VERIFY_TOKEN: 'TEST-verify',
+    DISPATCH_META_APP_SECRET: 'TEST-secret',
+    DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME: 'TEST_assignment_template',
+    DISPATCH_META_TEMPLATE_LANGUAGE: 'es',
+    DISPATCH_META_DUPLICATE_SEND_WINDOW_MS: '0'
+  });
+  try {
+    return await run();
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
+}
+
+function assignmentSenderPrisma() {
+  const assignment = {
+    id: 'assignment-template-test',
+    serviceRequestId: 'request-template-test',
+    workerId: 'worker-template-test',
+    status: 'ASSIGNED',
+    createdByUsername: 'coordinador-test',
+    worker: { id: 'worker-template-test', fullName: 'Auxiliar Plantilla', phone: '3008887766' },
+    serviceRequest: {
+      id: 'request-template-test',
+      source: 'MANUAL',
+      serviceDate: new Date('2099-09-22T05:00:00.000Z'),
+      operationPointName: 'Punto de Prueba',
+      address: 'Dirección de prueba',
+      startTime: '05:00',
+      operationPoint: null
+    }
+  };
+  const link = { id: 'link-template-test', assignmentId: assignment.id, phone: '573008887766', status: 'PENDING' };
+  const auditEvents = [];
+  const confirmationUpdates = [];
+  const prismaClient = {
+    dispatchAssignment: {
+      findFirst: async () => assignment,
+      updateMany: async () => ({ count: 1 })
+    },
+    dispatchWhatsappContactWindow: {
+      findUnique: async () => null
+    },
+    dispatchWhatsappConfirmation: {
+      findFirst: async () => null,
+      create: async ({ data }) => Object.assign(link, data),
+      updateMany: async ({ where, data }) => {
+        confirmationUpdates.push({ where, data });
+        if (where?.id === link.id && data?.status === 'FAILED') link.status = 'FAILED';
+        return { count: 1 };
+      },
+      update: async ({ data }) => Object.assign(link, data)
+    },
+    devAuditEvent: {
+      findFirst: async () => null,
+      create: async ({ data }) => {
+        auditEvents.push(data);
+        return { id: `audit-${auditEvents.length}`, ...data };
+      }
+    },
+    $transaction: async (operations) => Promise.all(operations)
+  };
+  return { prismaClient, assignment, link, auditEvents, confirmationUpdates };
 }
 
 test('historial consulta el día exacto de Bogotá, muestra teléfono completo y conserva estados Meta', async () => {
@@ -287,6 +371,79 @@ test('conversación por auxiliar reutiliza auditoría de Despacho y conserva dir
   assert.equal(conversation.messageHistory[0].deliveryState, 'DELIVERED');
   assert.equal(conversation.messageHistory[1].direction, 'INBOUND');
   assert.match(conversation.messageHistory[1].body, /CONFIRMADO/);
+});
+
+test('ventana cerrada con plantilla configurada ejecuta TEMPLATE y queda ACCEPTED hasta webhook', async () => {
+  await withOperationalMetaEnv(async () => {
+    const state = assignmentSenderPrisma();
+    const payloads = [];
+    const axiosClient = {
+      post: async (_url, payload) => {
+        payloads.push(payload);
+        return { data: { messages: [{ id: 'wamid-template-accepted' }] } };
+      }
+    };
+
+    const result = await sendDispatchWhatsappMessage({
+      phone: '3008887766',
+      context: {
+        assignmentId: state.assignment.id,
+        serviceRequestId: state.assignment.serviceRequestId,
+        workerId: state.assignment.workerId
+      },
+      scope: 'operational',
+      actorUsername: 'coordinador-test',
+      axiosClient,
+      prismaClient: state.prismaClient
+    });
+
+    assert.equal(result.deliveryMode, 'TEMPLATE');
+    assert.equal(result.templateName, 'TEST_assignment_template');
+    assert.equal(result.providerMessageId, 'wamid-template-accepted');
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].type, 'template');
+    assert.equal(payloads[0].template.name, 'TEST_assignment_template');
+    assert.equal(state.auditEvents.length, 1);
+    assert.equal(state.auditEvents[0].metadata.messageType, 'TEMPLATE');
+    assert.equal(state.auditEvents[0].metadata.providerStatus, 'ACCEPTED');
+  });
+});
+
+test('rechazo de TEMPLATE antes del wamid persiste FAILED y auditoría visible', async () => {
+  await withOperationalMetaEnv(async () => {
+    const state = assignmentSenderPrisma();
+    const axiosClient = {
+      post: async () => {
+        const error = new Error('rechazo de prueba');
+        error.response = { data: { error: { code: 131000, message: 'rechazo de prueba' } } };
+        throw error;
+      }
+    };
+
+    await assert.rejects(
+      sendDispatchWhatsappMessage({
+        phone: '3008887766',
+        context: {
+          assignmentId: state.assignment.id,
+          serviceRequestId: state.assignment.serviceRequestId,
+          workerId: state.assignment.workerId
+        },
+        scope: 'operational',
+        actorUsername: 'coordinador-test',
+        axiosClient,
+        prismaClient: state.prismaClient
+      }),
+      (error) => error?.statusCode === 502
+    );
+
+    assert.equal(state.link.status, 'FAILED');
+    assert.equal(state.auditEvents.length, 1);
+    assert.equal(state.auditEvents[0].metadata.source, 'ASSIGNMENT_CONFIRMATION_FAILED');
+    assert.equal(state.auditEvents[0].metadata.messageType, 'TEMPLATE');
+    assert.equal(state.auditEvents[0].metadata.providerMessageId, '');
+    assert.equal(state.auditEvents[0].metadata.providerStatus, null);
+    assert.match(state.auditEvents[0].metadata.body, /Intento de envío fallido/);
+  });
 });
 
 test('bandeja prioriza la asignación ligada al wamid para resolver el auxiliar', async () => {
@@ -537,6 +694,8 @@ test('pantalla usa bandeja sin selector diario, despliega conversación inline y
   assert.match(assignment, /else if \(config\.assignmentTemplateName && config\.templateLanguage\)/);
   assert.match(assignment, /deliveryMode = 'SESSION_INTERACTIVE'/);
   assert.match(assignment, /deliveryMode = 'TEMPLATE'/);
+  assert.match(assignment, /lastProviderStatus: 'ACCEPTED'/);
+  assert.doesNotMatch(assignment, /lastProviderStatus: 'SENT'/);
   assert.match(assignment, /source: 'ASSIGNMENT_CONFIRMATION_FAILED'/);
   assert.match(assignment, /dedupeKey: `assignment-failed:\$\{link\.id\}`/);
   assert.match(assignment, /failedMessageType = contactWindow\.isOpen/);
