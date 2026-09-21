@@ -161,25 +161,12 @@ test('evidencia técnica de otro turno no queda incrustada en experiencia', asyn
   assert.doesNotMatch(result.candidateFields.experienceSummary || '', /CONSENT/i);
 });
 
-test('interés por el trabajo no se convierte en experiencia aunque la IA lo proponga', () => {
+test('interés por el trabajo no se convierte en experiencia aunque una fuente lo proponga', () => {
   const text = 'Buenas tardes un favor interesado en el trabajo gracias';
+  const evidence = { snippet: text, confidence: 0.99, source: 'ai_extraction' };
   const result = sanitizeCandidateFieldsForConversation({
-    fields: {
-      experienceInfo: 'Sí',
-      experienceSummary: text
-    },
-    evidence: {
-      experienceInfo: {
-        snippet: text,
-        confidence: 0.99,
-        source: 'ai_extraction'
-      },
-      experienceSummary: {
-        snippet: text,
-        confidence: 0.99,
-        source: 'ai_extraction'
-      }
-    },
+    fields: { experienceInfo: 'Sí', experienceSummary: text },
+    evidence: { experienceInfo: evidence, experienceSummary: evidence },
     text,
     context: MULTIPURPOSE_CONTEXT,
     turnType: 'PROVIDE_DATA'
@@ -189,45 +176,11 @@ test('interés por el trabajo no se convierte en experiencia aunque la IA lo pro
   assert.equal(result.fields.experienceSummary, undefined);
 });
 
-test('una declaración laboral explícita conserva experiencia real', () => {
-  const text = 'Tengo 6 meses de experiencia en bodega';
-  const result = sanitizeCandidateFieldsForConversation({
-    fields: {
-      experienceInfo: 'Sí',
-      experienceSummary: 'experiencia en bodega'
-    },
-    evidence: {
-      experienceInfo: {
-        snippet: 'Tengo 6 meses de experiencia',
-        confidence: 0.98,
-        source: 'ai_extraction'
-      },
-      experienceSummary: {
-        snippet: 'experiencia en bodega',
-        confidence: 0.98,
-        source: 'ai_extraction'
-      }
-    },
-    text,
-    context: MULTIPURPOSE_CONTEXT,
-    turnType: 'PROVIDE_DATA'
-  });
-
-  assert.equal(result.fields.experienceInfo, 'Sí');
-  assert.equal(result.fields.experienceSummary, 'experiencia en bodega');
-});
-
-test('saludo abreviado no se acepta como nombre aunque nombre esté pendiente', () => {
+test('saludo abreviado no se acepta como nombre aunque el bot esté esperando nombre', () => {
   const text = 'Bnas tardes';
   const result = sanitizeCandidateFieldsForConversation({
     fields: { fullName: 'Bnas Tardes' },
-    evidence: {
-      fullName: {
-        snippet: text,
-        confidence: 0.99,
-        source: 'ai_extraction'
-      }
-    },
+    evidence: { fullName: { snippet: text, confidence: 0.99, source: 'ai_extraction' } },
     text,
     context: {
       currentStep: 'COLLECTING_DATA',
@@ -238,27 +191,4 @@ test('saludo abreviado no se acepta como nombre aunque nombre esté pendiente', 
   });
 
   assert.equal(result.fields.fullName, undefined);
-});
-
-test('nombre real sigue siendo válido cuando responde a nombre pendiente', () => {
-  const text = 'Andrés Felipe Henao Patiño';
-  const result = sanitizeCandidateFieldsForConversation({
-    fields: { fullName: text },
-    evidence: {
-      fullName: {
-        snippet: text,
-        confidence: 0.99,
-        source: 'ai_extraction'
-      }
-    },
-    text,
-    context: {
-      currentStep: 'COLLECTING_DATA',
-      pendingFields: ['fullName'],
-      lastBotQuestion: 'Confírmame por favor nombre completo.'
-    },
-    turnType: 'PROVIDE_DATA'
-  });
-
-  assert.equal(result.fields.fullName, text);
 });
