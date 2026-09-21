@@ -199,25 +199,25 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
   }
 
   if (/\b(edad|rango de edad)\b/.test(normalized)) {
-    const ageRequirement = getConfiguredAgeRequirementText(vacancy);
-    return ageRequirement
-      ? `Para ${title}${location}, ${ageRequirement}.`
-      : `La información disponible no especifica un rango de edad para ${title}${location}.`;
-  }
+  const ageRequirement = getConfiguredAgeRequirementText(vacancy);
+  return ageRequirement
+    ? `Para ${title}${location}, ${ageRequirement}.`
+    : `La información disponible no especifica un rango de edad para ${title}${location}.`;
+}
 
-  if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
-    const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
-    if (experienceRequirement) return `Para ${title}${location}, ${experienceRequirement}.`;
-    return requirements && /\bexperiencia\b/i.test(requirements)
-      ? `Los requisitos para ${title}${location} son: ${requirements}.`
-      : `La información disponible no especifica un requisito adicional de experiencia para ${title}${location}.`;
-  }
+if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
+  const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
+  if (experienceRequirement) return `Para ${title}${location}, ${experienceRequirement}.`;
+  return requirements && /\bexperiencia\b/i.test(requirements)
+    ? `Los requisitos para ${title}${location} son: ${requirements}.`
+    : `La información disponible no especifica un requisito adicional de experiencia para ${title}${location}.`;
+}
 
-  if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
-    return requirements
-      ? `Los requisitos para ${title}${location} son: ${requirements}.`
-      : `La información disponible no incluye requisitos adicionales para ${title}${location}.`;
-  }
+if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+  return requirements
+    ? `Los requisitos para ${title}${location} son: ${requirements}.`
+    : `La información disponible no incluye requisitos adicionales para ${title}${location}.`;
+}
 
   if (/\b(documento|documentos|papeles)\b/.test(normalized)) {
     return documents
@@ -357,6 +357,8 @@ function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMes
   const explicitProfileIntent = /\b(dejar|registr|guardar|tomar|enviar|adjuntar|mandar|compartir)\b/.test(normalized)
     && /\b(perfil|hoja de vida|hv|datos|registro|registrada|registrado)\b/.test(normalized);
 
+  // Una pregunta o una solicitud de información tiene prioridad conversacional.
+  // "Me interesa" expresa interés en la vacante, no autoriza por sí solo guardar el perfil.
   if (turn.question || turn.vacancyInformationRequest) {
     return { accepted: false, passiveAck: false, reason: 'information_request_before_future_profile_decision', lastReplyKind };
   }
@@ -526,7 +528,7 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
         reason: 'ASSIGNED_VACANCY_CHANGE_NOT_AVAILABLE',
         replyKind: 'VACANCY_CHANGE_RETAINED',
         candidateUpdates: { currentStep: candidate.currentStep, botResumeMode: null, reminderScheduledFor: null, reminderState: 'SKIPPED' },
-        reply: 'Esa nueva vacante ya no está disponible. Mantengo tu proceso en la vacante que ya tienes asociada.'
+        reply: 'Esa nueva vacante ya no está disponible. Mantengo tu proceso en la vacante que ya tenías asociada.'
       };
     }
     return {
