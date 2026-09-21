@@ -197,7 +197,7 @@ function workerPhoneWhere(phones) {
 
 function providerStateFromLink(status) {
   const normalized = String(status || '').trim().toUpperCase();
-  return ['SENT', 'DELIVERED', 'READ', 'FAILED', 'DELIVERY_UNKNOWN', 'CONFIRMED'].includes(normalized)
+  return ['DELIVERED', 'READ', 'FAILED', 'DELIVERY_UNKNOWN', 'CONFIRMED'].includes(normalized)
     ? normalized
     : null;
 }
@@ -332,8 +332,11 @@ export async function loadDispatchWhatsappConversationInbox(prisma, {
     const workerId = linkedWorker?.id || linked?.assignment?.workerId || fallbackWorker?.id || null;
     const workerName = normalizeString(linkedWorker?.fullName) || (knownNames.length ? knownNames.join(' / ') : null);
     const lastMessageAt = newestDate(lastMessage?.at, latestByPhone.get(phone))?.toISOString() || null;
-    const providerStatus = lastOutbound?.providerStatus || null;
-    const deliveryState = lastOutbound?.deliveryState || providerStateFromLink(linked?.status) || providerStatus;
+    const historicalSent = Boolean(lastOutbound?.reconstructed && (lastOutbound?.providerStatus === 'SENT' || lastOutbound?.deliveryState === 'SENT'));
+    const providerStatus = historicalSent ? null : (lastOutbound?.providerStatus || null);
+    const deliveryState = historicalSent
+      ? providerStateFromLink(linked?.status)
+      : (lastOutbound?.deliveryState || providerStateFromLink(linked?.status) || providerStatus);
 
     return {
       phone,
@@ -350,9 +353,9 @@ export async function loadDispatchWhatsappConversationInbox(prisma, {
       providerMessageId: lastOutbound?.providerMessageId || normalizeString(linked?.providerMessageId),
       providerStatus,
       deliveryState,
-      providerStatusAt: lastOutbound?.providerStatusAt || null,
+      providerStatusAt: historicalSent ? null : (lastOutbound?.providerStatusAt || null),
       providerDiagnostic: lastOutbound?.providerDiagnostic || null,
-      reconstructed: Boolean(lastMessage?.reconstructed),
+      reconstructed: Boolean(lastMessage?.reconstructed || lastOutbound?.reconstructed),
       windowStatus: conversation.windowStatus,
       lastInboundAt: conversation.lastInboundAt
     };
@@ -455,7 +458,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         return redirectWith('settingsError', 'Configura primero tu WhatsApp personal de alertas en el panel de Operaciones.');
       }
       if (assignmentAutoSendTime && pendingConfirmationAlertTime && pendingConfirmationAlertTime <= assignmentAutoSendTime) {
-        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora de envío automático.');
+        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora de envío de confirmaciones.');
       }
 
       await saveDispatchWhatsappAutomationSettings({
