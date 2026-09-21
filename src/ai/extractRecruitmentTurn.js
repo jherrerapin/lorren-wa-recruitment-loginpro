@@ -117,6 +117,8 @@ Criterios por campo:
 - age: no confundas edad con números de dirección, calle, carrera, cédula, experiencia ni cantidades de personal.
 - documentType/documentNumber: para avanzar en este flujo solo CC y PPT son válidos. CE, pasaporte u otros pueden mencionarse en conflictos/trazabilidad, pero no los marques como documento válido del proceso.
 - residence: no confundas ciudad desde donde escribe, ciudad de operación o ciudad de la vacante con barrio/localidad de residencia.
+- experienceInfo: usa "Sí" o "No" únicamente cuando el candidato declara de forma explícita que tiene o no tiene experiencia, aporta una duración ligada a experiencia/trabajo, o responde Sí/No a una pregunta directa sobre experiencia. "Estoy interesado en el trabajo", "me interesa la vacante", "quiero aplicar" y expresiones equivalentes son intención de postulación, no experiencia laboral.
+- experienceTime: extrae una duración solo cuando esté ligada explícitamente a experiencia laboral o a trabajo realizado. No conviertas edad, antigüedad de otro dato, números sueltos ni requisitos de la vacante en tiempo de experiencia.
 
 Devuelve solo JSON válido bajo el schema estricto.`
           }
