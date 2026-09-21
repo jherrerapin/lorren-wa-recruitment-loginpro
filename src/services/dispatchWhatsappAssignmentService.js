@@ -194,9 +194,23 @@ export async function sendDispatchWhatsappMessage({
       where: { id: link.id, status: 'PENDING' }, data: { status: 'FAILED' }
     }).catch(() => {});
     const message = error?.code?.startsWith?.('dispatch_') ? error.message : dispatchWhatsappProviderErrorMessage(error);
+    const diagnostic = sanitizeDispatchWhatsappProviderDiagnostic(message);
+    const failedMessageType = contactWindow.isOpen
+      ? 'INTERACTIVE'
+      : (config.assignmentTemplateName && config.templateLanguage ? 'TEMPLATE' : 'UNKNOWN');
+    await recordDispatchWhatsappMessageAudit({
+      prismaClient,
+      scope,
+      direction: 'OUTBOUND',
+      phone: validated.phone,
+      body: `Intento de envío fallido. ${diagnostic || 'No se obtuvo aceptación del proveedor.'}`,
+      messageType: failedMessageType,
+      dedupeKey: `assignment-failed:${link.id}`,
+      source: 'ASSIGNMENT_CONFIRMATION_FAILED',
+      occurredAt: new Date()
+    });
     setDispatchWhatsappRuntimeState(scope, { lastError: message });
     if (error?.statusCode) throw error;
-    const diagnostic = sanitizeDispatchWhatsappProviderDiagnostic(message);
     console.warn('[dispatch-wa-cloud] Rechazo del proveedor al enviar asignación:', diagnostic);
     throw buildDispatchWhatsappError(message, 502, dispatchWhatsappProviderFailureCode(error));
   }
