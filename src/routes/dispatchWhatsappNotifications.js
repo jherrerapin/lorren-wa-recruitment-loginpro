@@ -4,6 +4,7 @@ import {
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappCloudService.js';
 import {
+  loadDispatchWhatsappOutboundHistoryByDate,
   loadDispatchWhatsappPhoneConversation,
   loadDispatchWhatsappTomorrowAssignmentMonitor,
   loadDispatchWhatsappWindowStatusForAssignments,
@@ -184,9 +185,13 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
   router.use(requireOps);
 
   router.get('/', async (req, res) => {
-    const [status, automationSettings] = await Promise.all([
+    const [status, automationSettings, outboundHistory] = await Promise.all([
       getStatusForViewer(req),
-      getAutomationSettingsForViewer(prisma, req)
+      getAutomationSettingsForViewer(prisma, req),
+      loadDispatchWhatsappOutboundHistoryByDate({
+        prismaClient: prisma,
+        dateKey: normalizeString(req.query?.date)
+      })
     ]);
     res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de despacho',
@@ -195,6 +200,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       settingsMessage: normalizeString(req.query?.settingsMessage),
       settingsError: normalizeString(req.query?.settingsError),
       automationSettings,
+      outboundHistory,
       whatsappTitle: role(req) === 'dev' ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
       whatsappEyebrow: 'Operaciones / Despacho',
       whatsappDescription: role(req) === 'dev'
@@ -230,7 +236,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         return redirectWith('settingsError', 'Configura primero tu WhatsApp personal de alertas en el panel de Operaciones.');
       }
       if (assignmentAutoSendTime && pendingConfirmationAlertTime && pendingConfirmationAlertTime <= assignmentAutoSendTime) {
-        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora de envío de confirmaciones.');
+        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora del envío automático.');
       }
 
       await saveDispatchWhatsappAutomationSettings({
