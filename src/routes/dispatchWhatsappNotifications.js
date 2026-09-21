@@ -28,6 +28,7 @@ const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
 const MAX_ASSIGNMENT_WINDOW_IDS = 100;
 const MAX_MANUAL_MESSAGE_LENGTH = 1200;
 const CONVERSATION_INBOX_PAGE_SIZE = 20;
+const SUPERVISOR_STATUS_PAGE_SIZE = 30;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -42,6 +43,14 @@ function positivePage(value) {
 
 function role(req) {
   return req.session?.userRole || req.userRole;
+}
+
+function operationalRole(req) {
+  return normalizeString(req.session?.operationalRole || req.operationalRole)?.toUpperCase() || null;
+}
+
+function isSupervisorView(req) {
+  return role(req) !== 'dev' && operationalRole(req) === 'SUPERVISOR';
 }
 
 function allowed(req) {
@@ -66,6 +75,13 @@ function requireOps(req, res, next) {
 function requireDevMonitor(req, res, next) {
   if (!canAccessDispatchWhatsappMonitor(req)) {
     return res.status(403).send('Monitor de WhatsApp de Despacho disponible solo para DEV.');
+  }
+  return next();
+}
+
+function requireSupervisorStatus(req, res, next) {
+  if (!isSupervisorView(req)) {
+    return res.status(403).json({ ok: false, message: 'Este estado está disponible para supervisores de Operaciones.' });
   }
   return next();
 }
@@ -200,6 +216,193 @@ function providerStateFromLink(status) {
   return ['DELIVERED', 'READ', 'FAILED', 'DELIVERY_UNKNOWN', 'CONFIRMED'].includes(normalized)
     ? normalized
     : null;
+}
+
+function supervisorAssignmentStatus(link, auditMetadata = {}) {
+  const linkStatus = String(link?.status || '').trim().toUpperCase();
+  const providerStatus = String(auditMetadata?.providerStatus || '').trim().toUpperCase();
+  const watchdogStatus = String(auditMetadata?.deliveryWatchdogStatus || '').trim().toUpperCase();
+  const providerAt = validDate(auditMetadata?.providerStatusAt);
+  const receivedAt = validDate(link?.confirmationReceivedAt);
+  const updatedAt = validDate(link?.updatedAt);
+  const createdAt = validDate(link?.createdAt);
+  const statusAt = (...values) => newestDate(...values)?.toISOString() || null;
+
+  if (['CONFIRMED_REPLY_PENDING', 'CONFIRMED'].includes(linkStatus)) {
+    return {
+      key: 'CONFIRMED',
+      label: 'Confirmado por el auxiliar',
+      detail: 'El auxiliar respondió y confirmó la asignación.',
+      at: statusAt(receivedAt, updatedAt, createdAt)
+    };
+  }
+  if (linkStatus === 'NOVELTY_REPORTED') {
+    return {
+      key: 'NOVELTY',
+      label: 'Novedad reportada',
+      detail: 'El auxiliar respondió que tiene una novedad sobre la asignación.',
+      at: statusAt(receivedAt, updatedAt, createdAt)
+    };
+  }
+  if (linkStatus === 'FAILED' || providerStatus === 'FAILED') {
+    return {
+      key: 'FAILED',
+      label: 'No se pudo enviar',
+      detail: 'El mensaje no pudo enviarse. Revisa la asignación antes de intentar nuevamente.',
+      at: statusAt(providerAt, updatedAt, createdAt)
+    };
+  }
+  if (linkStatus === 'DELIVERY_UNKNOWN' || watchdogStatus === 'DELIVERY_UNKNOWN') {
+    return {
+      key: 'DELIVERY_UNKNOWN',
+      label: 'Entrega sin confirmar',
+      detail: 'No recibimos confirmación de entrega dentro del tiempo esperado. Revisa antes de reenviar.',
+      at: statusAt(providerAt, updatedAt, createdAt)
+    };
+  }
+  if (providerStatus === 'READ') {
+    return {
+      key: 'READ',
+      label: 'Leído',
+      detail: 'WhatsApp confirmó que el mensaje fue leído.',
+      at: statusAt(providerAt, updatedAt, createdAt)
+    };
+  }
+  if (providerStatus === 'DELIVERED') {
+    return {
+      key: 'DELIVERED',
+      label: 'Entregado',
+      detail: 'WhatsApp confirmó que el mensaje llegó al teléfono.',
+      at: statusAt(providerAt, updatedAt, createdAt)
+    };
+  }
+  if (providerStatus === 'SENT') {
+    return {
+      key: 'SENT',
+      label: 'Enviado',
+      detail: 'WhatsApp confirmó que el mensaje fue enviado.',
+      at: statusAt(providerAt, updatedAt, createdAt)
+    };
+  }
+  if (providerStatus === 'ACCEPTED' || normalizeString(link?.providerMessageId)) {
+    return {
+      key: 'ACCEPTED',
+      label: 'Recibido por WhatsApp',
+      detail: 'WhatsApp recibió la solicitud; todavía no ha confirmado que salió hacia el teléfono.',
+      at: statusAt(providerAt, updatedAt, createdAt)
+    };
+  }
+  if (linkStatus === 'EXPIRED') {
+    return {
+      key: 'EXPIRED',
+      label: 'Solicitud vencida',
+      detail: 'Esta solicitud dejó de estar activa.',
+      at: statusAt(updatedAt, createdAt)
+    };
+  }
+  if (linkStatus === 'DECLINED') {
+    return {
+      key: 'DECLINED',
+      label: 'No confirmado por el auxiliar',
+      detail: 'La asignación no quedó confirmada por el auxiliar.',
+      at: statusAt(receivedAt, updatedAt, createdAt)
+    };
+  }
+  return {
+    key: 'PROCESSING',
+    label: 'Procesando envío',
+    detail: 'La solicitud todavía está en proceso de envío.',
+    at: statusAt(updatedAt, createdAt)
+  };
+}
+
+export async function loadDispatchWhatsappSupervisorAssignmentStatus(prisma, {
+  ownerUsername,
+  page = 1,
+  pageSize = SUPERVISOR_STATUS_PAGE_SIZE,
+  now = new Date()
+} = {}) {
+  if (!prisma?.dispatchWhatsappConfirmation?.findMany) throw new Error('prisma es requerido');
+  const owner = normalizeString(ownerUsername);
+  if (!owner) {
+    return {
+      items: [],
+      generatedAt: now.toISOString(),
+      pagination: { page: 1, pageSize: SUPERVISOR_STATUS_PAGE_SIZE, hasPrevious: false, hasNext: false },
+      summary: { shown: 0, confirmed: 0, deliveredOrRead: 0, attention: 0 }
+    };
+  }
+  const normalizedPage = positivePage(page);
+  const normalizedPageSize = Math.min(50, Math.max(1, Number(pageSize) || SUPERVISOR_STATUS_PAGE_SIZE));
+  const links = await prisma.dispatchWhatsappConfirmation.findMany({
+    where: {
+      alertOwnerUsername: owner,
+      assignment: { serviceRequest: { source: { not: 'DEV_TEST' } } }
+    },
+    include: { assignment: { include: { worker: true, serviceRequest: true } } },
+    orderBy: { createdAt: 'desc' },
+    distinct: ['assignmentId'],
+    skip: (normalizedPage - 1) * normalizedPageSize,
+    take: normalizedPageSize + 1
+  });
+  const hasNext = links.length > normalizedPageSize;
+  const pageLinks = links.slice(0, normalizedPageSize);
+  const providerMessageIds = [...new Set(pageLinks.map((link) => normalizeString(link?.providerMessageId)).filter(Boolean))];
+  const auditRows = providerMessageIds.length && prisma.devAuditEvent?.findMany
+    ? await prisma.devAuditEvent.findMany({
+        where: {
+          entityType: 'DISPATCH_WHATSAPP_MESSAGE',
+          action: 'DISPATCH_WHATSAPP_OUTBOUND',
+          entityId: { in: providerMessageIds.map((id) => `dispatch-wa:outbound:${id}`) }
+        },
+        select: { entityId: true, metadata: true }
+      })
+    : [];
+  const auditByProviderId = new Map();
+  for (const row of auditRows || []) {
+    const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+    const providerMessageId = normalizeString(metadata.providerMessageId)
+      || normalizeString(row?.entityId)?.replace(/^dispatch-wa:outbound:/, '');
+    if (providerMessageId) auditByProviderId.set(providerMessageId, metadata);
+  }
+
+  const items = pageLinks.map((link) => {
+    const providerMessageId = normalizeString(link?.providerMessageId);
+    const status = supervisorAssignmentStatus(link, providerMessageId ? auditByProviderId.get(providerMessageId) : null);
+    const assignment = link?.assignment || {};
+    const worker = assignment.worker || {};
+    const serviceRequest = assignment.serviceRequest || {};
+    return {
+      assignmentId: assignment.id || link.assignmentId,
+      workerId: worker.id || assignment.workerId || null,
+      workerName: normalizeString(worker.fullName) || 'Auxiliar',
+      phoneDisplay: formatDispatchPhone(link.phone || worker.phone),
+      sentAt: validDate(link.createdAt)?.toISOString() || null,
+      serviceDate: validDate(serviceRequest.serviceDate)?.toISOString() || null,
+      operationName: normalizeString(serviceRequest.operationPointName || serviceRequest.serviceName) || null,
+      statusKey: status.key,
+      statusLabel: status.label,
+      statusDetail: status.detail,
+      statusAt: status.at
+    };
+  });
+
+  return {
+    items,
+    generatedAt: now.toISOString(),
+    pagination: {
+      page: normalizedPage,
+      pageSize: normalizedPageSize,
+      hasPrevious: normalizedPage > 1,
+      hasNext
+    },
+    summary: {
+      shown: items.length,
+      confirmed: items.filter((item) => item.statusKey === 'CONFIRMED').length,
+      deliveredOrRead: items.filter((item) => ['DELIVERED', 'READ'].includes(item.statusKey)).length,
+      attention: items.filter((item) => ['FAILED', 'DELIVERY_UNKNOWN', 'NOVELTY'].includes(item.statusKey)).length
+    }
+  };
 }
 
 export async function loadDispatchWhatsappConversationInbox(prisma, {
@@ -407,33 +610,41 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
 
   router.get('/', async (req, res) => {
     const page = positivePage(req.query?.page);
-    const conversationWorkerId = normalizeString(req.query?.workerId);
-    const [status, automationSettings, conversationInbox, selectedConversation] = await Promise.all([
+    const devView = role(req) === 'dev';
+    const supervisorView = isSupervisorView(req);
+    const conversationWorkerId = devView ? normalizeString(req.query?.workerId) : null;
+    const ownerUsername = supervisorView ? normalizeString(req.session?.username || req.username) : null;
+    const [status, automationSettings, conversationInbox, selectedConversation, supervisorAssignmentStatus] = await Promise.all([
       getStatusForViewer(req),
       getAutomationSettingsForViewer(prisma, req),
-      loadDispatchWhatsappConversationInbox(prisma, { page }),
-      loadSelectedWorkerConversation(prisma, conversationWorkerId)
+      devView ? loadDispatchWhatsappConversationInbox(prisma, { page }) : null,
+      devView ? loadSelectedWorkerConversation(prisma, conversationWorkerId) : null,
+      supervisorView ? loadDispatchWhatsappSupervisorAssignmentStatus(prisma, { ownerUsername, page }) : null
     ]);
     res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de despacho',
       role: role(req),
+      operationalRole: operationalRole(req),
       message: normalizeString(req.query?.message),
       settingsMessage: normalizeString(req.query?.settingsMessage),
       settingsError: normalizeString(req.query?.settingsError),
       automationSettings,
       conversationInbox,
       selectedConversation,
-      whatsappTitle: role(req) === 'dev' ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
+      supervisorAssignmentStatus,
+      whatsappTitle: devView ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
       whatsappEyebrow: 'Operaciones / Despacho',
-      whatsappDescription: role(req) === 'dev'
+      whatsappDescription: devView
         ? 'Integración directa con WhatsApp Business Platform de Meta. No usa QR, navegador automatizado ni dispositivos vinculados.'
-        : 'Estado general del canal de WhatsApp usado por Despacho.',
+        : supervisorView
+          ? 'Seguimiento de los mensajes de asignación enviados por tu usuario.'
+          : 'Estado general del canal de WhatsApp usado por Despacho.',
       whatsappBasePath: '/admin/operaciones/whatsapp',
       whatsappReturnHref: '/admin/operaciones',
       whatsappReturnLabel: 'Volver a Operaciones',
       whatsappAssignmentsHref: '/admin/operaciones/asignaciones',
       whatsappAssignmentsLabel: 'Asignaciones',
-      whatsappMonitorHref: role(req) === 'dev' ? '/admin/operaciones/whatsapp/monitor' : null,
+      whatsappMonitorHref: devView ? '/admin/operaciones/whatsapp/monitor' : null,
       ...status
     });
   });
@@ -476,6 +687,19 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
 
   router.get('/estado', async (req, res) => {
     res.json({ ok: true, ...await getStatusForViewer(req) });
+  });
+
+  router.get('/estado-mensajes-asignacion', requireSupervisorStatus, async (req, res, next) => {
+    try {
+      const ownerUsername = normalizeString(req.session?.username || req.username);
+      const status = await loadDispatchWhatsappSupervisorAssignmentStatus(prisma, {
+        ownerUsername,
+        page: positivePage(req.query?.page)
+      });
+      return res.json({ ok: true, ...status });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.get('/ventanas-asignaciones', async (req, res, next) => {
