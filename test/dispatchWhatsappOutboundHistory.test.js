@@ -449,7 +449,7 @@ test('watchdog marca entrega incierta, actualiza auditoría y alerta una sola ve
   assert.equal(sentAlerts.length, 1);
 });
 
-test('pantalla usa bandeja sin selector diario y representa los estados Meta sin inventar entrega', () => {
+test('pantalla usa bandeja sin selector diario, despliega conversación inline y representa estados Meta sin inventar entrega', () => {
   const view = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/dispatchWhatsappNotifications.js', import.meta.url), 'utf8');
   const monitor = fs.readFileSync(new URL('../src/services/dispatchWhatsappMonitor.js', import.meta.url), 'utf8');
@@ -457,8 +457,12 @@ test('pantalla usa bandeja sin selector diario y representa los estados Meta sin
 
   assert.match(view, /Conversaciones de Despacho/);
   assert.match(view, /item\.phoneDisplay \|\| item\.phone/);
-  assert.match(view, /Ver conversación/);
+  assert.match(view, /Ver mensajes/);
   assert.match(view, /conversation\.messageHistory/);
+  assert.match(view, /inline-conversation-scroll/);
+  assert.match(view, /max-height:360px/);
+  assert.match(view, /conversation && item\.workerId && conversation\.workerId === item\.workerId/);
+  assert.doesNotMatch(view, /<section class="conversation-card"/);
   assert.match(view, /✓ Enviado/);
   assert.match(view, /✓✓ Entregado/);
   assert.match(view, /✓✓ Leído/);
