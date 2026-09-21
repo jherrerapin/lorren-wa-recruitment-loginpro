@@ -18,6 +18,31 @@
     pendingConfirmationAlertTime: null,
     alertPhoneConfigured: false
   };
+  const history = typeof outboundHistory !== 'undefined' && outboundHistory ? outboundHistory : {
+    dateKey: '', items: [], summary: { total: 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, withoutProviderStatus: 0 }
+  };
+  const providerStatusLabel = (status) => ({
+    ACCEPTED: 'Aceptado por Meta',
+    SENT: 'Enviado',
+    DELIVERED: 'Entregado',
+    READ: 'Leído',
+    FAILED: 'Fallido'
+  })[status] || 'Sin estado Meta';
+  const providerStatusClass = (status) => ['ACCEPTED', 'SENT', 'DELIVERED', 'READ', 'FAILED'].includes(status) ? status.toLowerCase() : 'unknown';
+  const sourceLabel = (source) => ({
+    ASSIGNMENT_CONFIRMATION: 'Asignación',
+    WINDOW_CHECK_TEMPLATE: 'Verificación de ventana',
+    DEV_MANUAL: 'Manual DEV',
+    WEBHOOK_AUTO_REPLY: 'Respuesta automática'
+  })[source] || source || 'Despacho';
+  const historyTime = (value) => {
+    if (!value) return 'Hora no disponible';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return String(value);
+    return new Intl.DateTimeFormat('es-CO', {
+      timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
+    }).format(date);
+  };
 %>
 <!DOCTYPE html>
 <html lang="es">
@@ -33,8 +58,9 @@
     .status-pill{display:inline-flex;width:fit-content;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:900;background:#fee2e2;color:#991b1b}.status-pill.ready{background:#dcfce7;color:#166534}
     .meta-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.meta-row{display:grid;grid-template-columns:minmax(140px,.7fr) minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid #edf2f7}.meta-row:last-child{border-bottom:0}.meta-key{color:var(--muted);font-size:12px;font-weight:850}.meta-value{color:var(--navy);font-size:12px;font-weight:800;overflow-wrap:anywhere}
     .alert{border:1px solid #fecaca;background:#fff5f5;color:#991b1b;border-radius:14px;padding:12px 14px;font-weight:800}.info{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:14px;padding:12px 14px;font-weight:800;line-height:1.45}.technical{border:1px dashed #cbd5e1;background:#f8fafc;color:#334155;border-radius:14px;padding:12px 14px;font-size:12px;line-height:1.45;word-break:break-word}.missing-list{margin:0;padding-left:18px;color:#991b1b;font-size:12px;font-weight:800}
-    .schedule-card{margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:18px;display:grid;gap:13px}.schedule-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}.schedule-head h2{margin:0;color:var(--navy);font-size:18px}.schedule-form{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr)) auto;gap:12px;align-items:end}.schedule-field{display:grid;gap:5px}.schedule-field label{color:var(--navy);font-size:12px;font-weight:900}.schedule-field input[type="time"]{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 11px;font:inherit;background:#fff;color:var(--navy)}.schedule-field small{color:var(--muted);font-size:10.5px;line-height:1.35}.schedule-note{border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;color:#475569;font-size:11px;line-height:1.45}.schedule-feedback{border-radius:10px;padding:10px 12px;font-size:12px;font-weight:800}.schedule-feedback.success{background:#dcfce7;color:#166534}.schedule-feedback.error{background:#fee2e2;color:#991b1b}
-    @media(max-width:900px){.cloud-grid{grid-template-columns:1fr}.meta-row{grid-template-columns:1fr;gap:3px}.schedule-form{grid-template-columns:1fr}}
+    .schedule-card,.history-card{margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:18px;display:grid;gap:13px}.schedule-head,.history-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}.schedule-head h2,.history-head h2{margin:0;color:var(--navy);font-size:18px}.schedule-form{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr)) auto;gap:12px;align-items:end}.schedule-field{display:grid;gap:5px}.schedule-field label{color:var(--navy);font-size:12px;font-weight:900}.schedule-field input[type="time"]{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 11px;font:inherit;background:#fff;color:var(--navy)}.schedule-field small{color:var(--muted);font-size:10.5px;line-height:1.35}.schedule-note{border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;color:#475569;font-size:11px;line-height:1.45}.schedule-feedback{border-radius:10px;padding:10px 12px;font-size:12px;font-weight:800}.schedule-feedback.success{background:#dcfce7;color:#166534}.schedule-feedback.error{background:#fee2e2;color:#991b1b}
+    .history-filter{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.history-field{display:grid;gap:5px;min-width:190px}.history-field label{color:var(--navy);font-size:12px;font-weight:900}.history-field input{min-height:42px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;font:inherit;background:#fff;color:var(--navy)}.history-help{margin:0;color:var(--muted);font-size:11px;line-height:1.45}.history-summary{display:flex;gap:7px;flex-wrap:wrap}.history-summary span{display:inline-flex;border-radius:999px;padding:5px 9px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:900}.history-list{display:grid;gap:10px}.history-item{border:1px solid #e2e8f0;border-radius:14px;padding:13px;display:grid;gap:8px;background:#fff}.history-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}.history-recipient{display:grid;gap:2px}.history-recipient strong{color:var(--navy);font-size:13px}.history-recipient span,.history-meta{color:var(--muted);font-size:10.5px}.history-status{display:inline-flex;width:fit-content;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900}.history-status.accepted{background:#fef3c7;color:#92400e}.history-status.sent{background:#dbeafe;color:#1d4ed8}.history-status.delivered{background:#dcfce7;color:#166534}.history-status.read{background:#ccfbf1;color:#115e59}.history-status.failed{background:#fee2e2;color:#991b1b}.history-status.unknown{background:#f1f5f9;color:#475569}.history-body{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#1e293b;font:inherit;font-size:11.5px;line-height:1.5}.history-diagnostic{border-radius:10px;background:#fff1f2;color:#9f1239;padding:8px 10px;font-size:10.5px;line-height:1.4;overflow-wrap:anywhere}.history-empty{border:1px dashed #cbd5e1;border-radius:12px;padding:18px;text-align:center;color:var(--muted);font-size:12px}
+    @media(max-width:900px){.cloud-grid{grid-template-columns:1fr}.meta-row{grid-template-columns:1fr;gap:3px}.schedule-form{grid-template-columns:1fr}.history-filter{align-items:stretch}.history-field{min-width:0;width:100%}.history-filter .btn{width:100%}}
   </style>
 </head>
 <body>
@@ -82,6 +108,50 @@
         </div>
       <% } else { %>
         <div class="alert">No fue posible asociar los horarios a tu usuario. Puedes seguir usando Despacho, pero esta automatización no podrá guardarse hasta resolver el perfil.</div>
+      <% } %>
+    </section>
+
+    <section class="history-card" aria-label="Historial diario de mensajes de WhatsApp de Despacho">
+      <div class="history-head">
+        <div><h2>Mensajes enviados por día</h2><p class="history-help">Consulta los envíos auditados de Despacho y el último estado informado por Meta.</p></div>
+        <form class="history-filter" method="get" action="<%= basePath %>">
+          <div class="history-field">
+            <label for="dispatchHistoryDate">Fecha en Bogotá</label>
+            <input id="dispatchHistoryDate" name="date" type="date" value="<%= history.dateKey %>" required />
+          </div>
+          <button class="btn btn-primary" type="submit">Consultar</button>
+        </form>
+      </div>
+      <p class="history-help"><strong>Importante:</strong> “Aceptado por Meta” solo confirma que la API recibió la solicitud; no significa que el mensaje haya sido entregado al teléfono.</p>
+      <div class="history-summary" aria-label="Resumen de estados Meta">
+        <span>Total: <%= history.summary?.total || 0 %></span>
+        <span>Leídos: <%= history.summary?.read || 0 %></span>
+        <span>Entregados: <%= history.summary?.delivered || 0 %></span>
+        <span>Enviados: <%= history.summary?.sent || 0 %></span>
+        <span>Aceptados: <%= history.summary?.accepted || 0 %></span>
+        <span>Fallidos: <%= history.summary?.failed || 0 %></span>
+      </div>
+      <% if (Array.isArray(history.items) && history.items.length) { %>
+        <div class="history-list">
+          <% history.items.forEach((item) => { %>
+            <article class="history-item">
+              <div class="history-item-head">
+                <div class="history-recipient">
+                  <strong><%= item.workerName || 'Destinatario sin nombre relacionado' %></strong>
+                  <span><%= item.phoneMasked || 'Sin número' %> · <%= historyTime(item.at) %></span>
+                </div>
+                <span class="history-status <%= providerStatusClass(item.providerStatus) %>"><%= providerStatusLabel(item.providerStatus) %></span>
+              </div>
+              <div class="history-meta"><%= sourceLabel(item.source) %> · <%= item.messageType || 'UNKNOWN' %></div>
+              <p class="history-body"><%= item.body || '(mensaje sin texto)' %></p>
+              <% if (item.providerStatus === 'FAILED' && item.providerDiagnostic) { %>
+                <div class="history-diagnostic"><strong>Detalle de Meta:</strong> <%= item.providerDiagnostic %></div>
+              <% } %>
+            </article>
+          <% }) %>
+        </div>
+      <% } else { %>
+        <div class="history-empty">No hay mensajes outbound auditados para esta fecha.</div>
       <% } %>
     </section>
 
