@@ -248,7 +248,7 @@ function supervisorAssignmentStatus(link, auditMetadata = {}) {
     return {
       key: 'FAILED',
       label: 'No se pudo enviar',
-      detail: 'El mensaje no pudo enviarse. Revisa la asignación antes de intentar nuevamente.',
+      detail: 'El mensaje no salió por WhatsApp. Puedes reenviarlo con el botón de esta fila; si vuelve a fallar, informa al responsable técnico.',
       at: statusAt(providerAt, updatedAt, createdAt)
     };
   }
@@ -256,7 +256,7 @@ function supervisorAssignmentStatus(link, auditMetadata = {}) {
     return {
       key: 'DELIVERY_UNKNOWN',
       label: 'Entrega sin confirmar',
-      detail: 'No recibimos confirmación de entrega dentro del tiempo esperado. Revisa antes de reenviar.',
+      detail: 'WhatsApp no confirmó que el mensaje haya llegado al teléfono. Puedes reenviarlo con el botón de esta fila; Lórren seguirá actualizando el estado si WhatsApp informa uno después.',
       at: statusAt(providerAt, updatedAt, createdAt)
     };
   }
@@ -383,18 +383,26 @@ export async function loadDispatchWhatsappSupervisorAssignmentStatus(prisma, {
     const assignment = link?.assignment || {};
     const worker = assignment.worker || {};
     const serviceRequest = assignment.serviceRequest || {};
+    const assignmentId = assignment.id || link.assignmentId || null;
+    const serviceRequestId = serviceRequest.id || assignment.serviceRequestId || null;
+    const workerId = worker.id || assignment.workerId || null;
+    const phone = normalizeDispatchWhatsappMonitorPhone(link.phone || worker.phone);
     return {
-      assignmentId: assignment.id || link.assignmentId,
-      workerId: worker.id || assignment.workerId || null,
+      assignmentId,
+      serviceRequestId,
+      workerId,
       workerName: normalizeString(worker.fullName) || 'Auxiliar',
-      phoneDisplay: formatDispatchPhone(link.phone || worker.phone),
+      phone,
+      phoneDisplay: formatDispatchPhone(phone),
       sentAt: validDate(link.createdAt)?.toISOString() || null,
       serviceDate: validDate(serviceRequest.serviceDate)?.toISOString() || null,
       operationName: normalizeString(serviceRequest.operationPointName || serviceRequest.serviceName) || null,
       statusKey: status.key,
       statusLabel: status.label,
       statusDetail: status.detail,
-      statusAt: status.at
+      statusAt: status.at,
+      canResend: ['FAILED', 'DELIVERY_UNKNOWN'].includes(status.key)
+        && Boolean(assignmentId && serviceRequestId && workerId && phone)
     };
   });
 

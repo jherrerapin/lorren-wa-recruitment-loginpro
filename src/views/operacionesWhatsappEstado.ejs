@@ -34,6 +34,7 @@
         summary: { shown: 0, confirmed: 0, deliveredOrRead: 0, attention: 0 },
         generatedAt: null
       };
+  const supervisorPage = Math.max(1, Number(supervisorStatus.pagination?.page) || 1);
   const deliveryStatusLabel = (state, reconstructed = false) => {
     if (state === 'DELIVERY_UNKNOWN') return 'Entrega sin confirmar';
     if (state === 'CONFIRMED') return 'Confirmado por auxiliar';
@@ -193,7 +194,7 @@
           <span>Mostrados: <%= supervisorStatus.summary?.shown || 0 %></span>
           <span>Confirmados: <%= supervisorStatus.summary?.confirmed || 0 %></span>
           <span>Entregados o leídos: <%= supervisorStatus.summary?.deliveredOrRead || 0 %></span>
-          <span>Requieren revisión: <%= supervisorStatus.summary?.attention || 0 %></span>
+          <span>Requieren atención: <%= supervisorStatus.summary?.attention || 0 %></span>
         </div>
         <div class="supervisor-message-list" id="supervisorAssignmentStatusList">
           <% if (Array.isArray(supervisorStatus.items) && supervisorStatus.items.length) { %>
@@ -207,6 +208,9 @@
                 <div class="supervisor-state">
                   <span class="supervisor-state-badge <%= supervisorStatusClass(item.statusKey) %>"><%= item.statusLabel %></span>
                   <p class="supervisor-state-detail"><%= item.statusDetail %></p>
+                  <% if (item.canResend) { %>
+                    <button class="btn" type="button" data-supervisor-resend data-assignment-id="<%= item.assignmentId %>" data-service-request-id="<%= item.serviceRequestId %>" data-worker-id="<%= item.workerId %>" data-phone="<%= item.phone %>" data-recipient-name="<%= item.workerName %>">Reenviar mensaje</button>
+                  <% } %>
                 </div>
               </article>
             <% }) %>
@@ -214,15 +218,16 @@
             <div class="supervisor-status-empty">Todavía no has enviado solicitudes de asignación por WhatsApp.</div>
           <% } %>
         </div>
-        <% if (supervisorStatus.pagination?.hasPrevious || supervisorStatus.pagination?.hasNext) { %>
-          <div class="supervisor-pagination">
-            <div class="inbox-actions">
-              <% if (supervisorStatus.pagination?.hasPrevious) { %><a class="btn" href="<%= supervisorPageUrl((supervisorStatus.pagination.page || 1) - 1) %>">← Más recientes</a><% } %>
-              <% if (supervisorStatus.pagination?.hasNext) { %><a class="btn" href="<%= supervisorPageUrl((supervisorStatus.pagination.page || 1) + 1) %>">Más antiguas →</a><% } %>
-            </div>
-            <p class="supervisor-status-help">Página <%= supervisorStatus.pagination?.page || 1 %>.</p>
+        <div class="supervisor-pagination" id="supervisorPagination">
+          <div class="inbox-actions">
+            <% if (supervisorPage > 1) { %>
+              <a class="btn" href="<%= supervisorPageUrl(supervisorPage - 1) %>">← Página anterior</a>
+              <a class="btn" href="<%= supervisorPageUrl(1) %>">Ir a página 1</a>
+            <% } %>
+            <% if (supervisorStatus.pagination?.hasNext) { %><a class="btn" href="<%= supervisorPageUrl(supervisorPage + 1) %>">Página siguiente →</a><% } %>
           </div>
-        <% } %>
+          <p class="supervisor-status-help">Página <%= supervisorPage %>.</p>
+        </div>
       </section>
     <% } %>
 
@@ -381,9 +386,11 @@
     const isDev = <%= isDevView ? 'true' : 'false' %>;
     const isSupervisor = <%= isSupervisorView ? 'true' : 'false' %>;
     const statusEndpoint = <%- JSON.stringify(`${basePath}/estado`) %>;
-    const supervisorStatusEndpoint = <%- JSON.stringify(isSupervisorView ? `${basePath}/estado-mensajes-asignacion?page=${supervisorStatus.pagination?.page || 1}` : '') %>;
+    const supervisorBasePath = <%- JSON.stringify(basePath) %>;
+    const supervisorStatusEndpoint = <%- JSON.stringify(isSupervisorView ? `${basePath}/estado-mensajes-asignacion?page=${supervisorPage}` : '') %>;
     const statusCard = document.getElementById('statusCard'); const statusPill = document.getElementById('statusPill'); const statusTitle = document.getElementById('statusTitle'); const errorBox = document.getElementById('errorBox');
     const missingBox = document.getElementById('missingBox'); const missingList = document.getElementById('missingList'); const technicalDetails = document.getElementById('technicalDetails'); const technicalError = document.getElementById('technicalError');
+    const supervisorResendBusy = new Set();
     function formatBogota(value){if(!value)return 'Sin registro';const date=new Date(value);if(Number.isNaN(date.getTime()))return 'Sin registro';return new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).format(date);}
     function text(id,value){const element=document.getElementById(id);if(element)element.textContent=value??'—';}
     function renderStatus(data){
@@ -398,23 +405,54 @@
     }
     function supervisorBadgeClass(key){const classes={PROCESSING:'processing',ACCEPTED:'accepted',SENT:'sent',DELIVERED:'delivered',READ:'read',CONFIRMED:'confirmed',NOVELTY:'novelty',DELIVERY_UNKNOWN:'delivery-unknown',FAILED:'failed',EXPIRED:'expired',DECLINED:'declined'};return classes[key]||'processing';}
     function appendTextElement(parent,tag,className,value){const element=document.createElement(tag);if(className)element.className=className;element.textContent=value||'';parent.appendChild(element);return element;}
+    function supervisorPageHref(page){const normalized=Math.max(1,Number(page)||1);return normalized>1?`${supervisorBasePath}?page=${normalized}`:supervisorBasePath;}
+    function appendSupervisorPageLink(parent,page,label){const link=document.createElement('a');link.className='btn';link.href=supervisorPageHref(page);link.textContent=label;parent.appendChild(link);}
+    function renderSupervisorPagination(pagination={}){
+      const container=document.getElementById('supervisorPagination');if(!container)return;
+      const page=Math.max(1,Number(pagination.page)||1);container.replaceChildren();
+      const actions=document.createElement('div');actions.className='inbox-actions';
+      if(page>1){appendSupervisorPageLink(actions,page-1,'← Página anterior');appendSupervisorPageLink(actions,1,'Ir a página 1');}
+      if(pagination.hasNext)appendSupervisorPageLink(actions,page+1,'Página siguiente →');
+      container.appendChild(actions);appendTextElement(container,'p','supervisor-status-help',`Página ${page}.`);
+    }
+    function appendSupervisorResendButton(parent,item){
+      if(!item?.canResend)return;
+      const button=document.createElement('button');button.className='btn';button.type='button';button.dataset.supervisorResend='1';
+      button.dataset.assignmentId=item.assignmentId||'';button.dataset.serviceRequestId=item.serviceRequestId||'';button.dataset.workerId=item.workerId||'';button.dataset.phone=item.phone||'';button.dataset.recipientName=item.workerName||'';
+      if(supervisorResendBusy.has(String(item.assignmentId||''))){button.disabled=true;button.textContent='Reenviando…';}else button.textContent='Reenviar mensaje';
+      parent.appendChild(button);
+    }
     function renderSupervisorAssignments(data){
       const list=document.getElementById('supervisorAssignmentStatusList');const summary=document.getElementById('supervisorStatusSummary');const updated=document.getElementById('supervisorStatusUpdated');if(!list)return;
-      if(summary){summary.replaceChildren();[['Mostrados',data.summary?.shown||0],['Confirmados',data.summary?.confirmed||0],['Entregados o leídos',data.summary?.deliveredOrRead||0],['Requieren revisión',data.summary?.attention||0]].forEach(([label,value])=>appendTextElement(summary,'span','',`${label}: ${value}`));}
+      if(summary){summary.replaceChildren();[['Mostrados',data.summary?.shown||0],['Confirmados',data.summary?.confirmed||0],['Entregados o leídos',data.summary?.deliveredOrRead||0],['Requieren atención',data.summary?.attention||0]].forEach(([label,value])=>appendTextElement(summary,'span','',`${label}: ${value}`));}
       if(updated)updated.textContent=`Actualizado ${formatBogota(data.generatedAt)}`;
+      renderSupervisorPagination(data.pagination);
       list.replaceChildren();const items=Array.isArray(data.items)?data.items:[];
       if(!items.length){appendTextElement(list,'div','supervisor-status-empty','Todavía no has enviado solicitudes de asignación por WhatsApp.');return;}
       for(const item of items){
         const row=document.createElement('article');row.className='supervisor-message-row';if(item.assignmentId)row.dataset.assignmentId=String(item.assignmentId);
         const worker=document.createElement('div');worker.className='supervisor-worker';appendTextElement(worker,'strong','',item.workerName||'Auxiliar');appendTextElement(worker,'span','',[item.phoneDisplay,item.operationName].filter(Boolean).join(' · '));row.appendChild(worker);
         const sent=document.createElement('div');sent.className='supervisor-send-meta';appendTextElement(sent,'span','','Solicitud enviada');appendTextElement(sent,'strong','',formatBogota(item.sentAt));row.appendChild(sent);
-        const state=document.createElement('div');state.className='supervisor-state';appendTextElement(state,'span',`supervisor-state-badge ${supervisorBadgeClass(item.statusKey)}`,item.statusLabel||'Procesando envío');appendTextElement(state,'p','supervisor-state-detail',item.statusDetail||'La solicitud todavía está en proceso de envío.');row.appendChild(state);
+        const state=document.createElement('div');state.className='supervisor-state';appendTextElement(state,'span',`supervisor-state-badge ${supervisorBadgeClass(item.statusKey)}`,item.statusLabel||'Procesando envío');appendTextElement(state,'p','supervisor-state-detail',item.statusDetail||'La solicitud todavía está en proceso de envío.');appendSupervisorResendButton(state,item);row.appendChild(state);
         list.appendChild(row);
       }
+    }
+    async function resendSupervisorAssignment(button){
+      const assignmentId=String(button?.dataset?.assignmentId||'');const serviceRequestId=String(button?.dataset?.serviceRequestId||'');const workerId=String(button?.dataset?.workerId||'');const phone=String(button?.dataset?.phone||'');const recipientName=String(button?.dataset?.recipientName||'');
+      const row=button?.closest?.('.supervisor-message-row');const detail=row?.querySelector?.('.supervisor-state-detail');
+      if(!assignmentId||!serviceRequestId||!workerId||!phone){if(detail)detail.textContent='No fue posible preparar el reenvío con los datos actuales. Actualiza el estado e intenta nuevamente.';return;}
+      if(supervisorResendBusy.has(assignmentId))return;supervisorResendBusy.add(assignmentId);button.disabled=true;button.textContent='Reenviando…';
+      try{
+        const response=await fetch(`${supervisorBasePath}/enviar`,{method:'POST',cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json','Content-Type':'application/json'},body:JSON.stringify({phone,context:{serviceRequestId,assignmentId,workerId,recipientName,messageType:'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST'}})});
+        const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(data.message||'No fue posible reenviar el mensaje.');
+        if(detail)detail.textContent='Mensaje reenviado. Esperando la confirmación de WhatsApp.';button.textContent='Reenviado';await refreshSupervisorAssignments();
+      }catch(error){if(detail)detail.textContent=error?.message||'No fue posible reenviar el mensaje. Intenta nuevamente.';button.disabled=false;button.textContent='Reintentar envío';}
+      finally{supervisorResendBusy.delete(assignmentId);}
     }
     async function refreshStatus(){try{const response=await fetch(statusEndpoint,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);renderStatus(await response.json());}catch(error){console.error('No fue posible consultar el estado de WhatsApp de despacho.',error);}}
     async function refreshSupervisorAssignments(){if(!isSupervisor||!supervisorStatusEndpoint)return;try{const response=await fetch(supervisorStatusEndpoint,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);renderSupervisorAssignments(await response.json());}catch(error){console.error('No fue posible actualizar el estado de los mensajes de asignación.',error);}}
     async function refreshAll(){await Promise.allSettled([refreshStatus(),refreshSupervisorAssignments()]);}
+    document.getElementById('supervisorAssignmentStatusList')?.addEventListener('click',(event)=>{const button=event.target?.closest?.('[data-supervisor-resend]');if(button)resendSupervisorAssignment(button);});
     document.getElementById('refreshStatus')?.addEventListener('click',refreshAll);refreshAll();window.setInterval(refreshStatus,15000);if(isSupervisor)window.setInterval(refreshSupervisorAssignments,5000);
   </script>
 </body>
