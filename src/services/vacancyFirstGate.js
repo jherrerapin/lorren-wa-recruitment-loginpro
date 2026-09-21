@@ -1,7 +1,7 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
 import { analyzeConversationTurn } from './conversationIntent.js';
 import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply, DATA_CONSENT_VERSION } from './dataConsentGate.js';
-import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
+import { classifyLocationMention, detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
 import { buildProfessionalVacancyPresentation, buildVacancyTimingReply, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 
@@ -199,25 +199,25 @@ function buildVacancyInformationAnswer(vacancy = null, inboundText = '') {
   }
 
   if (/\b(edad|rango de edad)\b/.test(normalized)) {
-  const ageRequirement = getConfiguredAgeRequirementText(vacancy);
-  return ageRequirement
-    ? `Para ${title}${location}, ${ageRequirement}.`
-    : `La información disponible no especifica un rango de edad para ${title}${location}.`;
-}
+    const ageRequirement = getConfiguredAgeRequirementText(vacancy);
+    return ageRequirement
+      ? `Para ${title}${location}, ${ageRequirement}.`
+      : `La información disponible no especifica un rango de edad para ${title}${location}.`;
+  }
 
-if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
-  const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
-  if (experienceRequirement) return `Para ${title}${location}, ${experienceRequirement}.`;
-  return requirements && /\bexperiencia\b/i.test(requirements)
-    ? `Los requisitos para ${title}${location} son: ${requirements}.`
-    : `La información disponible no especifica un requisito adicional de experiencia para ${title}${location}.`;
-}
+  if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
+    const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
+    if (experienceRequirement) return `Para ${title}${location}, ${experienceRequirement}.`;
+    return requirements && /\bexperiencia\b/i.test(requirements)
+      ? `Los requisitos para ${title}${location} son: ${requirements}.`
+      : `La información disponible no especifica un requisito adicional de experiencia para ${title}${location}.`;
+  }
 
-if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
-  return requirements
-    ? `Los requisitos para ${title}${location} son: ${requirements}.`
-    : `La información disponible no incluye requisitos adicionales para ${title}${location}.`;
-}
+  if (/\b(requisito|requisitos|perfil|estudio|formacion|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+    return requirements
+      ? `Los requisitos para ${title}${location} son: ${requirements}.`
+      : `La información disponible no incluye requisitos adicionales para ${title}${location}.`;
+  }
 
   if (/\b(documento|documentos|papeles)\b/.test(normalized)) {
     return documents
@@ -357,8 +357,6 @@ function evaluateFutureProfileConsent({ text = '', botResumeMode = '', recentMes
   const explicitProfileIntent = /\b(dejar|registr|guardar|tomar|enviar|adjuntar|mandar|compartir)\b/.test(normalized)
     && /\b(perfil|hoja de vida|hv|datos|registro|registrada|registrado)\b/.test(normalized);
 
-  // Una pregunta o una solicitud de información tiene prioridad conversacional.
-  // "Me interesa" expresa interés en la vacante, no autoriza por sí solo guardar el perfil.
   if (turn.question || turn.vacancyInformationRequest) {
     return { accepted: false, passiveAck: false, reason: 'information_request_before_future_profile_decision', lastReplyKind };
   }
@@ -528,7 +526,7 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
         reason: 'ASSIGNED_VACANCY_CHANGE_NOT_AVAILABLE',
         replyKind: 'VACANCY_CHANGE_RETAINED',
         candidateUpdates: { currentStep: candidate.currentStep, botResumeMode: null, reminderScheduledFor: null, reminderState: 'SKIPPED' },
-        reply: 'Esa nueva vacante ya no está disponible. Mantengo tu proceso en la vacante que ya tenías asociada.'
+        reply: 'Esa nueva vacante ya no está disponible. Mantengo tu proceso en la vacante que ya tienes asociada.'
       };
     }
     return {
@@ -537,6 +535,24 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
       replyKind: 'ALTERNATIVE_NOT_AVAILABLE_FUTURE_PROFILE_OFFER',
       candidateUpdates: { currentStep: GREETING_SENT, botResumeMode: FUTURE_PROFILE_OFFER_MODE, reminderScheduledFor: null, reminderState: 'SKIPPED' },
       reply: buildNoActiveVacanciesReply(vacancyCity(vacancy))
+    };
+  }
+
+  if (requiresConsentBeforeCollection(candidate)) {
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: isVacancyChange ? 'ASSIGNED_VACANCY_CHANGE_ACCEPTED_AWAIT_CONSENT' : 'ALTERNATIVE_VACANCY_ACCEPTED_AWAIT_CONSENT',
+      replyKind: 'DATA_CONSENT_PROMPT',
+      vacancyId: vacancy.id,
+      vacancy,
+      candidateUpdates: {
+        vacancyId: vacancy.id,
+        currentStep: GREETING_SENT,
+        botResumeMode: buildConsentPendingMode(),
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      },
+      reply: buildDataConsentPromptReply()
     };
   }
 
@@ -556,12 +572,14 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
 function isExplicitAssignedVacancyChange(text = '', currentStep = null) {
   if (!START_OR_INTAKE_STEPS.has(currentStep)) return false;
   const turn = analyzeConversationTurn(text, { currentStep });
+  const mentionedCity = detectCityFromText(text);
+  const hasExplicitTargetCity = Boolean(mentionedCity && classifyLocationMention(text, mentionedCity) === 'vacancy_target');
   const hasMaterialCorrection = turn.correction && Boolean(
-    detectCityFromText(text)
+    mentionedCity
     || detectRoleHintFromText(text)
     || detectOperationZoneEvidence(text).length
   );
-  return turn.primaryIntent === 'change_intent' || hasMaterialCorrection;
+  return turn.primaryIntent === 'change_intent' || hasMaterialCorrection || hasExplicitTargetCity;
 }
 
 async function evaluateAssignedVacancyChange({
@@ -575,9 +593,12 @@ async function evaluateAssignedVacancyChange({
   if (!candidate?.vacancyId || !isExplicitAssignedVacancyChange(inboundText, currentStep)) return null;
 
   const currentText = String(inboundText || '').trim();
+  const mentionedCity = detectCityFromText(currentText);
+  const explicitRoleHint = detectRoleHintFromText(currentText, { city: mentionedCity || '' });
   const resolution = await resolveVacancyFromText(prisma, currentText, {
     allVacancies: vacancyHints?.allVacancies,
-    activeVacancies: vacancyHints?.activeVacancies
+    activeVacancies: vacancyHints?.activeVacancies,
+    roleHint: explicitRoleHint ? null : (currentVacancy?.role || currentVacancy?.title || null)
   });
 
   if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
@@ -716,7 +737,8 @@ export async function resolveVacancyFirstGate({
   if (currentVacancy && isOpenVacancy(currentVacancy)
     && (currentTurn.vacancyInformationRequest || currentTurn.question)
     && !currentTurn.interest
-    && currentTurn.primaryIntent !== 'change_intent') {
+    && currentTurn.primaryIntent !== 'change_intent'
+    && !isExplicitAssignedVacancyChange(inboundText, currentStep)) {
     const informationReply = buildVacancyInformationAnswer(currentVacancy, inboundText);
     if (informationReply) {
       return {
@@ -896,6 +918,17 @@ export async function resolveVacancyFirstGate({
       reply: buildNoActiveVacanciesReply(resolution.city),
       resolution
     }, { recentMessages, inboundText, city: resolution.city, currentStep });
+  }
+
+  if (resolution.reason === 'role_without_target_location') {
+    return preventRepeatDecision({
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'ROLE_WITHOUT_TARGET_LOCATION',
+      replyKind: 'ASK_VACANCY_TARGET',
+      candidateUpdates: { currentStep: GREETING_SENT },
+      reply: 'Ya tengo el cargo que buscas. Para ubicar la vacante correcta, dime en qué ciudad o zona quieres aplicar.',
+      resolution
+    }, { recentMessages, inboundText, city: null, currentStep });
   }
 
   if (resolution.residenceLocation && ['missing_city_and_role', 'residence_without_compatible_vacancy'].includes(resolution.reason)) {
