@@ -324,6 +324,34 @@ test('bandeja prioriza la asignación ligada al wamid para resolver el auxiliar'
   assert.equal(inbox.items[0].deliveryState, 'SENT');
 });
 
+test('bandeja no certifica SENT histórico sin auditoría de estado Meta', async () => {
+  const sentAt = '2026-09-20T23:20:00.000Z';
+  const confirmations = [{
+    id: 'link-historical-sent',
+    phone: '573006667799',
+    providerMessageId: 'wamid-historical-sent',
+    status: 'SENT',
+    createdAt: new Date(sentAt),
+    updatedAt: new Date(sentAt),
+    confirmationReceivedAt: null,
+    assignment: {
+      id: 'assignment-historical-sent',
+      workerId: 'worker-historical-sent',
+      worker: { id: 'worker-historical-sent', fullName: 'Auxiliar Histórico Envío', phone: '3006667799' },
+      serviceRequest: { id: 'request-historical-sent', source: 'MANUAL' }
+    }
+  }];
+  const prismaClient = inboxPrisma({ confirmations });
+
+  const inbox = await loadDispatchWhatsappConversationInbox(prismaClient, { now: NOW });
+
+  assert.equal(inbox.items.length, 1);
+  assert.equal(inbox.items[0].workerName, 'Auxiliar Histórico Envío');
+  assert.equal(inbox.items[0].providerStatus, null);
+  assert.equal(inbox.items[0].deliveryState, null);
+  assert.equal(inbox.items[0].reconstructed, true);
+});
+
 test('bandeja agrupa una sola conversación por teléfono y ordena por último mensaje descendente', async () => {
   const rows = [
     auditRow({ id: 'wamid-old-a', phone: '573001112233', status: 'DELIVERED', at: '2026-09-21T10:00:00.000Z', body: 'Anterior A' }),
@@ -434,13 +462,15 @@ test('pantalla usa bandeja sin selector diario y representa los estados Meta sin
   assert.match(view, /✓ Enviado/);
   assert.match(view, /✓✓ Entregado/);
   assert.match(view, /✓✓ Leído/);
+  assert.match(view, /Sin estado Meta histórico/);
   assert.match(view, /DELIVERY_UNKNOWN/);
   assert.match(view, /Meta reportó fallo/);
   assert.doesNotMatch(view, /type="date"/);
   assert.doesNotMatch(view, /dispatchHistoryDate/);
   assert.match(route, /loadDispatchWhatsappConversationInbox/);
   assert.match(route, /linkedByProviderId/);
-  assert.match(route, /workerId:\s*linkedWorker/);
+  assert.match(route, /const workerId = linkedWorker\?\.id/);
+  assert.match(route, /historicalSent/);
   assert.doesNotMatch(route, /loadDispatchWhatsappOutboundHistoryByDate/);
   assert.doesNotMatch(route, /req\.query\?\.date/);
   assert.match(monitor, /contenido original no quedó almacenado/);
