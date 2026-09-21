@@ -248,7 +248,7 @@ function supervisorAssignmentStatus(link, auditMetadata = {}) {
     return {
       key: 'FAILED',
       label: 'No se pudo enviar',
-      detail: 'El mensaje no pudo enviarse. Revisa la asignación antes de intentar nuevamente.',
+      detail: 'El mensaje no salió por WhatsApp. Puedes intentar enviarlo nuevamente desde Asignaciones; si vuelve a fallar, informa al responsable técnico.',
       at: statusAt(providerAt, updatedAt, createdAt)
     };
   }
@@ -256,7 +256,7 @@ function supervisorAssignmentStatus(link, auditMetadata = {}) {
     return {
       key: 'DELIVERY_UNKNOWN',
       label: 'Entrega sin confirmar',
-      detail: 'No recibimos confirmación de entrega dentro del tiempo esperado. Revisa antes de reenviar.',
+      detail: 'WhatsApp no confirmó que el mensaje haya llegado al teléfono. Puedes reenviar la asignación desde Asignaciones; Lórren seguirá actualizando el estado si WhatsApp informa uno después.',
       at: statusAt(providerAt, updatedAt, createdAt)
     };
   }
