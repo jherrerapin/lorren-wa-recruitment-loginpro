@@ -19,7 +19,7 @@
     alertPhoneConfigured: false
   };
   const history = typeof outboundHistory !== 'undefined' && outboundHistory ? outboundHistory : {
-    dateKey: '', items: [], summary: { total: 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, withoutProviderStatus: 0 }
+    dateKey: '', items: [], summary: { total: 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, historical: 0, withoutProviderStatus: 0 }
   };
   const providerStatusLabel = (status) => ({
     ACCEPTED: 'Aceptado por Meta',
@@ -33,7 +33,8 @@
     ASSIGNMENT_CONFIRMATION: 'Asignación',
     WINDOW_CHECK_TEMPLATE: 'Verificación de ventana',
     DEV_MANUAL: 'Manual DEV',
-    WEBHOOK_AUTO_REPLY: 'Respuesta automática'
+    WEBHOOK_AUTO_REPLY: 'Respuesta automática',
+    RECONSTRUIDO_ASIGNACION: 'Asignación · evidencia histórica'
   })[source] || source || 'Despacho';
   const historyTime = (value) => {
     if (!value) return 'Hora no disponible';
@@ -122,7 +123,7 @@
           <button class="btn btn-primary" type="submit">Consultar</button>
         </form>
       </div>
-      <p class="history-help"><strong>Importante:</strong> “Aceptado por Meta” solo confirma que la API recibió la solicitud; no significa que el mensaje haya sido entregado al teléfono.</p>
+      <p class="history-help"><strong>Importante:</strong> “Aceptado por Meta” solo confirma que la API recibió la solicitud; no significa que el mensaje haya sido entregado al teléfono. En envíos anteriores a la auditoría de estados puede aparecer “Sin estado Meta histórico”: confirma que existe evidencia del envío y su <code>providerMessageId</code>, pero no permite afirmar entrega o lectura.</p>
       <div class="history-summary" aria-label="Resumen de estados Meta">
         <span>Total: <%= history.summary?.total || 0 %></span>
         <span>Leídos: <%= history.summary?.read || 0 %></span>
@@ -130,6 +131,7 @@
         <span>Enviados: <%= history.summary?.sent || 0 %></span>
         <span>Aceptados: <%= history.summary?.accepted || 0 %></span>
         <span>Fallidos: <%= history.summary?.failed || 0 %></span>
+        <% if (history.summary?.historical) { %><span>Sin estado histórico: <%= history.summary.historical %></span><% } %>
       </div>
       <% if (Array.isArray(history.items) && history.items.length) { %>
         <div class="history-list">
@@ -140,7 +142,7 @@
                   <strong><%= item.workerName || 'Destinatario sin nombre relacionado' %></strong>
                   <span><%= item.phoneMasked || 'Sin número' %> · <%= historyTime(item.at) %></span>
                 </div>
-                <span class="history-status <%= providerStatusClass(item.providerStatus) %>"><%= providerStatusLabel(item.providerStatus) %></span>
+                <span class="history-status <%= providerStatusClass(item.providerStatus) %>"><%= item.reconstructed ? 'Sin estado Meta histórico' : providerStatusLabel(item.providerStatus) %></span>
               </div>
               <div class="history-meta"><%= sourceLabel(item.source) %> · <%= item.messageType || 'UNKNOWN' %></div>
               <p class="history-body"><%= item.body || '(mensaje sin texto)' %></p>
@@ -151,7 +153,7 @@
           <% }) %>
         </div>
       <% } else { %>
-        <div class="history-empty">No hay mensajes outbound auditados para esta fecha.</div>
+        <div class="history-empty">No hay mensajes outbound auditados ni evidencia histórica de asignaciones para esta fecha.</div>
       <% } %>
     </section>
 
