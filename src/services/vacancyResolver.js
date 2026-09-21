@@ -214,9 +214,10 @@ export function classifyLocationMention(text = '', location = '') {
   if (!segments.length) return 'unspecified';
 
   const vacancyTerms = '(?:vacante|vacantes|oferta|ofertas|convocatoria|convocatorias|empleo|empleos|trabajo|trabajos|cargo|cargos|puesto|puestos|operacion|proceso)';
+  const targetLocationPrefix = '(?:(?:el\\s+municipio|la\\s+ciudad)\\s+de\\s+)?';
   const targetPatterns = [
-    new RegExp(`\\b${vacancyTerms}\\b.{0,80}\\b(?:en|para|de)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
-    new RegExp(`\\b(?:quiero|busco|deseo|necesito|me\\s+interesa)\\b.{0,60}\\b(?:trabajar|empleo|vacante|vacantes|cargo|puesto)\\b.{0,60}\\b(?:en|para)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
+    new RegExp(`\\b${vacancyTerms}\\b.{0,80}\\b(?:en|para|de)\\s+${targetLocationPrefix}${locationPattern}\\b`),
+    new RegExp(`\\b(?:quiero|busco|deseo|necesito|me\\s+interesa)\\b.{0,60}\\b(?:trabajar|empleo|vacante|vacantes|cargo|puesto)\\b.{0,60}\\b(?:en|para)\\s+${targetLocationPrefix}${locationPattern}\\b`),
     new RegExp(`\\b${vacancyTerms}\\b.{0,40}\\b(?:queda|esta|es|seria|sera)\\b.{0,20}\\b(?:en|para)?\\s*${locationPattern}\\b`)
   ];
   const residencePatterns = [
