@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { listOfferableSlots } from '../src/services/interviewScheduler.js';
 import { isSchedulingOfferDecline } from '../src/services/interviewLifecycle.js';
 import { buildReminderText } from '../src/services/reminder.js';
+import { generateBookingConfirmation } from '../src/services/naturalReply.js';
 
 test('agenda exige más de seis horas de anticipación y excluye exactamente seis horas', async () => {
   const now = new Date('2026-04-08T10:00:00.000Z'); // 5:00 a.m. Colombia
@@ -83,4 +84,33 @@ test('la documentación conversacional coincide con el recordatorio operativo de
   const principles = fs.readFileSync('docs/conversational-ai-principles.md', 'utf8');
   assert.match(principles, /recordatorio de entrevista se envía 1 hora antes/);
   assert.doesNotMatch(principles, /recordatorio de entrevista se envía 40 minutos antes/);
+});
+
+test('naturalReply exige tuteo colombiano y no conserva instrucciones de voseo', () => {
+  const source = fs.readFileSync('src/services/naturalReply.js', 'utf8');
+  const instructions = source.match(/Usa tuteo colombiano natural y evita el voseo\./g) || [];
+  const voseo = /(?:^|[^\p{L}])(?:sos|saludá|respondé|respondás|ofrecé|preguntá|soná|usés|inventés|confirmá|pedilo|llamás|decí|dejá|variá|usá|indicá|avisá|necesitás)(?=$|[^\p{L}])/iu;
+
+  assert.equal(instructions.length, 5);
+  assert.doesNotMatch(source, voseo);
+});
+
+test('confirmación natural y fallback anuncian el recordatorio una hora antes', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const reply = await generateBookingConfirmation({
+      formattedDate: 'lunes 21 de septiembre a las 10:00 a. m.',
+      vacancy: {},
+      candidateName: 'Persona Prueba'
+    });
+    assert.match(reply, /recordatorio una hora antes/i);
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+
+  const source = fs.readFileSync('src/services/naturalReply.js', 'utf8');
+  assert.doesNotMatch(source, /40 minutos antes/i);
+  assert.match(source, /Avisa que le llegará un recordatorio una hora antes/);
 });

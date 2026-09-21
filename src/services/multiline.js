@@ -1,6 +1,6 @@
-const DEFAULT_REASONING_WINDOW_MS = 8000;
-const MIN_REASONING_WINDOW_MS = 3000;
-const MAX_REASONING_WINDOW_MS = 20000;
+const DEFAULT_REASONING_WINDOW_MS = 20000;
+const MIN_REASONING_WINDOW_MS = 20000;
+const MAX_REASONING_WINDOW_MS = 30000;
 
 function normalizeText(text = '') {
   return String(text || '').trim();

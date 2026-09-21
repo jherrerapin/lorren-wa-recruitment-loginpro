@@ -1,7 +1,7 @@
 import { getCandidateReadiness, hasValidCv } from './readinessGuard.js';
 import { analyzeConversationTurn } from './conversationIntent.js';
 import { APPLICATION_INTEREST_PENDING_MODE, buildConsentPendingMode, buildDataConsentPromptReply, DATA_CONSENT_VERSION } from './dataConsentGate.js';
-import { detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
+import { classifyLocationMention, detectCityFromText, detectOperationZoneEvidence, detectRoleHintFromText, findActiveVacancies, normalizeResolverText, resolveVacancyFromText } from './vacancyResolver.js';
 import { evaluateVacancyConceptAlternative, VacancyConceptAlternativeAction } from './vacancyConceptMatcher.js';
 import { buildProfessionalVacancyPresentation, buildVacancyTimingReply, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 
@@ -131,7 +131,7 @@ function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
 function missingDataPrompt(candidate = {}, vacancy = null) {
   const labels = missingDataLabels(candidate, vacancy);
   if (labels.length) return `Listo, dejo tu perfil como registro para futuras aperturas. Para hacerlo bien, compárteme ${labels[0]}.`;
-  if (!hasValidCv(candidate)) return 'Listo, dejo tu perfil como registro para futuras aperturas. Si deseas actualizar o adjuntar tu hoja de vida, envíala en PDF o Word/DOCX.';
+  if (!hasValidCv(candidate)) return 'Listo, dejo tu perfil como registro para futuras aperturas. Si deseas actualizar o adjuntar tu hoja de vida, envíala en PDF, DOC o DOCX.';
   return 'Listo, tu perfil queda registrado para futuras aperturas compatibles. No hay entrevista activa para agendar en este momento.';
 }
 
@@ -540,6 +540,24 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
     };
   }
 
+  if (requiresConsentBeforeCollection(candidate)) {
+    return {
+      action: VacancyFirstGateAction.REPLY,
+      reason: isVacancyChange ? 'ASSIGNED_VACANCY_CHANGE_ACCEPTED_AWAIT_CONSENT' : 'ALTERNATIVE_VACANCY_ACCEPTED_AWAIT_CONSENT',
+      replyKind: 'DATA_CONSENT_PROMPT',
+      vacancyId: vacancy.id,
+      vacancy,
+      candidateUpdates: {
+        vacancyId: vacancy.id,
+        currentStep: GREETING_SENT,
+        botResumeMode: buildConsentPendingMode(),
+        reminderScheduledFor: null,
+        reminderState: 'SKIPPED'
+      },
+      reply: buildDataConsentPromptReply()
+    };
+  }
+
   return {
     action: VacancyFirstGateAction.REPLY,
     reason: isVacancyChange
@@ -556,12 +574,14 @@ async function evaluateAlternativeAcceptance({ prisma, candidate = {}, inboundTe
 function isExplicitAssignedVacancyChange(text = '', currentStep = null) {
   if (!START_OR_INTAKE_STEPS.has(currentStep)) return false;
   const turn = analyzeConversationTurn(text, { currentStep });
+  const mentionedCity = detectCityFromText(text);
+  const hasExplicitTargetCity = Boolean(mentionedCity && classifyLocationMention(text, mentionedCity) === 'vacancy_target');
   const hasMaterialCorrection = turn.correction && Boolean(
-    detectCityFromText(text)
+    mentionedCity
     || detectRoleHintFromText(text)
     || detectOperationZoneEvidence(text).length
   );
-  return turn.primaryIntent === 'change_intent' || hasMaterialCorrection;
+  return turn.primaryIntent === 'change_intent' || hasMaterialCorrection || hasExplicitTargetCity;
 }
 
 async function evaluateAssignedVacancyChange({
@@ -575,9 +595,12 @@ async function evaluateAssignedVacancyChange({
   if (!candidate?.vacancyId || !isExplicitAssignedVacancyChange(inboundText, currentStep)) return null;
 
   const currentText = String(inboundText || '').trim();
+  const mentionedCity = detectCityFromText(currentText);
+  const explicitRoleHint = detectRoleHintFromText(currentText, { city: mentionedCity || '' });
   const resolution = await resolveVacancyFromText(prisma, currentText, {
     allVacancies: vacancyHints?.allVacancies,
-    activeVacancies: vacancyHints?.activeVacancies
+    activeVacancies: vacancyHints?.activeVacancies,
+    roleHint: explicitRoleHint ? null : (currentVacancy?.role || currentVacancy?.title || null)
   });
 
   if (resolution.resolved && resolution.vacancy && isOpenVacancy(resolution.vacancy)) {
@@ -716,7 +739,8 @@ export async function resolveVacancyFirstGate({
   if (currentVacancy && isOpenVacancy(currentVacancy)
     && (currentTurn.vacancyInformationRequest || currentTurn.question)
     && !currentTurn.interest
-    && currentTurn.primaryIntent !== 'change_intent') {
+    && currentTurn.primaryIntent !== 'change_intent'
+    && !isExplicitAssignedVacancyChange(inboundText, currentStep)) {
     const informationReply = buildVacancyInformationAnswer(currentVacancy, inboundText);
     if (informationReply) {
       return {
@@ -896,6 +920,17 @@ export async function resolveVacancyFirstGate({
       reply: buildNoActiveVacanciesReply(resolution.city),
       resolution
     }, { recentMessages, inboundText, city: resolution.city, currentStep });
+  }
+
+  if (resolution.reason === 'role_without_target_location') {
+    return preventRepeatDecision({
+      action: VacancyFirstGateAction.REPLY,
+      reason: 'ROLE_WITHOUT_TARGET_LOCATION',
+      replyKind: 'ASK_VACANCY_TARGET',
+      candidateUpdates: { currentStep: GREETING_SENT },
+      reply: 'Ya tengo el cargo que buscas. Para ubicar la vacante correcta, dime en qué ciudad o zona quieres aplicar.',
+      resolution
+    }, { recentMessages, inboundText, city: null, currentStep });
   }
 
   if (resolution.residenceLocation && ['missing_city_and_role', 'residence_without_compatible_vacancy'].includes(resolution.reason)) {

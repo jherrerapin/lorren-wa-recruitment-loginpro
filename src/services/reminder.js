@@ -93,7 +93,7 @@ export function buildReminderText(candidate = {}) {
     missingParts.push(`estos datos: ${formatList(missingFields)}`);
   }
   if (missingHv) {
-    missingParts.push('tu hoja de vida (HV) en PDF o Word/DOCX');
+    missingParts.push('tu hoja de vida (HV) en PDF, DOC o DOCX');
   }
 
   if (!missingParts.length) {

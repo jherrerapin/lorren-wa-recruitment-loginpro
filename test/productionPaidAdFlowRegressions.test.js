@@ -136,19 +136,120 @@ test('Meta: IDs objetivos desconocidos no se sustituyen por campaign_name descri
   assert.equal(unsafe.reason, 'objective_metadata_without_exact_campaign_match');
 });
 
-test('latencia: configuración heredada de 60s queda limitada a máximo 20s', () => {
+test('latencia: la ventana lógica de producción se mantiene entre 20 y 30 segundos', () => {
   const previousNodeEnv = process.env.NODE_ENV;
   const previousReasoning = process.env.LORREN_REASONING_WINDOW_MS;
   process.env.NODE_ENV = 'production';
-  process.env.LORREN_REASONING_WINDOW_MS = '60000';
   try {
+    delete process.env.LORREN_REASONING_WINDOW_MS;
     assert.equal(getMultilineWindowMs(), 20000);
+    process.env.LORREN_REASONING_WINDOW_MS = '8000';
+    assert.equal(getMultilineWindowMs(), 20000);
+    process.env.LORREN_REASONING_WINDOW_MS = '60000';
+    assert.equal(getMultilineWindowMs(), 30000);
   } finally {
     if (previousNodeEnv === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousNodeEnv;
     if (previousReasoning === undefined) delete process.env.LORREN_REASONING_WINDOW_MS; else process.env.LORREN_REASONING_WINDOW_MS = previousReasoning;
   }
 });
 
+test('orgánico: cargo sin referral ni ubicación no autoasigna una vacante', async () => {
+  const siberia = {
+    ...vacancy,
+    id: 'vac-siberia-bodega',
+    title: 'Auxiliar Cargue y Descargue Siberia',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: { id: 'op-siberia', name: 'Siberia', city: { id: 'city-bogota', name: 'Bogota' } }
+  };
+  const neiva = {
+    ...vacancy,
+    id: 'vac-neiva-bodega',
+    title: 'Auxiliar de Bodega Neiva',
+    role: 'Auxiliar de bodega'
+  };
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: candidate(),
+    currentVacancy: null,
+    inboundText: 'Para preguntar por el trabajo de auxiliar de bodega',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [],
+    vacancyHints: { allVacancies: [siberia, neiva], activeVacancies: [siberia, neiva] }
+  });
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ROLE_WITHOUT_TARGET_LOCATION');
+  assert.equal(decision.vacancyId, undefined);
+  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+  assert.match(decision.reply, /ciudad|zona/i);
+  assert.doesNotMatch(decision.reply, /Siberia|Auxiliar de Bodega Neiva/i);
+});
+
+test('orgánico: una ciudad objetivo explícita corrige la vacante antes de confirmar interés', async () => {
+  const siberia = {
+    ...vacancy,
+    id: 'vac-siberia-bodega',
+    title: 'Auxiliar Cargue y Descargue Siberia',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: { id: 'op-siberia', name: 'Siberia', city: { id: 'city-bogota', name: 'Bogota' } }
+  };
+  const neiva = {
+    ...vacancy,
+    id: 'vac-neiva-bodega',
+    title: 'Auxiliar de Bodega Neiva',
+    role: 'Auxiliar de bodega'
+  };
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: candidate({ vacancyId: siberia.id, botResumeMode: APPLICATION_INTEREST_PENDING_MODE }),
+    currentVacancy: siberia,
+    inboundText: 'Mire la vacante para la ciudad de Neiva',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [],
+    vacancyHints: { allVacancies: [siberia, neiva], activeVacancies: [siberia, neiva] }
+  });
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ASSIGNED_VACANCY_CHANGE_OFFERED');
+  assert.equal(decision.vacancyId, neiva.id);
+  assert.equal(decision.candidateUpdates.vacancyId, undefined);
+  assert.equal(decision.candidateUpdates.botResumeMode, `vacancy_change_offer:${neiva.id}`);
+  assert.match(decision.reply, /Neiva/i);
+  assert.doesNotMatch(decision.reply, /autorizas|nombre completo|documento/i);
+});
+
+test('orgánico: confirmar el cambio de vacante pendiente conserva consentimiento antes de datos', async () => {
+  const siberia = {
+    ...vacancy,
+    id: 'vac-siberia-bodega',
+    title: 'Auxiliar Cargue y Descargue Siberia',
+    role: 'Auxiliar de bodega',
+    city: 'Bogota',
+    operation: { id: 'op-siberia', name: 'Siberia', city: { id: 'city-bogota', name: 'Bogota' } }
+  };
+  const neiva = {
+    ...vacancy,
+    id: 'vac-neiva-bodega',
+    title: 'Auxiliar de Bodega Neiva',
+    role: 'Auxiliar de bodega'
+  };
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: candidate({ vacancyId: siberia.id, botResumeMode: `vacancy_change_offer:${neiva.id}` }),
+    currentVacancy: siberia,
+    inboundText: 'Si',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [],
+    vacancyHints: { allVacancies: [siberia, neiva], activeVacancies: [siberia, neiva] }
+  });
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'ASSIGNED_VACANCY_CHANGE_ACCEPTED_AWAIT_CONSENT');
+  assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
+  assert.equal(decision.candidateUpdates.vacancyId, neiva.id);
+  assert.match(String(decision.candidateUpdates.botResumeMode), new RegExp(`^${DATA_CONSENT_PENDING_MODE}`));
+  assert.match(decision.reply, /autorizas|autorización/i);
+  assert.doesNotMatch(decision.reply, /nombre completo|tipo de documento|edad/i);
+});
 
 test('replay #901: texto y HV consecutivos comparten una sola respuesta lógica', () => {
   const texts = [{
@@ -178,7 +279,6 @@ test('defensa: una HV fuera de la ventana conserva su respuesta independiente', 
 
   assert.equal(adjacent.length, 0);
 });
-
 
 test('producción: interés explícito al resolver vacante pasa directamente a consentimiento', async () => {
   const decision = await resolveVacancyFirstGate({
@@ -290,7 +390,6 @@ test('replay #901: responde la pregunta y después retoma únicamente los datos 
     'fullName'
   ]);
 });
-
 
 test('replay #901: una etiqueta de experiencia dentro del bloque de datos no se trata como pregunta', async () => {
   const result = await runConversationCase({

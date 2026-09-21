@@ -77,7 +77,7 @@ function pausedRegistrationMessage(candidate = {}, vacancy = null) {
   const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
   const labels = readiness.missingFieldLabels || readiness.missingFields || [];
   if (labels.length) return `Listo, lo tomo como registro para futuras aperturas. Compárteme: ${labels.join(', ')}.`;
-  return 'Listo, lo tomo como registro para futuras aperturas. Si no la has enviado, adjunta tu hoja de vida en PDF o Word/DOCX.';
+  return 'Listo, lo tomo como registro para futuras aperturas. Si no la has enviado, adjunta tu hoja de vida en PDF, DOC o DOCX.';
 }
 
 function buildBypassResult({ reply, nextStep, reason, consent = null }) {
