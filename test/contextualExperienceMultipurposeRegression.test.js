@@ -160,3 +160,35 @@ test('evidencia técnica de otro turno no queda incrustada en experiencia', asyn
   assert.equal(result.candidateFields.experienceSummary, 'Cargue y descargue');
   assert.doesNotMatch(result.candidateFields.experienceSummary || '', /CONSENT/i);
 });
+
+test('interés por el trabajo no se convierte en experiencia aunque una fuente lo proponga', () => {
+  const text = 'Buenas tardes un favor interesado en el trabajo gracias';
+  const evidence = { snippet: text, confidence: 0.99, source: 'ai_extraction' };
+  const result = sanitizeCandidateFieldsForConversation({
+    fields: { experienceInfo: 'Sí', experienceSummary: text },
+    evidence: { experienceInfo: evidence, experienceSummary: evidence },
+    text,
+    context: MULTIPURPOSE_CONTEXT,
+    turnType: 'PROVIDE_DATA'
+  });
+
+  assert.equal(result.fields.experienceInfo, undefined);
+  assert.equal(result.fields.experienceSummary, undefined);
+});
+
+test('saludo abreviado no se acepta como nombre aunque el bot esté esperando nombre', () => {
+  const text = 'Bnas tardes';
+  const result = sanitizeCandidateFieldsForConversation({
+    fields: { fullName: 'Bnas Tardes' },
+    evidence: { fullName: { snippet: text, confidence: 0.99, source: 'ai_extraction' } },
+    text,
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['fullName'],
+      lastBotQuestion: 'Confírmame por favor nombre completo.'
+    },
+    turnType: 'PROVIDE_DATA'
+  });
+
+  assert.equal(result.fields.fullName, undefined);
+});

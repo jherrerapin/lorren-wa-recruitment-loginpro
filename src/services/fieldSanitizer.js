@@ -179,9 +179,10 @@ function hasExplicitPositiveExperienceEvidence(text = '') {
   if (!normalized || hasExplicitNoExperienceEvidence(normalized)) return false;
 
   const explicitExperience = /\b(?:tengo|cuento con|poseo|acredito|he adquirido)\s+(?:mas de\s+|aproximadamente\s+)?(?:\d+\s+(?:anos?|meses?|semanas?)\s+de\s+)?experiencia\b/.test(normalized)
-    || /\b(?:he trabajado|he laborado|trabajo|laboro|me he desempenado)\b/.test(normalized);
+    || /\b(?:he trabajado|he laborado|trabaje|trabajaba|estoy trabajando|me encuentro trabajando|labore|laboraba|laboro|me he desempenado)\b/.test(normalized)
+    || /\btrabajo\s+(?:en|como|con|para)\b/.test(normalized);
   const durationWithWorkContext = /\b\d+\s+(?:anos?|meses?|semanas?)\b/.test(normalized)
-    && /\b(?:experiencia|trabaj|labor|operacion|logistic|cargo|oficio|personal|coordin|turno|bodega|cargue|descargue)\w*\b/.test(normalized);
+    && /\b(?:experiencia|trabajado|trabajando|trabaje|trabajaba|labor|operacion|logistic|cargo|oficio|personal|coordin|turno|bodega|cargue|descargue)\w*\b/.test(normalized);
   const operationalResponsibility = /\b(?:manejo|coordino|coordinacion|lidero|superviso)\s+(?:de\s+)?personal\b/.test(normalized);
 
   return explicitExperience || durationWithWorkContext || operationalResponsibility;
@@ -193,8 +194,6 @@ function sanitizeExperienceInfo(value, evidence, text, context = {}, turnType = 
   const isNegative = normalizedValue === 'no';
   if (!isPositive && !isNegative) return { ok: false, reason: 'invalid_experience_info_value' };
 
-  const fieldContext = fieldWasPending('experienceInfo', context)
-    || lastQuestionAskedForField('experienceInfo', context);
   const normalizedText = normalizeText(text);
   const shortAnswer = /^(?:si|sii|sip|no)$/.test(normalizedText);
   const explicitNo = hasExplicitNoExperienceEvidence(text);
@@ -210,11 +209,6 @@ function sanitizeExperienceInfo(value, evidence, text, context = {}, turnType = 
   }
   if (isPositive && explicitYes) return { ok: true, value: 'Sí' };
   if (isNegative && explicitNo) return { ok: true, value: 'No' };
-
-  const usableEvidence = evidenceIsUsable('experienceInfo', evidence, { allowLocalParser: true });
-  if (fieldContext && usableEvidence && !turnLooksLikeOnlyConversation(turnType)) {
-    return { ok: true, value: isPositive ? 'Sí' : 'No' };
-  }
 
   return { ok: false, reason: 'missing_experience_evidence' };
 }
@@ -283,8 +277,8 @@ function hasAgeEvidence(text = '') {
 
 function hasExperienceEvidence(text = '') {
   const normalized = normalizeText(text);
-  return /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu|supervis|lider|carg|descarg)\w*\b/.test(normalized)
-    || /\b(?:cargo|oficio|turnos?|personal|bodega)\b/.test(normalized);
+  return /\b(?:experien|labor|coordin|operaci|logistic|despach|empaqu|supervis|lider|carg|descarg)\w*\b/.test(normalized)
+    || /\b(?:trabajado|trabajando|trabaje|trabajaba|cargo|oficio|turnos?|personal|bodega)\b/.test(normalized);
 }
 
 function looksLikeQuestionText(text = '', turnType = null) {
@@ -298,6 +292,10 @@ function looksLikeQuestionText(text = '', turnType = null) {
 function hasGroundedExperienceSummaryContext(text = '', context = {}, turnType = null) {
   if (hasExplicitPositiveExperienceEvidence(text)) return true;
   if (looksLikeQuestionText(text, turnType)) return false;
+
+  const normalized = normalizeText(text);
+  if (/\b(?:interes|vacante|oferta|postul|aplic)\w*\b/.test(normalized)) return false;
+
   return fieldWasPending('experienceSummary', context) && hasExperienceEvidence(text);
 }
 
@@ -354,6 +352,9 @@ function looksLikePersonalName(value = '') {
   if (/\d/.test(raw)) return false;
 
   const normalized = normalizeText(raw);
+  if (/^(?:hola\b|b(?:ue)?n(?:a|as|o|os)?s?\s+(?:dia|dias|tarde|tardes|noche|noches)\b)/.test(normalized)) {
+    return false;
+  }
   if (/\b(auxiliar|vacante|cargo|bodega|cargue|descargue|logistica|operacion|requisitos|documento|cedula|ppt|barrio|localidad|municipio|ciudad|transporte|moto|bicicleta|experiencia|informacion|info|interes|interesado|interesada|postulacion|trabajo|requisito|favor|gracias)\b/.test(normalized)) {
     return false;
   }
