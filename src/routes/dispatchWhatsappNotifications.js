@@ -4,6 +4,7 @@ import {
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappCloudService.js';
 import {
+  loadDispatchWhatsappOutboundHistoryByDate,
   loadDispatchWhatsappPhoneConversation,
   loadDispatchWhatsappTomorrowAssignmentMonitor,
   loadDispatchWhatsappWindowStatusForAssignments,
@@ -12,7 +13,6 @@ import {
 import {
   DISPATCH_WINDOW_CHECK_BUTTON,
   DISPATCH_WINDOW_CHECK_MESSAGE,
-  buildDispatchAssignmentMessageBody,
   dispatchWhatsappProviderErrorMessage,
   sendCloudWindowCheckTemplate,
   sendDispatchWhatsappTextMessage
@@ -156,37 +156,18 @@ function manualMessageText(value) {
   return message.slice(0, MAX_MANUAL_MESSAGE_LENGTH);
 }
 
-async function auditAssignmentSend(prisma, context, result) {
-  const assignment = await prisma.dispatchAssignment.findFirst({
-    where: {
-      id: context.assignmentId,
-      serviceRequestId: context.serviceRequestId,
-      workerId: context.workerId
-    },
-    include: { worker: true, serviceRequest: { include: { operationPoint: true } } }
-  });
-  if (!assignment) return;
-  await recordDispatchWhatsappMessageAudit({
-    prismaClient: prisma,
-    scope: 'operational',
-    direction: 'OUTBOUND',
-    phone: result.phone,
-    body: `${buildDispatchAssignmentMessageBody(assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
-    messageType: result.deliveryMode === 'TEMPLATE' ? 'TEMPLATE' : 'INTERACTIVE',
-    providerMessageId: result.providerMessageId,
-    source: 'ASSIGNMENT_CONFIRMATION',
-    occurredAt: new Date()
-  });
-}
-
 export function dispatchWhatsappNotificationsRouter(prisma) {
   const router = express.Router();
   router.use(requireOps);
 
   router.get('/', async (req, res) => {
-    const [status, automationSettings] = await Promise.all([
+    const [status, automationSettings, outboundHistory] = await Promise.all([
       getStatusForViewer(req),
-      getAutomationSettingsForViewer(prisma, req)
+      getAutomationSettingsForViewer(prisma, req),
+      loadDispatchWhatsappOutboundHistoryByDate({
+        prismaClient: prisma,
+        dateKey: normalizeString(req.query?.date)
+      })
     ]);
     res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de despacho',
@@ -195,6 +176,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       settingsMessage: normalizeString(req.query?.settingsMessage),
       settingsError: normalizeString(req.query?.settingsError),
       automationSettings,
+      outboundHistory,
       whatsappTitle: role(req) === 'dev' ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
       whatsappEyebrow: 'Operaciones / Despacho',
       whatsappDescription: role(req) === 'dev'
@@ -423,7 +405,6 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         scope: 'operational',
         actorUsername: normalizeString(req.session?.username || req.username)
       });
-      await auditAssignmentSend(prisma, context, result);
       return res.json({
         ok: true,
         provider: result.provider,

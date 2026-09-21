@@ -11,11 +11,13 @@ import {
   setDispatchWhatsappRuntimeState
 } from './dispatchWhatsappCloudConfig.js';
 import {
+  buildDispatchAssignmentMessageBody,
   dispatchWhatsappProviderErrorMessage,
   sendCloudAssignmentInteractive,
   sendCloudAssignmentTemplate
 } from './dispatchWhatsappCloudClient.js';
 import { getDispatchWhatsappContactWindowStatus } from './dispatchWhatsappAdminAlerts.js';
+import { recordDispatchWhatsappMessageAudit } from './dispatchWhatsappMonitor.js';
 
 function numericProviderIdentifier(value) {
   const text = String(value ?? '').trim();
@@ -172,6 +174,17 @@ export async function sendDispatchWhatsappMessage({
       }));
     }
     await prismaClient.$transaction(transaction);
+    await recordDispatchWhatsappMessageAudit({
+      prismaClient,
+      scope,
+      direction: 'OUTBOUND',
+      phone: validated.phone,
+      body: `${buildDispatchAssignmentMessageBody(validated.assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
+      messageType: deliveryMode === 'TEMPLATE' ? 'TEMPLATE' : 'INTERACTIVE',
+      providerMessageId,
+      source: 'ASSIGNMENT_CONFIRMATION',
+      occurredAt: new Date()
+    });
     const now = new Date().toISOString();
     setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
     console.info(`[dispatch-wa-cloud] Mensaje de asignación enviado. scope=${scope} assignment=${validated.assignment.id} mode=${deliveryMode}.`);
