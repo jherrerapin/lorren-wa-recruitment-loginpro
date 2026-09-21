@@ -34,6 +34,11 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function positivePage(value) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? Math.min(parsed, 1000) : 1;
+}
+
 function role(req) {
   return req.session?.userRole || req.userRole;
 }
@@ -136,6 +141,25 @@ async function getAutomationSettingsForViewer(prisma, req) {
   };
 }
 
+async function loadSelectedWorkerConversation(prisma, workerId) {
+  const id = normalizeString(workerId);
+  if (!id) return null;
+  const worker = await prisma.dispatchWorker.findUnique({
+    where: { id },
+    select: { id: true, fullName: true, phone: true }
+  });
+  if (!worker?.phone) return null;
+  const conversation = await loadDispatchWhatsappPhoneConversation({
+    prismaClient: prisma,
+    phone: worker.phone
+  });
+  return {
+    workerId: worker.id,
+    workerName: worker.fullName || 'Auxiliar',
+    ...conversation
+  };
+}
+
 function responseStatusCode(error) {
   const statusCode = Number(error?.statusCode || 0);
   if (statusCode >= 400 && statusCode <= 599) return statusCode;
@@ -161,13 +185,17 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
   router.use(requireOps);
 
   router.get('/', async (req, res) => {
-    const [status, automationSettings, outboundHistory] = await Promise.all([
+    const page = positivePage(req.query?.page);
+    const conversationWorkerId = normalizeString(req.query?.workerId);
+    const [status, automationSettings, outboundHistory, selectedConversation] = await Promise.all([
       getStatusForViewer(req),
       getAutomationSettingsForViewer(prisma, req),
       loadDispatchWhatsappOutboundHistoryByDate({
         prismaClient: prisma,
-        dateKey: normalizeString(req.query?.date)
-      })
+        dateKey: normalizeString(req.query?.date),
+        page
+      }),
+      loadSelectedWorkerConversation(prisma, conversationWorkerId)
     ]);
     res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de despacho',
@@ -177,6 +205,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       settingsError: normalizeString(req.query?.settingsError),
       automationSettings,
       outboundHistory,
+      selectedConversation,
       whatsappTitle: role(req) === 'dev' ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
       whatsappEyebrow: 'Operaciones / Despacho',
       whatsappDescription: role(req) === 'dev'
