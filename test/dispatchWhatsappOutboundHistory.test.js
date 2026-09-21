@@ -134,9 +134,10 @@ test('fecha inválida usa el día actual de Bogotá sin ampliar el rango', async
   assert.deepEqual(history.items, []);
 });
 
-test('pantalla y ruta reutilizan la autoridad existente para seleccionar fecha', () => {
+test('pantalla, ruta y servicio de envío comparten una sola auditoría de asignaciones', () => {
   const view = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/dispatchWhatsappNotifications.js', import.meta.url), 'utf8');
+  const assignmentService = fs.readFileSync(new URL('../src/services/dispatchWhatsappAssignmentService.js', import.meta.url), 'utf8');
 
   assert.match(view, /name="date" type="date"/);
   assert.match(view, /Aceptado por Meta/);
@@ -144,4 +145,10 @@ test('pantalla y ruta reutilizan la autoridad existente para seleccionar fecha',
   assert.match(view, /providerStatus === 'FAILED'/);
   assert.match(route, /loadDispatchWhatsappOutboundHistoryByDate/);
   assert.match(route, /dateKey:\s*normalizeString\(req\.query\?\.date\)/);
+  assert.doesNotMatch(route, /auditAssignmentSend/);
+  assert.match(assignmentService, /import \{ recordDispatchWhatsappMessageAudit \} from '\.\/dispatchWhatsappMonitor\.js';/);
+  assert.match(
+    assignmentService,
+    /await prismaClient\.\$transaction\(transaction\);[\s\S]{0,500}await recordDispatchWhatsappMessageAudit\(\{[\s\S]{0,500}source: 'ASSIGNMENT_CONFIRMATION'/
+  );
 });
