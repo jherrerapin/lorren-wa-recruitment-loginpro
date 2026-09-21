@@ -1,4 +1,5 @@
 import { requestDataConsent, buildDataConsentPromptReply } from '../services/dataConsentGate.js';
+import { buildVacancyTimingReply } from '../services/vacancyPublicInfo.js';
 import express from 'express';
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendImageMessage, sendTextMessage } from '../services/whatsapp.js';
@@ -23,7 +24,7 @@ import {
   normalizeCandidateFields,
   parseNaturalData
 } from '../services/candidateData.js';
-import { consolidateTextMessages, getMultilineWindowMs, summarizeConsolidatedInput } from '../services/multiline.js';
+import { consolidateTextMessages, getMultilineWindowMs, selectAdjacentTurnMessages, summarizeConsolidatedInput } from '../services/multiline.js';
 import { cancelReminderOnInbound, scheduleReminderForCandidate } from '../services/reminder.js';
 import { detectConversationIntent, isPostCompletionAck } from '../services/conversationIntent.js';
 import { conversationUnderstanding } from '../services/conversationUnderstanding.js';
@@ -389,6 +390,8 @@ function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
   const availabilityLead = isVacancyOpen(vacancy)
     ? `Te cuento sobre ${vacancy?.title || vacancy?.role || 'la vacante'}`
     : `Te cuento sobre ${vacancy?.title || vacancy?.role || 'la vacante'} y te aclaro que por ahora no esta recibiendo personal`;
+  const timingReply = buildVacancyTimingReply(vacancy, text);
+  if (timingReply) return timingReply;
   if (/(donde|direccion|ubicacion|queda|sector)/.test(n)) {
     if (vacancy?.schedulingEnabled && interviewAddress && candidate?.currentStep === ConversationStep.SCHEDULED) {
       return `${availabilityLead} La dirección de entrevista registrada es ${interviewAddress}.`;
@@ -404,7 +407,7 @@ function buildVacancyQuestionLead(vacancy, text = '', candidate = null) {
   if (/(requisit|document|edad|experien|perfil)/.test(n) && vacancy?.requirements) {
     return `${availabilityLead} Los requisitos registrados para esta vacante son: ${vacancy.requirements}.`;
   }
-  if (/(pago|salario|sueldo|turno|horario|condicion|prestacion|beneficio|contrato)/.test(n)) {
+  if (/(pago|salario|sueldo|condicion|prestacion|beneficio|contrato)/.test(n)) {
     if (vacancy?.conditions) return `${availabilityLead} Las condiciones registradas para esta vacante son: ${vacancy.conditions}.`;
     return buildUnavailableVacancyInfoReply(vacancy);
   }
@@ -1891,9 +1894,20 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     );
 
   const contextualReadiness = getCandidateReadiness(candidate, currentVacancy);
+  const preliminaryContextualIntent = inferContextualSemanticIntent({
+    text: cleanText,
+    resolvedIntent,
+    interviewIntent: null,
+    isQuestion: isQuestionLike(cleanText),
+    hasDataIntent
+  });
   const shouldEvaluateContextualGate = Boolean(
     candidate.currentStep === ConversationStep.SCHEDULED
     || candidate.currentStep === ConversationStep.DONE
+    || (
+      preliminaryContextualIntent === 'ASK_APPLICATION_STATUS'
+      && Boolean(candidate.vacancyId || currentVacancy?.id)
+    )
     || (currentVacancy && !currentVacancy.schedulingEnabled && contextualReadiness.readyForDone)
     || (!contextualReadiness.missingFields.length && contextualReadiness.hasValidCv && candidate.vacancyId)
   );
@@ -2105,6 +2119,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
 
   if (vacancyFirstGateDecision.replyKind === 'DATA_CONSENT_PROMPT') {
     if (!options.inboundMessageId) return;
+    currentVacancy = vacancyFirstGateDecision.vacancy || currentVacancy;
+    normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
+    debugTrace.normalized_fields = normalizedData;
+    await persistUnderstoodFieldsBeforeGateReturn();
     const information = String(vacancyFirstGateDecision.reply || '')
       .replace(buildDataConsentPromptReply(), '').trim();
     if (information) {
@@ -2118,9 +2136,19 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       candidateUpdates: vacancyFirstGateDecision.candidateUpdates
     });
   }
-  if (vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY) {
+  const vacancyInformationIncludesCandidateData = Boolean(
+    vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY
+    && vacancyFirstGateDecision.reason === 'ACTIVE_VACANCY_INFORMATION_ANSWER'
+    && hasDataIntent
+  );
+
+  if (
+    vacancyFirstGateDecision.action === VacancyFirstGateAction.REPLY
+    && !vacancyInformationIncludesCandidateData
+  ) {
     const applied = await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
     if (!applied.applied) return;
+    await persistUnderstoodFieldsBeforeGateReturn();
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -2133,6 +2161,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   if (vacancyFirstGateDecision.action === VacancyFirstGateAction.ENTER_FUTURE_PROFILE_CONSENT) {
     const applied = await applyVacancyFirstGateUpdates(vacancyFirstGateDecision.candidateUpdates);
     if (!applied.applied) return;
+    await persistUnderstoodFieldsBeforeGateReturn();
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -2146,6 +2175,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
       currentStep: ConversationStep.GREETING_SENT
     });
     if (!applied.applied) return;
+    await persistUnderstoodFieldsBeforeGateReturn();
     return reply(prisma, candidate.id, from, vacancyFirstGateDecision.reply, cleanText, {
       body: vacancyFirstGateDecision.reply,
       source: 'vacancy_first_gate',
@@ -2172,6 +2202,7 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     currentVacancy = vacancyFirstGateDecision.vacancy || await loadVacancyContext(prisma, vacancyFirstGateDecision.vacancyId);
     normalizedData = alignCandidateLocationFields(normalizedData, currentVacancy, { clearAlternate: false });
     debugTrace.normalized_fields = normalizedData;
+    await persistUnderstoodFieldsBeforeGateReturn();
     const candidateState = {
       ...candidate,
       vacancyId: vacancyFirstGateDecision.vacancyId,
@@ -2353,6 +2384,10 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
   const askedVacancyQuestion = Boolean(
     currentVacancy
     && isQuestionLike(cleanText)
+    && (
+      /[?¿]/.test(cleanText)
+      || ['faq', 'info_request'].includes(resolvedIntent)
+    )
     && !isSchedulingConfirmationIntent(cleanText)
     && !isSchedulingRescheduleIntent(cleanText)
     && !isDocumentValidationQuestion(cleanText)
@@ -2540,16 +2575,16 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     return;
   }
 
-  async function applyDecisionsAndUpdate() {
+  async function applyDecisionsAndUpdate(fields = normalizedData) {
     const current = await prisma.candidate.findUnique({ where: { id: candidate.id } });
     const explicitCorrection = /\b(corrijo|correccion|corrección|quise decir|actualizo|de hecho|mejor|perd[oó]n|en realidad|más bien|mas bien)\b/i.test(cleanText);
     const allowOverwriteFields = inferNaturalOverwriteFields(cleanText, normalizedData, current, candidate.currentStep);
     if (explicitCorrection) {
-      Object.keys(normalizedData).forEach((field) => {
+      Object.keys(fields).forEach((field) => {
         if (!allowOverwriteFields.includes(field)) allowOverwriteFields.push(field);
       });
     }
-    const decisions = splitFieldDecisions(normalizedData, current, { sourceByField, allowOverwriteFields });
+    const decisions = splitFieldDecisions(fields, current, { sourceByField, allowOverwriteFields });
     debugTrace.persisted_fields.push(...decisions.persistedFields);
     debugTrace.consolidated_fields?.push(...(decisions.consolidatedFields || []));
     debugTrace.rejected_fields.push(...decisions.rejectedFields);
@@ -2571,6 +2606,21 @@ export async function processText(prisma, candidate, from, text, debugTrace, opt
     }
     const updatedCandidate = await prisma.candidate.findUnique({ where: { id: candidate.id } });
     return { updatedCandidate, decisions };
+  }
+
+  async function persistUnderstoodFieldsBeforeGateReturn() {
+    if (!hasDataIntent || !Object.keys(normalizedData).length) return candidate;
+
+    // Género conserva exactamente su flujo existente; esta corrección solo evita
+    // perder entidades de perfil ya comprendidas cuando vacancy-first responde.
+    const profileFields = Object.fromEntries(
+      Object.entries(normalizedData).filter(([field]) => field !== 'gender')
+    );
+    if (!Object.keys(profileFields).length) return candidate;
+
+    const { updatedCandidate } = await applyDecisionsAndUpdate(profileFields);
+    candidate = updatedCandidate || candidate;
+    return candidate;
   }
 
   const routeAfterConfirmation = async (updatedCandidate) => {
@@ -2866,6 +2916,70 @@ async function fetchPendingTextBatch(prisma, candidateId) {
   });
 }
 
+function mixedTurnAttachmentState(message = {}) {
+  return String(message?.rawPayload?.logicalTurn?.state || '');
+}
+
+async function findAdjacentMixedTurnDocument(prisma, candidateId, pendingTextBatch = []) {
+  if (!pendingTextBatch.length || typeof prisma?.message?.findFirst !== 'function') return null;
+  const windowMs = getMultilineWindowMs();
+  const firstAt = new Date(pendingTextBatch[0].createdAt).getTime();
+  const lastAt = new Date(pendingTextBatch[pendingTextBatch.length - 1].createdAt).getTime();
+  if (!Number.isFinite(firstAt) || !Number.isFinite(lastAt)) return null;
+  return prisma.message.findFirst({
+    where: {
+      candidateId,
+      direction: MessageDirection.INBOUND,
+      messageType: MessageType.DOCUMENT,
+      respondedAt: null,
+      createdAt: {
+        gte: new Date(firstAt - windowMs),
+        lte: new Date(lastAt + windowMs)
+      }
+    },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, createdAt: true, rawPayload: true }
+  });
+}
+
+async function waitForMixedTurnDocument(prisma, documentMessage) {
+  let current = documentMessage;
+  const windowMs = getMultilineWindowMs();
+  const deadline = Date.now() + windowMs;
+  while (current && !['CV_SAVED', 'FAILED'].includes(mixedTurnAttachmentState(current))) {
+    if (Date.now() >= deadline || typeof prisma?.message?.findUnique !== 'function') break;
+    await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
+    current = await prisma.message.findUnique({
+      where: { id: documentMessage.id },
+      select: { id: true, createdAt: true, rawPayload: true }
+    });
+  }
+  return current;
+}
+
+async function markMixedTurnDocumentState(prisma, messageId, state) {
+  if (!messageId) return false;
+  try {
+    await mergeConversationMessagePayload(prisma, {
+      messageId,
+      patch: {
+        logicalTurn: {
+          kind: 'text_with_cv_document',
+          state
+        }
+      }
+    });
+    return true;
+  } catch (error) {
+    console.warn('[MIXED_TURN_DOCUMENT_STATE_ERROR]', JSON.stringify({
+      messageId,
+      state,
+      error: summarizeError(error)
+    }));
+    return false;
+  }
+}
+
 async function tryAcquireMultilineProcessing(prisma, candidateId, scheduling = {}) {
   const acquired = await acquireCandidateMultilineBatch(prisma, {
     candidateId,
@@ -2963,6 +3077,11 @@ export function webhookRouter(prisma) {
           const pendingBatch = await fetchPendingTextBatch(prisma, candidate.id);
           if (!pendingBatch.length) continue;
 
+          const adjacentDocument = await findAdjacentMixedTurnDocument(prisma, candidate.id, pendingBatch);
+          const mixedTurnDocument = adjacentDocument
+            ? await waitForMixedTurnDocument(prisma, adjacentDocument)
+            : null;
+
           const consolidatedText = consolidateTextMessages(pendingBatch);
           const anchorMessage = pendingBatch[pendingBatch.length - 1];
           let candidateForBatch = await prisma.candidate.findUnique({ where: { id: candidate.id } });
@@ -2980,7 +3099,10 @@ export function webhookRouter(prisma) {
             });
             await markPotentialDuplicateByDocument(prisma, candidate.id);
             await markConversationMessagesResponded(prisma, {
-              messageIds: pendingBatch.map((item) => item.id),
+              messageIds: [
+                ...pendingBatch.map((item) => item.id),
+                ...(['CV_SAVED', 'FAILED'].includes(mixedTurnAttachmentState(mixedTurnDocument)) ? [mixedTurnDocument.id] : [])
+              ],
               respondedAt: new Date()
             });
           } catch (error) {
@@ -3000,6 +3122,10 @@ export function webhookRouter(prisma) {
         const inboundBody = buildInboundBody(message);
         const inbound = await saveInboundMessage(prisma, candidate.id, message, inboundBody, inboundType, from);
         if (!inbound.isNew) continue;
+        const inboundMessageRecord = inbound.id && typeof prisma?.message?.findUnique === 'function'
+          ? await prisma.message.findUnique({ where: { id: inbound.id }, select: { createdAt: true } })
+          : null;
+        const inboundCreatedAt = inboundMessageRecord?.createdAt || new Date();
 
         await cancelReminderOnInbound(prisma, candidate.id);
 
@@ -3184,6 +3310,19 @@ export function webhookRouter(prisma) {
                     originalName: filename
                   });
                   debugTrace.cv_saved = true;
+                  const coordinationMarked = await markMixedTurnDocumentState(prisma, inbound.id, 'CV_SAVED');
+                  if (coordinationMarked) {
+                    await sleep(getMultilineWindowMs());
+                    const pendingTextsAfterWindow = selectAdjacentTurnMessages(
+                      await fetchPendingTextBatch(prisma, candidate.id),
+                      inboundCreatedAt,
+                      getMultilineWindowMs()
+                    );
+                    if (pendingTextsAfterWindow.length > 0) {
+                      debugTrace.mixed_turn_reply_owner = 'text_batch';
+                      continue;
+                    }
+                  }
                 } else {
                   debugTrace.cv_saved = false;
                   const requiresHumanReview = shouldEscalateHumanReview({ attachmentAnalysis: analysis })
@@ -3259,9 +3398,25 @@ export function webhookRouter(prisma) {
                   }
                 }
               } catch (error) {
+                const coordinationMarked = await markMixedTurnDocumentState(prisma, inbound.id, 'FAILED');
                 debugTrace.cv_download_failed = true;
                 debugTrace.error_summary = summarizeError(error);
                 console.error('[CV_ERROR]', JSON.stringify({ phone: from, error: debugTrace.error_summary }));
+                if (coordinationMarked) {
+                  await sleep(getMultilineWindowMs());
+                  const pendingTextsAfterWindow = selectAdjacentTurnMessages(
+                    await fetchPendingTextBatch(prisma, candidate.id),
+                    inboundCreatedAt,
+                    getMultilineWindowMs()
+                  );
+                  const refreshedDocument = typeof prisma?.message?.findUnique === 'function'
+                    ? await prisma.message.findUnique({ where: { id: inbound.id }, select: { respondedAt: true } })
+                    : null;
+                  if (pendingTextsAfterWindow.length > 0 || refreshedDocument?.respondedAt) {
+                    debugTrace.mixed_turn_reply_owner = 'text_batch';
+                    continue;
+                  }
+                }
                 if (!automationBlocked) {
                   await reply(prisma, candidate.id, from, 'No pude descargar tu hoja de vida en este momento. Inténtalo nuevamente en unos minutos.', '', { source: 'bot_flow' });
                 }
@@ -3288,4 +3443,3 @@ export function webhookRouter(prisma) {
 
   return router;
 }
-

@@ -1,6 +1,6 @@
-const DEFAULT_REASONING_WINDOW_MS = 8000;
-const MIN_REASONING_WINDOW_MS = 3000;
-const MAX_REASONING_WINDOW_MS = 20000;
+const DEFAULT_REASONING_WINDOW_MS = 20000;
+const MIN_REASONING_WINDOW_MS = 20000;
+const MAX_REASONING_WINDOW_MS = 30000;
 
 function normalizeText(text = '') {
   return String(text || '').trim();
@@ -32,4 +32,15 @@ export function consolidateTextMessages(messages = []) {
     .map((message) => normalizeText(message.body || ''))
     .filter(Boolean)
     .join('\n');
+}
+
+export function selectAdjacentTurnMessages(messages = [], anchorCreatedAt, windowMs = getMultilineWindowMs()) {
+  const anchorAt = new Date(anchorCreatedAt).getTime();
+  const safeWindowMs = Number(windowMs);
+  if (!Number.isFinite(anchorAt) || !Number.isFinite(safeWindowMs) || safeWindowMs < 0) return [];
+
+  return (Array.isArray(messages) ? messages : []).filter((message) => {
+    const createdAt = new Date(message?.createdAt).getTime();
+    return Number.isFinite(createdAt) && Math.abs(createdAt - anchorAt) <= safeWindowMs;
+  });
 }

@@ -214,9 +214,10 @@ export function classifyLocationMention(text = '', location = '') {
   if (!segments.length) return 'unspecified';
 
   const vacancyTerms = '(?:vacante|vacantes|oferta|ofertas|convocatoria|convocatorias|empleo|empleos|trabajo|trabajos|cargo|cargos|puesto|puestos|operacion|proceso)';
+  const targetLocationPrefix = '(?:(?:el\\s+municipio|la\\s+ciudad)\\s+de\\s+)?';
   const targetPatterns = [
-    new RegExp(`\\b${vacancyTerms}\\b.{0,80}\\b(?:en|para|de)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
-    new RegExp(`\\b(?:quiero|busco|deseo|necesito|me\\s+interesa)\\b.{0,60}\\b(?:trabajar|empleo|vacante|vacantes|cargo|puesto)\\b.{0,60}\\b(?:en|para)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
+    new RegExp(`\\b${vacancyTerms}\\b.{0,80}\\b(?:en|para|de)\\s+${targetLocationPrefix}${locationPattern}\\b`),
+    new RegExp(`\\b(?:quiero|busco|deseo|necesito|me\\s+interesa)\\b.{0,60}\\b(?:trabajar|empleo|vacante|vacantes|cargo|puesto)\\b.{0,60}\\b(?:en|para)\\s+${targetLocationPrefix}${locationPattern}\\b`),
     new RegExp(`\\b${vacancyTerms}\\b.{0,40}\\b(?:queda|esta|es|seria|sera)\\b.{0,20}\\b(?:en|para)?\\s*${locationPattern}\\b`)
   ];
   const residencePatterns = [
@@ -224,7 +225,8 @@ export function classifyLocationMention(text = '', location = '') {
     new RegExp(`\\b(?:te\\s+escribo|les\\s+escribo|escribo|te\\s+hablo|les\\s+hablo|hablo)\\s+desde\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`),
     new RegExp(`\\bdesde\\s+(?:el\\s+)?municipio\\s+de\\s+${locationPattern}\\b`),
     new RegExp(`\\b(?:mi\\s+)?(?:ciudad|municipio|lugar)\\s+de\\s+residencia\\s+(?:es|queda)?\\s*(?:en\\s+)?${locationPattern}\\b`),
-    new RegExp(`\\b(?:mi\\s+)?residencia\\s+(?:es|queda)\\s+(?:en\\s+)?${locationPattern}\\b`)
+    new RegExp(`\\b(?:mi\\s+)?residencia\\s+(?:es|queda)\\s+(?:en\\s+)?${locationPattern}\\b`),
+    new RegExp(`^(?:de|desde)\\s+(?:el\\s+municipio\\s+de\\s+)?${locationPattern}\\b`)
   ];
 
   let lastExplicit = 'unspecified';
@@ -624,6 +626,9 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
   const localRoleHint = detectRoleHintFromText(text, { city });
   const roleHint = mergeRoleHints(options.roleHint, localRoleHint, city);
   if (!city && !roleHint) return { resolved: false, vacancy: null, city: null, residenceLocation, roleHint: null, reason: 'missing_city_and_role', source: 'text_inference_fallback', fallback: true };
+  if (!city && !residenceLocation && !operationZones.length && roleHint) {
+    return { resolved: false, vacancy: null, city: null, residenceLocation: null, roleHint, reason: 'role_without_target_location', source: 'text_inference_fallback', fallback: true };
+  }
 
   const shouldUseResidenceCompatibility = Boolean(!city && residenceLocation && !operationZones.length);
   const matchingCityVacancies = city

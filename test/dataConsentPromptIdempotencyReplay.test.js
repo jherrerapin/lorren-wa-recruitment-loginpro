@@ -3,9 +3,15 @@ import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
 import {
+  buildDataConsentPromptReply,
+  DATA_CONSENT_VERSION,
   dataConsentGateMiddleware,
   parseConsentPendingMode
 } from '../src/services/dataConsentGate.js';
+import {
+  VacancyFirstGateAction,
+  resolveVacancyFirstGate
+} from '../src/services/vacancyFirstGate.js';
 import { CONSENT_PROMPT_IDEMPOTENCY_REPLAYS } from './conversation-replay/consentPromptIdempotencyReplay.js';
 
 const originalAxiosPost = axios.post;
@@ -139,6 +145,77 @@ function countBodiesMatching(bodies = [], pattern) {
   return bodies.filter((body) => pattern.test(body)).length;
 }
 
+
+test('replay #901: un segundo interés inmediato no repite el aviso entre gates', async () => {
+  const vacancy = {
+    id: 'TEST-VACANCY-REPEATED-CONSENT',
+    title: 'Auxiliar de Operación',
+    role: 'Auxiliar de Operación',
+    city: 'Neiva',
+    isActive: true,
+    acceptingApplications: true,
+    operation: { city: { name: 'Neiva' } }
+  };
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: {
+      id: 'TEST-CANDIDATE-REPEATED-CONSENT',
+      phone: 'TEST-PHONE-REPEATED-CONSENT',
+      vacancyId: vacancy.id,
+      currentStep: 'GREETING_SENT',
+      dataConsentStatus: 'PENDING',
+      botResumeMode: 'awaiting_data_consent'
+    },
+    currentVacancy: vacancy,
+    inboundText: 'Me interesa',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [{
+      direction: 'OUTBOUND',
+      body: buildDataConsentPromptReply(),
+      createdAt: new Date(),
+      rawPayload: { source: 'data_consent_prompt', consentVersion: DATA_CONSENT_VERSION }
+    }],
+    vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.SUPPRESS_REPLY);
+  assert.equal(decision.reason, 'REPEAT_PREVENTED');
+  assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
+});
+
+
+test('una versión anterior del aviso no oculta la versión canónica vigente', async () => {
+  const vacancy = {
+    id: 'TEST-VACANCY-CONSENT-VERSION',
+    title: 'Auxiliar de Operación',
+    city: 'Neiva',
+    isActive: true,
+    acceptingApplications: true,
+    operation: { city: { name: 'Neiva' } }
+  };
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: {
+      id: 'TEST-CANDIDATE-CONSENT-VERSION',
+      vacancyId: vacancy.id,
+      currentStep: 'GREETING_SENT',
+      dataConsentStatus: 'PENDING'
+    },
+    currentVacancy: vacancy,
+    inboundText: 'Me interesa',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [{
+      direction: 'OUTBOUND',
+      createdAt: new Date(),
+      rawPayload: { source: 'data_consent_prompt', consentVersion: 'version-anterior' }
+    }],
+    vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.replyKind, 'DATA_CONSENT_PROMPT');
+});
+
 test('replay CONV-065: el mismo waMessageId solicita consentimiento una sola vez', async () => {
   const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'conv-065-consent-prompt-webhook-retry-v1');
   const observed = await executeReplay(replay);
@@ -152,7 +229,7 @@ test('replay CONV-065: el mismo waMessageId solicita consentimiento una sola vez
   assert.deepEqual(observed.deliveries.map((item) => item.remainingMessages), [0, 0]);
 });
 
-test('replay CONV-062: dos fragmentos se reclaman pero solo el primero construye el aviso', async () => {
+test('replay CONV-062: el interés se reclama y el dato adyacente sigue al webhook canónico', async () => {
   const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'conv-062-fragmented-interest-single-prompt-v1');
   const observed = await executeReplay(replay);
   const pending = parseConsentPendingMode(observed.getCandidate().botResumeMode);
@@ -161,8 +238,9 @@ test('replay CONV-062: dos fragmentos se reclaman pero solo el primero construye
   assert.equal(observed.metrics.inboundClaims, replay.expected.inboundClaims);
   assert.equal(countBodiesMatching(observed.sentBodies, /Autorizo a LoginPro/i), replay.expected.consentPromptCount);
   assert.equal(pending.pending, replay.expected.finalPending);
-  assert.deepEqual(observed.deliveries[0].statuses, [200]);
-  assert.equal(observed.deliveries[0].remainingMessages, 0);
+  assert.deepEqual(observed.deliveries[0].statuses, []);
+  assert.equal(observed.deliveries[0].nextCalls, 1);
+  assert.equal(observed.deliveries[0].remainingMessages, replay.expected.remainingMessages);
 });
 
 test('replay CONV-034: una pregunta pendiente se responde una vez ante reintento', async () => {
@@ -181,7 +259,7 @@ test('replay CONV-034: una pregunta pendiente se responde una vez ante reintento
   assert.deepEqual(observed.deliveries.map((item) => item.statuses), [[200], [200]]);
 });
 
-test('replay CONV-008: un adjunto pendiente conserva reenvío de CV sin repetir consentimiento', async () => {
+test('replay CONV-008: un adjunto pendiente queda para persistencia sin repetir consentimiento', async () => {
   const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'conv-008-pending-attachment-no-second-prompt-v1');
   const observed = await executeReplay(replay);
   const pending = parseConsentPendingMode(observed.getCandidate().botResumeMode);
@@ -191,7 +269,8 @@ test('replay CONV-008: un adjunto pendiente conserva reenvío de CV sin repetir 
   assert.equal(countBodiesMatching(observed.sentBodies, /Autorizo a LoginPro/i), replay.expected.consentPromptCount);
   assert.equal(pending.pending, replay.expected.finalPending);
   assert.equal(pending.cvResendRequired, replay.expected.cvResendRequired);
-  assert.deepEqual(observed.deliveries[0].statuses, [200]);
-  assert.equal(observed.deliveries[0].remainingMessages, 0);
+  assert.deepEqual(observed.deliveries[0].statuses, []);
+  assert.equal(observed.deliveries[0].nextCalls, 1);
+  assert.equal(observed.deliveries[0].remainingMessages, replay.expected.remainingMessages);
+  assert.equal(observed.getClaimedInboundIds().has('TEST-WAMID-CONV-008-PENDING-ATTACHMENT'), false);
 });
-

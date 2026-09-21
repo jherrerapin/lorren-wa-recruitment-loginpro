@@ -14,7 +14,7 @@ import { isSupervisorPhone } from './adminSupervisor.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
 import { cancelActiveInterviewBookings } from './interviewBookingStateService.js';
 import { cancelReminderOnInbound } from './reminder.js';
-import { buildProfessionalVacancyPresentation, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
+import { buildProfessionalVacancyPresentation, buildVacancyTimingReply, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
 import {
   compareAndSwapConversationMessagePayload,
   findInboundConversationMessage,
@@ -87,6 +87,12 @@ function hasAny(text = '', patterns = []) {
   return patterns.some((pattern) => pattern.test(text));
 }
 
+function normalizeConsentDecisionText(value = '') {
+  return normalize(value)
+    .replace(/\bsi{2,}\b/g, 'si')
+    .replace(/^si\s+autoriza(?:s)?\b/, 'si autorizo');
+}
+
 function isQuestionLike(text = '') {
   const raw = String(text || '').trim();
   const normalized = normalize(raw);
@@ -98,7 +104,20 @@ function isQuestionLike(text = '') {
 }
 
 function startsWithExplicitConsent(text = '') {
-  return /^(si|sii|sip|claro|correcto|de acuerdo|acepto|autorizo|consiento|estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso)\b/.test(text);
+  const normalized = normalizeConsentDecisionText(text);
+  return /^(si|sip|claro|correcto|de acuerdo|acepto|autorizo|consiento|estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso)\b/.test(normalized);
+}
+
+function startsWithUnaccentedConditionalConsentQuestion(text = '') {
+  const raw = String(text || '').trim();
+  const normalized = normalizeConsentDecisionText(raw);
+  const remainder = normalized.replace(/^si\s+autorizo\b/, '').trim();
+  return /^si\s+autorizo\b/.test(normalized)
+    && !/^sí(?:\s|[,.;:!?¿])/i.test(raw)
+    && (
+      /[?¿]/.test(raw)
+      || /^(?:que\s+(?:pasa|hacen|haran)|como|cuando|donde|por\s+que|para\s+que|cual|quien)\b/.test(remainder)
+    );
 }
 
 function startsWithExplicitVacancyConfirmation(text = '') {
@@ -145,6 +164,9 @@ function isExplicitConsentRevocation(text = '') {
   const normalized = stripConsentCourtesyPrefix(text);
   if (!normalized || isConsentRightsQuestion(text)) return false;
   if (isDirectConsentWithdrawal(normalized)) return true;
+  const describesFutureRevocationRight = /\b(?:puedo|podre|tengo derecho a)\s+(?:solicitar|pedir)\b.*\b(?:revocatoria|revocacion)\b/.test(normalized);
+  const containsDirectRevocationVerb = /\b(?:revoco|retiro|revoquen|revoque|retiren|retire)\b/.test(normalized);
+  if (describesFutureRevocationRight && !containsDirectRevocationVerb) return false;
   return hasAny(normalized, [
     /\b(cancelar|cancelen|cancele|detener|detengan|detenga|parar|paren|pare)\b.*\b(postulacion|proceso|tratamiento|datos)\b/,
     /\b(eliminar|eliminen|elimine|borrar|borren|borre|suprimir|supriman|suprima)\b.*\b(datos|informacion|registro)\b/,
@@ -183,16 +205,21 @@ function hasExplicitConsentAcceptance(text = '') {
 }
 
 export function isConsentAcceptance(text = '') {
-  const normalized = normalize(text);
-  if (!normalized || hasExplicitConsentRejection(text)) return false;
+  const raw = String(text || '').trim();
+  const normalized = normalizeConsentDecisionText(raw);
+  if (!normalized || hasExplicitConsentRejection(raw)) return false;
+  if (
+    (raw.startsWith('¿') && isQuestionLike(raw))
+    || startsWithUnaccentedConditionalConsentQuestion(raw)
+  ) return false;
   if (isQuestionLike(text) && !startsWithExplicitConsent(normalized)) return false;
   return hasAny(normalized, [
     /\b(acepto|autorizo|autorizado|autorisado|consiento)\b/,
-    /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo|consiento)\b/,
+    /\b(si|sip|claro|correcto|de acuerdo|dale|ok|listo)\b.*\b(acepto|autorizo|consiento)\b/,
     /\b(estoy de acuerdo|doy mi consentimiento|doy consentimiento|doy permiso|tienen mi permiso|autorizacion concedida)\b/,
     /\b(pueden|puede)\s+(usar|tratar|manejar|procesar|guardar)\s+(mis|los)\s+datos\b/,
     /\b(pueden|puede)\s+continuar\s+con\s+(mis|los)\s+datos\b/,
-    /\b(si|sii|sip|claro|correcto|de acuerdo|dale|ok|listo|continuemos|sigamos)\b$/
+    /\b(si|sip|claro|correcto|de acuerdo|dale|ok|listo|continuemos|sigamos)\b$/
   ]);
 }
 
@@ -1021,6 +1048,8 @@ function buildVacancyInfoReply(vacancy = {}, { includeInterestPrompt = true } = 
 export function buildVacancyQuestionReply(vacancy = {}, text = '') {
   if (!vacancy || !isQuestionLike(text)) return '';
   const normalized = normalize(text);
+  const timingReply = buildVacancyTimingReply(vacancy, text);
+  if (timingReply) return timingReply;
   const lead = `Sobre la vacante de ${vacancyTitle(vacancy)}`;
 
   if (/\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized)) {
@@ -1035,7 +1064,7 @@ export function buildVacancyQuestionReply(vacancy = {}, text = '') {
       ? `${lead}, las condiciones son: ${cleanConfiguredFragment(vacancy.conditions)}.`
       : 'La información disponible de esta vacante no especifica el salario.';
   }
-  if (/\b(horario|turno|jornada|contrato|prestacion|beneficio|condicion)\b/.test(normalized)) {
+  if (/\b(contrato|prestacion|beneficio|condicion)\b/.test(normalized)) {
     return cleanConfiguredFragment(vacancy.conditions)
       ? `${lead}, las condiciones son: ${cleanConfiguredFragment(vacancy.conditions)}.`
       : 'La información disponible de esta vacante no especifica ese detalle.';

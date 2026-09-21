@@ -206,7 +206,7 @@ test('una vacante alternativa cerrada no se asigna después del consentimiento',
   });
 });
 
-test('si una HV fue descartada antes de autorizar se solicita reenviarla solo en PDF o DOCX', () => {
+test('al aceptar consentimiento solicita la HV pendiente en todos los formatos soportados', () => {
   const reply = buildConsentAcceptedReply(
     {
       fullName: 'Laura Pérez',
@@ -221,10 +221,10 @@ test('si una HV fue descartada antes de autorizar se solicita reenviarla solo en
     { cvResendRequired: true }
   );
 
-  assert.match(reply, /archivo anterior.*no fue guardado/i);
-  assert.match(reply, /vuelve a adjuntar tu hoja de vida/i);
-  assert.match(reply, /PDF o DOCX/i);
-  assert.doesNotMatch(reply, /PDF, DOC o DOCX/i);
+  assert.equal(
+    reply,
+    'Gracias, tu autorización quedó registrada. Para continuar, adjunta tu hoja de vida como archivo PDF, DOC o DOCX.'
+  );
 });
 
 test('la captura admite varios prefijos naturales antes de autorizar', async () => {

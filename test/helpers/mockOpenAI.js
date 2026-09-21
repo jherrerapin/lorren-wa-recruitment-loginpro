@@ -6,6 +6,12 @@ function extractMessage(payload = {}, role = 'user') {
   return payload?.messages?.find((message) => message.role === role)?.content || '';
 }
 
+function extractResponsesInput(payload = {}, role = 'user') {
+  const item = payload?.input?.find((entry) => entry?.role === role);
+  const part = item?.content?.find((entry) => entry?.type === 'input_text');
+  return String(part?.text || '');
+}
+
 function parseJsonSection(prompt = '', header = '') {
   const start = prompt.indexOf(header);
   if (start < 0) return null;
@@ -216,7 +222,7 @@ function buildEngineDecision(systemPrompt, userText) {
     if (affirmative) {
       if (completeAfterMerge && !hasCv) {
         return {
-          reply: 'Listo, ya tengo tus datos. Cuando puedas, adjuntame la hoja de vida en PDF o Word/DOCX.',
+          reply: 'Listo, ya tengo tus datos. Cuando puedas, adjuntame la hoja de vida en PDF, DOC o DOCX.',
           nextStep: 'ASK_CV',
           actions: [{ type: 'request_cv' }],
           extractedFields: {}
@@ -241,7 +247,7 @@ function buildEngineDecision(systemPrompt, userText) {
     if (Object.keys(parsed).length) {
       if (completeAfterMerge && !hasCv) {
         return {
-          reply: 'Listo, ya actualice ese dato. Ahora enviame tu hoja de vida en PDF o Word/DOCX.',
+          reply: 'Listo, ya actualice ese dato. Ahora enviame tu hoja de vida en PDF, DOC o DOCX.',
           nextStep: 'ASK_CV',
           actions: [{ type: 'save_fields', data: parsed }, { type: 'request_cv' }],
           extractedFields: parsed
@@ -258,7 +264,7 @@ function buildEngineDecision(systemPrompt, userText) {
 
   if (completeAfterMerge && !hasCv) {
     return {
-      reply: 'Listo, ya tengo tus datos. Cuando puedas, adjuntame la hoja de vida en PDF o Word/DOCX.',
+      reply: 'Listo, ya tengo tus datos. Cuando puedas, adjuntame la hoja de vida en PDF, DOC o DOCX.',
       nextStep: 'ASK_CV',
       actions: Object.keys(parsed).length
         ? [{ type: 'save_fields', data: parsed }, { type: 'request_cv' }]
@@ -295,7 +301,7 @@ function buildEngineDecision(systemPrompt, userText) {
   if (Object.keys(parsed).length) {
     if (completeAfterMerge) {
       return {
-        reply: 'Listo, ya tengo la informacion clave. Cuando puedas, enviame la hoja de vida en PDF o Word/DOCX.',
+        reply: 'Listo, ya tengo la informacion clave. Cuando puedas, enviame la hoja de vida en PDF, DOC o DOCX.',
         nextStep: 'ASK_CV',
         actions: [{ type: 'save_fields', data: parsed }, { type: 'request_cv' }],
         extractedFields: parsed
@@ -324,8 +330,8 @@ function buildEngineDecision(systemPrompt, userText) {
 function buildNaturalReply(systemPrompt = '') {
   const dateMatch = systemPrompt.match(/Horario a ofrecer:\s*([^\n.]+)/i) || systemPrompt.match(/Fecha\/hora:\s*([^\n.]+)/i);
   const dateText = dateMatch?.[1]?.trim() || 'el horario disponible';
-  if (/confirm[aá].*entrevista agendada/i.test(systemPrompt) || /recordatorio (?:una hora|1 hora|50 minutos|40 minutos|30 minutos) antes/i.test(systemPrompt)) {
-    return `Listo, tu entrevista quedo agendada para ${dateText}. Te escribimos 40 minutos antes para recordarte.`;
+  if (/confirm[aá].*entrevista agendada/i.test(systemPrompt) || /recordatorio (?:una hora|1 hora) antes/i.test(systemPrompt)) {
+    return `Listo, tu entrevista quedo agendada para ${dateText}. Te escribimos una hora antes para recordarte.`;
   }
   return `Perfecto, te puedo ofrecer ${dateText}. Me confirmas si te sirve.`;
 }
@@ -372,6 +378,28 @@ export function installOpenAIMock({ whatsappMock, responder, calls, recognizeCur
               }
             }
           ]
+        }
+      };
+    }
+
+    if (String(url).includes('/responses')) {
+      const userText = extractResponsesInput(payload, 'user');
+      let context = {};
+      try { context = JSON.parse(userText); } catch {}
+      const reply = String(context?.fallbackText || '').trim()
+        || 'No tengo información adicional registrada para responder ese punto.';
+      if (Array.isArray(calls)) calls.push({ type: 'contextual_reply' });
+      return {
+        data: {
+          output: [{
+            content: [{
+              parsed: {
+                reply,
+                escalateHuman: Boolean(context?.requiresHumanReview),
+                reason: 'test_responses_mock'
+              }
+            }]
+          }]
         }
       };
     }

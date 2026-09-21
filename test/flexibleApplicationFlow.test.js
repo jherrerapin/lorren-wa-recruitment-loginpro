@@ -32,6 +32,17 @@ test('consentimiento reconoce intención natural sin frase única', () => {
   assert.equal(isConsentAcceptance('Sí, estoy de acuerdo'), true);
   assert.equal(isConsentAcceptance('Pueden usar mis datos para la postulación'), true);
   assert.equal(isConsentAcceptance('Doy mi consentimiento, continuemos'), true);
+  assert.equal(isConsentAcceptance('Siiiiii'), true);
+  assert.equal(isConsentAcceptance('SÍÍÍÍ, autorizo'), true);
+  assert.equal(isConsentAcceptance('Sí autoriza'), true);
+  assert.equal(isConsentAcceptance('Si autorizas el tratamiento de datos'), true);
+  assert.equal(isConsentAcceptance('¿Si autorizo, qué pasa con mis datos?'), false);
+  assert.equal(isConsentAcceptance('Si autorizo, qué pasa con mis datos?'), false);
+  assert.equal(isConsentAcceptance('Si autorizo que hacen con mis datos'), false);
+  assert.equal(isConsentAcceptance('Si autorizo que traten mis datos para la postulación'), true);
+  assert.equal(isConsentAcceptance('Sí autorizo, ¿qué pasa con mis datos?'), true);
+  assert.equal(isConsentAcceptance('Siiiiiiempre'), false);
+  assert.equal(isConsentAcceptance('No autorizo, siiiii'), false);
   assert.equal(isConsentRejection('No doy permiso para usar mis datos'), true);
 });
 
@@ -40,6 +51,13 @@ test('una pregunta hipotética sobre datos no se registra como autorización', (
   assert.equal(isConsentAcceptance('¿Qué pasa si autorizo?'), false);
   assert.equal(isConsentRejection('¿Qué pasa si no autorizo?'), false);
   assert.equal(isConsentAcceptance('Sí autorizo, ¿qué sigue?'), true);
+});
+
+test('una autorización que describe el derecho de revocatoria no se convierte en rechazo', () => {
+  const authorization = 'Autorizo a LoginPro a tratar mis datos personales para gestionar mi postulación. Entiendo que puedo solicitar la corrección o revocatoria de esta autorización.';
+  assert.equal(isConsentAcceptance(authorization), true);
+  assert.equal(isConsentRejection(authorization), false);
+  assert.equal(isConsentRejection('Revoco la autorización para tratar mis datos'), true);
 });
 
 test('las dudas sobre autorización se responden antes de retomar el consentimiento', () => {
@@ -63,31 +81,31 @@ test('durante el consentimiento responde con datos de la vacante sin inventar', 
   assert.match(buildVacancyQuestionReply(vacancy, '¿Y si no tengo moto?'), /Técnico o tecnólogo/i);
 });
 
-test('un archivo enviado antes del consentimiento queda bloqueado sin depender de una vacante', () => {
+test('un archivo enviado antes del consentimiento sigue a la persistencia canónica sin autorizar la postulación', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'MENU', botResumeMode: null },
     { type: 'document', document: { id: 'media-1', filename: 'hoja-de-vida.pdf' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'attachment_before_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
-test('datos personales enviados espontáneamente se bloquean antes del consentimiento', () => {
+test('datos personales espontáneos pueden persistirse sin equivaler a consentimiento', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'MENU', botResumeMode: null },
     { type: 'text', text: { body: 'Me llamo Persona Prueba y mi cédula es 1020304050' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
-test('un perfil futuro sin vacancyId también exige consentimiento antes de capturar datos', () => {
+test('un perfil futuro conserva datos espontáneos y mantiene pendiente el consentimiento funcional', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: null, vacancyId: null, currentStep: 'GREETING_SENT', botResumeMode: 'future_profile_capture' },
     { type: 'text', text: { body: 'Me llamo Persona Prueba' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'capture_mode_without_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
 test('un candidato con autorización aceptada no vuelve a ser bloqueado por el gate', () => {

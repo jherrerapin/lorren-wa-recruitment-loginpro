@@ -8,20 +8,20 @@ Este delta refina componentes existentes sin rehacer arquitectura:
 - **Policy layer**: la inferencia de género débil pasa a revisión (`weak_gender_inference`) y no se persiste para decisiones duras.
 - **AI-first contextual replies**: se agrega `contextualReply` como capa principal de redacción por situación (`replySituation`) usando `gpt-5.4-mini-2026-03-17`.
 - **Response policy**: queda relegada a fallback defensivo cuando el modelo falla, responde vacío o repite semánticamente outbound reciente.
-- **Attachment analyzer**: pipeline híbrida PDF/DOCX + fallback multimodal con Responses API, sin tratar automáticamente toda imagen como HV en foto.
-- **Attachment analyzer**: se fija política explícita para `.doc` legacy: no se procesa con `mammoth`, se clasifica como `OTHER` (`unsupported_doc_format`) y se solicita reenviar HV en PDF o DOCX para evitar falsos `CV_VALID`.
+- **Attachment analyzer**: pipeline híbrida PDF/DOC/DOCX + fallback multimodal con Responses API, sin tratar automáticamente toda imagen como HV en foto.
+- **Attachment analyzer**: se fija política explícita para `.doc` legacy: se valida como contenedor OLE y se extrae con la autoridad dedicada; un archivo renombrado sin contenedor Word se clasifica como `OTHER` (`invalid_legacy_word_container`).
 - **Webhook**: enruta adjuntos y continuidad de faltantes por `contextualReply` como vía principal; mantiene decisiones de negocio deterministas (guardar/no guardar HV, update de estado y booking).
 - **Webhook**: reduce mensajes hardcodeados en adjuntos/follow-up y usa `responsePolicy` solo como respaldo técnico.
-- **Reminder/keepalive**: recordatorio operativo ajustado a 40 minutos y encolado con JobQueue (cuando `FF_POSTGRES_JOB_QUEUE=true`); keepalive se corta como política permanente al detectar entrevista vencida, reminder ya intentado o booking inactivo (sin depender de rollout adicional).
+- **Reminder/keepalive**: recordatorio operativo alineado a una hora y encolado con JobQueue (cuando `FF_POSTGRES_JOB_QUEUE=true`); keepalive se corta como política permanente al detectar entrevista vencida, reminder ya intentado o booking inactivo (sin depender de rollout adicional).
 - **Job worker**: el job `INTERVIEW_REMINDER` procesa por `candidateId` (payload) para evitar ejecuciones amplias no deterministas.
 - **JobQueue**: se agrega `completedAt` para trazabilidad de finalización en jobs `DONE` y `FAILED` terminales.
 - **Tests**: se amplían casos delta para saludo/nombre, calle 80/edad, género explícito vs ambiguo, no repetición fuerte, reminder + corte keepalive y clasificación de adjuntos.
 
 ## Alcance real PR 64 (quirúrgico post PR 63)
 
-- Corregir soporte de adjuntos para bloquear `.doc` legacy y guiar a PDF/DOCX.
+- Corregir soporte de adjuntos para validar `.doc` legacy y guiar a PDF/DOC/DOCX.
 - Formalizar que keepalive no debe ejecutarse después de entrevista vencida ni en bookings cerrados/intentados.
-- Cubrir explícitamente con tests: `.doc` no válido como HV, anti-repetición con contexto de pregunta+adjunto, dispatcher por `candidateId`, y guardas de keepalive.
+- Cubrir explícitamente con tests: `.doc` auténtico válido y `.doc` renombrado inválido, anti-repetición con contexto de pregunta+adjunto, dispatcher por `candidateId`, y guardas de keepalive.
 - Sin cambios de `ConversationStep`, sin cambios SaaS/tenant/RLS, sin rehacer webhook/conversationEngine ni extractor estructurado.
 
 ## Cierre P0: AI-first replies y adjuntos
@@ -65,7 +65,7 @@ Este delta refina componentes existentes sin rehacer arquitectura:
   - Un “confirmo” temprano, fuera de ventana y sin reminder enviado, **no** cambia estado.
 
 - **Recordatorio real de entrevista**:
-  - Se ejecuta a `scheduledAt - 40 minutos`.
+  - Se ejecuta a `scheduledAt - 1 hora`.
   - Marca `reminderSentAt` y cierra keepalive (`reminderWindowClosed=true`).
   - Solo envía si booking está activo (`SCHEDULED`/`CONFIRMED`), no vencido y sin reminder previo.
   - El copy es explícitamente de entrevista (no de faltantes/HV).

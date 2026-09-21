@@ -207,9 +207,9 @@ El comportamiento legado que almacenaba archivos anticipados debe quedar caracte
 La Fase 0 incluye dos deudas confirmadas:
 
 1. alinear `AttachmentAnalysis` con los campos reales de Prisma y evitar fallos silenciosos;
-2. unificar el contrato de hoja de vida en PDF/DOCX.
+2. unificar el contrato de hoja de vida en PDF/DOC/DOCX.
 
-Las hojas de vida de reclutamiento deben aceptarse únicamente como PDF o DOCX. Los archivos `.doc` heredados se rechazan y Lórren solicita el reenvío en un formato permitido; analizar su contenido no los convierte en válidos.
+Las hojas de vida de reclutamiento se aceptan como PDF, DOC o DOCX. Los archivos `.doc` deben tener un contenedor Word OLE válido; renombrar otro archivo con esa extensión no lo convierte en una HV válida.
 
 La persistencia de un documento debe mantener consistentes la fila de base de datos y el objeto almacenado. Los fallos parciales requieren compensación, estado explícito o reconciliación; no se debe presentar como disponible un archivo cuyo objeto no exista.
 
@@ -221,7 +221,7 @@ El objetivo es marcar `RESCHEDULED` solo cuando existe una nueva reserva. El run
 
 ### Recordatorio de entrevista
 
-El requisito de producto es una hora antes. Los cuarenta minutos presentes en código o documentación heredada constituyen una migración pendiente que debe actualizar política y pruebas de manera coordinada.
+El requisito de producto y la implementación conversacional vigente son una hora antes. La política, las respuestas naturales y las pruebas deben conservar ese mismo valor.
 
 ### Recordatorio de abandono
 
@@ -283,7 +283,7 @@ Antes del segundo tenant debe existir una versión mínima tenant-aware de estas
 - sincronizar #420 con el `main` vigente;
 - corregir sus regresiones y devolver CI a verde;
 - corregir `AttachmentAnalysis`;
-- unificar PDF/DOCX y rechazar `.doc`;
+- unificar PDF/DOC/DOCX y rechazar `.doc` que no sea un contenedor Word válido;
 - iniciar trazabilidad e inventario de deuda.
 
 ### Fase 1 — Corpus conversacional y gates
