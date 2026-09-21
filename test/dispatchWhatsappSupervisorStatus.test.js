@@ -141,6 +141,31 @@ test('supervisor ve solo sus auxiliares y el estado visible depende de evidencia
   }
 });
 
+test('estado reintentable sin contexto completo no expone reenvío', async () => {
+  const incomplete = assignmentLink({
+    id: 'link-incomplete-retry',
+    assignmentId: 'assignment-incomplete-retry',
+    workerId: null,
+    workerName: 'Auxiliar sin relación',
+    phone: '3001012020',
+    status: 'FAILED'
+  });
+  incomplete.assignment.serviceRequest = null;
+  const prismaClient = {
+    dispatchWhatsappConfirmation: { findMany: async () => [incomplete] },
+    devAuditEvent: { findMany: async () => [] }
+  };
+
+  const result = await loadDispatchWhatsappSupervisorAssignmentStatus(prismaClient, {
+    ownerUsername: 'supervisor-prueba',
+    now: NOW
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].statusKey, 'FAILED');
+  assert.equal(result.items[0].canResend, false);
+});
+
 test('un mismo auxiliar aparece una sola vez con el estado de su asignación más reciente', async () => {
   const links = [
     assignmentLink({
