@@ -510,7 +510,7 @@ function failureSummary(reason = '') {
   const summaries = {
     candidate_without_cv: 'El candidato no tiene una hoja de vida almacenada.',
     cv_read_failed: 'No fue posible leer el archivo almacenado.',
-    unsupported_file_type: 'Formato no compatible. La hoja de vida debe estar en PDF o DOCX.',
+    unsupported_file_type: 'Formato no compatible. La hoja de vida debe estar en PDF, DOC o DOCX.',
     missing_buffer: 'No existe contenido de archivo disponible para analizar.',
     empty_pdf_text: 'El PDF no contiene texto legible y necesita revisión manual.',
     empty_docx_text: 'El DOCX no contiene texto legible.',

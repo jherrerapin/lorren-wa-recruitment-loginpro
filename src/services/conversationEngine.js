@@ -341,7 +341,7 @@ export function buildOperationalScopeInstruction(readiness = {}) {
   const canAskCv = Boolean(readiness.readyForCvRequest) || (!readiness.hasValidCv && !missingFields.length);
   const allowedProfileRequests = missingLabels.length
     ? formatOperationalList(missingLabels)
-    : (canAskCv ? 'hoja de vida en PDF o Word/DOCX' : 'ningun dato de perfil adicional');
+    : (canAskCv ? 'hoja de vida en PDF, DOC o DOCX' : 'ningun dato de perfil adicional');
 
   return `
 ALCANCE OPERATIVO DEL TURNO:
@@ -384,7 +384,7 @@ PRIORIDADES:
 - Si corrige algo, usa el valor nuevo y no reabras la misma confirmacion.
 - Si detectas un dato incoherente con el contexto reciente, corrigelo o pídelo de forma puntual; no confirmes datos absurdos.
 - Si ya envio la hoja de vida y en este mensaje por fin aclara ciudad o vacante, ubica el proceso, explica brevemente la vacante real y luego sigue solo con lo faltante.
-- Cuando pidas hoja de vida, pide únicamente archivo PDF o Word/DOCX. Nunca digas foto, imagen, impresa, Minerva física ni ‘como la tengas’. Si el candidato envía una foto de la hoja de vida, responde que debe reenviarla en PDF o DOCX.
+- Cuando pidas hoja de vida, pide únicamente archivo PDF, DOC o DOCX. Nunca digas foto, imagen, impresa, Minerva física ni ‘como la tengas’. Si el candidato envía una foto de la hoja de vida, responde que debe reenviarla en PDF, DOC o DOCX.
 - Si expresa no interes, cierra correctamente con "mark_no_interest".
 - Si ves un mensaje de Humano en el historial, tomalo como contexto real del equipo y continua desde ahi cuando el ultimo mensaje sea del Candidato. No contradigas ni pises lo que dijo el humano.
 - Si el ultimo mensaje del historial fuera de Humano y no hay mensaje nuevo del Candidato, no respondas encima; usa "nothing".
@@ -647,9 +647,9 @@ function buildLoopGuardReply({ candidate = {}, currentStep = '', recentMessages 
 
   if (currentStep === 'ASK_CV') {
     variants = [
-      'Recibí lo que enviaste. Para registrarlo bien, adjunta la hoja de vida en PDF o Word/DOCX.',
-      'Para guardar tu hoja de vida correctamente, envíala como archivo PDF o DOCX; así evitamos repetir el mismo pedido.',
-      'Seguimos en la parte de hoja de vida: compártela en PDF o Word/DOCX para poder registrarla.'
+      'Recibí lo que enviaste. Para registrarlo bien, adjunta la hoja de vida en PDF, DOC o DOCX.',
+      'Para guardar tu hoja de vida correctamente, envíala como archivo PDF, DOC o DOCX; así evitamos repetir el mismo pedido.',
+      'Seguimos en la parte de hoja de vida: compártela en PDF, DOC o DOCX para poder registrarla.'
     ];
     return chooseLoopGuardVariant(variants, recentMessages);
   }

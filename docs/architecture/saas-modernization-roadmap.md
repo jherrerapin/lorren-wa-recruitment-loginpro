@@ -305,7 +305,7 @@ Los logs deben evitar contenido sensible y conservar razones, estados, versiones
 - Actualizar #420 contra el `main` que ya contiene #419 y #425.
 - Resolver sus bloqueadores y devolver CI a verde.
 - Corregir la persistencia de `AttachmentAnalysis` contra Prisma.
-- Unificar el contrato de HV en PDF/DOCX y rechazar `.doc`.
+- Unificar el contrato de HV en PDF/DOC/DOCX y rechazar `.doc` que no sea un contenedor Word válido.
 - Inventariar deuda y añadir correlación mínima.
 
 ### Fase 1 — Caracterización y gates

@@ -14,15 +14,15 @@ function assertNoForbiddenHvTerms(reply) {
   assert.doesNotMatch(reply, /minerva\s*1003/i);
 }
 
-test('fallbacks críticos piden HV solo como archivo PDF o DOCX', () => {
+test('fallbacks críticos piden HV solo como archivo PDF, DOC o DOCX', () => {
   for (const situation of ['attachment_resume_photo', 'attachment_other_doc', 'attachment_unreadable', 'attachment_id_doc']) {
     const text = buildSafeContextualFallbackText({ situation });
-    assert.match(text, /PDF o DOCX/i);
+    assert.match(text, /PDF, DOC o DOCX/i);
     assertNoForbiddenHvTerms(text);
   }
 });
 
-test('image/jpeg no cuenta como CV válido y pide reenviar en PDF o DOCX', async () => {
+test('image/jpeg no cuenta como CV válido y pide reenviar en PDF, DOC o DOCX', async () => {
   const analysis = await analyzeAttachment({ buffer: Buffer.from('fake image bytes'), mimeType: 'image/jpeg', filename: 'hv.jpg' });
   const saveCv = analysis.classification === 'CV_VALID';
   const hasCv = saveCv;
@@ -31,7 +31,7 @@ test('image/jpeg no cuenta como CV válido y pide reenviar en PDF o DOCX', async
   assert.equal(saveCv, false);
   assert.equal(hasCv, false);
   assert.equal(analysis.classification, 'CV_IMAGE_ONLY');
-  assert.match(reply, /PDF o DOCX/i);
+  assert.match(reply, /PDF, DOC o DOCX/i);
   assertNoForbiddenHvTerms(reply);
 });
 
@@ -42,8 +42,8 @@ test('texto con nombre de archivo no cuenta como HV adjunta', () => {
   assert.equal(candidatePatch.cvStorageKey, undefined);
   assert.equal(candidatePatch.cvData, undefined);
   assert.equal(candidatePatch.hasCv, undefined);
-  const reply = 'Para registrar tu hoja de vida necesito que adjuntes el archivo real en PDF o Word/DOCX; escribir solo el nombre del archivo no es suficiente.';
-  assert.match(reply, /archivo real en PDF o Word\/DOCX/i);
+  const reply = 'Para registrar tu hoja de vida necesito que adjuntes el archivo real en PDF, DOC o DOCX; escribir solo el nombre del archivo no es suficiente.';
+  assert.match(reply, /archivo real en PDF, DOC o DOCX/i);
 });
 
 test('documentos de entrevista salen de la información de la vacante sin forzar PDF/DOCX', async () => {

@@ -131,7 +131,7 @@ function buildActiveVacancyInterestReply(vacancy = {}, inboundText = '') {
 function missingDataPrompt(candidate = {}, vacancy = null) {
   const labels = missingDataLabels(candidate, vacancy);
   if (labels.length) return `Listo, dejo tu perfil como registro para futuras aperturas. Para hacerlo bien, compárteme ${labels[0]}.`;
-  if (!hasValidCv(candidate)) return 'Listo, dejo tu perfil como registro para futuras aperturas. Si deseas actualizar o adjuntar tu hoja de vida, envíala en PDF o Word/DOCX.';
+  if (!hasValidCv(candidate)) return 'Listo, dejo tu perfil como registro para futuras aperturas. Si deseas actualizar o adjuntar tu hoja de vida, envíala en PDF, DOC o DOCX.';
   return 'Listo, tu perfil queda registrado para futuras aperturas compatibles. No hay entrevista activa para agendar en este momento.';
 }
 

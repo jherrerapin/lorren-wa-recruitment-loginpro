@@ -108,7 +108,7 @@ export function buildSafeContextualFallbackText(context) {
   const situation = safeContext.situation || 'continue_flow';
 
   if (situation === 'attachment_resume_photo') {
-    return 'Recibí la imagen, pero no puedo registrarla como hoja de vida. Envíala como archivo PDF o DOCX.';
+    return 'Recibí la imagen, pero no puedo registrarla como hoja de vida. Envíala como archivo PDF, DOC o DOCX.';
   }
 
   if (situation === 'attachment_cv_valid') {
@@ -118,15 +118,15 @@ export function buildSafeContextualFallbackText(context) {
   }
 
   if (situation === 'attachment_id_doc') {
-    return 'El archivo recibido parece ser un documento de identidad y no reemplaza la hoja de vida. Para continuar, envía tu HV como archivo PDF o DOCX.';
+    return 'El archivo recibido parece ser un documento de identidad y no reemplaza la hoja de vida. Para continuar, envía tu HV como archivo PDF, DOC o DOCX.';
   }
 
   if (situation === 'attachment_other_doc') {
-    return 'El archivo recibido no corresponde a una hoja de vida válida. Para continuar, envía tu HV como archivo PDF o DOCX.';
+    return 'El archivo recibido no corresponde a una hoja de vida válida. Para continuar, envía tu HV como archivo PDF, DOC o DOCX.';
   }
 
   if (situation === 'attachment_unreadable') {
-    return 'No pude procesar el archivo que enviaste. Reenvía tu hoja de vida como archivo PDF o DOCX.';
+    return 'No pude procesar el archivo que enviaste. Reenvía tu hoja de vida como archivo PDF, DOC o DOCX.';
   }
 
   if (situation === 'request_missing_data') {
@@ -252,7 +252,7 @@ export async function buildContextualReply(context) {
         role: 'system',
         content: [{
           type: 'input_text',
-          text: `Eres ${LORREN_ROLE_LABEL} solo si el candidato pregunta directamente tu nombre, identidad o si eres bot; de resto actúas desde ese rol por WhatsApp sin presentarte. Redacta un mensaje breve, natural y contextual en español colombiano. Evita frases quemadas, no repitas texto reciente, responde preguntas primero y luego retoma el proceso solo si aporta valor. No inventes reglas: respeta la decision ya dada por el sistema. Para cualquier dato de la vacante, usa exclusivamente la vacante asignada incluida en el JSON del usuario, incluida la documentacion de entrevista indicada en la vacante; no uses conocimiento general, supuestos ni datos de otras vacantes. Si el dato no esta en esa vacante, di que no lo tienes registrado. Si requiere revision humana, dilo sin improvisar soluciones. Nunca digas que la hoja de vida puede enviarse en foto, imagen, impresa, Minerva física o como la tenga. Para este canal solo es válida como archivo PDF o DOCX.`
+          text: `Eres ${LORREN_ROLE_LABEL} solo si el candidato pregunta directamente tu nombre, identidad o si eres bot; de resto actúas desde ese rol por WhatsApp sin presentarte. Redacta un mensaje breve, natural y contextual en español colombiano. Evita frases quemadas, no repitas texto reciente, responde preguntas primero y luego retoma el proceso solo si aporta valor. No inventes reglas: respeta la decision ya dada por el sistema. Para cualquier dato de la vacante, usa exclusivamente la vacante asignada incluida en el JSON del usuario, incluida la documentacion de entrevista indicada en la vacante; no uses conocimiento general, supuestos ni datos de otras vacantes. Si el dato no esta en esa vacante, di que no lo tienes registrado. Si requiere revision humana, dilo sin improvisar soluciones. Nunca digas que la hoja de vida puede enviarse en foto, imagen, impresa, Minerva física o como la tenga. Para este canal solo es válida como archivo PDF, DOC o DOCX.`
         }]
       },
       {

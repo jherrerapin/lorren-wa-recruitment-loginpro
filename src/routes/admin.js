@@ -3327,7 +3327,7 @@ export function adminRouter(prisma) {
     }
 
     const templates = {
-      request_hv: 'Para continuar tu proceso necesito tu hoja de vida (HV) como archivo PDF o Word/DOCX.',
+      request_hv: 'Para continuar tu proceso necesito tu hoja de vida (HV) como archivo PDF, DOC o DOCX.',
       reminder: 'Te recuerdo que tu proceso sigue activo. Si deseas continuar, comparte la información faltante o tu Hoja de vida (HV).'
     };
 
@@ -3388,7 +3388,7 @@ export function adminRouter(prisma) {
       return res.redirect(withFlashMessage(returnTo, 'error', 'La ventana de 24h de WhatsApp está vencida. No se puede solicitar la HV.'));
     }
 
-    const body = 'Para continuar tu proceso necesito tu hoja de vida (HV) como archivo PDF o Word/DOCX.';
+    const body = 'Para continuar tu proceso necesito tu hoja de vida (HV) como archivo PDF, DOC o DOCX.';
 
     try {
       await sendAdminOutboundMessage(prisma, candidate, body, {

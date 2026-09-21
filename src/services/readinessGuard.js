@@ -22,7 +22,7 @@ const FIELD_LABELS = {
   experienceInfo: 'experiencia',
   experienceTime: 'tiempo de experiencia',
   experienceSummary: 'en qué tiene experiencia',
-  cv: 'hoja de vida en PDF o Word/DOCX',
+  cv: 'hoja de vida en PDF, DOC o DOCX',
   vacancyId: 'vacante asignada',
   eligibility: 'requisitos de la vacante'
 };
@@ -302,7 +302,7 @@ export function buildMissingFieldReply(readiness = {}) {
   const eligibilityReply = buildEligibilityFailureReply(readiness);
   if (eligibilityReply) return eligibilityReply;
   if (!readiness?.missingFields?.length) {
-    if (!readiness?.hasValidCv) return 'Para continuar, adjunta tu hoja de vida como archivo PDF o Word/DOCX.';
+    if (!readiness?.hasValidCv) return 'Para continuar, adjunta tu hoja de vida como archivo PDF, DOC o DOCX.';
     return 'La información principal está lista; sigo con el punto concreto que falta para avanzar.';
   }
   const label = getFirstMissingFieldLabel(readiness);
