@@ -5,27 +5,29 @@ import {
   loadDispatchWhatsappOutboundHistoryByDate,
   loadDispatchWhatsappPhoneConversation
 } from '../src/services/dispatchWhatsappMonitor.js';
+import { loadDispatchWhatsappConversationInbox } from '../src/routes/dispatchWhatsappNotifications.js';
 import { runDispatchDeliveryWatchdog } from '../src/services/dispatchWhatsappAdminAlerts.js';
 
 const NOW = new Date('2026-09-21T12:00:00.000Z');
 
-function auditRow({ id, phone, status, at, body, source = 'ASSIGNMENT_CONFIRMATION', diagnostic = null, watchdog = null }) {
+function auditRow({ id, phone, status, at, body, source = 'ASSIGNMENT_CONFIRMATION', diagnostic = null, watchdog = null, direction = 'OUTBOUND' }) {
   return {
     id,
     entityType: 'DISPATCH_WHATSAPP_MESSAGE',
-    entityId: `dispatch-wa:outbound:${id}`,
+    entityId: `dispatch-wa:${direction.toLowerCase()}:${id}`,
     entityLabel: phone,
-    action: 'DISPATCH_WHATSAPP_OUTBOUND',
+    action: direction === 'INBOUND' ? 'DISPATCH_WHATSAPP_INBOUND' : 'DISPATCH_WHATSAPP_OUTBOUND',
     actorSource: source,
     metadata: {
       scope: 'operational',
-      direction: 'OUTBOUND',
+      direction,
       phone,
       body,
-      messageType: 'TEMPLATE',
-      providerMessageId: id,
-      providerStatus: status,
-      providerStatusAt: at,
+      messageType: direction === 'INBOUND' ? 'TEXT' : 'TEMPLATE',
+      messageId: direction === 'INBOUND' ? id : '',
+      providerMessageId: direction === 'OUTBOUND' ? id : '',
+      providerStatus: direction === 'OUTBOUND' ? status : null,
+      providerStatusAt: direction === 'OUTBOUND' ? at : null,
       providerDiagnostic: diagnostic,
       deliveryWatchdogStatus: watchdog,
       source,
@@ -70,6 +72,66 @@ function historyPrisma({ rows = [], confirmations = [], globallyAuditedProviderI
           { id: 'worker-two', fullName: 'Auxiliar Dos', phone: '3002223344' }
         ];
       }
+    }
+  };
+}
+
+function normalizedPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length === 10 ? `57${digits}` : digits;
+}
+
+function inboxPrisma({ rows = [], confirmations = [], workers = [], windows = [] } = {}) {
+  const auditGroups = new Map();
+  for (const row of rows) {
+    const phone = normalizedPhone(row.entityLabel);
+    const at = new Date(row.createdAt);
+    const previous = auditGroups.get(phone);
+    if (!previous || at > previous) auditGroups.set(phone, at);
+  }
+  const confirmationGroups = new Map();
+  for (const row of confirmations) {
+    const phone = normalizedPhone(row.phone);
+    const previous = confirmationGroups.get(phone) || { createdAt: null, confirmationReceivedAt: null };
+    const createdAt = row.createdAt ? new Date(row.createdAt) : null;
+    const receivedAt = row.confirmationReceivedAt ? new Date(row.confirmationReceivedAt) : null;
+    if (createdAt && (!previous.createdAt || createdAt > previous.createdAt)) previous.createdAt = createdAt;
+    if (receivedAt && (!previous.confirmationReceivedAt || receivedAt > previous.confirmationReceivedAt)) previous.confirmationReceivedAt = receivedAt;
+    confirmationGroups.set(phone, previous);
+  }
+  return {
+    devAuditEvent: {
+      groupBy: async () => [...auditGroups.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([entityLabel, createdAt]) => ({ entityLabel, _max: { createdAt } })),
+      findMany: async ({ where = {} } = {}) => {
+        const phones = Array.isArray(where.entityLabel?.in) ? where.entityLabel.in.map(normalizedPhone) : null;
+        return rows
+          .filter((row) => !phones || phones.includes(normalizedPhone(row.entityLabel)))
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      }
+    },
+    dispatchWhatsappContactWindow: {
+      findMany: async () => windows,
+      findUnique: async ({ where }) => windows.find((row) => normalizedPhone(row.phone) === normalizedPhone(where.scope_phone.phone)) || null,
+      upsert: async () => ({})
+    },
+    dispatchWhatsappConfirmation: {
+      groupBy: async () => [...confirmationGroups.entries()]
+        .sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0))
+        .map(([phone, latest]) => ({
+          phone,
+          _max: { createdAt: latest.createdAt, confirmationReceivedAt: latest.confirmationReceivedAt }
+        })),
+      findMany: async ({ where = {} } = {}) => {
+        if (typeof where.phone === 'string') {
+          return confirmations.filter((row) => normalizedPhone(row.phone) === normalizedPhone(where.phone));
+        }
+        return confirmations;
+      }
+    },
+    dispatchWorker: {
+      findMany: async () => workers
     }
   };
 }
@@ -227,6 +289,63 @@ test('conversación por auxiliar reutiliza auditoría de Despacho y conserva dir
   assert.match(conversation.messageHistory[1].body, /CONFIRMADO/);
 });
 
+test('bandeja prioriza la asignación ligada al wamid para resolver el auxiliar', async () => {
+  const sentAt = '2026-09-21T11:40:00.000Z';
+  const rows = [auditRow({
+    id: 'wamid-linked-worker',
+    phone: '573006667788',
+    status: 'SENT',
+    at: sentAt,
+    body: 'Asignación de prueba'
+  })];
+  const confirmations = [{
+    id: 'link-worker-1',
+    phone: '573006667788',
+    providerMessageId: 'wamid-linked-worker',
+    status: 'SENT',
+    createdAt: new Date(sentAt),
+    updatedAt: new Date(sentAt),
+    confirmationReceivedAt: null,
+    assignment: {
+      id: 'assignment-linked-1',
+      workerId: 'worker-linked-1',
+      worker: { id: 'worker-linked-1', fullName: 'Auxiliar Vinculado', phone: '3006667788' },
+      serviceRequest: { id: 'request-linked-1', source: 'MANUAL' }
+    }
+  }];
+  const prismaClient = inboxPrisma({ rows, confirmations, workers: [] });
+
+  const inbox = await loadDispatchWhatsappConversationInbox(prismaClient, { now: NOW });
+
+  assert.equal(inbox.items.length, 1);
+  assert.equal(inbox.items[0].workerId, 'worker-linked-1');
+  assert.equal(inbox.items[0].workerName, 'Auxiliar Vinculado');
+  assert.equal(inbox.items[0].phoneDisplay, '+57 300 666 7788');
+  assert.equal(inbox.items[0].deliveryState, 'SENT');
+});
+
+test('bandeja agrupa una sola conversación por teléfono y ordena por último mensaje descendente', async () => {
+  const rows = [
+    auditRow({ id: 'wamid-old-a', phone: '573001112233', status: 'DELIVERED', at: '2026-09-21T10:00:00.000Z', body: 'Anterior A' }),
+    auditRow({ id: 'wamid-new-a', phone: '573001112233', status: 'READ', at: '2026-09-21T11:20:00.000Z', body: 'Reciente A' }),
+    auditRow({ id: 'wamid-b', phone: '573002223344', status: 'DELIVERED', at: '2026-09-21T11:30:00.000Z', body: 'Reciente B' })
+  ];
+  const workers = [
+    { id: 'worker-a', fullName: 'Auxiliar A', phone: '3001112233' },
+    { id: 'worker-b', fullName: 'Auxiliar B', phone: '3002223344' }
+  ];
+  const prismaClient = inboxPrisma({ rows, workers });
+
+  const inbox = await loadDispatchWhatsappConversationInbox(prismaClient, { now: NOW });
+
+  assert.equal(inbox.items.length, 2);
+  assert.equal(inbox.items[0].workerName, 'Auxiliar B');
+  assert.equal(inbox.items[0].lastMessageBody.includes('Reciente B'), true);
+  assert.equal(inbox.items[1].workerName, 'Auxiliar A');
+  assert.equal(inbox.items[1].lastMessageBody.includes('Reciente A'), true);
+  assert.equal(inbox.items[1].messageCount, 2);
+});
+
 test('watchdog marca entrega incierta, actualiza auditoría y alerta una sola vez sin reenviar', async () => {
   const link = {
     id: 'link-watchdog-1',
@@ -302,21 +421,28 @@ test('watchdog marca entrega incierta, actualiza auditoría y alerta una sola ve
   assert.equal(sentAlerts.length, 1);
 });
 
-test('pantalla y ruta muestran teléfono completo, conversación y ocultan historial cuando no se suministra', () => {
+test('pantalla usa bandeja sin selector diario y representa los estados Meta sin inventar entrega', () => {
   const view = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/dispatchWhatsappNotifications.js', import.meta.url), 'utf8');
   const monitor = fs.readFileSync(new URL('../src/services/dispatchWhatsappMonitor.js', import.meta.url), 'utf8');
   const alerts = fs.readFileSync(new URL('../src/services/dispatchWhatsappAdminAlerts.js', import.meta.url), 'utf8');
 
-  assert.match(view, /hasOutboundHistory/);
+  assert.match(view, /Conversaciones de Despacho/);
   assert.match(view, /item\.phoneDisplay \|\| item\.phone/);
   assert.match(view, /Ver conversación/);
   assert.match(view, /conversation\.messageHistory/);
+  assert.match(view, /✓ Enviado/);
+  assert.match(view, /✓✓ Entregado/);
+  assert.match(view, /✓✓ Leído/);
   assert.match(view, /DELIVERY_UNKNOWN/);
-  assert.match(route, /workerId:\s*worker\.id/);
-  assert.match(route, /loadSelectedWorkerConversation/);
-  assert.match(route, /page:\s*page/);
-  assert.doesNotMatch(route, /phone:\s*normalizeString\(req\.query/);
+  assert.match(view, /Meta reportó fallo/);
+  assert.doesNotMatch(view, /type="date"/);
+  assert.doesNotMatch(view, /dispatchHistoryDate/);
+  assert.match(route, /loadDispatchWhatsappConversationInbox/);
+  assert.match(route, /linkedByProviderId/);
+  assert.match(route, /workerId:\s*linkedWorker/);
+  assert.doesNotMatch(route, /loadDispatchWhatsappOutboundHistoryByDate/);
+  assert.doesNotMatch(route, /req\.query\?\.date/);
   assert.match(monitor, /contenido original no quedó almacenado/);
   assert.doesNotMatch(monitor, /buildDispatchAssignmentMessageBody/);
   assert.match(alerts, /runDispatchDeliveryWatchdog/);
