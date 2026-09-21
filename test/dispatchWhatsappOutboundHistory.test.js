@@ -352,6 +352,61 @@ test('bandeja no certifica SENT histórico sin auditoría de estado Meta', async
   assert.equal(inbox.items[0].reconstructed, true);
 });
 
+test('fallo previo al wamid permanece visible como FAILED y no como enviado', async () => {
+  const failedAt = '2026-09-21T11:45:00.000Z';
+  const phone = '573006667700';
+  const rows = [{
+    id: 'audit-failed-no-wamid',
+    entityType: 'DISPATCH_WHATSAPP_MESSAGE',
+    entityId: 'dispatch-wa:outbound:assignment-failed:link-failed-no-wamid',
+    entityLabel: phone,
+    action: 'DISPATCH_WHATSAPP_OUTBOUND',
+    actorSource: 'ASSIGNMENT_CONFIRMATION_FAILED',
+    metadata: {
+      scope: 'operational',
+      direction: 'OUTBOUND',
+      phone,
+      body: 'Intento de envío fallido. Rechazo de prueba saneado.',
+      messageType: 'TEMPLATE',
+      messageId: '',
+      providerMessageId: '',
+      providerStatus: null,
+      providerStatusAt: null,
+      providerDiagnostic: null,
+      deliveryWatchdogStatus: null,
+      source: 'ASSIGNMENT_CONFIRMATION_FAILED',
+      occurredAt: failedAt
+    },
+    createdAt: new Date(failedAt)
+  }];
+  const confirmations = [{
+    id: 'link-failed-no-wamid',
+    phone,
+    providerMessageId: null,
+    status: 'FAILED',
+    createdAt: new Date(failedAt),
+    updatedAt: new Date(failedAt),
+    confirmationReceivedAt: null,
+    assignment: {
+      id: 'assignment-failed-no-wamid',
+      workerId: 'worker-failed-no-wamid',
+      worker: { id: 'worker-failed-no-wamid', fullName: 'Auxiliar Fallo Visible', phone: '3006667700' },
+      serviceRequest: { id: 'request-failed-no-wamid', source: 'MANUAL' }
+    }
+  }];
+  const prismaClient = inboxPrisma({ rows, confirmations });
+
+  const inbox = await loadDispatchWhatsappConversationInbox(prismaClient, { now: NOW });
+
+  assert.equal(inbox.items.length, 1);
+  assert.equal(inbox.items[0].workerName, 'Auxiliar Fallo Visible');
+  assert.equal(inbox.items[0].providerMessageId, null);
+  assert.equal(inbox.items[0].providerStatus, null);
+  assert.equal(inbox.items[0].deliveryState, 'FAILED');
+  assert.equal(inbox.items[0].lastMessageSource, 'ASSIGNMENT_CONFIRMATION_FAILED');
+  assert.match(inbox.items[0].lastMessageBody, /Intento de envío fallido/);
+});
+
 test('bandeja agrupa una sola conversación por teléfono y ordena por último mensaje descendente', async () => {
   const rows = [
     auditRow({ id: 'wamid-old-a', phone: '573001112233', status: 'DELIVERED', at: '2026-09-21T10:00:00.000Z', body: 'Anterior A' }),
@@ -452,6 +507,7 @@ test('watchdog marca entrega incierta, actualiza auditoría y alerta una sola ve
 test('pantalla usa bandeja sin selector diario, despliega conversación inline y representa estados Meta sin inventar entrega', () => {
   const view = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/dispatchWhatsappNotifications.js', import.meta.url), 'utf8');
+  const assignment = fs.readFileSync(new URL('../src/services/dispatchWhatsappAssignmentService.js', import.meta.url), 'utf8');
   const monitor = fs.readFileSync(new URL('../src/services/dispatchWhatsappMonitor.js', import.meta.url), 'utf8');
   const alerts = fs.readFileSync(new URL('../src/services/dispatchWhatsappAdminAlerts.js', import.meta.url), 'utf8');
 
@@ -477,6 +533,13 @@ test('pantalla usa bandeja sin selector diario, despliega conversación inline y
   assert.match(route, /historicalSent/);
   assert.doesNotMatch(route, /loadDispatchWhatsappOutboundHistoryByDate/);
   assert.doesNotMatch(route, /req\.query\?\.date/);
+  assert.match(assignment, /if \(contactWindow\.isOpen\)/);
+  assert.match(assignment, /else if \(config\.assignmentTemplateName && config\.templateLanguage\)/);
+  assert.match(assignment, /deliveryMode = 'SESSION_INTERACTIVE'/);
+  assert.match(assignment, /deliveryMode = 'TEMPLATE'/);
+  assert.match(assignment, /source: 'ASSIGNMENT_CONFIRMATION_FAILED'/);
+  assert.match(assignment, /dedupeKey: `assignment-failed:\$\{link\.id\}`/);
+  assert.match(assignment, /failedMessageType = contactWindow\.isOpen/);
   assert.match(monitor, /contenido original no quedó almacenado/);
   assert.doesNotMatch(monitor, /buildDispatchAssignmentMessageBody/);
   assert.match(alerts, /runDispatchDeliveryWatchdog/);
