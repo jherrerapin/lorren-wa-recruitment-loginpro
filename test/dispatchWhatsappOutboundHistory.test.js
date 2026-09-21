@@ -103,6 +103,7 @@ test('historial outbound consulta exactamente el día de Bogotá y conserva esta
     delivered: 1,
     read: 0,
     failed: 1,
+    historical: 0,
     withoutProviderStatus: 0
   });
   assert.equal(history.items[0].providerStatus, 'FAILED');
@@ -134,6 +135,55 @@ test('fecha inválida usa el día actual de Bogotá sin ampliar el rango', async
   assert.deepEqual(history.items, []);
 });
 
+test('envío automático histórico se reconstruye sin inventar estado de entrega', async () => {
+  const prismaClient = {
+    devAuditEvent: { findMany: async () => [] },
+    dispatchWhatsappConfirmation: {
+      findMany: async (query) => {
+        assert.equal(query.where.createdAt.gte.toISOString(), '2026-09-20T05:00:00.000Z');
+        assert.equal(query.where.createdAt.lt.toISOString(), '2026-09-21T05:00:00.000Z');
+        assert.deepEqual(query.where.providerMessageId, { not: null });
+        return [{
+          id: 'confirmation-historical-1',
+          phone: '573004445566',
+          providerMessageId: 'wamid-historical-1',
+          createdAt: new Date('2026-09-21T00:08:00.000Z'),
+          assignment: {
+            id: 'assignment-historical-1',
+            worker: { id: 'worker-historical-1', fullName: 'Auxiliar Histórico', phone: '3004445566' },
+            serviceRequest: {
+              id: 'request-historical-1',
+              source: 'MANUAL',
+              operationPointName: 'Operación ficticia',
+              serviceDate: new Date('2026-09-21T00:00:00.000Z'),
+              startTime: '08:00',
+              address: 'Dirección ficticia',
+              operationPoint: null
+            }
+          }
+        }];
+      }
+    }
+  };
+
+  const history = await loadDispatchWhatsappOutboundHistoryByDate({
+    prismaClient,
+    dateKey: '2026-09-20',
+    now: NOW
+  });
+
+  assert.equal(history.summary.total, 1);
+  assert.equal(history.summary.historical, 1);
+  assert.equal(history.summary.withoutProviderStatus, 1);
+  assert.equal(history.items[0].workerName, 'Auxiliar Histórico');
+  assert.equal(history.items[0].phoneMasked, '•••• 5566');
+  assert.equal(history.items[0].providerMessageId, 'wamid-historical-1');
+  assert.equal(history.items[0].providerStatus, null);
+  assert.equal(history.items[0].source, 'RECONSTRUIDO_ASIGNACION');
+  assert.equal(history.items[0].reconstructed, true);
+  assert.match(history.items[0].body, /CONFIRMADO · REPORTAR NOVEDAD/);
+});
+
 test('pantalla, ruta y servicio de envío comparten una sola auditoría de asignaciones', () => {
   const view = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/dispatchWhatsappNotifications.js', import.meta.url), 'utf8');
@@ -141,6 +191,7 @@ test('pantalla, ruta y servicio de envío comparten una sola auditoría de asign
 
   assert.match(view, /name="date" type="date"/);
   assert.match(view, /Aceptado por Meta/);
+  assert.match(view, /Sin estado Meta histórico/);
   assert.match(view, /no significa que el mensaje haya sido entregado al teléfono/);
   assert.match(view, /providerStatus === 'FAILED'/);
   assert.match(route, /loadDispatchWhatsappOutboundHistoryByDate/);
