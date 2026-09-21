@@ -8,6 +8,7 @@ const NOW = new Date('2026-09-21T19:00:00.000Z');
 function assignmentLink({
   id,
   assignmentId,
+  workerId = `worker-${assignmentId}`,
   workerName,
   phone,
   status = 'SENT',
@@ -28,8 +29,8 @@ function assignmentLink({
     updatedAt: new Date(updatedAt),
     assignment: {
       id: assignmentId,
-      workerId: `worker-${assignmentId}`,
-      worker: { id: `worker-${assignmentId}`, fullName: workerName, phone },
+      workerId,
+      worker: workerId ? { id: workerId, fullName: workerName, phone } : null,
       serviceRequest: {
         id: `request-${assignmentId}`,
         source: 'MANUAL',
@@ -52,7 +53,7 @@ function providerAudit(providerMessageId, providerStatus, providerStatusAt, deli
   };
 }
 
-test('supervisor ve solo sus asignaciones y el estado visible depende de evidencia real, no del estado interno SENT', async () => {
+test('supervisor ve solo sus auxiliares y el estado visible depende de evidencia real, no del estado interno SENT', async () => {
   const links = [
     assignmentLink({ id: 'link-accepted', assignmentId: 'assignment-accepted', workerName: 'Auxiliar Alfa', phone: '3001112233', status: 'SENT', providerMessageId: 'provider-accepted' }),
     assignmentLink({ id: 'link-sent', assignmentId: 'assignment-sent', workerName: 'Auxiliar Beta', phone: '3002223344', status: 'SENT', providerMessageId: 'provider-sent' }),
@@ -101,7 +102,9 @@ test('supervisor ve solo sus asignaciones y el estado visible depende de evidenc
   });
 
   assert.equal(confirmationQuery.where.alertOwnerUsername, 'supervisor-prueba');
-  assert.deepEqual(confirmationQuery.distinct, ['assignmentId']);
+  assert.equal(confirmationQuery.distinct, undefined);
+  assert.equal(confirmationQuery.skip, undefined);
+  assert.equal(confirmationQuery.take, undefined);
   assert.deepEqual(confirmationQuery.orderBy, { createdAt: 'desc' });
   assert.equal(confirmationQuery.where.assignment.serviceRequest.source.not, 'DEV_TEST');
   assert.ok(auditQuery.where.entityId.in.includes('dispatch-wa:outbound:provider-accepted'));
@@ -124,6 +127,100 @@ test('supervisor ve solo sus asignaciones y el estado visible depende de evidenc
     const visibleText = `${item.statusLabel} ${item.statusDetail}`;
     assert.doesNotMatch(visibleText, /\b(?:SENT|DELIVERED|READ|FAILED|DELIVERY_UNKNOWN|UNKNOWN|wamid|Meta)\b/i);
   }
+});
+
+test('un mismo auxiliar aparece una sola vez con el estado de su asignación más reciente', async () => {
+  const links = [
+    assignmentLink({
+      id: 'link-worker-new',
+      assignmentId: 'assignment-worker-new',
+      workerId: 'worker-shared',
+      workerName: 'Auxiliar Consolidado',
+      phone: '3001234567',
+      status: 'SENT',
+      providerMessageId: 'provider-worker-new',
+      createdAt: '2026-09-21T18:30:00.000Z'
+    }),
+    assignmentLink({
+      id: 'link-worker-old',
+      assignmentId: 'assignment-worker-old',
+      workerId: 'worker-shared',
+      workerName: 'Auxiliar Consolidado',
+      phone: '3001234567',
+      status: 'DELIVERED',
+      providerMessageId: 'provider-worker-old',
+      createdAt: '2026-09-21T17:30:00.000Z'
+    }),
+    assignmentLink({
+      id: 'link-other-worker',
+      assignmentId: 'assignment-other-worker',
+      workerId: 'worker-other',
+      workerName: 'Auxiliar Distinto',
+      phone: '3007654321',
+      status: 'DELIVERED',
+      providerMessageId: 'provider-other-worker',
+      createdAt: '2026-09-21T18:20:00.000Z'
+    })
+  ];
+  const prismaClient = {
+    dispatchWhatsappConfirmation: { findMany: async () => links },
+    devAuditEvent: {
+      findMany: async () => [
+        providerAudit('provider-worker-new', 'SENT', '2026-09-21T18:31:00.000Z'),
+        providerAudit('provider-worker-old', 'DELIVERED', '2026-09-21T17:31:00.000Z'),
+        providerAudit('provider-other-worker', 'DELIVERED', '2026-09-21T18:21:00.000Z')
+      ]
+    }
+  };
+
+  const result = await loadDispatchWhatsappSupervisorAssignmentStatus(prismaClient, {
+    ownerUsername: 'supervisor-prueba',
+    now: NOW
+  });
+
+  assert.equal(result.items.length, 2);
+  assert.deepEqual(result.items.map((item) => item.workerId), ['worker-shared', 'worker-other']);
+  const consolidated = result.items.find((item) => item.workerId === 'worker-shared');
+  assert.equal(consolidated.assignmentId, 'assignment-worker-new');
+  assert.equal(consolidated.statusLabel, 'Enviado');
+  assert.equal(result.items.some((item) => item.assignmentId === 'assignment-worker-old'), false);
+});
+
+test('si falta workerId, el teléfono normalizado consolida el mismo auxiliar como respaldo', async () => {
+  const links = [
+    assignmentLink({
+      id: 'link-phone-new',
+      assignmentId: 'assignment-phone-new',
+      workerId: null,
+      workerName: 'Auxiliar sin relación',
+      phone: '+57 300 555 7788',
+      status: 'SENT',
+      providerMessageId: 'provider-phone-new',
+      createdAt: '2026-09-21T18:30:00.000Z'
+    }),
+    assignmentLink({
+      id: 'link-phone-old',
+      assignmentId: 'assignment-phone-old',
+      workerId: null,
+      workerName: 'Auxiliar sin relación',
+      phone: '3005557788',
+      status: 'DELIVERED',
+      providerMessageId: 'provider-phone-old',
+      createdAt: '2026-09-21T17:30:00.000Z'
+    })
+  ];
+  const prismaClient = {
+    dispatchWhatsappConfirmation: { findMany: async () => links },
+    devAuditEvent: { findMany: async () => [providerAudit('provider-phone-new', 'SENT', '2026-09-21T18:31:00.000Z')] }
+  };
+
+  const result = await loadDispatchWhatsappSupervisorAssignmentStatus(prismaClient, {
+    ownerUsername: 'supervisor-prueba',
+    now: NOW
+  });
+
+  assert.equal(result.items.length, 1);
+  assert.equal(result.items[0].assignmentId, 'assignment-phone-new');
 });
 
 test('confirmación humana prevalece sobre un estado de entrega anterior', async () => {

@@ -340,13 +340,24 @@ export async function loadDispatchWhatsappSupervisorAssignmentStatus(prisma, {
       assignment: { serviceRequest: { source: { not: 'DEV_TEST' } } }
     },
     include: { assignment: { include: { worker: true, serviceRequest: true } } },
-    orderBy: { createdAt: 'desc' },
-    distinct: ['assignmentId'],
-    skip: (normalizedPage - 1) * normalizedPageSize,
-    take: normalizedPageSize + 1
+    orderBy: { createdAt: 'desc' }
   });
-  const hasNext = links.length > normalizedPageSize;
-  const pageLinks = links.slice(0, normalizedPageSize);
+
+  const latestLinkByWorker = new Map();
+  for (const link of links || []) {
+    const assignment = link?.assignment || {};
+    const worker = assignment.worker || {};
+    const workerId = normalizeString(worker.id || assignment.workerId);
+    const phone = normalizeDispatchWhatsappMonitorPhone(link.phone || worker.phone);
+    const identityKey = workerId ? `worker:${workerId}` : (phone ? `phone:${phone}` : null);
+    if (!identityKey || latestLinkByWorker.has(identityKey)) continue;
+    latestLinkByWorker.set(identityKey, link);
+  }
+
+  const workerLinks = [...latestLinkByWorker.values()];
+  const offset = (normalizedPage - 1) * normalizedPageSize;
+  const pageLinks = workerLinks.slice(offset, offset + normalizedPageSize);
+  const hasNext = workerLinks.length > offset + normalizedPageSize;
   const providerMessageIds = [...new Set(pageLinks.map((link) => normalizeString(link?.providerMessageId)).filter(Boolean))];
   const auditRows = providerMessageIds.length && prisma.devAuditEvent?.findMany
     ? await prisma.devAuditEvent.findMany({
@@ -782,7 +793,9 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
             scope: 'operational',
             direction: 'OUTBOUND',
             phone: item.phone,
-            body: `${DISPATCH_WINDOW_CHECK_MESSAGE}\n\n[Botón: ${DISPATCH_WINDOW_CHECK_BUTTON}]`,
+            body: `${DISPATCH_WINDOW_CHECK_MESSAGE}\
+\
+[Botón: ${DISPATCH_WINDOW_CHECK_BUTTON}]`,
             messageType: 'TEMPLATE',
             providerMessageId: result.providerMessageId,
             source: 'WINDOW_CHECK_TEMPLATE',
