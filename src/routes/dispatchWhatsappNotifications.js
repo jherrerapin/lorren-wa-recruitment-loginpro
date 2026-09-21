@@ -236,7 +236,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         return redirectWith('settingsError', 'Configura primero tu WhatsApp personal de alertas en el panel de Operaciones.');
       }
       if (assignmentAutoSendTime && pendingConfirmationAlertTime && pendingConfirmationAlertTime <= assignmentAutoSendTime) {
-        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora del envío automático.');
+        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora de envío de confirmaciones.');
       }
 
       await saveDispatchWhatsappAutomationSettings({
