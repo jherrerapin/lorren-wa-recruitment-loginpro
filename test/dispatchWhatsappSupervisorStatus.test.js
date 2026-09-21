@@ -118,7 +118,11 @@ test('supervisor ve solo sus auxiliares y el estado visible depende de evidencia
   assert.equal(byAssignment.get('assignment-read').statusLabel, 'Leído');
   assert.equal(byAssignment.get('assignment-confirmed').statusLabel, 'Confirmado por el auxiliar');
   assert.equal(byAssignment.get('assignment-failed').statusLabel, 'No se pudo enviar');
+  assert.match(byAssignment.get('assignment-failed').statusDetail, /desde Asignaciones/i);
   assert.equal(byAssignment.get('assignment-unknown').statusLabel, 'Entrega sin confirmar');
+  assert.match(byAssignment.get('assignment-unknown').statusDetail, /WhatsApp no confirmó que el mensaje haya llegado al teléfono/i);
+  assert.match(byAssignment.get('assignment-unknown').statusDetail, /reenviar la asignación desde Asignaciones/i);
+  assert.doesNotMatch(byAssignment.get('assignment-unknown').statusDetail, /revisa|configuración|wamid|DELIVERY_UNKNOWN/i);
   assert.equal(byAssignment.get('assignment-novelty').statusLabel, 'Novedad reportada');
   assert.equal(byAssignment.get('assignment-accepted').workerName, 'Auxiliar Alfa');
   assert.equal(byAssignment.get('assignment-accepted').phoneDisplay, '+57 300 111 2233');
@@ -248,7 +252,7 @@ test('confirmación humana prevalece sobre un estado de entrega anterior', async
   assert.equal(result.summary.confirmed, 1);
 });
 
-test('vista separa supervisor operativo de conversaciones DEV y refresca estados cada cinco segundos', () => {
+test('vista separa supervisor operativo de conversaciones DEV, refresca estados y mantiene navegación explícita', () => {
   const view = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/dispatchWhatsappNotifications.js', import.meta.url), 'utf8');
 
@@ -260,13 +264,23 @@ test('vista separa supervisor operativo de conversaciones DEV y refresca estados
 
   assert.match(view, /const isSupervisorView = !isDevView && operationalRole === 'SUPERVISOR'/);
   assert.match(view, /const hasConversationInbox = isDevView &&/);
+  assert.match(view, /const supervisorPage = Math\.max\(1, Number\(supervisorStatus\.pagination\?\.page\) \|\| 1\)/);
   assert.match(view, /Estado de mensajes de asignación/);
   assert.match(view, /únicamente las solicitudes de asignación enviadas por tu usuario/);
+  assert.match(view, /id="supervisorPagination"/);
+  assert.match(view, /supervisorPage > 1/);
+  assert.match(view, /← Página anterior/);
+  assert.match(view, /Ir a página 1/);
+  assert.match(view, /Página siguiente →/);
+  assert.match(view, /function renderSupervisorPagination\(pagination=\{\}\)/);
+  assert.match(view, /if\(page>1\).*← Página anterior.*Ir a página 1/s);
+  assert.match(view, /renderSupervisorPagination\(data\.pagination\)/);
   assert.match(view, /setInterval\(refreshSupervisorAssignments,5000\)/);
 
   const supervisorBlockStart = view.indexOf('<% if (isSupervisorView) { %>');
   const devConversationStart = view.indexOf('<% if (hasConversationInbox) { %>', supervisorBlockStart);
   assert.ok(supervisorBlockStart >= 0 && devConversationStart > supervisorBlockStart);
   const supervisorBlock = view.slice(supervisorBlockStart, devConversationStart);
+  assert.doesNotMatch(supervisorBlock, /supervisorStatus\.pagination\?\.hasPrevious/);
   assert.doesNotMatch(supervisorBlock, /Ver mensajes|Conversaciones de Despacho|wamid|Meta reportó|\bSENT\b|\bDELIVERED\b|\bREAD\b|\bFAILED\b|DELIVERY_UNKNOWN/);
 });
