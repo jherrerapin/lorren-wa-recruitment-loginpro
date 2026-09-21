@@ -186,7 +186,7 @@ export async function sendDispatchWhatsappMessage({
       occurredAt: new Date()
     });
     const now = new Date().toISOString();
-    setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'SENT', lastProviderStatusAt: now });
+    setDispatchWhatsappRuntimeState(scope, { lastOutboundAt: now, lastError: null, lastProviderStatus: 'ACCEPTED', lastProviderStatusAt: now });
     console.info(`[dispatch-wa-cloud] Mensaje de asignación enviado. scope=${scope} assignment=${validated.assignment.id} mode=${deliveryMode}.`);
     return { phone: validated.phone, providerMessageId, templateName, deliveryMode, provider: 'META_CLOUD_API' };
   } catch (error) {
