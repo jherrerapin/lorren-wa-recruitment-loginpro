@@ -34,6 +34,7 @@
         summary: { shown: 0, confirmed: 0, deliveredOrRead: 0, attention: 0 },
         generatedAt: null
       };
+  const supervisorPage = Math.max(1, Number(supervisorStatus.pagination?.page) || 1);
   const deliveryStatusLabel = (state, reconstructed = false) => {
     if (state === 'DELIVERY_UNKNOWN') return 'Entrega sin confirmar';
     if (state === 'CONFIRMED') return 'Confirmado por auxiliar';
@@ -214,15 +215,16 @@
             <div class="supervisor-status-empty">Todavía no has enviado solicitudes de asignación por WhatsApp.</div>
           <% } %>
         </div>
-        <% if (supervisorStatus.pagination?.hasPrevious || supervisorStatus.pagination?.hasNext) { %>
-          <div class="supervisor-pagination">
-            <div class="inbox-actions">
-              <% if (supervisorStatus.pagination?.hasPrevious) { %><a class="btn" href="<%= supervisorPageUrl((supervisorStatus.pagination.page || 1) - 1) %>">← Más recientes</a><% } %>
-              <% if (supervisorStatus.pagination?.hasNext) { %><a class="btn" href="<%= supervisorPageUrl((supervisorStatus.pagination.page || 1) + 1) %>">Más antiguas →</a><% } %>
-            </div>
-            <p class="supervisor-status-help">Página <%= supervisorStatus.pagination?.page || 1 %>.</p>
+        <div class="supervisor-pagination" id="supervisorPagination">
+          <div class="inbox-actions">
+            <% if (supervisorPage > 1) { %>
+              <a class="btn" href="<%= supervisorPageUrl(supervisorPage - 1) %>">← Página anterior</a>
+              <a class="btn" href="<%= supervisorPageUrl(1) %>">Ir a página 1</a>
+            <% } %>
+            <% if (supervisorStatus.pagination?.hasNext) { %><a class="btn" href="<%= supervisorPageUrl(supervisorPage + 1) %>">Página siguiente →</a><% } %>
           </div>
-        <% } %>
+          <p class="supervisor-status-help">Página <%= supervisorPage %>.</p>
+        </div>
       </section>
     <% } %>
 
@@ -381,7 +383,8 @@
     const isDev = <%= isDevView ? 'true' : 'false' %>;
     const isSupervisor = <%= isSupervisorView ? 'true' : 'false' %>;
     const statusEndpoint = <%- JSON.stringify(`${basePath}/estado`) %>;
-    const supervisorStatusEndpoint = <%- JSON.stringify(isSupervisorView ? `${basePath}/estado-mensajes-asignacion?page=${supervisorStatus.pagination?.page || 1}` : '') %>;
+    const supervisorBasePath = <%- JSON.stringify(basePath) %>;
+    const supervisorStatusEndpoint = <%- JSON.stringify(isSupervisorView ? `${basePath}/estado-mensajes-asignacion?page=${supervisorPage}` : '') %>;
     const statusCard = document.getElementById('statusCard'); const statusPill = document.getElementById('statusPill'); const statusTitle = document.getElementById('statusTitle'); const errorBox = document.getElementById('errorBox');
     const missingBox = document.getElementById('missingBox'); const missingList = document.getElementById('missingList'); const technicalDetails = document.getElementById('technicalDetails'); const technicalError = document.getElementById('technicalError');
     function formatBogota(value){if(!value)return 'Sin registro';const date=new Date(value);if(Number.isNaN(date.getTime()))return 'Sin registro';return new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).format(date);}
@@ -398,10 +401,21 @@
     }
     function supervisorBadgeClass(key){const classes={PROCESSING:'processing',ACCEPTED:'accepted',SENT:'sent',DELIVERED:'delivered',READ:'read',CONFIRMED:'confirmed',NOVELTY:'novelty',DELIVERY_UNKNOWN:'delivery-unknown',FAILED:'failed',EXPIRED:'expired',DECLINED:'declined'};return classes[key]||'processing';}
     function appendTextElement(parent,tag,className,value){const element=document.createElement(tag);if(className)element.className=className;element.textContent=value||'';parent.appendChild(element);return element;}
+    function supervisorPageHref(page){const normalized=Math.max(1,Number(page)||1);return normalized>1?`${supervisorBasePath}?page=${normalized}`:supervisorBasePath;}
+    function appendSupervisorPageLink(parent,page,label){const link=document.createElement('a');link.className='btn';link.href=supervisorPageHref(page);link.textContent=label;parent.appendChild(link);}
+    function renderSupervisorPagination(pagination={}){
+      const container=document.getElementById('supervisorPagination');if(!container)return;
+      const page=Math.max(1,Number(pagination.page)||1);container.replaceChildren();
+      const actions=document.createElement('div');actions.className='inbox-actions';
+      if(page>1){appendSupervisorPageLink(actions,page-1,'← Página anterior');appendSupervisorPageLink(actions,1,'Ir a página 1');}
+      if(pagination.hasNext)appendSupervisorPageLink(actions,page+1,'Página siguiente →');
+      container.appendChild(actions);appendTextElement(container,'p','supervisor-status-help',`Página ${page}.`);
+    }
     function renderSupervisorAssignments(data){
       const list=document.getElementById('supervisorAssignmentStatusList');const summary=document.getElementById('supervisorStatusSummary');const updated=document.getElementById('supervisorStatusUpdated');if(!list)return;
       if(summary){summary.replaceChildren();[['Mostrados',data.summary?.shown||0],['Confirmados',data.summary?.confirmed||0],['Entregados o leídos',data.summary?.deliveredOrRead||0],['Requieren revisión',data.summary?.attention||0]].forEach(([label,value])=>appendTextElement(summary,'span','',`${label}: ${value}`));}
       if(updated)updated.textContent=`Actualizado ${formatBogota(data.generatedAt)}`;
+      renderSupervisorPagination(data.pagination);
       list.replaceChildren();const items=Array.isArray(data.items)?data.items:[];
       if(!items.length){appendTextElement(list,'div','supervisor-status-empty','Todavía no has enviado solicitudes de asignación por WhatsApp.');return;}
       for(const item of items){
