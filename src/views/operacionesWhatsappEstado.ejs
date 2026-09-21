@@ -183,7 +183,7 @@
                     <strong><%= item.workerName || 'Número sin auxiliar relacionado' %></strong>
                     <span><%= item.phoneDisplay || item.phone || 'Sin número' %> · último mensaje <%= historyDateTime(item.lastMessageAt) %></span>
                   </div>
-                  <% if (visibleState) { %>
+                  <% if (visibleState || item.reconstructed) { %>
                     <span class="delivery-state <%= providerStatusClass(visibleState) %>" title="<%= deliveryStatusLabel(visibleState, item.reconstructed) %>">
                       <span class="delivery-mark" aria-hidden="true"><%= deliveryMark(visibleState) %></span>
                       <span><%= deliveryStatusLabel(visibleState, item.reconstructed) %></span>
@@ -245,10 +245,10 @@
                     <span>· <%= historyDateTime(item.at) %></span>
                     <span>· <%= sourceLabel(item.source) %></span>
                     <span>· <%= item.messageType || 'UNKNOWN' %></span>
-                    <% if (item.direction === 'OUTBOUND' && visibleState) { %>
+                    <% if (item.direction === 'OUTBOUND') { %>
                       <span class="delivery-state <%= providerStatusClass(visibleState) %>" title="<%= deliveryStatusLabel(visibleState, item.reconstructed) %>">
-                        <span class="delivery-mark" aria-hidden="true"><%= deliveryMark(visibleState) %></span>
-                        <span><%= deliveryStatusLabel(visibleState, item.reconstructed) %></span>
+                        <span class="delivery-mark" aria-hidden="true"><%= deliveryMark(item.reconstructed && visibleState === 'SENT' ? null : visibleState) %></span>
+                        <span><%= item.reconstructed && visibleState === 'SENT' ? 'Sin estado Meta histórico' : deliveryStatusLabel(visibleState, item.reconstructed) %></span>
                       </span>
                     <% } %>
                     <% if (item.reconstructed) { %><span class="conversation-legacy">· evidencia histórica</span><% } %>
