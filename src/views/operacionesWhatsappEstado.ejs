@@ -18,10 +18,11 @@
     pendingConfirmationAlertTime: null,
     alertPhoneConfigured: false
   };
-  const hasOutboundHistory = typeof outboundHistory !== 'undefined' && outboundHistory !== null;
-  const history = hasOutboundHistory ? outboundHistory : {
-    dateKey: '', items: [], pagination: { page: 1, total: 0, totalPages: 1, hasPrevious: false, hasNext: false },
-    summary: { total: 0, accepted: 0, sent: 0, delivered: 0, read: 0, failed: 0, deliveryUnknown: 0, confirmed: 0, historical: 0, withoutProviderStatus: 0 }
+  const hasConversationInbox = typeof conversationInbox !== 'undefined' && conversationInbox !== null;
+  const inbox = hasConversationInbox ? conversationInbox : {
+    items: [],
+    pagination: { page: 1, pageSize: 20, hasPrevious: false, hasNext: false },
+    summary: { shown: 0, failed: 0, deliveryUnknown: 0, delivered: 0, read: 0 }
   };
   const conversation = typeof selectedConversation !== 'undefined' && selectedConversation ? selectedConversation : null;
   const deliveryStatusLabel = (state, reconstructed = false) => {
@@ -29,7 +30,7 @@
     if (state === 'CONFIRMED') return 'Confirmado por auxiliar';
     const labels = {
       ACCEPTED: 'Aceptado por Meta',
-      SENT: 'Enviado por WhatsApp',
+      SENT: 'Enviado',
       DELIVERED: 'Entregado',
       READ: 'Leído',
       FAILED: 'Fallido'
@@ -41,6 +42,14 @@
     if (status === 'DELIVERY_UNKNOWN') return 'delivery-unknown';
     if (status === 'CONFIRMED') return 'confirmed';
     return ['ACCEPTED', 'SENT', 'DELIVERED', 'READ', 'FAILED'].includes(status) ? status.toLowerCase() : 'unknown';
+  };
+  const deliveryMark = (status) => {
+    if (status === 'SENT') return '✓';
+    if (status === 'DELIVERED' || status === 'READ') return '✓✓';
+    if (status === 'FAILED') return '!';
+    if (status === 'DELIVERY_UNKNOWN') return '?';
+    if (status === 'CONFIRMED') return '✓';
+    return '…';
   };
   const sourceLabel = (source) => ({
     ASSIGNMENT_CONFIRMATION: 'Asignación',
@@ -54,14 +63,6 @@
     RECONSTRUIDO_AUTO_REPLY: 'Respuesta automática · evidencia histórica',
     EVIDENCIA_VENTANA: 'Evidencia histórica de conversación'
   })[source] || source || 'Despacho';
-  const historyTime = (value) => {
-    if (!value) return 'Hora no disponible';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    return new Intl.DateTimeFormat('es-CO', {
-      timeZone: 'America/Bogota', hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true
-    }).format(date);
-  };
   const historyDateTime = (value) => {
     if (!value) return 'Fecha no disponible';
     const date = new Date(value);
@@ -71,9 +72,11 @@
       hour: 'numeric', minute: '2-digit', hour12: true
     }).format(date);
   };
-  const historyUrl = (page, workerId = null) => {
+  const visibleMessageBody = (value) => String(value || '(mensaje sin texto)')
+    .replace(/\n\n\[Meta:[\s\S]*$/i, '')
+    .trim() || '(mensaje sin texto)';
+  const inboxUrl = (page, workerId = null) => {
     const params = new URLSearchParams();
-    if (history.dateKey) params.set('date', history.dateKey);
     if (page && Number(page) > 1) params.set('page', String(page));
     if (workerId) params.set('workerId', String(workerId));
     const query = params.toString();
@@ -94,10 +97,11 @@
     .status-pill{display:inline-flex;width:fit-content;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:900;background:#fee2e2;color:#991b1b}.status-pill.ready{background:#dcfce7;color:#166534}
     .meta-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.meta-row{display:grid;grid-template-columns:minmax(140px,.7fr) minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid #edf2f7}.meta-row:last-child{border-bottom:0}.meta-key{color:var(--muted);font-size:12px;font-weight:850}.meta-value{color:var(--navy);font-size:12px;font-weight:800;overflow-wrap:anywhere}
     .alert{border:1px solid #fecaca;background:#fff5f5;color:#991b1b;border-radius:14px;padding:12px 14px;font-weight:800}.info{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:14px;padding:12px 14px;font-weight:800;line-height:1.45}.technical{border:1px dashed #cbd5e1;background:#f8fafc;color:#334155;border-radius:14px;padding:12px 14px;font-size:12px;line-height:1.45;word-break:break-word}.missing-list{margin:0;padding-left:18px;color:#991b1b;font-size:12px;font-weight:800}
-    .schedule-card,.history-card,.conversation-card{margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:18px;display:grid;gap:13px}.schedule-head,.history-head,.conversation-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}.schedule-head h2,.history-head h2,.conversation-head h2{margin:0;color:var(--navy);font-size:18px}.schedule-form{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr)) auto;gap:12px;align-items:end}.schedule-field{display:grid;gap:5px}.schedule-field label{color:var(--navy);font-size:12px;font-weight:900}.schedule-field input[type="time"]{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 11px;font:inherit;background:#fff;color:var(--navy)}.schedule-field small{color:var(--muted);font-size:10.5px;line-height:1.35}.schedule-note{border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;color:#475569;font-size:11px;line-height:1.45}.schedule-feedback{border-radius:10px;padding:10px 12px;font-size:12px;font-weight:800}.schedule-feedback.success{background:#dcfce7;color:#166534}.schedule-feedback.error{background:#fee2e2;color:#991b1b}
-    .history-filter{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.history-field{display:grid;gap:5px;min-width:190px}.history-field label{color:var(--navy);font-size:12px;font-weight:900}.history-field input{min-height:42px;border:1px solid var(--border);border-radius:10px;padding:8px 10px;font:inherit;background:#fff;color:var(--navy)}.history-help{margin:0;color:var(--muted);font-size:11px;line-height:1.45}.history-summary{display:flex;gap:7px;flex-wrap:wrap}.history-summary span{display:inline-flex;border-radius:999px;padding:5px 9px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:900}.history-list{display:grid;gap:10px}.history-item{border:1px solid #e2e8f0;border-radius:14px;padding:13px;display:grid;gap:8px;background:#fff}.history-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}.history-recipient{display:grid;gap:2px}.history-recipient strong{color:var(--navy);font-size:13px}.history-recipient span,.history-meta{color:var(--muted);font-size:10.5px}.history-status{display:inline-flex;width:fit-content;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900}.history-status.accepted{background:#fef3c7;color:#92400e}.history-status.sent{background:#dbeafe;color:#1d4ed8}.history-status.delivered,.history-status.confirmed{background:#dcfce7;color:#166534}.history-status.read{background:#ccfbf1;color:#115e59}.history-status.failed{background:#fee2e2;color:#991b1b}.history-status.delivery-unknown{background:#ffedd5;color:#9a3412}.history-status.unknown{background:#f1f5f9;color:#475569}.history-body{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#1e293b;font:inherit;font-size:11.5px;line-height:1.5}.history-diagnostic{border-radius:10px;background:#fff1f2;color:#9f1239;padding:8px 10px;font-size:10.5px;line-height:1.4;overflow-wrap:anywhere}.history-empty{border:1px dashed #cbd5e1;border-radius:12px;padding:18px;text-align:center;color:var(--muted);font-size:12px}.history-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.history-pagination{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;padding-top:2px}.history-pagination .history-help{font-weight:800}
-    .conversation-person{display:grid;gap:3px}.conversation-person strong{color:var(--navy);font-size:15px}.conversation-person span{color:var(--muted);font-size:12px;font-weight:750}.conversation-list{display:grid;gap:9px}.conversation-message{max-width:min(88%,720px);border-radius:15px;padding:10px 12px;display:grid;gap:6px}.conversation-message.inbound{justify-self:start;background:#f1f5f9;border:1px solid #e2e8f0}.conversation-message.outbound{justify-self:end;background:#ecfdf5;border:1px solid #bbf7d0}.conversation-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.conversation-meta{display:flex;gap:6px;flex-wrap:wrap;color:var(--muted);font-size:9.5px;font-weight:750}.conversation-legacy{font-style:italic}.conversation-window{font-size:11px;color:#475569;background:#f8fafc;border-radius:10px;padding:8px 10px}
-    @media(max-width:900px){.cloud-grid{grid-template-columns:1fr}.meta-row{grid-template-columns:1fr;gap:3px}.schedule-form{grid-template-columns:1fr}.history-filter{align-items:stretch}.history-field{min-width:0;width:100%}.history-filter .btn{width:100%}.conversation-message{max-width:96%}}
+    .schedule-card,.inbox-card,.conversation-card{margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:18px;display:grid;gap:13px}.schedule-head,.inbox-head,.conversation-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}.schedule-head h2,.inbox-head h2,.conversation-head h2{margin:0;color:var(--navy);font-size:18px}.schedule-form{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr)) auto;gap:12px;align-items:end}.schedule-field{display:grid;gap:5px}.schedule-field label{color:var(--navy);font-size:12px;font-weight:900}.schedule-field input[type="time"]{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 11px;font:inherit;background:#fff;color:var(--navy)}.schedule-field small{color:var(--muted);font-size:10.5px;line-height:1.35}.schedule-note{border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;color:#475569;font-size:11px;line-height:1.45}.schedule-feedback{border-radius:10px;padding:10px 12px;font-size:12px;font-weight:800}.schedule-feedback.success{background:#dcfce7;color:#166534}.schedule-feedback.error{background:#fee2e2;color:#991b1b}
+    .inbox-help{margin:0;color:var(--muted);font-size:11px;line-height:1.5}.evidence-legend{display:flex;gap:8px;flex-wrap:wrap;border:1px solid #e2e8f0;background:#f8fafc;border-radius:12px;padding:9px 11px}.evidence-legend span{font-size:10.5px;color:#475569;font-weight:800}.inbox-summary{display:flex;gap:7px;flex-wrap:wrap}.inbox-summary span{display:inline-flex;border-radius:999px;padding:5px 9px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:900}.inbox-list{display:grid;gap:10px}.inbox-item{border:1px solid #e2e8f0;border-radius:14px;padding:13px;display:grid;gap:8px;background:#fff}.inbox-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}.inbox-recipient{display:grid;gap:2px}.inbox-recipient strong{color:var(--navy);font-size:13px}.inbox-recipient span,.inbox-meta{color:var(--muted);font-size:10.5px}.inbox-preview{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#1e293b;font-size:11.5px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.inbox-diagnostic{border-radius:10px;background:#fff1f2;color:#9f1239;padding:8px 10px;font-size:10.5px;line-height:1.4;overflow-wrap:anywhere}.inbox-empty{border:1px dashed #cbd5e1;border-radius:12px;padding:18px;text-align:center;color:var(--muted);font-size:12px}.inbox-actions,.inbox-pagination{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.inbox-pagination{justify-content:space-between;padding-top:2px}
+    .delivery-state{display:inline-flex;align-items:center;gap:5px;width:fit-content;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900}.delivery-mark{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:1000;letter-spacing:-2px}.delivery-state.accepted{background:#fef3c7;color:#92400e}.delivery-state.sent{background:#f1f5f9;color:#334155}.delivery-state.delivered,.delivery-state.confirmed{background:#dcfce7;color:#166534}.delivery-state.read{background:#dbeafe;color:#0369a1}.delivery-state.failed{background:#fee2e2;color:#991b1b}.delivery-state.delivery-unknown{background:#ffedd5;color:#9a3412}.delivery-state.unknown{background:#f1f5f9;color:#64748b}
+    .conversation-person{display:grid;gap:3px}.conversation-person strong{color:var(--navy);font-size:15px}.conversation-person span{color:var(--muted);font-size:12px;font-weight:750}.conversation-list{display:grid;gap:9px}.conversation-message{max-width:min(88%,720px);border-radius:15px;padding:10px 12px;display:grid;gap:6px}.conversation-message.inbound{justify-self:start;background:#f1f5f9;border:1px solid #e2e8f0}.conversation-message.outbound{justify-self:end;background:#ecfdf5;border:1px solid #bbf7d0}.conversation-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.conversation-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:9.5px;font-weight:750}.conversation-legacy{font-style:italic}.conversation-window{font-size:11px;color:#475569;background:#f8fafc;border-radius:10px;padding:8px 10px}.conversation-diagnostic{font-size:10px;color:#9f1239;background:#fff1f2;border-radius:9px;padding:7px 9px}
+    @media(max-width:900px){.cloud-grid{grid-template-columns:1fr}.meta-row{grid-template-columns:1fr;gap:3px}.schedule-form{grid-template-columns:1fr}.conversation-message{max-width:96%}}
   </style>
 </head>
 <body>
@@ -146,63 +150,76 @@
       <% } %>
     </section>
 
-    <% if (hasOutboundHistory) { %>
-      <section class="history-card" aria-label="Historial diario de mensajes de WhatsApp de Despacho">
-        <div class="history-head">
-          <div><h2>Mensajes enviados por día</h2><p class="history-help">Consulta los envíos de Despacho y la evidencia disponible de Meta. El teléfono se muestra completo porque esta es una superficie administrativa autenticada.</p></div>
-          <form class="history-filter" method="get" action="<%= basePath %>">
-            <div class="history-field">
-              <label for="dispatchHistoryDate">Fecha en Bogotá</label>
-              <input id="dispatchHistoryDate" name="date" type="date" value="<%= history.dateKey %>" required />
-            </div>
-            <button class="btn btn-primary" type="submit">Consultar</button>
-          </form>
+    <% if (hasConversationInbox) { %>
+      <section class="inbox-card" aria-label="Bandeja de conversaciones de WhatsApp de Despacho">
+        <div class="inbox-head">
+          <div>
+            <h2>Conversaciones de Despacho</h2>
+            <p class="inbox-help">Una conversación por destinatario, ordenada por el último mensaje de más reciente a más antiguo. El teléfono se muestra completo porque esta es una superficie administrativa autenticada.</p>
+          </div>
         </div>
-        <p class="history-help"><strong>Evidencia:</strong> “Aceptado por Meta” y “Enviado por WhatsApp” no equivalen a entrega. “Entregado” confirma entrega reportada por Meta; “Leído” es evidencia posterior; “Confirmado por auxiliar” representa una respuesta humana. “Entrega sin confirmar” significa que Lórren agotó el margen de espera sin recibir evidencia suficiente y requiere revisión, no que Meta haya reportado un fallo.</p>
-        <div class="history-summary" aria-label="Resumen de estados de entrega">
-          <span>Total del día: <%= history.summary?.total || 0 %></span>
-          <span>Mostrados: <%= history.summary?.pageCount || 0 %></span>
-          <span>Leídos: <%= history.summary?.read || 0 %></span>
-          <span>Entregados: <%= history.summary?.delivered || 0 %></span>
-          <span>Enviados: <%= history.summary?.sent || 0 %></span>
-          <span>Aceptados: <%= history.summary?.accepted || 0 %></span>
-          <span>Sin entrega confirmada: <%= history.summary?.deliveryUnknown || 0 %></span>
-          <span>Confirmados: <%= history.summary?.confirmed || 0 %></span>
-          <span>Fallidos: <%= history.summary?.failed || 0 %></span>
+        <div class="evidence-legend" aria-label="Significado de estados de WhatsApp">
+          <span>… Aceptado por Meta: todavía no certifica envío</span>
+          <span>✓ Enviado: WhatsApp reportó SENT</span>
+          <span>✓✓ Entregado: Meta reportó DELIVERED</span>
+          <span>✓✓ Leído: Meta reportó READ</span>
+          <span>! Fallido: Meta reportó FAILED</span>
+          <span>? Entrega sin confirmar: Lórren no recibió evidencia suficiente dentro del margen</span>
         </div>
-        <% if (Array.isArray(history.items) && history.items.length) { %>
-          <div class="history-list">
-            <% history.items.forEach((item) => { const visibleState = item.deliveryState || item.providerStatus; %>
-              <article class="history-item">
-                <div class="history-item-head">
-                  <div class="history-recipient">
-                    <strong><%= item.workerName || 'Destinatario sin nombre relacionado' %></strong>
-                    <span><%= item.phoneDisplay || item.phone || 'Sin número' %> · <%= historyTime(item.at) %></span>
+        <p class="inbox-help"><strong>Garantía de la pantalla:</strong> Lórren nunca muestra “Entregado” o “Leído” por haber obtenido un <code>wamid</code> o un HTTP 200. Esos estados solo aparecen cuando llegan los webhooks correspondientes de Meta. Una entrega sin evidencia permanece explícitamente sin confirmar.</p>
+        <div class="inbox-summary" aria-label="Resumen de conversaciones mostradas">
+          <span>Conversaciones mostradas: <%= inbox.summary?.shown || 0 %></span>
+          <span>Leído: <%= inbox.summary?.read || 0 %></span>
+          <span>Entregado: <%= inbox.summary?.delivered || 0 %></span>
+          <span>Sin entrega confirmada: <%= inbox.summary?.deliveryUnknown || 0 %></span>
+          <span>Fallido: <%= inbox.summary?.failed || 0 %></span>
+        </div>
+        <% if (Array.isArray(inbox.items) && inbox.items.length) { %>
+          <div class="inbox-list">
+            <% inbox.items.forEach((item) => { const visibleState = item.deliveryState || item.providerStatus; %>
+              <article class="inbox-item">
+                <div class="inbox-item-head">
+                  <div class="inbox-recipient">
+                    <strong><%= item.workerName || 'Número sin auxiliar relacionado' %></strong>
+                    <span><%= item.phoneDisplay || item.phone || 'Sin número' %> · último mensaje <%= historyDateTime(item.lastMessageAt) %></span>
                   </div>
-                  <span class="history-status <%= providerStatusClass(visibleState) %>"><%= deliveryStatusLabel(visibleState, item.reconstructed) %></span>
+                  <% if (visibleState) { %>
+                    <span class="delivery-state <%= providerStatusClass(visibleState) %>" title="<%= deliveryStatusLabel(visibleState, item.reconstructed) %>">
+                      <span class="delivery-mark" aria-hidden="true"><%= deliveryMark(visibleState) %></span>
+                      <span><%= deliveryStatusLabel(visibleState, item.reconstructed) %></span>
+                    </span>
+                  <% } %>
                 </div>
-                <div class="history-meta"><%= sourceLabel(item.source) %> · <%= item.messageType || 'UNKNOWN' %></div>
-                <p class="history-body"><%= item.body || '(mensaje sin texto)' %></p>
+                <div class="inbox-meta">
+                  Último mensaje: <%= item.lastMessageDirection === 'INBOUND' ? 'Auxiliar → Lórren' : 'Lórren → auxiliar' %>
+                  · <%= sourceLabel(item.lastMessageSource) %>
+                  · <%= item.lastMessageType || 'UNKNOWN' %>
+                  · <%= item.messageCount || 0 %> mensaje(s) visibles
+                </div>
+                <p class="inbox-preview"><%= visibleMessageBody(item.lastMessageBody) %></p>
                 <% if (item.providerStatus === 'FAILED' && item.providerDiagnostic) { %>
-                  <div class="history-diagnostic"><strong>Detalle de Meta:</strong> <%= item.providerDiagnostic %></div>
+                  <div class="inbox-diagnostic"><strong>Meta reportó fallo:</strong> <%= item.providerDiagnostic %></div>
                 <% } %>
-                <div class="history-actions">
-                  <% if (item.workerId) { %><a class="btn" href="<%= historyUrl(history.pagination?.page || 1, item.workerId) %>#dispatchConversation">Ver conversación</a><% } %>
-                  <% if (item.reconstructed) { %><span class="history-help">Evidencia histórica: el contenido original no se reconstruye desde datos actuales.</span><% } %>
+                <div class="inbox-actions">
+                  <% if (item.workerId) { %>
+                    <a class="btn" href="<%= inboxUrl(inbox.pagination?.page || 1, item.workerId) %>#dispatchConversation">Ver conversación</a>
+                  <% } else { %>
+                    <span class="inbox-help">No existe una asignación persistida suficientemente unívoca para vincular este número a un auxiliar. El mensaje se conserva por teléfono.</span>
+                  <% } %>
                 </div>
               </article>
             <% }) %>
           </div>
         <% } else { %>
-          <div class="history-empty">No hay mensajes outbound auditados ni evidencia histórica de asignaciones para esta fecha.</div>
+          <div class="inbox-empty">Todavía no hay conversaciones de WhatsApp de Despacho con evidencia persistida.</div>
         <% } %>
-        <% if ((history.pagination?.totalPages || 1) > 1) { %>
-          <div class="history-pagination">
-            <div class="history-actions">
-              <% if (history.pagination?.hasPrevious) { %><a class="btn" href="<%= historyUrl((history.pagination.page || 1) - 1) %>">← Anterior</a><% } %>
-              <% if (history.pagination?.hasNext) { %><a class="btn" href="<%= historyUrl((history.pagination.page || 1) + 1) %>">Siguiente →</a><% } %>
+        <% if (inbox.pagination?.hasPrevious || inbox.pagination?.hasNext) { %>
+          <div class="inbox-pagination">
+            <div class="inbox-actions">
+              <% if (inbox.pagination?.hasPrevious) { %><a class="btn" href="<%= inboxUrl((inbox.pagination.page || 1) - 1) %>">← Más recientes</a><% } %>
+              <% if (inbox.pagination?.hasNext) { %><a class="btn" href="<%= inboxUrl((inbox.pagination.page || 1) + 1) %>">Más antiguas →</a><% } %>
             </div>
-            <p class="history-help">Página <%= history.pagination?.page || 1 %> de <%= history.pagination?.totalPages || 1 %>.</p>
+            <p class="inbox-help">Página <%= inbox.pagination?.page || 1 %>. La paginación se hace por conversación, no por mensaje.</p>
           </div>
         <% } %>
       </section>
@@ -215,28 +232,35 @@
               <strong><%= conversation.workerName || (Array.isArray(conversation.workerNames) ? conversation.workerNames.join(' / ') : 'Auxiliar') %></strong>
               <span><%= conversation.phoneDisplay || conversation.phone || 'Sin número' %></span>
             </div>
-            <a class="btn" href="<%= historyUrl(history.pagination?.page || 1) %>">Cerrar conversación</a>
+            <a class="btn" href="<%= inboxUrl(inbox.pagination?.page || 1) %>">Cerrar conversación</a>
           </div>
           <div class="conversation-window">Ventana de atención: <strong><%= conversation.windowStatus || 'SIN EVIDENCIA' %></strong><% if (conversation.lastInboundAt) { %> · último mensaje recibido <%= historyDateTime(conversation.lastInboundAt) %><% } %>.</div>
           <% if (Array.isArray(conversation.messageHistory) && conversation.messageHistory.length) { %>
             <div class="conversation-list">
               <% conversation.messageHistory.forEach((item) => { const visibleState = item.deliveryState || item.providerStatus; %>
                 <article class="conversation-message <%= item.direction === 'INBOUND' ? 'inbound' : 'outbound' %>">
-                  <p><%= item.body || '(mensaje sin texto)' %></p>
+                  <p><%= visibleMessageBody(item.body) %></p>
                   <div class="conversation-meta">
                     <span><%= item.direction === 'INBOUND' ? 'Auxiliar → Lórren' : 'Lórren → auxiliar' %></span>
                     <span>· <%= historyDateTime(item.at) %></span>
                     <span>· <%= sourceLabel(item.source) %></span>
-                    <% if (item.direction === 'OUTBOUND' && visibleState) { %><span>· <%= deliveryStatusLabel(visibleState, item.reconstructed) %></span><% } %>
+                    <span>· <%= item.messageType || 'UNKNOWN' %></span>
+                    <% if (item.direction === 'OUTBOUND' && visibleState) { %>
+                      <span class="delivery-state <%= providerStatusClass(visibleState) %>" title="<%= deliveryStatusLabel(visibleState, item.reconstructed) %>">
+                        <span class="delivery-mark" aria-hidden="true"><%= deliveryMark(visibleState) %></span>
+                        <span><%= deliveryStatusLabel(visibleState, item.reconstructed) %></span>
+                      </span>
+                    <% } %>
                     <% if (item.reconstructed) { %><span class="conversation-legacy">· evidencia histórica</span><% } %>
                   </div>
+                  <% if (item.providerStatus === 'FAILED' && item.providerDiagnostic) { %><div class="conversation-diagnostic"><strong>Meta reportó fallo:</strong> <%= item.providerDiagnostic %></div><% } %>
                 </article>
               <% }) %>
             </div>
           <% } else { %>
-            <div class="history-empty">No hay mensajes de Despacho persistidos o reconstruibles para este auxiliar.</div>
+            <div class="inbox-empty">No hay mensajes de Despacho persistidos o reconstruibles para este auxiliar.</div>
           <% } %>
-          <p class="history-help">Este historial usa exclusivamente la auditoría y las confirmaciones de WhatsApp de Despacho; no mezcla conversaciones del bot de Reclutamiento.</p>
+          <p class="inbox-help">Este historial usa exclusivamente la auditoría y las confirmaciones de WhatsApp de Despacho; no mezcla conversaciones del bot de Reclutamiento.</p>
         </section>
       <% } %>
     <% } %>
