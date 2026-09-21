@@ -4,10 +4,10 @@ import {
   sendDispatchWhatsappMessage
 } from '../services/dispatchWhatsappCloudService.js';
 import {
-  loadDispatchWhatsappOutboundHistoryByDate,
   loadDispatchWhatsappPhoneConversation,
   loadDispatchWhatsappTomorrowAssignmentMonitor,
   loadDispatchWhatsappWindowStatusForAssignments,
+  normalizeDispatchWhatsappMonitorPhone,
   recordDispatchWhatsappMessageAudit
 } from '../services/dispatchWhatsappMonitor.js';
 import {
@@ -27,6 +27,7 @@ const OPERATIONAL_API_ERROR = 'La integración oficial de WhatsApp de despacho n
 const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
 const MAX_ASSIGNMENT_WINDOW_IDS = 100;
 const MAX_MANUAL_MESSAGE_LENGTH = 1200;
+const CONVERSATION_INBOX_PAGE_SIZE = 20;
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -160,6 +161,223 @@ async function loadSelectedWorkerConversation(prisma, workerId) {
   };
 }
 
+function validDate(value) {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function newestDate(...values) {
+  return values
+    .map(validDate)
+    .filter(Boolean)
+    .sort((left, right) => right.getTime() - left.getTime())[0] || null;
+}
+
+function formatDispatchPhone(value) {
+  const phone = normalizeDispatchWhatsappMonitorPhone(value);
+  if (!phone) return 'Sin número';
+  if (/^57\d{10}$/.test(phone)) return `+57 ${phone.slice(2, 5)} ${phone.slice(5, 8)} ${phone.slice(8)}`;
+  return `+${phone}`;
+}
+
+function addConversationEvidence(map, phoneValue, atValue) {
+  const phone = normalizeDispatchWhatsappMonitorPhone(phoneValue);
+  const at = validDate(atValue);
+  if (!phone || !at) return;
+  const current = map.get(phone);
+  if (!current || at.getTime() > current.getTime()) map.set(phone, at);
+}
+
+function workerPhoneWhere(phones) {
+  const suffixes = [...new Set((phones || [])
+    .map((phone) => normalizeDispatchWhatsappMonitorPhone(phone).slice(-10))
+    .filter(Boolean))];
+  return suffixes.length ? { OR: suffixes.map((suffix) => ({ phone: { endsWith: suffix } })) } : null;
+}
+
+function providerStateFromLink(status) {
+  const normalized = String(status || '').trim().toUpperCase();
+  return ['SENT', 'DELIVERED', 'READ', 'FAILED', 'DELIVERY_UNKNOWN', 'CONFIRMED'].includes(normalized)
+    ? normalized
+    : null;
+}
+
+export async function loadDispatchWhatsappConversationInbox(prisma, {
+  page = 1,
+  pageSize = CONVERSATION_INBOX_PAGE_SIZE,
+  now = new Date()
+} = {}) {
+  if (!prisma) throw new Error('prisma es requerido');
+  const normalizedPage = positivePage(page);
+  const normalizedPageSize = Math.min(50, Math.max(1, Number(pageSize) || CONVERSATION_INBOX_PAGE_SIZE));
+  const through = normalizedPage * normalizedPageSize + 1;
+
+  const [auditGroups, windowRows, confirmationGroups] = await Promise.all([
+    prisma.devAuditEvent?.groupBy
+      ? prisma.devAuditEvent.groupBy({
+          by: ['entityLabel'],
+          where: {
+            entityType: 'DISPATCH_WHATSAPP_MESSAGE',
+            action: { in: ['DISPATCH_WHATSAPP_INBOUND', 'DISPATCH_WHATSAPP_OUTBOUND'] },
+            entityLabel: { not: null }
+          },
+          _max: { createdAt: true },
+          orderBy: { _max: { createdAt: 'desc' } },
+          take: through
+        })
+      : [],
+    prisma.dispatchWhatsappContactWindow?.findMany
+      ? prisma.dispatchWhatsappContactWindow.findMany({
+          where: { scope: 'operational' },
+          select: { phone: true, lastInboundAt: true },
+          orderBy: { lastInboundAt: 'desc' },
+          take: through
+        })
+      : [],
+    prisma.dispatchWhatsappConfirmation?.groupBy
+      ? prisma.dispatchWhatsappConfirmation.groupBy({
+          by: ['phone'],
+          where: {
+            providerMessageId: { not: null },
+            assignment: { serviceRequest: { source: { not: 'DEV_TEST' } } }
+          },
+          _max: { createdAt: true, confirmationReceivedAt: true },
+          orderBy: { _max: { createdAt: 'desc' } },
+          take: through
+        })
+      : []
+  ]);
+
+  const latestByPhone = new Map();
+  for (const row of auditGroups || []) addConversationEvidence(latestByPhone, row.entityLabel, row?._max?.createdAt);
+  for (const row of windowRows || []) addConversationEvidence(latestByPhone, row.phone, row.lastInboundAt);
+  for (const row of confirmationGroups || []) {
+    addConversationEvidence(latestByPhone, row.phone, row?._max?.createdAt);
+    addConversationEvidence(latestByPhone, row.phone, row?._max?.confirmationReceivedAt);
+  }
+
+  const orderedPhones = [...latestByPhone.entries()]
+    .sort((left, right) => right[1].getTime() - left[1].getTime())
+    .map(([phone]) => phone);
+  const offset = (normalizedPage - 1) * normalizedPageSize;
+  const pagePhones = orderedPhones.slice(offset, offset + normalizedPageSize);
+  const hasNext = orderedPhones.length > offset + normalizedPageSize;
+
+  if (!pagePhones.length) {
+    return {
+      items: [],
+      generatedAt: now.toISOString(),
+      pagination: { page: normalizedPage, pageSize: normalizedPageSize, hasPrevious: normalizedPage > 1, hasNext: false },
+      summary: { shown: 0, failed: 0, deliveryUnknown: 0, delivered: 0, read: 0 },
+      scope: 'operational'
+    };
+  }
+
+  const pagePhoneWhere = workerPhoneWhere(pagePhones);
+  const [conversations, confirmationRows, fallbackWorkers] = await Promise.all([
+    Promise.all(pagePhones.map((phone) => loadDispatchWhatsappPhoneConversation({ prismaClient: prisma, phone, now }))),
+    prisma.dispatchWhatsappConfirmation?.findMany
+      ? prisma.dispatchWhatsappConfirmation.findMany({
+          where: {
+            ...(pagePhoneWhere || {}),
+            assignment: { serviceRequest: { source: { not: 'DEV_TEST' } } }
+          },
+          include: { assignment: { include: { worker: true, serviceRequest: true } } },
+          orderBy: { createdAt: 'desc' }
+        })
+      : [],
+    pagePhoneWhere && prisma.dispatchWorker?.findMany
+      ? prisma.dispatchWorker.findMany({
+          where: pagePhoneWhere,
+          select: { id: true, fullName: true, phone: true }
+        })
+      : []
+  ]);
+
+  const linkedByProviderId = new Map();
+  const latestLinkByPhone = new Map();
+  for (const link of confirmationRows || []) {
+    if (link?.assignment?.serviceRequest?.source === 'DEV_TEST') continue;
+    const phone = normalizeDispatchWhatsappMonitorPhone(link.phone || link.assignment?.worker?.phone);
+    if (!phone) continue;
+    const providerMessageId = normalizeString(link.providerMessageId);
+    if (providerMessageId && !linkedByProviderId.has(providerMessageId)) linkedByProviderId.set(providerMessageId, link);
+    if (!latestLinkByPhone.has(phone)) latestLinkByPhone.set(phone, link);
+  }
+
+  const fallbackWorkersByPhone = new Map();
+  for (const worker of fallbackWorkers || []) {
+    const phone = normalizeDispatchWhatsappMonitorPhone(worker?.phone);
+    if (!phone) continue;
+    const bucket = fallbackWorkersByPhone.get(phone) || [];
+    bucket.push(worker);
+    fallbackWorkersByPhone.set(phone, bucket);
+  }
+
+  const items = conversations.map((conversation) => {
+    const phone = normalizeDispatchWhatsappMonitorPhone(conversation.phone);
+    const messages = Array.isArray(conversation.messageHistory) ? conversation.messageHistory : [];
+    const lastMessage = messages.at(-1) || null;
+    const lastOutbound = [...messages].reverse().find((item) => item.direction === 'OUTBOUND') || null;
+    const exactLink = lastMessage?.providerMessageId ? linkedByProviderId.get(lastMessage.providerMessageId) : null;
+    const linked = exactLink || latestLinkByPhone.get(phone) || null;
+    const linkedWorker = linked?.assignment?.worker || null;
+    const fallbackBucket = fallbackWorkersByPhone.get(phone) || [];
+    const fallbackWorker = fallbackBucket.length === 1 ? fallbackBucket[0] : null;
+    const knownNames = [...new Set([
+      normalizeString(linkedWorker?.fullName),
+      ...(Array.isArray(conversation.workerNames) ? conversation.workerNames.map(normalizeString) : []),
+      normalizeString(fallbackWorker?.fullName)
+    ].filter(Boolean))];
+    const workerId = linkedWorker?.id || linked?.assignment?.workerId || fallbackWorker?.id || null;
+    const workerName = normalizeString(linkedWorker?.fullName) || (knownNames.length ? knownNames.join(' / ') : null);
+    const lastMessageAt = newestDate(lastMessage?.at, latestByPhone.get(phone))?.toISOString() || null;
+    const providerStatus = lastOutbound?.providerStatus || null;
+    const deliveryState = lastOutbound?.deliveryState || providerStateFromLink(linked?.status) || providerStatus;
+
+    return {
+      phone,
+      phoneDisplay: conversation.phoneDisplay || formatDispatchPhone(phone),
+      workerId,
+      workerName,
+      workerNames: knownNames,
+      lastMessageAt,
+      lastMessageDirection: lastMessage?.direction || null,
+      lastMessageBody: lastMessage?.body || 'Hay evidencia de conversación, pero el contenido exacto no está disponible.',
+      lastMessageType: lastMessage?.messageType || 'UNKNOWN',
+      lastMessageSource: lastMessage?.source || null,
+      messageCount: Number(conversation.messageCount || messages.length || 0),
+      providerMessageId: lastOutbound?.providerMessageId || normalizeString(linked?.providerMessageId),
+      providerStatus,
+      deliveryState,
+      providerStatusAt: lastOutbound?.providerStatusAt || null,
+      providerDiagnostic: lastOutbound?.providerDiagnostic || null,
+      reconstructed: Boolean(lastMessage?.reconstructed),
+      windowStatus: conversation.windowStatus,
+      lastInboundAt: conversation.lastInboundAt
+    };
+  }).sort((left, right) => new Date(right.lastMessageAt || 0).getTime() - new Date(left.lastMessageAt || 0).getTime());
+
+  return {
+    items,
+    generatedAt: now.toISOString(),
+    pagination: {
+      page: normalizedPage,
+      pageSize: normalizedPageSize,
+      hasPrevious: normalizedPage > 1,
+      hasNext
+    },
+    summary: {
+      shown: items.length,
+      failed: items.filter((item) => item.deliveryState === 'FAILED').length,
+      deliveryUnknown: items.filter((item) => item.deliveryState === 'DELIVERY_UNKNOWN').length,
+      delivered: items.filter((item) => item.deliveryState === 'DELIVERED').length,
+      read: items.filter((item) => item.deliveryState === 'READ').length
+    },
+    scope: 'operational'
+  };
+}
+
 function responseStatusCode(error) {
   const statusCode = Number(error?.statusCode || 0);
   if (statusCode >= 400 && statusCode <= 599) return statusCode;
@@ -187,14 +405,10 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
   router.get('/', async (req, res) => {
     const page = positivePage(req.query?.page);
     const conversationWorkerId = normalizeString(req.query?.workerId);
-    const [status, automationSettings, outboundHistory, selectedConversation] = await Promise.all([
+    const [status, automationSettings, conversationInbox, selectedConversation] = await Promise.all([
       getStatusForViewer(req),
       getAutomationSettingsForViewer(prisma, req),
-      loadDispatchWhatsappOutboundHistoryByDate({
-        prismaClient: prisma,
-        dateKey: normalizeString(req.query?.date),
-        page
-      }),
+      loadDispatchWhatsappConversationInbox(prisma, { page }),
       loadSelectedWorkerConversation(prisma, conversationWorkerId)
     ]);
     res.render('operacionesWhatsappEstado', {
@@ -204,7 +418,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       settingsMessage: normalizeString(req.query?.settingsMessage),
       settingsError: normalizeString(req.query?.settingsError),
       automationSettings,
-      outboundHistory,
+      conversationInbox,
       selectedConversation,
       whatsappTitle: role(req) === 'dev' ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
       whatsappEyebrow: 'Operaciones / Despacho',
@@ -241,7 +455,7 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
         return redirectWith('settingsError', 'Configura primero tu WhatsApp personal de alertas en el panel de Operaciones.');
       }
       if (assignmentAutoSendTime && pendingConfirmationAlertTime && pendingConfirmationAlertTime <= assignmentAutoSendTime) {
-        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora de envío de confirmaciones.');
+        return redirectWith('settingsError', 'La hora del reporte de pendientes debe ser posterior a la hora de envío automático.');
       }
 
       await saveDispatchWhatsappAutomationSettings({
