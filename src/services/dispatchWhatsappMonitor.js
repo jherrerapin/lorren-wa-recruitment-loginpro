@@ -736,25 +736,42 @@ export async function loadDispatchWhatsappOutboundHistoryByDate({
     lt: new Date(`${nextDate}T05:00:00.000Z`)
   };
   const take = Math.min(500, Math.max(1, Number.isFinite(Number(limit)) ? Math.trunc(Number(limit)) : 500));
-  const rows = prismaClient?.devAuditEvent?.findMany
-    ? await prismaClient.devAuditEvent.findMany({
-        where: {
-          entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
-          action: 'DISPATCH_WHATSAPP_OUTBOUND',
-          createdAt: range
-        },
-        orderBy: { createdAt: 'desc' },
-        take
-      })
-    : [];
+  const [rows, confirmationRows] = await Promise.all([
+    prismaClient?.devAuditEvent?.findMany
+      ? prismaClient.devAuditEvent.findMany({
+          where: {
+            entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
+            action: 'DISPATCH_WHATSAPP_OUTBOUND',
+            createdAt: range
+          },
+          orderBy: { createdAt: 'desc' },
+          take
+        })
+      : [],
+    prismaClient?.dispatchWhatsappConfirmation?.findMany
+      ? prismaClient.dispatchWhatsappConfirmation.findMany({
+          where: { createdAt: range, providerMessageId: { not: null } },
+          include: {
+            assignment: {
+              include: {
+                worker: true,
+                serviceRequest: { include: { operationPoint: true } }
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+          take
+        })
+      : []
+  ]);
   const workerNamesByPhone = rows.length ? await loadWorkerNamesByPhone(prismaClient) : new Map();
-  const items = rows.map((row) => {
+  const auditedProviderIds = new Set(rows.map((row) => text(row?.metadata?.providerMessageId)).filter(Boolean));
+  const auditedItems = rows.map((row) => {
     const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
     const phone = normalizePhone(metadata.phone || row.entityLabel);
     const workerNames = workerNamesByPhone.get(phone) || [];
     return {
       id: row.entityId || row.id,
-      phone,
       phoneMasked: maskDispatchPhone(phone),
       workerName: workerNames.length ? workerNames.join(' / ') : null,
       workerNames,
@@ -765,9 +782,41 @@ export async function loadDispatchWhatsappOutboundHistoryByDate({
       providerMessageId: text(metadata.providerMessageId) || null,
       providerStatus: text(metadata.providerStatus).toUpperCase() || null,
       providerStatusAt: isoDate(metadata.providerStatusAt),
-      providerDiagnostic: text(metadata.providerDiagnostic) || null
+      providerDiagnostic: text(metadata.providerDiagnostic) || null,
+      reconstructed: false
     };
   });
+  const reconstructedItems = (confirmationRows || [])
+    .filter((row) => (
+      text(row?.providerMessageId)
+      && !auditedProviderIds.has(text(row.providerMessageId))
+      && row?.assignment
+      && row.assignment?.serviceRequest?.source !== 'DEV_TEST'
+    ))
+    .map((row) => {
+      const assignment = row.assignment;
+      const phone = normalizePhone(row.phone || assignment?.worker?.phone);
+      const workerName = text(assignment?.worker?.fullName) || null;
+      return {
+        id: `legacy-out:${row.id}`,
+        phoneMasked: maskDispatchPhone(phone),
+        workerName,
+        workerNames: workerName ? [workerName] : [],
+        body: `${buildDispatchAssignmentMessageBody(assignment)}\n\n[Botones: CONFIRMADO · REPORTAR NOVEDAD]`,
+        messageType: 'UNKNOWN',
+        source: 'RECONSTRUIDO_ASIGNACION',
+        at: isoDate(row.createdAt),
+        providerMessageId: text(row.providerMessageId) || null,
+        providerStatus: null,
+        providerStatusAt: null,
+        providerDiagnostic: null,
+        reconstructed: true
+      };
+    });
+  const items = [...auditedItems, ...reconstructedItems]
+    .filter((item) => item.at)
+    .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .slice(0, take);
   const statusCount = (status) => items.filter((item) => item.providerStatus === status).length;
   return {
     dateKey: normalizedDate,
@@ -781,6 +830,7 @@ export async function loadDispatchWhatsappOutboundHistoryByDate({
       delivered: statusCount('DELIVERED'),
       read: statusCount('READ'),
       failed: statusCount('FAILED'),
+      historical: items.filter((item) => item.reconstructed).length,
       withoutProviderStatus: items.filter((item) => !item.providerStatus).length
     },
     scope: 'operational'
