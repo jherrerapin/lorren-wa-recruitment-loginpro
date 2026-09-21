@@ -35,12 +35,20 @@ const NOTIFICATION_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 const WINDOW_EXPIRY_NOTIFICATION = 'WINDOW_EXPIRY_REMINDER';
 const ALL_CONFIRMED_NOTIFICATION = 'ALL_ASSIGNMENTS_CONFIRMED';
 const ATTENDANCE_FAILURE_NOTIFICATION = 'ATTENDANCE_MARK_FAILURE_ALERT';
+const DELIVERY_UNKNOWN_NOTIFICATION = 'ASSIGNMENT_DELIVERY_UNKNOWN_ALERT';
+const DELIVERY_WATCH_GRACE_MS = 10 * 60 * 1000;
+const DELIVERY_WATCH_LOOKBACK_MS = 48 * 60 * 60 * 1000;
+const DELIVERY_WATCH_SWEEP_MS = 60 * 1000;
+const DELIVERY_WATCH_MAX_LINKS = 200;
+const MAX_DELIVERY_UNKNOWN_ALERT_ITEMS = 20;
+const DISPATCH_WHATSAPP_MESSAGE_ENTITY = 'DISPATCH_WHATSAPP_MESSAGE';
 const ATTENDANCE_FAILURE_ENTITY = 'DISPATCH_ATTENDANCE_MARK_FAILURE';
 const ATTENDANCE_FAILURE_ACTION = 'MARK_ATTEMPT_FAILED';
 const ATTENDANCE_FAILURE_ALERT_THRESHOLD = 5;
 const activeScheduleRuns = new Set();
 const activeNotificationClaims = new Set();
 const NOTIFICATION_ENTITY = 'DISPATCH_WHATSAPP_NOTIFICATION';
+let lastDeliveryWatchSweepAt = 0;
 
 function inboundReceivedAt(message = {}) {
   const timestamp = Number(message.timestamp || 0);
@@ -486,6 +494,149 @@ async function markDispatchWhatsappNotification(prismaClient, claim, { sent, err
   } finally {
     activeNotificationClaims.delete(claim.key);
   }
+}
+
+function providerStatusFromAudit(row) {
+  const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : {};
+  return String(metadata.providerStatus || '').trim().toUpperCase();
+}
+
+function buildDispatchDeliveryUnknownAlertText(links = []) {
+  const visible = links.slice(0, MAX_DELIVERY_UNKNOWN_ALERT_ITEMS);
+  const lines = visible.map((link, index) => {
+    const assignment = link?.assignment || {};
+    const name = String(assignment?.worker?.fullName || 'Auxiliar').trim() || 'Auxiliar';
+    const phone = normalizeDispatchWhatsappPhone(link?.phone || assignment?.worker?.phone) || 'sin número';
+    return `${index + 1}. ${name} — ${phone}`;
+  });
+  if (links.length > visible.length) lines.push(`… y ${links.length - visible.length} auxiliar(es) más.`);
+  return `⚠️ Entrega de WhatsApp todavía no confirmada\n\nMeta no ha informado DELIVERED/READ después de 10 minutos para ${links.length} asignación(es):\n${lines.join('\n')}\n\nLórren no reenvió estos mensajes automáticamente. Revisa WhatsApp de despacho antes de decidir si corresponde reenviar.`;
+}
+
+export async function runDispatchWhatsappDeliveryWatchdog(prismaClient = prisma, {
+  now = new Date(),
+  axiosClient,
+  sendAdminMessage = sendDispatchWhatsappTextMessage
+} = {}) {
+  const cutoff = new Date(now.getTime() - DELIVERY_WATCH_GRACE_MS);
+  const lookback = new Date(now.getTime() - DELIVERY_WATCH_LOOKBACK_MS);
+  const linksRaw = await prismaClient.dispatchWhatsappConfirmation.findMany({
+    where: {
+      providerMessageId: { not: null },
+      createdAt: { gte: lookback, lte: cutoff },
+      status: { in: ['PENDING', 'SENT', 'DELIVERY_UNKNOWN'] }
+    },
+    include: { assignment: { include: { worker: true, serviceRequest: true } } },
+    orderBy: { createdAt: 'asc' },
+    take: DELIVERY_WATCH_MAX_LINKS
+  });
+  const links = (linksRaw || []).filter((link) => link?.assignment?.serviceRequest?.source !== 'DEV_TEST');
+  if (!links.length) {
+    return { checked: 0, reconciled: 0, deliveryUnknown: 0, alertsSent: 0, alertsFailed: 0, linksNotified: 0 };
+  }
+
+  const providerIds = [...new Set(links.map((link) => String(link.providerMessageId || '').trim()).filter(Boolean))];
+  const auditRows = providerIds.length
+    ? await prismaClient.devAuditEvent.findMany({
+        where: {
+          entityType: DISPATCH_WHATSAPP_MESSAGE_ENTITY,
+          action: 'DISPATCH_WHATSAPP_OUTBOUND',
+          entityId: { in: providerIds.map((providerMessageId) => `dispatch-wa:outbound:${providerMessageId}`) }
+        },
+        select: { entityId: true, metadata: true }
+      })
+    : [];
+  const auditStatusByProviderId = new Map((auditRows || []).map((row) => [
+    String(row?.entityId || '').replace(/^dispatch-wa:outbound:/, ''),
+    providerStatusFromAudit(row)
+  ]));
+
+  let reconciled = 0;
+  const unknownLinks = [];
+  for (const link of links) {
+    const providerMessageId = String(link.providerMessageId || '').trim();
+    const providerStatus = auditStatusByProviderId.get(providerMessageId) || '';
+    if (['DELIVERED', 'READ', 'FAILED'].includes(providerStatus)) {
+      if (link.status !== providerStatus) {
+        const updated = await prismaClient.dispatchWhatsappConfirmation.updateMany({
+          where: { id: link.id, status: { in: ['PENDING', 'SENT', 'DELIVERY_UNKNOWN'] } },
+          data: { status: providerStatus }
+        });
+        if (Number(updated?.count || 0) > 0) reconciled += 1;
+      }
+      continue;
+    }
+    if (link.status !== 'DELIVERY_UNKNOWN') {
+      const updated = await prismaClient.dispatchWhatsappConfirmation.updateMany({
+        where: { id: link.id, status: { in: ['PENDING', 'SENT'] } },
+        data: { status: 'DELIVERY_UNKNOWN' }
+      });
+      if (Number(updated?.count || 0) > 0) reconciled += 1;
+    }
+    unknownLinks.push({ ...link, status: 'DELIVERY_UNKNOWN' });
+  }
+
+  const owners = [...new Set(unknownLinks.map((link) => String(link.alertOwnerUsername || link?.assignment?.createdByUsername || '').trim()).filter(Boolean))];
+  const users = owners.length
+    ? await prismaClient.appUser.findMany({
+        where: { username: { in: owners }, isActive: true, dispatchAlertPhone: { not: null } },
+        select: { id: true, username: true, dispatchAlertPhone: true, isActive: true }
+      })
+    : [];
+  const usersByUsername = new Map((users || []).map((user) => [user.username, user]));
+  const byUser = new Map();
+  for (const link of unknownLinks) {
+    const username = String(link.alertOwnerUsername || link?.assignment?.createdByUsername || '').trim();
+    const user = usersByUsername.get(username);
+    if (!user?.dispatchAlertPhone) continue;
+    const bucket = byUser.get(user.id) || { user, links: [] };
+    bucket.links.push(link);
+    byUser.set(user.id, bucket);
+  }
+
+  let alertsSent = 0;
+  let alertsFailed = 0;
+  let linksNotified = 0;
+  for (const { user, links: userLinks } of byUser.values()) {
+    const claimed = [];
+    for (const link of userLinks) {
+      const key = notificationKey(DELIVERY_UNKNOWN_NOTIFICATION, [link.id, link.providerMessageId]);
+      const claim = await claimDispatchWhatsappNotification(prismaClient, {
+        notificationType: DELIVERY_UNKNOWN_NOTIFICATION,
+        key,
+        eventAt: link.createdAt || now,
+        now
+      });
+      if (claim.claimed) claimed.push({ claim, link });
+    }
+    if (!claimed.length) continue;
+    try {
+      await sendAdminMessage({
+        scope: 'operational',
+        phone: user.dispatchAlertPhone,
+        text: buildDispatchDeliveryUnknownAlertText(claimed.map((item) => item.link)),
+        axiosClient
+      });
+      for (const item of claimed) await markDispatchWhatsappNotification(prismaClient, item.claim, { sent: true, now });
+      alertsSent += 1;
+      linksNotified += claimed.length;
+    } catch (error) {
+      for (const item of claimed) {
+        await markDispatchWhatsappNotification(prismaClient, item.claim, { sent: false, error, now }).catch(() => {});
+      }
+      alertsFailed += 1;
+      console.warn(`[dispatch-wa-delivery-watch] No fue posible alertar entrega no confirmada a ${user.username}: ${error?.message || error}`);
+    }
+  }
+
+  return {
+    checked: links.length,
+    reconciled,
+    deliveryUnknown: unknownLinks.length,
+    alertsSent,
+    alertsFailed,
+    linksNotified
+  };
 }
 
 export function normalizeDispatchAutomationTime(value) {
@@ -1018,5 +1169,13 @@ export async function runDispatchWhatsappWindowReminderDispatcher(prismaClient =
   await runDispatchUserAutomationScheduler(prismaClient, { now, axiosClient }).catch((error) =>
     console.warn('[DISPATCH_WHATSAPP_AUTOMATION_ERROR]', error?.message || error)
   );
-  return { windowsChecked: windows.length, sent, failed };
+  let deliveryWatch = null;
+  if (nowMs - lastDeliveryWatchSweepAt >= DELIVERY_WATCH_SWEEP_MS) {
+    lastDeliveryWatchSweepAt = nowMs;
+    deliveryWatch = await runDispatchWhatsappDeliveryWatchdog(prismaClient, { now, axiosClient }).catch((error) => {
+      console.warn('[DISPATCH_WHATSAPP_DELIVERY_WATCH_ERROR]', error?.message || error);
+      return { error: true };
+    });
+  }
+  return { windowsChecked: windows.length, sent, failed, deliveryWatch };
 }
