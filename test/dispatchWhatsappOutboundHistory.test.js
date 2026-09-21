@@ -5,27 +5,30 @@ import {
   loadDispatchWhatsappOutboundHistoryByDate,
   loadDispatchWhatsappPhoneConversation
 } from '../src/services/dispatchWhatsappMonitor.js';
+import { loadDispatchWhatsappConversationInbox } from '../src/routes/dispatchWhatsappNotifications.js';
+import { sendDispatchWhatsappMessage } from '../src/services/dispatchWhatsappAssignmentService.js';
 import { runDispatchDeliveryWatchdog } from '../src/services/dispatchWhatsappAdminAlerts.js';
 
 const NOW = new Date('2026-09-21T12:00:00.000Z');
 
-function auditRow({ id, phone, status, at, body, source = 'ASSIGNMENT_CONFIRMATION', diagnostic = null, watchdog = null }) {
+function auditRow({ id, phone, status, at, body, source = 'ASSIGNMENT_CONFIRMATION', diagnostic = null, watchdog = null, direction = 'OUTBOUND' }) {
   return {
     id,
     entityType: 'DISPATCH_WHATSAPP_MESSAGE',
-    entityId: `dispatch-wa:outbound:${id}`,
+    entityId: `dispatch-wa:${direction.toLowerCase()}:${id}`,
     entityLabel: phone,
-    action: 'DISPATCH_WHATSAPP_OUTBOUND',
+    action: direction === 'INBOUND' ? 'DISPATCH_WHATSAPP_INBOUND' : 'DISPATCH_WHATSAPP_OUTBOUND',
     actorSource: source,
     metadata: {
       scope: 'operational',
-      direction: 'OUTBOUND',
+      direction,
       phone,
       body,
-      messageType: 'TEMPLATE',
-      providerMessageId: id,
-      providerStatus: status,
-      providerStatusAt: at,
+      messageType: direction === 'INBOUND' ? 'TEXT' : 'TEMPLATE',
+      messageId: direction === 'INBOUND' ? id : '',
+      providerMessageId: direction === 'OUTBOUND' ? id : '',
+      providerStatus: direction === 'OUTBOUND' ? status : null,
+      providerStatusAt: direction === 'OUTBOUND' ? at : null,
       providerDiagnostic: diagnostic,
       deliveryWatchdogStatus: watchdog,
       source,
@@ -72,6 +75,149 @@ function historyPrisma({ rows = [], confirmations = [], globallyAuditedProviderI
       }
     }
   };
+}
+
+function normalizedPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length === 10 ? `57${digits}` : digits;
+}
+
+function inboxPrisma({ rows = [], confirmations = [], workers = [], windows = [] } = {}) {
+  const auditGroups = new Map();
+  for (const row of rows) {
+    const phone = normalizedPhone(row.entityLabel);
+    const at = new Date(row.createdAt);
+    const previous = auditGroups.get(phone);
+    if (!previous || at > previous) auditGroups.set(phone, at);
+  }
+  const confirmationGroups = new Map();
+  for (const row of confirmations) {
+    const phone = normalizedPhone(row.phone);
+    const previous = confirmationGroups.get(phone) || { createdAt: null, confirmationReceivedAt: null };
+    const createdAt = row.createdAt ? new Date(row.createdAt) : null;
+    const receivedAt = row.confirmationReceivedAt ? new Date(row.confirmationReceivedAt) : null;
+    if (createdAt && (!previous.createdAt || createdAt > previous.createdAt)) previous.createdAt = createdAt;
+    if (receivedAt && (!previous.confirmationReceivedAt || receivedAt > previous.confirmationReceivedAt)) previous.confirmationReceivedAt = receivedAt;
+    confirmationGroups.set(phone, previous);
+  }
+  return {
+    devAuditEvent: {
+      groupBy: async () => [...auditGroups.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([entityLabel, createdAt]) => ({ entityLabel, _max: { createdAt } })),
+      findMany: async ({ where = {} } = {}) => {
+        const phones = Array.isArray(where.entityLabel?.in) ? where.entityLabel.in.map(normalizedPhone) : null;
+        return rows
+          .filter((row) => !phones || phones.includes(normalizedPhone(row.entityLabel)))
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      }
+    },
+    dispatchWhatsappContactWindow: {
+      findMany: async () => windows,
+      findUnique: async ({ where }) => windows.find((row) => normalizedPhone(row.phone) === normalizedPhone(where.scope_phone.phone)) || null,
+      upsert: async () => ({})
+    },
+    dispatchWhatsappConfirmation: {
+      groupBy: async () => [...confirmationGroups.entries()]
+        .sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0))
+        .map(([phone, latest]) => ({
+          phone,
+          _max: { createdAt: latest.createdAt, confirmationReceivedAt: latest.confirmationReceivedAt }
+        })),
+      findMany: async ({ where = {} } = {}) => {
+        if (typeof where.phone === 'string') {
+          return confirmations.filter((row) => normalizedPhone(row.phone) === normalizedPhone(where.phone));
+        }
+        return confirmations;
+      }
+    },
+    dispatchWorker: {
+      findMany: async () => workers
+    }
+  };
+}
+
+async function withOperationalMetaEnv(run) {
+  const keys = [
+    'DISPATCH_META_GRAPH_VERSION',
+    'DISPATCH_META_ACCESS_TOKEN',
+    'DISPATCH_META_PHONE_NUMBER_ID',
+    'DISPATCH_META_VERIFY_TOKEN',
+    'DISPATCH_META_APP_SECRET',
+    'DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME',
+    'DISPATCH_META_TEMPLATE_LANGUAGE',
+    'DISPATCH_META_DUPLICATE_SEND_WINDOW_MS'
+  ];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
+  Object.assign(process.env, {
+    DISPATCH_META_GRAPH_VERSION: 'v23.0',
+    DISPATCH_META_ACCESS_TOKEN: 'TEST-token-not-real',
+    DISPATCH_META_PHONE_NUMBER_ID: 'TEST-phone-id',
+    DISPATCH_META_VERIFY_TOKEN: 'TEST-verify',
+    DISPATCH_META_APP_SECRET: 'TEST-secret',
+    DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME: 'TEST_assignment_template',
+    DISPATCH_META_TEMPLATE_LANGUAGE: 'es',
+    DISPATCH_META_DUPLICATE_SEND_WINDOW_MS: '0'
+  });
+  try {
+    return await run();
+  } finally {
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
+  }
+}
+
+function assignmentSenderPrisma() {
+  const assignment = {
+    id: 'assignment-template-test',
+    serviceRequestId: 'request-template-test',
+    workerId: 'worker-template-test',
+    status: 'ASSIGNED',
+    createdByUsername: 'coordinador-test',
+    worker: { id: 'worker-template-test', fullName: 'Auxiliar Plantilla', phone: '3008887766' },
+    serviceRequest: {
+      id: 'request-template-test',
+      source: 'MANUAL',
+      serviceDate: new Date('2099-09-22T05:00:00.000Z'),
+      operationPointName: 'Punto de Prueba',
+      address: 'Dirección de prueba',
+      startTime: '05:00',
+      operationPoint: null
+    }
+  };
+  const link = { id: 'link-template-test', assignmentId: assignment.id, phone: '573008887766', status: 'PENDING' };
+  const auditEvents = [];
+  const confirmationUpdates = [];
+  const prismaClient = {
+    dispatchAssignment: {
+      findFirst: async () => assignment,
+      updateMany: async () => ({ count: 1 })
+    },
+    dispatchWhatsappContactWindow: {
+      findUnique: async () => null
+    },
+    dispatchWhatsappConfirmation: {
+      findFirst: async () => null,
+      create: async ({ data }) => Object.assign(link, data),
+      updateMany: async ({ where, data }) => {
+        confirmationUpdates.push({ where, data });
+        if (where?.id === link.id && data?.status === 'FAILED') link.status = 'FAILED';
+        return { count: 1 };
+      },
+      update: async ({ data }) => Object.assign(link, data)
+    },
+    devAuditEvent: {
+      findFirst: async () => null,
+      create: async ({ data }) => {
+        auditEvents.push(data);
+        return { id: `audit-${auditEvents.length}`, ...data };
+      }
+    },
+    $transaction: async (operations) => Promise.all(operations)
+  };
+  return { prismaClient, assignment, link, auditEvents, confirmationUpdates };
 }
 
 test('historial consulta el día exacto de Bogotá, muestra teléfono completo y conserva estados Meta', async () => {
@@ -227,6 +373,219 @@ test('conversación por auxiliar reutiliza auditoría de Despacho y conserva dir
   assert.match(conversation.messageHistory[1].body, /CONFIRMADO/);
 });
 
+test('ventana cerrada con plantilla configurada ejecuta TEMPLATE y queda ACCEPTED hasta webhook', async () => {
+  await withOperationalMetaEnv(async () => {
+    const state = assignmentSenderPrisma();
+    const payloads = [];
+    const axiosClient = {
+      post: async (_url, payload) => {
+        payloads.push(payload);
+        return { data: { messages: [{ id: 'wamid-template-accepted' }] } };
+      }
+    };
+
+    const result = await sendDispatchWhatsappMessage({
+      phone: '3008887766',
+      context: {
+        assignmentId: state.assignment.id,
+        serviceRequestId: state.assignment.serviceRequestId,
+        workerId: state.assignment.workerId
+      },
+      scope: 'operational',
+      actorUsername: 'coordinador-test',
+      axiosClient,
+      prismaClient: state.prismaClient
+    });
+
+    assert.equal(result.deliveryMode, 'TEMPLATE');
+    assert.equal(result.templateName, 'TEST_assignment_template');
+    assert.equal(result.providerMessageId, 'wamid-template-accepted');
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].type, 'template');
+    assert.equal(payloads[0].template.name, 'TEST_assignment_template');
+    assert.equal(state.auditEvents.length, 1);
+    assert.equal(state.auditEvents[0].metadata.messageType, 'TEMPLATE');
+    assert.equal(state.auditEvents[0].metadata.providerStatus, 'ACCEPTED');
+  });
+});
+
+test('rechazo de TEMPLATE antes del wamid persiste FAILED y auditoría visible', async () => {
+  await withOperationalMetaEnv(async () => {
+    const state = assignmentSenderPrisma();
+    const axiosClient = {
+      post: async () => {
+        const error = new Error('rechazo de prueba');
+        error.response = { data: { error: { code: 131000, message: 'rechazo de prueba' } } };
+        throw error;
+      }
+    };
+
+    await assert.rejects(
+      sendDispatchWhatsappMessage({
+        phone: '3008887766',
+        context: {
+          assignmentId: state.assignment.id,
+          serviceRequestId: state.assignment.serviceRequestId,
+          workerId: state.assignment.workerId
+        },
+        scope: 'operational',
+        actorUsername: 'coordinador-test',
+        axiosClient,
+        prismaClient: state.prismaClient
+      }),
+      (error) => error?.statusCode === 502
+    );
+
+    assert.equal(state.link.status, 'FAILED');
+    assert.equal(state.auditEvents.length, 1);
+    assert.equal(state.auditEvents[0].metadata.source, 'ASSIGNMENT_CONFIRMATION_FAILED');
+    assert.equal(state.auditEvents[0].metadata.messageType, 'TEMPLATE');
+    assert.equal(state.auditEvents[0].metadata.providerMessageId, '');
+    assert.equal(state.auditEvents[0].metadata.providerStatus, null);
+    assert.match(state.auditEvents[0].metadata.body, /Intento de envío fallido/);
+  });
+});
+
+test('bandeja prioriza la asignación ligada al wamid para resolver el auxiliar', async () => {
+  const sentAt = '2026-09-21T11:40:00.000Z';
+  const rows = [auditRow({
+    id: 'wamid-linked-worker',
+    phone: '573006667788',
+    status: 'SENT',
+    at: sentAt,
+    body: 'Asignación de prueba'
+  })];
+  const confirmations = [{
+    id: 'link-worker-1',
+    phone: '573006667788',
+    providerMessageId: 'wamid-linked-worker',
+    status: 'SENT',
+    createdAt: new Date(sentAt),
+    updatedAt: new Date(sentAt),
+    confirmationReceivedAt: null,
+    assignment: {
+      id: 'assignment-linked-1',
+      workerId: 'worker-linked-1',
+      worker: { id: 'worker-linked-1', fullName: 'Auxiliar Vinculado', phone: '3006667788' },
+      serviceRequest: { id: 'request-linked-1', source: 'MANUAL' }
+    }
+  }];
+  const prismaClient = inboxPrisma({ rows, confirmations, workers: [] });
+
+  const inbox = await loadDispatchWhatsappConversationInbox(prismaClient, { now: NOW });
+
+  assert.equal(inbox.items.length, 1);
+  assert.equal(inbox.items[0].workerId, 'worker-linked-1');
+  assert.equal(inbox.items[0].workerName, 'Auxiliar Vinculado');
+  assert.equal(inbox.items[0].phoneDisplay, '+57 300 666 7788');
+  assert.equal(inbox.items[0].deliveryState, 'SENT');
+});
+
+test('bandeja no certifica SENT histórico sin auditoría de estado Meta', async () => {
+  const sentAt = '2026-09-20T23:20:00.000Z';
+  const confirmations = [{
+    id: 'link-historical-sent',
+    phone: '573006667799',
+    providerMessageId: 'wamid-historical-sent',
+    status: 'SENT',
+    createdAt: new Date(sentAt),
+    updatedAt: new Date(sentAt),
+    confirmationReceivedAt: null,
+    assignment: {
+      id: 'assignment-historical-sent',
+      workerId: 'worker-historical-sent',
+      worker: { id: 'worker-historical-sent', fullName: 'Auxiliar Histórico Envío', phone: '3006667799' },
+      serviceRequest: { id: 'request-historical-sent', source: 'MANUAL' }
+    }
+  }];
+  const prismaClient = inboxPrisma({ confirmations });
+
+  const inbox = await loadDispatchWhatsappConversationInbox(prismaClient, { now: NOW });
+
+  assert.equal(inbox.items.length, 1);
+  assert.equal(inbox.items[0].workerName, 'Auxiliar Histórico Envío');
+  assert.equal(inbox.items[0].providerStatus, null);
+  assert.equal(inbox.items[0].deliveryState, null);
+  assert.equal(inbox.items[0].reconstructed, true);
+});
+
+test('fallo previo al wamid permanece visible como FAILED y no como enviado', async () => {
+  const failedAt = '2026-09-21T11:45:00.000Z';
+  const phone = '573006667700';
+  const rows = [{
+    id: 'audit-failed-no-wamid',
+    entityType: 'DISPATCH_WHATSAPP_MESSAGE',
+    entityId: 'dispatch-wa:outbound:assignment-failed:link-failed-no-wamid',
+    entityLabel: phone,
+    action: 'DISPATCH_WHATSAPP_OUTBOUND',
+    actorSource: 'ASSIGNMENT_CONFIRMATION_FAILED',
+    metadata: {
+      scope: 'operational',
+      direction: 'OUTBOUND',
+      phone,
+      body: 'Intento de envío fallido. Rechazo de prueba saneado.',
+      messageType: 'TEMPLATE',
+      messageId: '',
+      providerMessageId: '',
+      providerStatus: null,
+      providerStatusAt: null,
+      providerDiagnostic: null,
+      deliveryWatchdogStatus: null,
+      source: 'ASSIGNMENT_CONFIRMATION_FAILED',
+      occurredAt: failedAt
+    },
+    createdAt: new Date(failedAt)
+  }];
+  const confirmations = [{
+    id: 'link-failed-no-wamid',
+    phone,
+    providerMessageId: null,
+    status: 'FAILED',
+    createdAt: new Date(failedAt),
+    updatedAt: new Date(failedAt),
+    confirmationReceivedAt: null,
+    assignment: {
+      id: 'assignment-failed-no-wamid',
+      workerId: 'worker-failed-no-wamid',
+      worker: { id: 'worker-failed-no-wamid', fullName: 'Auxiliar Fallo Visible', phone: '3006667700' },
+      serviceRequest: { id: 'request-failed-no-wamid', source: 'MANUAL' }
+    }
+  }];
+  const prismaClient = inboxPrisma({ rows, confirmations });
+
+  const inbox = await loadDispatchWhatsappConversationInbox(prismaClient, { now: NOW });
+
+  assert.equal(inbox.items.length, 1);
+  assert.equal(inbox.items[0].workerName, 'Auxiliar Fallo Visible');
+  assert.equal(inbox.items[0].providerMessageId, null);
+  assert.equal(inbox.items[0].providerStatus, null);
+  assert.equal(inbox.items[0].deliveryState, 'FAILED');
+  assert.equal(inbox.items[0].lastMessageSource, 'ASSIGNMENT_CONFIRMATION_FAILED');
+  assert.match(inbox.items[0].lastMessageBody, /Intento de envío fallido/);
+});
+
+test('bandeja agrupa una sola conversación por teléfono y ordena por último mensaje descendente', async () => {
+  const rows = [
+    auditRow({ id: 'wamid-old-a', phone: '573001112233', status: 'DELIVERED', at: '2026-09-21T10:00:00.000Z', body: 'Anterior A' }),
+    auditRow({ id: 'wamid-new-a', phone: '573001112233', status: 'READ', at: '2026-09-21T11:20:00.000Z', body: 'Reciente A' }),
+    auditRow({ id: 'wamid-b', phone: '573002223344', status: 'DELIVERED', at: '2026-09-21T11:30:00.000Z', body: 'Reciente B' })
+  ];
+  const workers = [
+    { id: 'worker-a', fullName: 'Auxiliar A', phone: '3001112233' },
+    { id: 'worker-b', fullName: 'Auxiliar B', phone: '3002223344' }
+  ];
+  const prismaClient = inboxPrisma({ rows, workers });
+
+  const inbox = await loadDispatchWhatsappConversationInbox(prismaClient, { now: NOW });
+
+  assert.equal(inbox.items.length, 2);
+  assert.equal(inbox.items[0].workerName, 'Auxiliar B');
+  assert.equal(inbox.items[0].lastMessageBody.includes('Reciente B'), true);
+  assert.equal(inbox.items[1].workerName, 'Auxiliar A');
+  assert.equal(inbox.items[1].lastMessageBody.includes('Reciente A'), true);
+  assert.equal(inbox.items[1].messageCount, 2);
+});
+
 test('watchdog marca entrega incierta, actualiza auditoría y alerta una sola vez sin reenviar', async () => {
   const link = {
     id: 'link-watchdog-1',
@@ -302,21 +661,44 @@ test('watchdog marca entrega incierta, actualiza auditoría y alerta una sola ve
   assert.equal(sentAlerts.length, 1);
 });
 
-test('pantalla y ruta muestran teléfono completo, conversación y ocultan historial cuando no se suministra', () => {
+test('pantalla usa bandeja sin selector diario, despliega conversación inline y representa estados Meta sin inventar entrega', () => {
   const view = fs.readFileSync(new URL('../src/views/operacionesWhatsappEstado.ejs', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/dispatchWhatsappNotifications.js', import.meta.url), 'utf8');
+  const assignment = fs.readFileSync(new URL('../src/services/dispatchWhatsappAssignmentService.js', import.meta.url), 'utf8');
   const monitor = fs.readFileSync(new URL('../src/services/dispatchWhatsappMonitor.js', import.meta.url), 'utf8');
   const alerts = fs.readFileSync(new URL('../src/services/dispatchWhatsappAdminAlerts.js', import.meta.url), 'utf8');
 
-  assert.match(view, /hasOutboundHistory/);
+  assert.match(view, /Conversaciones de Despacho/);
   assert.match(view, /item\.phoneDisplay \|\| item\.phone/);
-  assert.match(view, /Ver conversación/);
+  assert.match(view, /Ver mensajes/);
   assert.match(view, /conversation\.messageHistory/);
+  assert.match(view, /inline-conversation-scroll/);
+  assert.match(view, /max-height:360px/);
+  assert.match(view, /conversation && item\.workerId && conversation\.workerId === item\.workerId/);
+  assert.doesNotMatch(view, /<section class="conversation-card"/);
+  assert.match(view, /✓ Enviado/);
+  assert.match(view, /✓✓ Entregado/);
+  assert.match(view, /✓✓ Leído/);
+  assert.match(view, /Sin estado Meta histórico/);
   assert.match(view, /DELIVERY_UNKNOWN/);
-  assert.match(route, /workerId:\s*worker\.id/);
-  assert.match(route, /loadSelectedWorkerConversation/);
-  assert.match(route, /page:\s*page/);
-  assert.doesNotMatch(route, /phone:\s*normalizeString\(req\.query/);
+  assert.match(view, /Meta reportó fallo/);
+  assert.doesNotMatch(view, /type="date"/);
+  assert.doesNotMatch(view, /dispatchHistoryDate/);
+  assert.match(route, /loadDispatchWhatsappConversationInbox/);
+  assert.match(route, /linkedByProviderId/);
+  assert.match(route, /const workerId = linkedWorker\?\.id/);
+  assert.match(route, /historicalSent/);
+  assert.doesNotMatch(route, /loadDispatchWhatsappOutboundHistoryByDate/);
+  assert.doesNotMatch(route, /req\.query\?\.date/);
+  assert.match(assignment, /if \(contactWindow\.isOpen\)/);
+  assert.match(assignment, /else if \(config\.assignmentTemplateName && config\.templateLanguage\)/);
+  assert.match(assignment, /deliveryMode = 'SESSION_INTERACTIVE'/);
+  assert.match(assignment, /deliveryMode = 'TEMPLATE'/);
+  assert.match(assignment, /lastProviderStatus: 'ACCEPTED'/);
+  assert.doesNotMatch(assignment, /lastProviderStatus: 'SENT'/);
+  assert.match(assignment, /source: 'ASSIGNMENT_CONFIRMATION_FAILED'/);
+  assert.match(assignment, /dedupeKey: `assignment-failed:\$\{link\.id\}`/);
+  assert.match(assignment, /failedMessageType = contactWindow\.isOpen/);
   assert.match(monitor, /contenido original no quedó almacenado/);
   assert.doesNotMatch(monitor, /buildDispatchAssignmentMessageBody/);
   assert.match(alerts, /runDispatchDeliveryWatchdog/);
