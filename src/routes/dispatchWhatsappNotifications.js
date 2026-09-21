@@ -34,6 +34,11 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizePositiveInteger(value, fallback = 1) {
+  const parsed = Math.trunc(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function role(req) {
   return req.session?.userRole || req.userRole;
 }
@@ -161,13 +166,20 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
   router.use(requireOps);
 
   router.get('/', async (req, res) => {
-    const [status, automationSettings, outboundHistory] = await Promise.all([
+    const historyDate = normalizeString(req.query?.date);
+    const historyPage = normalizePositiveInteger(req.query?.page, 1);
+    const conversationPhone = normalizeString(req.query?.conversationPhone);
+    const [status, automationSettings, outboundHistory, outboundConversation] = await Promise.all([
       getStatusForViewer(req),
       getAutomationSettingsForViewer(prisma, req),
       loadDispatchWhatsappOutboundHistoryByDate({
         prismaClient: prisma,
-        dateKey: normalizeString(req.query?.date)
-      })
+        dateKey: historyDate,
+        page: historyPage
+      }),
+      conversationPhone
+        ? loadDispatchWhatsappPhoneConversation({ prismaClient: prisma, phone: conversationPhone, messageLimit: 100 })
+        : null
     ]);
     res.render('operacionesWhatsappEstado', {
       pageTitle: 'WhatsApp de despacho',
@@ -177,6 +189,8 @@ export function dispatchWhatsappNotificationsRouter(prisma) {
       settingsError: normalizeString(req.query?.settingsError),
       automationSettings,
       outboundHistory,
+      outboundConversation,
+      conversationPhone,
       whatsappTitle: role(req) === 'dev' ? 'WhatsApp oficial de despacho' : 'WhatsApp de despacho',
       whatsappEyebrow: 'Operaciones / Despacho',
       whatsappDescription: role(req) === 'dev'
