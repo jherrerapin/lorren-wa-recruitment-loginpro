@@ -10,6 +10,7 @@
   const assignmentsHref = typeof whatsappAssignmentsHref === 'string' && whatsappAssignmentsHref ? whatsappAssignmentsHref : '/admin/operaciones/asignaciones';
   const assignmentsLabel = typeof whatsappAssignmentsLabel === 'string' && whatsappAssignmentsLabel ? whatsappAssignmentsLabel : 'Asignaciones';
   const isDevView = role === 'dev';
+  const isSupervisorView = !isDevView && operationalRole === 'SUPERVISOR';
   const monitorHref = isDevView && typeof whatsappMonitorHref === 'string' && whatsappMonitorHref ? whatsappMonitorHref : null;
   const missing = isDevView && typeof missingConfiguration !== 'undefined' && Array.isArray(missingConfiguration) ? missingConfiguration : [];
   const schedule = typeof automationSettings !== 'undefined' && automationSettings ? automationSettings : {
@@ -18,13 +19,21 @@
     pendingConfirmationAlertTime: null,
     alertPhoneConfigured: false
   };
-  const hasConversationInbox = typeof conversationInbox !== 'undefined' && conversationInbox !== null;
+  const hasConversationInbox = isDevView && typeof conversationInbox !== 'undefined' && conversationInbox !== null;
   const inbox = hasConversationInbox ? conversationInbox : {
     items: [],
     pagination: { page: 1, pageSize: 20, hasPrevious: false, hasNext: false },
     summary: { shown: 0, failed: 0, deliveryUnknown: 0, delivered: 0, read: 0 }
   };
-  const conversation = typeof selectedConversation !== 'undefined' && selectedConversation ? selectedConversation : null;
+  const conversation = isDevView && typeof selectedConversation !== 'undefined' && selectedConversation ? selectedConversation : null;
+  const supervisorStatus = isSupervisorView && typeof supervisorAssignmentStatus !== 'undefined' && supervisorAssignmentStatus
+    ? supervisorAssignmentStatus
+    : {
+        items: [],
+        pagination: { page: 1, pageSize: 30, hasPrevious: false, hasNext: false },
+        summary: { shown: 0, confirmed: 0, deliveredOrRead: 0, attention: 0 },
+        generatedAt: null
+      };
   const deliveryStatusLabel = (state, reconstructed = false) => {
     if (state === 'DELIVERY_UNKNOWN') return 'Entrega sin confirmar';
     if (state === 'CONFIRMED') return 'Confirmado por auxiliar';
@@ -83,6 +92,25 @@
     const query = params.toString();
     return `${basePath}${query ? `?${query}` : ''}`;
   };
+  const supervisorPageUrl = (page) => {
+    const params = new URLSearchParams();
+    if (page && Number(page) > 1) params.set('page', String(page));
+    const query = params.toString();
+    return `${basePath}${query ? `?${query}` : ''}`;
+  };
+  const supervisorStatusClass = (key) => ({
+    PROCESSING: 'processing',
+    ACCEPTED: 'accepted',
+    SENT: 'sent',
+    DELIVERED: 'delivered',
+    READ: 'read',
+    CONFIRMED: 'confirmed',
+    NOVELTY: 'novelty',
+    DELIVERY_UNKNOWN: 'delivery-unknown',
+    FAILED: 'failed',
+    EXPIRED: 'expired',
+    DECLINED: 'declined'
+  })[key] || 'processing';
 %>
 <!DOCTYPE html>
 <html lang="es">
@@ -98,11 +126,12 @@
     .status-pill{display:inline-flex;width:fit-content;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:900;background:#fee2e2;color:#991b1b}.status-pill.ready{background:#dcfce7;color:#166534}
     .meta-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.meta-row{display:grid;grid-template-columns:minmax(140px,.7fr) minmax(0,1fr);gap:10px;padding:9px 0;border-bottom:1px solid #edf2f7}.meta-row:last-child{border-bottom:0}.meta-key{color:var(--muted);font-size:12px;font-weight:850}.meta-value{color:var(--navy);font-size:12px;font-weight:800;overflow-wrap:anywhere}
     .alert{border:1px solid #fecaca;background:#fff5f5;color:#991b1b;border-radius:14px;padding:12px 14px;font-weight:800}.info{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:14px;padding:12px 14px;font-weight:800;line-height:1.45}.technical{border:1px dashed #cbd5e1;background:#f8fafc;color:#334155;border-radius:14px;padding:12px 14px;font-size:12px;line-height:1.45;word-break:break-word}.missing-list{margin:0;padding-left:18px;color:#991b1b;font-size:12px;font-weight:800}
-    .schedule-card,.inbox-card{margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:18px;display:grid;gap:13px}.schedule-head,.inbox-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}.schedule-head h2,.inbox-head h2{margin:0;color:var(--navy);font-size:18px}.schedule-form{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr)) auto;gap:12px;align-items:end}.schedule-field{display:grid;gap:5px}.schedule-field label{color:var(--navy);font-size:12px;font-weight:900}.schedule-field input[type="time"]{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 11px;font:inherit;background:#fff;color:var(--navy)}.schedule-field small{color:var(--muted);font-size:10.5px;line-height:1.35}.schedule-note{border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;color:#475569;font-size:11px;line-height:1.45}.schedule-feedback{border-radius:10px;padding:10px 12px;font-size:12px;font-weight:800}.schedule-feedback.success{background:#dcfce7;color:#166534}.schedule-feedback.error{background:#fee2e2;color:#991b1b}
+    .schedule-card,.inbox-card,.supervisor-status-card{margin-bottom:16px;background:#fff;border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow-sm);padding:18px;display:grid;gap:13px}.schedule-head,.inbox-head,.supervisor-status-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap}.schedule-head h2,.inbox-head h2,.supervisor-status-head h2{margin:0;color:var(--navy);font-size:18px}.schedule-form{display:grid;grid-template-columns:repeat(2,minmax(220px,1fr)) auto;gap:12px;align-items:end}.schedule-field{display:grid;gap:5px}.schedule-field label{color:var(--navy);font-size:12px;font-weight:900}.schedule-field input[type="time"]{width:100%;border:1px solid var(--border);border-radius:10px;padding:10px 11px;font:inherit;background:#fff;color:var(--navy)}.schedule-field small{color:var(--muted);font-size:10.5px;line-height:1.35}.schedule-note{border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;padding:10px 12px;color:#475569;font-size:11px;line-height:1.45}.schedule-feedback{border-radius:10px;padding:10px 12px;font-size:12px;font-weight:800}.schedule-feedback.success{background:#dcfce7;color:#166534}.schedule-feedback.error{background:#fee2e2;color:#991b1b}
+    .supervisor-status-help{margin:3px 0 0;color:#475569;font-size:11.5px;line-height:1.5}.supervisor-status-updated{color:#64748b;font-size:10.5px;font-weight:800}.supervisor-summary{display:flex;gap:7px;flex-wrap:wrap}.supervisor-summary span{display:inline-flex;border-radius:999px;padding:6px 10px;background:#f1f5f9;color:#475569;font-size:10.5px;font-weight:900}.supervisor-message-list{display:grid;gap:9px}.supervisor-message-row{display:grid;grid-template-columns:minmax(220px,1.2fr) minmax(180px,.7fr) minmax(230px,1fr);gap:14px;align-items:center;border:1px solid #e2e8f0;border-radius:14px;padding:13px;background:#fff}.supervisor-worker{display:grid;gap:3px;min-width:0}.supervisor-worker strong{color:var(--navy);font-size:13px}.supervisor-worker span,.supervisor-send-meta{color:#64748b;font-size:10.5px;line-height:1.45}.supervisor-state{display:grid;gap:5px;justify-items:start}.supervisor-state-badge{display:inline-flex;align-items:center;border-radius:999px;padding:6px 10px;font-size:11px;font-weight:950}.supervisor-state-detail{margin:0;color:#475569;font-size:10.5px;line-height:1.4}.supervisor-state-badge.processing{background:#f1f5f9;color:#475569}.supervisor-state-badge.accepted{background:#fef3c7;color:#92400e}.supervisor-state-badge.sent{background:#dbeafe;color:#1d4ed8}.supervisor-state-badge.delivered,.supervisor-state-badge.confirmed{background:#dcfce7;color:#166534}.supervisor-state-badge.read{background:#dbeafe;color:#075985}.supervisor-state-badge.novelty{background:#f3e8ff;color:#6b21a8}.supervisor-state-badge.delivery-unknown,.supervisor-state-badge.expired,.supervisor-state-badge.declined{background:#ffedd5;color:#9a3412}.supervisor-state-badge.failed{background:#fee2e2;color:#991b1b}.supervisor-status-empty{border:1px dashed #cbd5e1;border-radius:12px;padding:20px;text-align:center;color:#64748b;font-size:12px}.supervisor-pagination{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap}
     .inbox-help{margin:0;color:var(--muted);font-size:11px;line-height:1.5}.evidence-legend{display:flex;gap:8px;flex-wrap:wrap;border:1px solid #e2e8f0;background:#f8fafc;border-radius:12px;padding:9px 11px}.evidence-legend span{font-size:10.5px;color:#475569;font-weight:800}.inbox-summary{display:flex;gap:7px;flex-wrap:wrap}.inbox-summary span{display:inline-flex;border-radius:999px;padding:5px 9px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:900}.inbox-list{display:grid;gap:10px}.inbox-item{border:1px solid #e2e8f0;border-radius:14px;padding:13px;display:grid;gap:8px;background:#fff}.inbox-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;flex-wrap:wrap}.inbox-recipient{display:grid;gap:2px}.inbox-recipient strong{color:var(--navy);font-size:13px}.inbox-recipient span,.inbox-meta{color:var(--muted);font-size:10.5px}.inbox-preview{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:#1e293b;font-size:11.5px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}.inbox-diagnostic{border-radius:10px;background:#fff1f2;color:#9f1239;padding:8px 10px;font-size:10.5px;line-height:1.4;overflow-wrap:anywhere}.inbox-empty{border:1px dashed #cbd5e1;border-radius:12px;padding:18px;text-align:center;color:var(--muted);font-size:12px}.inbox-actions,.inbox-pagination{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.inbox-pagination{justify-content:space-between;padding-top:2px}
     .delivery-state{display:inline-flex;align-items:center;gap:5px;width:fit-content;border-radius:999px;padding:5px 8px;font-size:10px;font-weight:900}.delivery-mark{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:1000;letter-spacing:-2px}.delivery-state.accepted{background:#fef3c7;color:#92400e}.delivery-state.sent{background:#f1f5f9;color:#334155}.delivery-state.delivered,.delivery-state.confirmed{background:#dcfce7;color:#166534}.delivery-state.read{background:#dbeafe;color:#0369a1}.delivery-state.failed{background:#fee2e2;color:#991b1b}.delivery-state.delivery-unknown{background:#ffedd5;color:#9a3412}.delivery-state.unknown{background:#f1f5f9;color:#64748b}
     .inline-conversation{margin-top:4px;border-top:1px solid #e2e8f0;padding-top:10px}.inline-conversation summary{cursor:pointer;list-style:none;color:var(--navy);font-size:11px;font-weight:900}.inline-conversation summary::-webkit-details-marker{display:none}.inline-conversation-scroll{max-height:360px;overflow-y:auto;overscroll-behavior:contain;margin-top:10px;padding:10px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}.conversation-list{display:grid;gap:9px}.conversation-message{max-width:min(88%,720px);border-radius:15px;padding:10px 12px;display:grid;gap:6px}.conversation-message.inbound{justify-self:start;background:#f1f5f9;border:1px solid #e2e8f0}.conversation-message.outbound{justify-self:end;background:#ecfdf5;border:1px solid #bbf7d0}.conversation-message p{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.45}.conversation-meta{display:flex;gap:6px;align-items:center;flex-wrap:wrap;color:var(--muted);font-size:9.5px;font-weight:750}.conversation-legacy{font-style:italic}.conversation-window{font-size:11px;color:#475569;background:#fff;border-radius:10px;padding:8px 10px;margin-bottom:9px}.conversation-diagnostic{font-size:10px;color:#9f1239;background:#fff1f2;border-radius:9px;padding:7px 9px}
-    @media(max-width:900px){.cloud-grid{grid-template-columns:1fr}.meta-row{grid-template-columns:1fr;gap:3px}.schedule-form{grid-template-columns:1fr}.conversation-message{max-width:96%}.inline-conversation-scroll{max-height:320px}}
+    @media(max-width:900px){.cloud-grid{grid-template-columns:1fr}.meta-row{grid-template-columns:1fr;gap:3px}.schedule-form{grid-template-columns:1fr}.conversation-message{max-width:96%}.inline-conversation-scroll{max-height:320px}.supervisor-message-row{grid-template-columns:1fr;gap:8px}}
   </style>
 </head>
 <body>
@@ -150,6 +179,52 @@
         <div class="alert">No fue posible asociar los horarios a tu usuario. Puedes seguir usando Despacho, pero esta automatización no podrá guardarse hasta resolver el perfil.</div>
       <% } %>
     </section>
+
+    <% if (isSupervisorView) { %>
+      <section class="supervisor-status-card" aria-label="Estado de mensajes de asignación">
+        <div class="supervisor-status-head">
+          <div>
+            <h2>Estado de mensajes de asignación</h2>
+            <p class="supervisor-status-help">Aquí aparecen únicamente las solicitudes de asignación enviadas por tu usuario. Los estados se actualizan automáticamente.</p>
+          </div>
+          <span class="supervisor-status-updated" id="supervisorStatusUpdated">Actualizado <%= supervisorStatus.generatedAt ? historyDateTime(supervisorStatus.generatedAt) : 'ahora' %></span>
+        </div>
+        <div class="supervisor-summary" id="supervisorStatusSummary" aria-label="Resumen de estados">
+          <span>Mostrados: <%= supervisorStatus.summary?.shown || 0 %></span>
+          <span>Confirmados: <%= supervisorStatus.summary?.confirmed || 0 %></span>
+          <span>Entregados o leídos: <%= supervisorStatus.summary?.deliveredOrRead || 0 %></span>
+          <span>Requieren revisión: <%= supervisorStatus.summary?.attention || 0 %></span>
+        </div>
+        <div class="supervisor-message-list" id="supervisorAssignmentStatusList">
+          <% if (Array.isArray(supervisorStatus.items) && supervisorStatus.items.length) { %>
+            <% supervisorStatus.items.forEach((item) => { %>
+              <article class="supervisor-message-row" data-assignment-id="<%= item.assignmentId %>">
+                <div class="supervisor-worker">
+                  <strong><%= item.workerName %></strong>
+                  <span><%= item.phoneDisplay %><% if (item.operationName) { %> · <%= item.operationName %><% } %></span>
+                </div>
+                <div class="supervisor-send-meta">Solicitud enviada<br><strong><%= historyDateTime(item.sentAt) %></strong></div>
+                <div class="supervisor-state">
+                  <span class="supervisor-state-badge <%= supervisorStatusClass(item.statusKey) %>"><%= item.statusLabel %></span>
+                  <p class="supervisor-state-detail"><%= item.statusDetail %></p>
+                </div>
+              </article>
+            <% }) %>
+          <% } else { %>
+            <div class="supervisor-status-empty">Todavía no has enviado solicitudes de asignación por WhatsApp.</div>
+          <% } %>
+        </div>
+        <% if (supervisorStatus.pagination?.hasPrevious || supervisorStatus.pagination?.hasNext) { %>
+          <div class="supervisor-pagination">
+            <div class="inbox-actions">
+              <% if (supervisorStatus.pagination?.hasPrevious) { %><a class="btn" href="<%= supervisorPageUrl((supervisorStatus.pagination.page || 1) - 1) %>">← Más recientes</a><% } %>
+              <% if (supervisorStatus.pagination?.hasNext) { %><a class="btn" href="<%= supervisorPageUrl((supervisorStatus.pagination.page || 1) + 1) %>">Más antiguas →</a><% } %>
+            </div>
+            <p class="supervisor-status-help">Página <%= supervisorStatus.pagination?.page || 1 %>.</p>
+          </div>
+        <% } %>
+      </section>
+    <% } %>
 
     <% if (hasConversationInbox) { %>
       <section class="inbox-card" aria-label="Bandeja de conversaciones de WhatsApp de Despacho">
@@ -304,10 +379,12 @@
 
   <script>
     const isDev = <%= isDevView ? 'true' : 'false' %>;
+    const isSupervisor = <%= isSupervisorView ? 'true' : 'false' %>;
     const statusEndpoint = <%- JSON.stringify(`${basePath}/estado`) %>;
+    const supervisorStatusEndpoint = <%- JSON.stringify(isSupervisorView ? `${basePath}/estado-mensajes-asignacion?page=${supervisorStatus.pagination?.page || 1}` : '') %>;
     const statusCard = document.getElementById('statusCard'); const statusPill = document.getElementById('statusPill'); const statusTitle = document.getElementById('statusTitle'); const errorBox = document.getElementById('errorBox');
     const missingBox = document.getElementById('missingBox'); const missingList = document.getElementById('missingList'); const technicalDetails = document.getElementById('technicalDetails'); const technicalError = document.getElementById('technicalError');
-    function formatBogota(value){if(!value)return 'Sin registro desde este proceso';const date=new Date(value);if(Number.isNaN(date.getTime()))return value;return new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).format(date);}
+    function formatBogota(value){if(!value)return 'Sin registro';const date=new Date(value);if(Number.isNaN(date.getTime()))return 'Sin registro';return new Intl.DateTimeFormat('es-CO',{timeZone:'America/Bogota',year:'numeric',month:'2-digit',day:'2-digit',hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true}).format(date);}
     function text(id,value){const element=document.getElementById(id);if(element)element.textContent=value??'—';}
     function renderStatus(data){
       const ready=Boolean(data.ready);statusCard?.classList.toggle('ready',ready);
@@ -319,8 +396,26 @@
       if(technicalDetails)technicalDetails.hidden=!data.technicalLastError;if(technicalError)technicalError.textContent=data.technicalLastError||'';
       text('provider',data.provider||'META_CLOUD_API');text('graphVersion',data.graphVersion||'—');text('phoneNumberId',data.phoneNumberIdMasked||'—');text('assignmentTemplate',data.assignmentTemplateName||'—');text('programmingTemplate',data.programmingTemplateName||'—');text('templateLanguage',data.templateLanguage||'—');text('webhookPath',data.webhookPath||'/webhook/dispatch');text('lastOutbound',formatBogota(data.lastOutboundAt));text('lastInbound',formatBogota(data.lastInboundAt));text('lastProvider',data.lastProviderStatus||'—');
     }
+    function supervisorBadgeClass(key){const classes={PROCESSING:'processing',ACCEPTED:'accepted',SENT:'sent',DELIVERED:'delivered',READ:'read',CONFIRMED:'confirmed',NOVELTY:'novelty',DELIVERY_UNKNOWN:'delivery-unknown',FAILED:'failed',EXPIRED:'expired',DECLINED:'declined'};return classes[key]||'processing';}
+    function appendTextElement(parent,tag,className,value){const element=document.createElement(tag);if(className)element.className=className;element.textContent=value||'';parent.appendChild(element);return element;}
+    function renderSupervisorAssignments(data){
+      const list=document.getElementById('supervisorAssignmentStatusList');const summary=document.getElementById('supervisorStatusSummary');const updated=document.getElementById('supervisorStatusUpdated');if(!list)return;
+      if(summary){summary.replaceChildren();[['Mostrados',data.summary?.shown||0],['Confirmados',data.summary?.confirmed||0],['Entregados o leídos',data.summary?.deliveredOrRead||0],['Requieren revisión',data.summary?.attention||0]].forEach(([label,value])=>appendTextElement(summary,'span','',`${label}: ${value}`));}
+      if(updated)updated.textContent=`Actualizado ${formatBogota(data.generatedAt)}`;
+      list.replaceChildren();const items=Array.isArray(data.items)?data.items:[];
+      if(!items.length){appendTextElement(list,'div','supervisor-status-empty','Todavía no has enviado solicitudes de asignación por WhatsApp.');return;}
+      for(const item of items){
+        const row=document.createElement('article');row.className='supervisor-message-row';if(item.assignmentId)row.dataset.assignmentId=String(item.assignmentId);
+        const worker=document.createElement('div');worker.className='supervisor-worker';appendTextElement(worker,'strong','',item.workerName||'Auxiliar');appendTextElement(worker,'span','',[item.phoneDisplay,item.operationName].filter(Boolean).join(' · '));row.appendChild(worker);
+        const sent=document.createElement('div');sent.className='supervisor-send-meta';appendTextElement(sent,'span','','Solicitud enviada');appendTextElement(sent,'strong','',formatBogota(item.sentAt));row.appendChild(sent);
+        const state=document.createElement('div');state.className='supervisor-state';appendTextElement(state,'span',`supervisor-state-badge ${supervisorBadgeClass(item.statusKey)}`,item.statusLabel||'Procesando envío');appendTextElement(state,'p','supervisor-state-detail',item.statusDetail||'La solicitud todavía está en proceso de envío.');row.appendChild(state);
+        list.appendChild(row);
+      }
+    }
     async function refreshStatus(){try{const response=await fetch(statusEndpoint,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);renderStatus(await response.json());}catch(error){console.error('No fue posible consultar el estado de WhatsApp de despacho.',error);}}
-    document.getElementById('refreshStatus')?.addEventListener('click',refreshStatus);refreshStatus();window.setInterval(refreshStatus,15000);
+    async function refreshSupervisorAssignments(){if(!isSupervisor||!supervisorStatusEndpoint)return;try{const response=await fetch(supervisorStatusEndpoint,{cache:'no-store',credentials:'same-origin',headers:{Accept:'application/json'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);renderSupervisorAssignments(await response.json());}catch(error){console.error('No fue posible actualizar el estado de los mensajes de asignación.',error);}}
+    async function refreshAll(){await Promise.allSettled([refreshStatus(),refreshSupervisorAssignments()]);}
+    document.getElementById('refreshStatus')?.addEventListener('click',refreshAll);refreshAll();window.setInterval(refreshStatus,15000);if(isSupervisor)window.setInterval(refreshSupervisorAssignments,5000);
   </script>
 </body>
 </html>
