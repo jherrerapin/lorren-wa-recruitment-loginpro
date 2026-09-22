@@ -1,5 +1,10 @@
 import express from 'express';
-import { normalizeKnowledgeContent, normalizeKnowledgeScope } from '../services/botKnowledge.js';
+import {
+  deleteBotKnowledgeEntry,
+  normalizeKnowledgeContent,
+  normalizeKnowledgeScope,
+  updateBotKnowledgeEntry
+} from '../services/botKnowledge.js';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -43,16 +48,13 @@ export function botKnowledgeCrudRouter(prisma) {
     }
 
     try {
-      await prisma.botKnowledge.update({
-        where: { id },
-        data: {
-          scope,
-          content,
-          tags: tags || null,
-          vacancyId,
-          candidateId,
-          updatedBy: req.username || req.userRole || 'dev'
-        }
+      await updateBotKnowledgeEntry(prisma, id, {
+        scope,
+        content,
+        tags: tags || null,
+        vacancyId,
+        candidateId,
+        updatedBy: req.username || req.userRole || 'dev'
       });
       return res.redirect(redirectWith('success', 'Aprendizaje actualizado correctamente.'));
     } catch (error) {
@@ -66,7 +68,7 @@ export function botKnowledgeCrudRouter(prisma) {
     if (!id) return res.redirect(redirectWith('error', 'Aprendizaje inválido.'));
 
     try {
-      await prisma.botKnowledge.delete({ where: { id } });
+      await deleteBotKnowledgeEntry(prisma, id);
       return res.redirect(redirectWith('success', 'Aprendizaje eliminado correctamente.'));
     } catch (error) {
       console.error('[bot_knowledge_delete]', { id, error: error?.message || error });
