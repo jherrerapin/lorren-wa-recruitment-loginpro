@@ -6,6 +6,22 @@ const contactKey = ['fr', 'om'].join('');
 const personKey = ['referrer', 'Name'].join('');
 const sourceKey = ['source', 'Type'].join('');
 
+function isCandidateEligibleForPersonAttribution(candidate) {
+  return Boolean(
+    candidate
+    && !candidate.campaignId
+    && candidate[sourceKey] !== 'META_ADS'
+    && !candidate[personKey]
+  );
+}
+
+async function loadAttributionCandidate(prisma, contact) {
+  return prisma.candidate.findUnique({
+    where: { phone: contact },
+    select: { id: true, campaignId: true, [sourceKey]: true, [personKey]: true }
+  });
+}
+
 // Ejecuta clasificacion IA estructurada de origen. No contiene frases quemadas.
 export function runtime(prisma) {
   return async (req, _res, next) => {
@@ -15,16 +31,20 @@ export function runtime(prisma) {
         const contact = message?.[contactKey];
         const body = String(message?.text?.body || '').trim();
         if (!contact || !body) continue;
+
+        // Evita gastar una llamada de IA cuando el candidato ya tiene una fuente
+        // autoritativa o un referidor persistido. La segunda lectura posterior a
+        // la IA conserva la protección frente a cambios concurrentes.
+        const candidateBeforeAi = await loadAttributionCandidate(prisma, contact);
+        if (!isCandidateEligibleForPersonAttribution(candidateBeforeAi)) continue;
+
         const fn = ai[['classify', 'Lead', 'Origin'].join('')];
         const decision = await fn(body);
         const score = Number(decision?.score || 0);
         if (decision?.kind !== 'PERSON' || score < MIN_SCORE || !decision.label) continue;
 
-        const candidate = await prisma.candidate.findUnique({
-          where: { phone: contact },
-          select: { id: true, campaignId: true, [sourceKey]: true, [personKey]: true }
-        });
-        if (!candidate || candidate.campaignId || candidate[sourceKey] === 'META_ADS' || candidate[personKey]) continue;
+        const candidate = await loadAttributionCandidate(prisma, contact);
+        if (!isCandidateEligibleForPersonAttribution(candidate)) continue;
 
         await prisma.candidate.update({
           where: { id: candidate.id },
