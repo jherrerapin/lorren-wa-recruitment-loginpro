@@ -6,9 +6,10 @@ export const LEAD_ORIGIN_SCHEMA = {
     additionalProperties: false,
     properties: {
       kind: { type: 'string', enum: ['UNKNOWN', 'PERSON', 'OTHER'] },
-      score: { type: 'number' },
-      label: { type: ['string', 'null'] }
+      score: { type: 'number', minimum: 0, maximum: 1 },
+      label: { type: ['string', 'null'] },
+      evidence: { type: ['string', 'null'] }
     },
-    required: ['kind', 'score', 'label']
+    required: ['kind', 'score', 'label', 'evidence']
   }
 };
