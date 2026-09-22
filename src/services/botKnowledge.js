@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export const LOGINPRO_SERVICE_NAME = 'LoginPro Service';
 export const LORREN_ROLE_LABEL = `Lórren, reclutadora de ${LOGINPRO_SERVICE_NAME}`;
 
@@ -23,6 +25,48 @@ function normalizeKnowledgeTags(value = '') {
   return normalizeKnowledgeContent(Array.isArray(value) ? value.join('\n') : value);
 }
 
+function normalizeKnowledgeActor(value = '') {
+  return String(value || '').replace(/\s+/g, ' ').trim().slice(0, 160) || null;
+}
+
+function normalizeKnowledgeEntry(input = {}, current = {}) {
+  const scope = normalizeKnowledgeScope(input.scope ?? current.scope);
+  const content = normalizeKnowledgeContent(input.content ?? current.content);
+  const tags = normalizeKnowledgeTags(input.tags ?? current.tags);
+  const vacancyId = scope === 'VACANCY' ? String(input.vacancyId ?? current.vacancyId ?? '').trim() || null : null;
+  const candidateId = scope === 'CANDIDATE' ? String(input.candidateId ?? current.candidateId ?? '').trim() || null : null;
+  const createdBy = normalizeKnowledgeActor(current.createdBy || input.createdBy);
+  const updatedBy = normalizeKnowledgeActor(input.updatedBy || current.updatedBy || createdBy);
+
+  if (!content) throw new Error('bot_knowledge_content_required');
+  if (scope === 'VACANCY' && !vacancyId) throw new Error('bot_knowledge_vacancy_required');
+  if (scope === 'CANDIDATE' && !candidateId) throw new Error('bot_knowledge_candidate_required');
+
+  return {
+    scope,
+    content,
+    tags: tags || null,
+    vacancyId,
+    candidateId,
+    isActive: input.isActive == null ? current.isActive !== false : Boolean(input.isActive),
+    createdBy,
+    updatedBy
+  };
+}
+
+function serializeKnowledgeValue(entry = {}) {
+  return JSON.stringify({
+    scope: entry.scope,
+    content: entry.content,
+    tags: entry.tags || null,
+    vacancyId: entry.vacancyId || null,
+    candidateId: entry.candidateId || null,
+    isActive: entry.isActive !== false,
+    createdBy: entry.createdBy || null,
+    updatedBy: entry.updatedBy || null
+  });
+}
+
 function parseKnowledgeValue(row = {}) {
   if (!String(row?.key || '').startsWith(RECRUITMENT_KNOWLEDGE_PREFIX)) return null;
 
@@ -30,7 +74,7 @@ function parseKnowledgeValue(row = {}) {
     const parsed = JSON.parse(String(row?.value || ''));
     const scope = normalizeKnowledgeScope(parsed?.scope);
     const content = normalizeKnowledgeContent(parsed?.content);
-    if (!content || parsed?.isActive === false) return null;
+    if (!content) return null;
 
     return {
       id: row.id || null,
@@ -40,6 +84,9 @@ function parseKnowledgeValue(row = {}) {
       tags: normalizeKnowledgeTags(parsed?.tags),
       vacancyId: parsed?.vacancyId || null,
       candidateId: parsed?.candidateId || null,
+      isActive: parsed?.isActive !== false,
+      createdBy: normalizeKnowledgeActor(parsed?.createdBy),
+      updatedBy: normalizeKnowledgeActor(parsed?.updatedBy),
       updatedAt: row.updatedAt || null
     };
   } catch {
@@ -54,29 +101,75 @@ function isKnowledgeRelevant(entry, { candidateId = null, vacancyId = null } = {
   return false;
 }
 
-export async function loadBotKnowledgeForContext(prisma, { candidate = null, vacancy = null, limit = 8 } = {}) {
-  if (!prisma?.botKnowledge?.findMany) return [];
+async function findKnowledgeRowById(prisma, id) {
+  if (!prisma?.botKnowledge?.findUnique || !id) return null;
+  return prisma.botKnowledge.findUnique({
+    where: { id },
+    select: { id: true, key: true, value: true, updatedAt: true }
+  });
+}
 
+export async function listBotKnowledgeEntries(prisma, { limit = 100, includeInactive = true } = {}) {
+  if (!prisma?.botKnowledge?.findMany) return [];
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 100, 200));
+  const rows = await prisma.botKnowledge.findMany({
+    where: { key: { startsWith: RECRUITMENT_KNOWLEDGE_PREFIX } },
+    orderBy: { updatedAt: 'desc' },
+    take: safeLimit,
+    select: { id: true, key: true, value: true, updatedAt: true }
+  });
+  const entries = rows.map(parseKnowledgeValue).filter(Boolean);
+  return (includeInactive ? entries : entries.filter((entry) => entry.isActive))
+    .sort((left, right) => Number(right.isActive) - Number(left.isActive));
+}
+
+export async function createBotKnowledgeEntry(prisma, input = {}) {
+  if (!prisma?.botKnowledge?.create) throw new Error('bot_knowledge_create_unavailable');
+  const normalized = normalizeKnowledgeEntry(input);
+  const key = `${RECRUITMENT_KNOWLEDGE_PREFIX}${normalized.scope.toLowerCase()}:${randomUUID()}`;
+  const row = await prisma.botKnowledge.create({
+    data: { key, value: serializeKnowledgeValue(normalized) },
+    select: { id: true, key: true, value: true, updatedAt: true }
+  });
+  return parseKnowledgeValue(row);
+}
+
+export async function updateBotKnowledgeEntry(prisma, id, input = {}) {
+  if (!prisma?.botKnowledge?.update) throw new Error('bot_knowledge_update_unavailable');
+  const row = await findKnowledgeRowById(prisma, id);
+  const current = parseKnowledgeValue(row || {});
+  if (!current) throw new Error('bot_knowledge_not_found');
+  const normalized = normalizeKnowledgeEntry(input, current);
+  const updated = await prisma.botKnowledge.update({
+    where: { id },
+    data: { value: serializeKnowledgeValue(normalized) },
+    select: { id: true, key: true, value: true, updatedAt: true }
+  });
+  return parseKnowledgeValue(updated);
+}
+
+export async function setBotKnowledgeActive(prisma, id, isActive, updatedBy = null) {
+  return updateBotKnowledgeEntry(prisma, id, { isActive: Boolean(isActive), updatedBy });
+}
+
+export async function deleteBotKnowledgeEntry(prisma, id) {
+  if (!prisma?.botKnowledge?.delete) throw new Error('bot_knowledge_delete_unavailable');
+  const row = await findKnowledgeRowById(prisma, id);
+  if (!parseKnowledgeValue(row || {})) throw new Error('bot_knowledge_not_found');
+  return prisma.botKnowledge.delete({ where: { id } });
+}
+
+export async function loadBotKnowledgeForContext(prisma, { candidate = null, vacancy = null, limit = 8 } = {}) {
   const candidateId = candidate?.id || null;
   const vacancyId = vacancy?.id || candidate?.vacancyId || null;
   const safeLimit = Math.max(1, Math.min(Number(limit) || 8, 50));
 
   try {
-    const rows = await prisma.botKnowledge.findMany({
-      where: { key: { startsWith: RECRUITMENT_KNOWLEDGE_PREFIX } },
-      orderBy: { updatedAt: 'desc' },
-      take: Math.max(safeLimit * 4, safeLimit),
-      select: {
-        id: true,
-        key: true,
-        value: true,
-        updatedAt: true
-      }
+    const entries = await listBotKnowledgeEntries(prisma, {
+      limit: Math.max(safeLimit * 4, safeLimit),
+      includeInactive: false
     });
-
-    return rows
-      .map(parseKnowledgeValue)
-      .filter(Boolean)
+    return entries
       .filter((entry) => isKnowledgeRelevant(entry, { candidateId, vacancyId }))
       .slice(0, safeLimit);
   } catch (error) {
