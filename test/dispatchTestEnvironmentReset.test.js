@@ -19,6 +19,7 @@ function deleteModel(name, calls, count = 1) {
 
 function buildPrisma({ marker = null } = {}) {
   const calls = [];
+  const auditDelete = deleteModel('auditEvents', calls, 3);
   const prisma = {
     dispatchWorker: {
       async findMany() { return [{ id: 'worker-test', fullName: 'Sujeto de prueba' }]; }
@@ -71,15 +72,21 @@ function buildPrisma({ marker = null } = {}) {
       async findMany() { return [{ id: 'portal-session-test' }]; },
       ...deleteModel('portalSessions', calls)
     },
-    devAuditEvent: deleteModel('auditEvents', calls, 3),
+    devAuditEvent: {
+      ...auditDelete,
+      async findFirst(args) {
+        calls.push({ name: 'findResetMarker', args });
+        return marker ? { id: 'reset-marker', metadata: marker, createdAt: new Date('2026-07-28T00:00:00.000Z') } : null;
+      },
+      async create(args) {
+        calls.push({ name: 'resetMarker', args });
+        return { id: 'reset-marker', ...args.data };
+      }
+    },
     dispatchAttendanceReview: deleteModel('attendanceReviews', calls),
     dispatchAttendanceMark: deleteModel('attendanceMarks', calls),
     dispatchWhatsappConfirmation: deleteModel('whatsappConfirmations', calls),
     dispatchIncident: deleteModel('incidents', calls),
-    botKnowledge: {
-      async findUnique() { return marker ? { value: marker } : null; },
-      async upsert(args) { calls.push({ name: 'resetMarker', args }); return args.create; }
-    },
     async $transaction(callback) { return callback(prisma); }
   };
   return { prisma, calls };
@@ -125,7 +132,7 @@ test('el reinicio elimina actividad, biometría, portal y evidencia pero conserv
   assert.ok(order.indexOf('assignments') < order.indexOf('serviceRequests'));
 });
 
-test('la limpieza automática se ejecuta una sola vez y deja marcador', async () => {
+test('la limpieza automática se ejecuta una sola vez y deja marcador en auditoría operativa', async () => {
   const first = buildPrisma();
   const result = await resetDispatchTestEnvironmentOnce(first.prisma, {
     deleteEvidence: async () => {},
@@ -133,12 +140,16 @@ test('la limpieza automática se ejecuta una sola vez y deja marcador', async ()
   });
   assert.equal(result.skipped, false);
   const markerCall = first.calls.find((call) => call.name === 'resetMarker');
-  assert.equal(markerCall.args.where.key, DISPATCH_TEST_RESET_ONCE_KEY);
+  assert.equal(markerCall.args.data.entityId, DISPATCH_TEST_RESET_ONCE_KEY);
+  assert.equal(markerCall.args.data.entityType, 'SYSTEM');
+  assert.equal(markerCall.args.data.action, 'DISPATCH_TEST_ENVIRONMENT_RESET_ONCE');
+  assert.equal(first.prisma.botKnowledge, undefined);
 
-  const second = buildPrisma({ marker: '{"completed":true}' });
+  const second = buildPrisma({ marker: { completed: true } });
   const skipped = await resetDispatchTestEnvironmentOnce(second.prisma);
   assert.equal(skipped.skipped, true);
-  assert.equal(second.calls.length, 0);
+  assert.equal(second.calls.filter((call) => call.name === 'resetMarker').length, 0);
+  assert.equal(second.calls.filter((call) => call.name === 'findResetMarker').length, 1);
 });
 
 test('la vista de personal ofrece reinicio solo a DEV con confirmación escrita', () => {
