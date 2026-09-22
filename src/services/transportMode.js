@@ -1,11 +1,5 @@
 import { normalizeComparableText } from './geographyNormalization.js';
 
-export class TransportNormalizationService {
-  normalize(value) {
-    return normalizeTransportMode(value);
-  }
-}
-
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -58,5 +52,3 @@ export function uniqueNormalizedTransportModes(values = []) {
 
   return result.sort((a, b) => a.localeCompare(b, 'es'));
 }
-
-export const transportNormalizationService = new TransportNormalizationService();
