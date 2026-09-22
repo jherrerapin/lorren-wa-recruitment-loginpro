@@ -220,7 +220,7 @@ export async function saveAttendanceBillingStartDate(prisma, input = {}) {
       actorSource: 'attendance-admin-billing',
       ipAddress: normalizeString(input.ipAddress, 120),
       userAgent: normalizeString(input.userAgent, 500),
-      fromValue: previousBillingStartDate ? { billingStartDate: previousBillingStartDate } : null,
+      ...(previousBillingStartDate ? { fromValue: { billingStartDate: previousBillingStartDate } } : {}),
       toValue: { billingStartDate },
       metadata: {
         billingStartDate,
