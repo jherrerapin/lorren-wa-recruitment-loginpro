@@ -19,7 +19,6 @@
  *  - Sin mencionar nunca que es un bot, a menos que el candidato pregunte.
  */
 
-import { FlowDeciderAction } from './flowDecider.js';
 import { modelSupportsTemperature } from './aiParser.js';
 import { OPENAI_CONVERSATION_MODEL } from './openAiModelConfig.js';
 
@@ -28,6 +27,20 @@ const DEFAULT_MODEL = OPENAI_CONVERSATION_MODEL;
 const NATURAL_REPLY_TEMPERATURE = Object.freeze(
   modelSupportsTemperature(DEFAULT_MODEL) ? { temperature: 0.78 } : {}
 );
+
+// Etiquetas internas del redactor. No deciden el flujo ni se exportan como
+// autoridad de dominio: solo seleccionan el fallback que corresponde a una
+// acción que ya fue validada por las autoridades conversacionales previas.
+const FALLBACK_REPLY_ACTION = Object.freeze({
+  IDENTIFY_VACANCY: 'IDENTIFY_VACANCY',
+  PRESENT_VACANCY: 'PRESENT_VACANCY',
+  COLLECT_DATA: 'COLLECT_DATA',
+  REQUEST_CV: 'REQUEST_CV',
+  SCHEDULE_INTERVIEW: 'SCHEDULE_INTERVIEW',
+  CONFIRM_RECEIPT: 'CONFIRM_RECEIPT',
+  SAVE_PROFILE: 'SAVE_PROFILE',
+  ANSWER_FROM_VACANCY: 'ANSWER_FROM_VACANCY'
+});
 
 async function postOpenAi(url, payload, config) {
   const { default: axios } = await import('axios');
@@ -145,18 +158,18 @@ function buildContextualFallbackReply({
   const nextField = humanizeFieldName(missingFields[0]);
   const parts = [];
 
-  if (action === FlowDeciderAction.IDENTIFY_VACANCY) {
+  if (action === FALLBACK_REPLY_ACTION.IDENTIFY_VACANCY) {
     parts.push('Para ubicar tu proceso necesito confirmar la ciudad y la vacante o cargo por el que nos escribes.');
-  } else if (action === FlowDeciderAction.PRESENT_VACANCY) {
+  } else if (action === FALLBACK_REPLY_ACTION.PRESENT_VACANCY) {
     parts.push(vacancyName
       ? `Tengo ubicada la vacante de ${vacancyName}${vacancyCity(vacancy) ? ` en ${vacancyCity(vacancy)}` : ''}.`
       : 'Necesito confirmar la vacante registrada antes de avanzar.');
     parts.push('Si te interesa, seguimos con los datos necesarios para el proceso.');
-  } else if (action === FlowDeciderAction.COLLECT_DATA) {
+  } else if (action === FALLBACK_REPLY_ACTION.COLLECT_DATA) {
     parts.push(`${name ? `${name}, ` : ''}para continuar con tu postulación${vacancyName ? ` a ${vacancyName}` : ''}, necesito confirmar ${nextField || 'el dato pendiente'}.`);
-  } else if (action === FlowDeciderAction.REQUEST_CV) {
+  } else if (action === FALLBACK_REPLY_ACTION.REQUEST_CV) {
     parts.push(`${name ? `${name}, ` : ''}ya tengo los datos principales; ahora necesito que compartas tu hoja de vida en un archivo válido para revisarla.`);
-  } else if (action === FlowDeciderAction.SCHEDULE_INTERVIEW) {
+  } else if (action === FALLBACK_REPLY_ACTION.SCHEDULE_INTERVIEW) {
     if (formattedDate) {
       parts.push(isReschedule
         ? `Te puedo ofrecer el ${formattedDate} como alternativa para entrevista.`
@@ -165,11 +178,11 @@ function buildContextualFallbackReply({
     } else {
       parts.push('El siguiente paso es coordinar entrevista con la información registrada de tu proceso.');
     }
-  } else if (action === FlowDeciderAction.CONFIRM_RECEIPT) {
+  } else if (action === FALLBACK_REPLY_ACTION.CONFIRM_RECEIPT) {
     parts.push('Tu información quedó recibida y seguimos con la revisión del proceso.');
-  } else if (action === FlowDeciderAction.SAVE_PROFILE) {
+  } else if (action === FALLBACK_REPLY_ACTION.SAVE_PROFILE) {
     parts.push('Con la información registrada puedo dejar tu perfil guardado para futuras aperturas compatibles.');
-  } else if (action === FlowDeciderAction.ANSWER_FROM_VACANCY) {
+  } else if (action === FALLBACK_REPLY_ACTION.ANSWER_FROM_VACANCY) {
     parts.push(vacancyName
       ? `Te comparto solo la información registrada de ${vacancyName}.`
       : 'Te comparto solo la información que está registrada de la vacante.');
@@ -288,7 +301,7 @@ export async function generateNaturalReply({
  */
 export async function generateGreeting(vacancies, inboundText, resolvedVacancyId) {
   if (!process.env.OPENAI_API_KEY) {
-    return buildContextualFallbackReply({ defaultAction: FlowDeciderAction.IDENTIFY_VACANCY });
+    return buildContextualFallbackReply({ defaultAction: FALLBACK_REPLY_ACTION.IDENTIFY_VACANCY });
   }
 
   const resolved = vacancies.find((v) => v.id === resolvedVacancyId);
@@ -346,7 +359,7 @@ export async function generateGreeting(vacancies, inboundText, resolvedVacancyId
 
   return buildContextualFallbackReply({
     vacancy: resolved,
-    defaultAction: resolved ? FlowDeciderAction.PRESENT_VACANCY : FlowDeciderAction.IDENTIFY_VACANCY
+    defaultAction: resolved ? FALLBACK_REPLY_ACTION.PRESENT_VACANCY : FALLBACK_REPLY_ACTION.IDENTIFY_VACANCY
   });
 }
 
@@ -370,7 +383,7 @@ export async function generateInterviewOffer({
   const scheduleFallback = () => buildContextualFallbackReply({
     vacancy,
     candidate: fallbackCandidate,
-    defaultAction: FlowDeciderAction.SCHEDULE_INTERVIEW,
+    defaultAction: FALLBACK_REPLY_ACTION.SCHEDULE_INTERVIEW,
     formattedDate,
     documents: safeRequiredDocuments,
     isReschedule
@@ -433,7 +446,7 @@ export async function generateBookingConfirmation({ formattedDate, vacancy, cand
     buildContextualFallbackReply({
       vacancy,
       candidate: fallbackCandidate,
-      defaultAction: FlowDeciderAction.CONFIRM_RECEIPT,
+      defaultAction: FALLBACK_REPLY_ACTION.CONFIRM_RECEIPT,
       formattedDate,
       address,
       documents: docs
