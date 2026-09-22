@@ -258,87 +258,226 @@ export async function claimManualOutboundDelivery(client, input = {}) {
   const candidateId = requireCandidateId(input.candidateId);
   const expected = normalizeManualOutboundSnapshot(input.expected);
   const actor = requireNonEmptyString(input.actor, 'candidate_manual_outbound_actor');
+  const reason = requireNonEmptyString(input.reason, 'candidate_manual_outbound_reason');
   const nowInput = input.now === undefined ? new Date() : input.now;
-  const now = requireValidDate(nowInput, 'candidate_manual_outbound_claim_now');
+  const now = requireValidDate(nowInput, 'candidate_manual_outbound_now');
 
-  if (expected.botPaused) {
+  if ([MANUAL_OUTBOUND_SENDING_MODE, MANUAL_OUTBOUND_UNKNOWN_MODE].includes(expected.botResumeMode)) {
     return loadCandidateTransitionMiss(candidateClient, candidateId, {
-      blockedReason: 'candidate_already_paused'
+      blockedReason: expected.botResumeMode
     });
   }
 
-  const transition = await applyConditionalCandidatePauseTransition(candidateClient, {
+  return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
     expected: manualOutboundExpectedWhere(expected),
     data: {
       botPaused: true,
       botPausedAt: now,
       botPausedBy: actor,
-      botPauseReason: 'Envio manual en curso',
+      botPauseReason: reason,
       botResumeMode: MANUAL_OUTBOUND_SENDING_MODE,
       reminderScheduledFor: null,
-      reminderState: ReminderState.CANCELLED
+      reminderState: 'CANCELLED'
     }
   });
-
-  return {
-    ...transition,
-    expected,
-    claimedAt: now,
-    nextReminderState: ReminderState.CANCELLED
-  };
 }
 
 export async function finalizeManualOutboundDelivery(client, input = {}) {
   const candidateClient = requireCandidateClient(client);
   const candidateId = requireCandidateId(input.candidateId);
   const expected = requireClaimedManualOutboundSnapshot(input.expected);
-  const actor = requireNonEmptyString(input.actor, 'candidate_manual_outbound_actor');
-  const reason = requireNonEmptyString(input.reason, 'candidate_manual_outbound_reason');
+  const previous = input.previous == null ? null : normalizeManualOutboundSnapshot(input.previous);
   const sentAtInput = input.sentAt === undefined ? new Date() : input.sentAt;
   const sentAt = requireValidDate(sentAtInput, 'candidate_manual_outbound_sent_at');
+  const preserveExplicitAdminPause = Boolean(
+    previous?.botPaused
+    && previous?.botResumeMode === EXPLICIT_ADMIN_PAUSE_MODE
+  );
 
-  const transition = await applyConditionalCandidatePauseTransition(candidateClient, {
+  return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
     expected: manualOutboundExpectedWhere(expected),
-    data: {
-      botPaused: true,
-      botPausedAt: sentAt,
-      botPausedBy: actor,
-      botPauseReason: reason,
-      botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE,
-      reminderScheduledFor: null,
-      reminderState: ReminderState.CANCELLED,
-      lastOutboundAt: sentAt
-    }
+    data: preserveExplicitAdminPause
+      ? {
+        botPaused: true,
+        botPausedAt: previous.botPausedAt,
+        botPausedBy: previous.botPausedBy,
+        botPauseReason: previous.botPauseReason,
+        botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE,
+        reminderScheduledFor: previous.reminderScheduledFor,
+        reminderState: previous.reminderState,
+        lastOutboundAt: sentAt
+      }
+      : {
+        lastOutboundAt: sentAt,
+        botResumeMode: 'manual_resume_dashboard'
+      }
   });
+}
 
-  return {
-    ...transition,
-    expected,
-    sentAt,
-    nextReminderState: ReminderState.CANCELLED
-  };
+export async function restoreManualOutboundDelivery(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = requireClaimedManualOutboundSnapshot(input.expected);
+  const previous = normalizeManualOutboundSnapshot(input.previous);
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected: manualOutboundExpectedWhere(expected),
+    data: previous
+  });
 }
 
 export async function markManualOutboundDeliveryUnknown(client, input = {}) {
   const candidateClient = requireCandidateClient(client);
   const candidateId = requireCandidateId(input.candidateId);
   const expected = requireClaimedManualOutboundSnapshot(input.expected);
-  const actor = requireNonEmptyString(input.actor, 'candidate_manual_outbound_actor');
-  const reason = requireNonEmptyString(input.reason, 'candidate_manual_outbound_reason');
-  const nowInput = input.now === undefined ? new Date() : input.now;
-  const now = requireValidDate(nowInput, 'candidate_manual_outbound_unknown_now');
 
-  const transition = await applyConditionalCandidatePauseTransition(candidateClient, {
+  return applyConditionalCandidatePauseTransition(candidateClient, {
     candidateId,
     expected: manualOutboundExpectedWhere(expected),
     data: {
+      botResumeMode: MANUAL_OUTBOUND_UNKNOWN_MODE
+    }
+  });
+}
+
+export async function recordCandidateAutomaticOutboundSent(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const sentAtInput = input.sentAt === undefined ? new Date() : input.sentAt;
+  const sentAt = requireValidDate(sentAtInput, 'candidate_automatic_outbound_sent_at');
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      OR: [
+        { lastOutboundAt: null },
+        { lastOutboundAt: { lt: sentAt } }
+      ]
+    },
+    data: { lastOutboundAt: sentAt }
+  });
+
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    sentAt
+  };
+}
+
+export async function completeSupervisorReviewAfterDelivery(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeSupervisorReviewSnapshot(input.expected);
+  const sentAtInput = input.sentAt === undefined ? new Date() : input.sentAt;
+  const sentAt = requireValidDate(sentAtInput, 'candidate_supervisor_review_sent_at');
+
+  if ([MANUAL_OUTBOUND_SENDING_MODE, MANUAL_OUTBOUND_UNKNOWN_MODE].includes(expected.botResumeMode)) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId, {
+      blockedReason: expected.botResumeMode
+    });
+  }
+
+  return applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected: supervisorReviewExpectedWhere(expected),
+    data: {
+      botPaused: false,
+      botPausedAt: null,
+      botPausedBy: null,
+      botPauseReason: null,
+      botResumeMode: null,
+      lastOutboundAt: sentAt
+    }
+  });
+}
+
+
+function normalizeConversationEnginePauseSnapshot(expected) {
+  const requiredFields = [
+    'botPaused',
+    'botPausedAt',
+    'botPausedBy',
+    'botPauseReason',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_engine_pause_snapshot_required');
+  }
+
+  const pauseSnapshot = normalizeExpectedPauseSnapshot(expected);
+  return {
+    botPaused: pauseSnapshot.botPaused,
+    botPausedAt: pauseSnapshot.botPausedAt,
+    botPausedBy: requireNullableSnapshotString(
+      expected.botPausedBy,
+      'candidate_engine_pause_expected_bot_paused_by'
+    ),
+    botPauseReason: requireNullableSnapshotString(
+      expected.botPauseReason,
+      'candidate_engine_pause_expected_reason'
+    ),
+    botResumeMode: requireNullableSnapshotString(
+      expected.botResumeMode,
+      'candidate_engine_pause_expected_resume_mode'
+    ),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_engine_pause_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_engine_pause_reminder_state'
+    )
+  };
+}
+
+function conversationEnginePauseExpectedWhere(snapshot) {
+  return {
+    botPaused: snapshot.botPaused,
+    botPausedAt: millisecondDateFilter(snapshot.botPausedAt),
+    botPausedBy: snapshot.botPausedBy,
+    botPauseReason: snapshot.botPauseReason,
+    botResumeMode: snapshot.botResumeMode,
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function pauseCandidateAutomationFromConversationEngine(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeConversationEnginePauseSnapshot(input.expected);
+  const reason = requireNonEmptyString(input.reason, 'candidate_engine_pause_reason');
+  const pausedAtInput = input.pausedAt === undefined ? new Date() : input.pausedAt;
+  const pausedAt = requireValidDate(pausedAtInput, 'candidate_engine_pause_at');
+
+  if (expected.botPaused) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId, {
+      blockedReason: 'already_paused'
+    });
+  }
+
+  const transition = await applyConditionalCandidatePauseTransition(candidateClient, {
+    candidateId,
+    expected: conversationEnginePauseExpectedWhere(expected),
+    data: {
       botPaused: true,
-      botPausedAt: now,
-      botPausedBy: actor,
+      botPausedAt: pausedAt,
       botPauseReason: reason,
-      botResumeMode: MANUAL_OUTBOUND_UNKNOWN_MODE,
       reminderScheduledFor: null,
       reminderState: ReminderState.CANCELLED
     }
@@ -347,187 +486,36 @@ export async function markManualOutboundDeliveryUnknown(client, input = {}) {
   return {
     ...transition,
     expected,
-    markedAt: now,
+    pausedAt,
+    reason,
     nextReminderState: ReminderState.CANCELLED
   };
 }
 
-export async function rollbackManualOutboundClaim(client, input = {}) {
-  const candidateClient = requireCandidateClient(client);
-  const candidateId = requireCandidateId(input.candidateId);
-  const expected = requireClaimedManualOutboundSnapshot(input.expected);
 
-  const transition = await applyConditionalCandidatePauseTransition(candidateClient, {
-    candidateId,
-    expected: manualOutboundExpectedWhere(expected),
-    data: {
-      botPaused: expected.botPaused,
-      botPausedAt: expected.botPausedAt,
-      botPausedBy: expected.botPausedBy,
-      botPauseReason: expected.botPauseReason,
-      botResumeMode: expected.botResumeMode,
-      reminderScheduledFor: expected.reminderScheduledFor,
-      reminderState: expected.reminderState,
-      lastOutboundAt: expected.lastOutboundAt
-    }
-  });
-
-  return {
-    ...transition,
-    expected
-  };
-}
-
-export async function acknowledgeSupervisorReview(client, input = {}) {
-  const candidateClient = requireCandidateClient(client);
-  const candidateId = requireCandidateId(input.candidateId);
-  const expected = normalizeSupervisorReviewSnapshot(input.expected);
-  const actor = requireNonEmptyString(input.actor, 'candidate_supervisor_review_actor');
-  const nowInput = input.now === undefined ? new Date() : input.now;
-  const now = requireValidDate(nowInput, 'candidate_supervisor_review_now');
-
-  return applyConditionalCandidatePauseTransition(candidateClient, {
-    candidateId,
-    expected: supervisorReviewExpectedWhere(expected),
-    data: {
-      botPaused: true,
-      botPausedAt: now,
-      botPausedBy: actor,
-      botPauseReason: 'Supervisor revisó la conversación',
-      botResumeMode: EXPLICIT_ADMIN_PAUSE_MODE
-    }
-  });
-}
-
-function requireExpectedStateObject(expected, fieldName) {
-  if (!expected || typeof expected !== 'object' || Array.isArray(expected)) {
-    throw new TypeError(`${fieldName}_required`);
-  }
-  return expected;
-}
-
-function requireNullableSnapshotString(value, fieldName) {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== 'string') throw new TypeError(`${fieldName}_invalid`);
-  return value;
-}
-
-function normalizeVacancyFirstGateSnapshot(expected = {}) {
-  const snapshot = requireExpectedStateObject(expected, 'candidate_vacancy_first_expected_snapshot');
-  return {
-    currentStep: requireConversationStep(snapshot.currentStep, 'candidate_vacancy_first_current_step'),
-    vacancyId: requireNullableSnapshotString(snapshot.vacancyId, 'candidate_vacancy_first_vacancy_id'),
-    botResumeMode: requireNullableSnapshotString(snapshot.botResumeMode, 'candidate_vacancy_first_bot_resume_mode'),
-    reminderScheduledFor: normalizeNullableDate(
-      snapshot.reminderScheduledFor,
-      'candidate_vacancy_first_reminder_scheduled_for'
-    ),
-    reminderState: requireReminderState(snapshot.reminderState, 'candidate_vacancy_first_reminder_state')
-  };
-}
-
-function vacancyFirstGateExpectedWhere(snapshot) {
-  return {
-    currentStep: snapshot.currentStep,
-    vacancyId: snapshot.vacancyId,
-    botResumeMode: snapshot.botResumeMode,
-    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
-    reminderState: snapshot.reminderState
-  };
-}
-
-export async function applyCandidateVacancyFirstGateDecision(client, input = {}) {
-  const candidateClient = requireCandidateClient(client);
-  const candidateId = requireCandidateId(input.candidateId);
-  const expected = normalizeVacancyFirstGateSnapshot(input.expected);
-  const update = input.update;
-  if (!update || typeof update !== 'object' || Array.isArray(update) || !Object.keys(update).length) {
-    throw new TypeError('candidate_vacancy_first_update_required');
+function normalizeManualReviewPauseSnapshot(expected) {
+  const requiredFields = [
+    'botPaused',
+    'botPausedAt',
+    'botPausedBy',
+    'botPauseReason',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_manual_review_pause_snapshot_required');
   }
 
-  const result = await candidateClient.candidate.updateMany({
-    where: {
-      id: candidateId,
-      ...vacancyFirstGateExpectedWhere(expected)
-    },
-    data: update
-  });
-
-  const candidate = await candidateClient.candidate.findUnique({
-    where: { id: candidateId }
-  });
-
+  const pauseSnapshot = normalizeExpectedPauseSnapshot(expected);
   return {
-    count: Number(result?.count || 0),
-    candidate,
-    expected,
-    update
-  };
-}
-
-function normalizeSilentProfileCaptureSnapshot(expected = {}) {
-  const snapshot = requireExpectedStateObject(expected, 'candidate_silent_capture_expected_snapshot');
-  return {
-    currentStep: requireConversationStep(snapshot.currentStep, 'candidate_silent_capture_current_step'),
-    vacancyId: requireNullableSnapshotString(snapshot.vacancyId, 'candidate_silent_capture_vacancy_id'),
-    botResumeMode: requireNullableSnapshotString(snapshot.botResumeMode, 'candidate_silent_capture_bot_resume_mode'),
-    reminderScheduledFor: normalizeNullableDate(
-      snapshot.reminderScheduledFor,
-      'candidate_silent_capture_reminder_scheduled_for'
-    ),
-    reminderState: requireReminderState(snapshot.reminderState, 'candidate_silent_capture_reminder_state'),
-    ...Object.fromEntries(
-      Object.entries(snapshot).filter(([field]) => ![
-        'currentStep',
-        'vacancyId',
-        'botResumeMode',
-        'reminderScheduledFor',
-        'reminderState'
-      ].includes(field))
-    )
-  };
-}
-
-function silentProfileCaptureExpectedWhere(snapshot) {
-  return {
-    ...snapshot,
-    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor)
-  };
-}
-
-export async function applyCandidateSilentProfileCapture(client, input = {}) {
-  const candidateClient = requireCandidateClient(client);
-  const candidateId = requireCandidateId(input.candidateId);
-  const expected = normalizeSilentProfileCaptureSnapshot(input.expected);
-  const update = input.update;
-  if (!update || typeof update !== 'object' || Array.isArray(update) || !Object.keys(update).length) {
-    throw new TypeError('candidate_silent_capture_update_required');
-  }
-
-  const result = await candidateClient.candidate.updateMany({
-    where: {
-      id: candidateId,
-      ...silentProfileCaptureExpectedWhere(expected)
-    },
-    data: update
-  });
-
-  const candidate = await candidateClient.candidate.findUnique({
-    where: { id: candidateId }
-  });
-
-  return {
-    count: Number(result?.count || 0),
-    candidate,
-    profileFields: Object.keys(update)
-  };
-}
-
-function normalizeManualReviewPauseSnapshot(expected = {}) {
-  const snapshot = requireExpectedStateObject(expected, 'candidate_manual_review_pause_expected_snapshot');
-  return {
-    botPaused: Boolean(expected.botPaused),
-    botPausedAt: normalizeNullableDate(expected.botPausedAt, 'candidate_manual_review_pause_expected_bot_paused_at'),
+    botPaused: pauseSnapshot.botPaused,
+    botPausedAt: pauseSnapshot.botPausedAt,
     botPausedBy: requireNullableSnapshotString(
       expected.botPausedBy,
       'candidate_manual_review_pause_expected_bot_paused_by'
@@ -658,12 +646,12 @@ export async function scheduleCandidateMultilineWindow(client, input = {}) {
   });
   const batchVersion = requireMultilineBatchVersion(updated?.multilineBatchVersion);
 
-  // La ventana real siempre queda persistida. El caller HTTP no debe dormir
-  // durante toda la ventana: por defecto devuelve 0 ms y el worker reclama el
-  // lote cuando multilineWindowUntil vence. El modo síncrono queda disponible
-  // solo para herramientas/pruebas que lo soliciten expresamente.
-  const windowMs = input.awaitWindow === true ? scheduledWindowMs : 0;
-  return { windowMs, scheduledWindowMs, windowUntil, batchVersion };
+  return {
+    windowMs: input.awaitWindow === true ? scheduledWindowMs : 0,
+    scheduledWindowMs,
+    windowUntil,
+    batchVersion
+  };
 }
 
 export async function acquireCandidateMultilineBatch(client, input = {}) {
@@ -775,6 +763,14 @@ export async function completeCandidateNoInterestTransition(client, input = {}) 
   const candidateId = requireCandidateId(input.candidateId);
   const expected = normalizeNoInterestSnapshot(input.expected);
 
+  if (
+    expected.currentStep === ConversationStep.DONE
+    && expected.reminderScheduledFor === null
+    && expected.reminderState === ReminderState.SKIPPED
+  ) {
+    throw new TypeError('candidate_no_interest_already_done');
+  }
+
   const result = await candidateClient.candidate.updateMany({
     where: {
       id: candidateId,
@@ -797,5 +793,914 @@ export async function completeCandidateNoInterestTransition(client, input = {}) 
     expected,
     nextStep: ConversationStep.DONE,
     nextReminderState: ReminderState.SKIPPED
+  };
+}
+
+function requireCandidateStatus(value, fieldName) {
+  if (typeof value !== 'string' || !Object.values(CandidateStatus).includes(value)) {
+    throw new TypeError(`${fieldName}_invalid`);
+  }
+  return value;
+}
+
+function requireNullableSnapshotString(value, fieldName) {
+  if (value === null) return null;
+  if (typeof value !== 'string') throw new TypeError(`${fieldName}_invalid`);
+  return value;
+}
+
+function requireStrictDecisionString(value, fieldName) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${fieldName}_required`);
+  }
+  return value;
+}
+
+function normalizeRequirementRejectionSnapshot(expected) {
+  const requiredFields = [
+    'currentStep',
+    'status',
+    'rejectionReason',
+    'rejectionDetails',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_requirement_rejection_snapshot_required');
+  }
+
+  return {
+    currentStep: requireConversationStep(
+      expected.currentStep,
+      'candidate_requirement_rejection_current_step'
+    ),
+    status: requireCandidateStatus(
+      expected.status,
+      'candidate_requirement_rejection_status'
+    ),
+    rejectionReason: requireNullableSnapshotString(
+      expected.rejectionReason,
+      'candidate_requirement_rejection_expected_reason'
+    ),
+    rejectionDetails: requireNullableSnapshotString(
+      expected.rejectionDetails,
+      'candidate_requirement_rejection_expected_details'
+    ),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_requirement_rejection_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_requirement_rejection_reminder_state'
+    )
+  };
+}
+
+function requirementRejectionExpectedWhere(snapshot) {
+  return {
+    currentStep: snapshot.currentStep,
+    status: snapshot.status,
+    rejectionReason: snapshot.rejectionReason,
+    rejectionDetails: snapshot.rejectionDetails,
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function completeCandidateRequirementRejection(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeRequirementRejectionSnapshot(input.expected);
+  const reason = requireStrictDecisionString(
+    input.reason,
+    'candidate_requirement_rejection_reason'
+  );
+  const details = requireStrictDecisionString(
+    input.details,
+    'candidate_requirement_rejection_details'
+  );
+
+  if (expected.status === CandidateStatus.RECHAZADO) {
+    return loadCandidateTransitionMiss(candidateClient, candidateId, {
+      blockedReason: 'already_rejected'
+    });
+  }
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...requirementRejectionExpectedWhere(expected)
+    },
+    data: {
+      currentStep: ConversationStep.DONE,
+      status: CandidateStatus.RECHAZADO,
+      rejectionReason: reason,
+      rejectionDetails: details,
+      reminderScheduledFor: null,
+      reminderState: ReminderState.SKIPPED
+    }
+  });
+
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    reason,
+    details,
+    nextStep: ConversationStep.DONE,
+    nextStatus: CandidateStatus.RECHAZADO,
+    nextReminderState: ReminderState.SKIPPED
+  };
+}
+
+
+
+
+
+export const CANDIDATE_PAUSED_VACANCY_ACTIONS = Object.freeze({
+  REGISTRATION_OFFERED: 'REGISTRATION_OFFERED',
+  FUTURE_PROFILE_ACCEPTED: 'FUTURE_PROFILE_ACCEPTED',
+  FUTURE_PROFILE_DECLINED: 'FUTURE_PROFILE_DECLINED'
+});
+
+const PAUSED_VACANCY_WAITING_MODE = 'paused_vacancy';
+const PAUSED_VACANCY_CAPTURE_MODE = 'paused_vacancy_capture';
+
+const CANDIDATE_PAUSED_VACANCY_DESTINATIONS = Object.freeze({
+  [CANDIDATE_PAUSED_VACANCY_ACTIONS.REGISTRATION_OFFERED]: Object.freeze({
+    currentStep: ConversationStep.GREETING_SENT,
+    botResumeMode: PAUSED_VACANCY_WAITING_MODE,
+    reminderScheduledFor: null,
+    reminderState: ReminderState.SKIPPED
+  }),
+  [CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_ACCEPTED]: Object.freeze({
+    currentStep: ConversationStep.COLLECTING_DATA,
+    botResumeMode: PAUSED_VACANCY_CAPTURE_MODE,
+    reminderScheduledFor: null,
+    reminderState: ReminderState.SKIPPED
+  }),
+  [CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_DECLINED]: Object.freeze({
+    currentStep: ConversationStep.DONE,
+    botResumeMode: null,
+    reminderScheduledFor: null,
+    reminderState: ReminderState.SKIPPED
+  })
+});
+
+function requireCandidatePausedVacancyAction(value) {
+  const action = String(value || '').trim();
+  if (!Object.hasOwn(CANDIDATE_PAUSED_VACANCY_DESTINATIONS, action)) {
+    throw new TypeError('candidate_paused_vacancy_action_invalid');
+  }
+  return action;
+}
+
+function normalizeCandidatePausedVacancySnapshot(expected) {
+  const requiredFields = [
+    'currentStep',
+    'vacancyId',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_paused_vacancy_snapshot_required');
+  }
+
+  return {
+    currentStep: requireConversationStep(
+      expected.currentStep,
+      'candidate_paused_vacancy_expected_step'
+    ),
+    vacancyId: requireNullableSnapshotString(
+      expected.vacancyId,
+      'candidate_paused_vacancy_expected_vacancy_id'
+    ),
+    botResumeMode: requireNullableSnapshotString(
+      expected.botResumeMode,
+      'candidate_paused_vacancy_expected_resume_mode'
+    ),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_paused_vacancy_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_paused_vacancy_expected_reminder_state'
+    )
+  };
+}
+
+function candidatePausedVacancyExpectedWhere(expected) {
+  return {
+    currentStep: expected.currentStep,
+    vacancyId: expected.vacancyId,
+    botResumeMode: expected.botResumeMode,
+    reminderScheduledFor: millisecondDateFilter(expected.reminderScheduledFor),
+    reminderState: expected.reminderState
+  };
+}
+
+function validateCandidatePausedVacancyOrigin(action, expected) {
+  const requiresWaitingMode = action === CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_ACCEPTED
+    || action === CANDIDATE_PAUSED_VACANCY_ACTIONS.FUTURE_PROFILE_DECLINED;
+  if (requiresWaitingMode && expected.botResumeMode !== PAUSED_VACANCY_WAITING_MODE) {
+    throw new TypeError('candidate_paused_vacancy_waiting_mode_required');
+  }
+  if (
+    action === CANDIDATE_PAUSED_VACANCY_ACTIONS.REGISTRATION_OFFERED
+    && expected.botResumeMode === PAUSED_VACANCY_CAPTURE_MODE
+  ) {
+    throw new TypeError('candidate_paused_vacancy_capture_mode_not_offerable');
+  }
+}
+
+export async function applyCandidatePausedVacancyDecision(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const action = requireCandidatePausedVacancyAction(input.action);
+
+  if (
+    Object.hasOwn(input, 'nextStep')
+    || Object.hasOwn(input, 'nextResumeMode')
+    || Object.hasOwn(input, 'nextReminderState')
+  ) {
+    throw new TypeError('candidate_paused_vacancy_next_state_not_allowed');
+  }
+  if (
+    Object.hasOwn(input, 'update')
+    || Object.hasOwn(input, 'data')
+    || Object.hasOwn(input, 'patch')
+  ) {
+    throw new TypeError('candidate_paused_vacancy_patch_not_allowed');
+  }
+
+  const expected = normalizeCandidatePausedVacancySnapshot(input.expected);
+  validateCandidatePausedVacancyOrigin(action, expected);
+  const destination = CANDIDATE_PAUSED_VACANCY_DESTINATIONS[action];
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...candidatePausedVacancyExpectedWhere(expected)
+    },
+    data: destination
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    action,
+    expected,
+    nextStep: destination.currentStep,
+    nextResumeMode: destination.botResumeMode,
+    nextReminderState: destination.reminderState
+  };
+}
+
+function normalizeCandidateInterviewCancellationReminderSnapshot(expected) {
+  const requiredFields = [
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_interview_cancellation_reminder_snapshot_required');
+  }
+
+  return {
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_interview_cancellation_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_interview_cancellation_expected_reminder_state'
+    )
+  };
+}
+
+function candidateInterviewCancellationReminderExpectedWhere(snapshot) {
+  return {
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function reflectCandidateInterviewCancellationReminder(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+
+  if (Object.hasOwn(input, 'nextReminderState') || Object.hasOwn(input, 'nextStep')) {
+    throw new TypeError('candidate_interview_cancellation_next_state_not_allowed');
+  }
+  if (Object.hasOwn(input, 'update') || Object.hasOwn(input, 'data')) {
+    throw new TypeError('candidate_interview_cancellation_patch_not_allowed');
+  }
+
+  const expected = normalizeCandidateInterviewCancellationReminderSnapshot(input.expected);
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...candidateInterviewCancellationReminderExpectedWhere(expected)
+    },
+    data: {
+      reminderScheduledFor: null,
+      reminderState: ReminderState.SKIPPED
+    }
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    nextReminderState: ReminderState.SKIPPED
+  };
+}
+
+const CANDIDATE_INTERVIEW_RESCHEDULE_PROGRESS_ORIGINS = new Set([
+  ConversationStep.SCHEDULING,
+  ConversationStep.SCHEDULED
+]);
+
+function normalizeCandidateInterviewRescheduleProgressSnapshot(expected) {
+  const requiredFields = [
+    'currentStep',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_interview_reschedule_snapshot_required');
+  }
+
+  const currentStep = requireConversationStep(
+    expected.currentStep,
+    'candidate_interview_reschedule_expected_current_step'
+  );
+  if (!CANDIDATE_INTERVIEW_RESCHEDULE_PROGRESS_ORIGINS.has(currentStep)) {
+    throw new TypeError('candidate_interview_reschedule_expected_step_invalid');
+  }
+
+  return {
+    currentStep,
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_interview_reschedule_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_interview_reschedule_expected_reminder_state'
+    )
+  };
+}
+
+function candidateInterviewRescheduleProgressExpectedWhere(snapshot) {
+  return {
+    currentStep: snapshot.currentStep,
+    reminderScheduledFor: millisecondDateFilter(snapshot.reminderScheduledFor),
+    reminderState: snapshot.reminderState
+  };
+}
+
+export async function reflectCandidateInterviewRescheduleProgress(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+
+  if (Object.hasOwn(input, 'nextStep')) {
+    throw new TypeError('candidate_interview_reschedule_next_step_not_allowed');
+  }
+  if (Object.hasOwn(input, 'update') || Object.hasOwn(input, 'data')) {
+    throw new TypeError('candidate_interview_reschedule_patch_not_allowed');
+  }
+
+  const expected = normalizeCandidateInterviewRescheduleProgressSnapshot(input.expected);
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...candidateInterviewRescheduleProgressExpectedWhere(expected)
+    },
+    data: {
+      currentStep: ConversationStep.SCHEDULING,
+      reminderScheduledFor: null,
+      reminderState: ReminderState.SKIPPED
+    }
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    nextStep: ConversationStep.SCHEDULING,
+    nextReminderState: ReminderState.SKIPPED
+  };
+}
+
+export const CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS = Object.freeze({
+  MANUAL_BOOKING_CREATED: 'MANUAL_BOOKING_CREATED',
+  LAST_BOOKING_DELETED: 'LAST_BOOKING_DELETED'
+});
+
+const CANDIDATE_ADMIN_INTERVIEW_PROGRESS_DESTINATIONS = new Map([
+  [
+    CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS.MANUAL_BOOKING_CREATED,
+    ConversationStep.SCHEDULED
+  ],
+  [
+    CANDIDATE_ADMIN_INTERVIEW_PROGRESS_ACTIONS.LAST_BOOKING_DELETED,
+    ConversationStep.SCHEDULING
+  ]
+]);
+
+function requireCandidateAdminInterviewProgressAction(value) {
+  const action = String(value || '').trim();
+  if (!CANDIDATE_ADMIN_INTERVIEW_PROGRESS_DESTINATIONS.has(action)) {
+    throw new TypeError('candidate_admin_interview_action_invalid');
+  }
+  return action;
+}
+
+export async function reflectCandidateAdminInterviewProgress(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const action = requireCandidateAdminInterviewProgressAction(input.action);
+  const expectedStep = requireConversationStep(
+    input.expected?.currentStep,
+    'candidate_admin_interview_expected_current_step'
+  );
+  const actor = requireNonEmptyString(input.actor, 'candidate_admin_interview_actor');
+  const reason = requireNonEmptyString(input.reason, 'candidate_admin_interview_reason');
+
+  if (Object.hasOwn(input, 'nextStep')) {
+    throw new TypeError('candidate_admin_interview_next_step_not_allowed');
+  }
+
+  const nextStep = CANDIDATE_ADMIN_INTERVIEW_PROGRESS_DESTINATIONS.get(action);
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      currentStep: expectedStep
+    },
+    data: {
+      currentStep: nextStep
+    }
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    action,
+    actor,
+    reason,
+    expectedStep,
+    nextStep
+  };
+}
+
+
+const CONSENT_STEP_DESTINATIONS = new Set([
+  ConversationStep.COLLECTING_DATA,
+  ConversationStep.GREETING_SENT,
+  ConversationStep.DONE
+]);
+
+export async function transitionCandidateConsentStep(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expectedStep = requireConversationStep(
+    input.expected?.currentStep,
+    'candidate_consent_expected_current_step'
+  );
+  const nextStep = requireConversationStep(input.nextStep, 'candidate_consent_next_step');
+
+  if (!CONSENT_STEP_DESTINATIONS.has(nextStep)) {
+    throw new TypeError('candidate_consent_next_step_invalid');
+  }
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      currentStep: expectedStep
+    },
+    data: {
+      currentStep: nextStep
+    }
+  });
+
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expectedStep,
+    nextStep
+  };
+}
+
+
+const VACANCY_FIRST_GATE_DESTINATIONS = new Set([
+  ConversationStep.GREETING_SENT,
+  ConversationStep.COLLECTING_DATA,
+  ConversationStep.CONFIRMING_DATA,
+  ConversationStep.ASK_CV
+]);
+
+const VACANCY_FIRST_GATE_UPDATE_FIELDS = new Set([
+  'currentStep',
+  'vacancyId',
+  'botResumeMode',
+  'reminderScheduledFor',
+  'reminderState'
+]);
+
+function normalizeVacancyFirstGateSnapshot(expected) {
+  const requiredFields = [
+    'currentStep',
+    'vacancyId',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_vacancy_first_gate_snapshot_required');
+  }
+
+  return {
+    currentStep: requireConversationStep(expected.currentStep, 'candidate_vacancy_first_gate_expected_step'),
+    vacancyId: requireNullableSnapshotString(expected.vacancyId, 'candidate_vacancy_first_gate_expected_vacancy_id'),
+    botResumeMode: requireNullableSnapshotString(expected.botResumeMode, 'candidate_vacancy_first_gate_expected_resume_mode'),
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_vacancy_first_gate_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_vacancy_first_gate_expected_reminder_state'
+    )
+  };
+}
+
+function normalizeVacancyFirstGateUpdate(update) {
+  if (!update || typeof update !== 'object' || Array.isArray(update)) {
+    throw new TypeError('candidate_vacancy_first_gate_update_required');
+  }
+  const fields = Object.keys(update);
+  if (!fields.length || !Object.hasOwn(update, 'currentStep')) {
+    throw new TypeError('candidate_vacancy_first_gate_current_step_required');
+  }
+  const invalidField = fields.find((field) => !VACANCY_FIRST_GATE_UPDATE_FIELDS.has(field));
+  if (invalidField) {
+    throw new TypeError(`candidate_vacancy_first_gate_update_field_not_allowed:${invalidField}`);
+  }
+
+  const currentStep = requireConversationStep(update.currentStep, 'candidate_vacancy_first_gate_next_step');
+  if (!VACANCY_FIRST_GATE_DESTINATIONS.has(currentStep)) {
+    throw new TypeError('candidate_vacancy_first_gate_next_step_invalid');
+  }
+
+  const normalized = { currentStep };
+  if (Object.hasOwn(update, 'vacancyId')) {
+    normalized.vacancyId = requireNullableSnapshotString(
+      update.vacancyId,
+      'candidate_vacancy_first_gate_vacancy_id'
+    );
+  }
+  if (Object.hasOwn(update, 'botResumeMode')) {
+    normalized.botResumeMode = requireNullableSnapshotString(
+      update.botResumeMode,
+      'candidate_vacancy_first_gate_resume_mode'
+    );
+  }
+  if (Object.hasOwn(update, 'reminderScheduledFor')) {
+    normalized.reminderScheduledFor = normalizeNullableDate(
+      update.reminderScheduledFor,
+      'candidate_vacancy_first_gate_reminder_scheduled_for'
+    );
+  }
+  if (Object.hasOwn(update, 'reminderState')) {
+    normalized.reminderState = requireReminderState(
+      update.reminderState,
+      'candidate_vacancy_first_gate_reminder_state'
+    );
+  }
+  return normalized;
+}
+
+function vacancyFirstGateExpectedWhere(expected) {
+  return {
+    currentStep: expected.currentStep,
+    vacancyId: expected.vacancyId,
+    botResumeMode: expected.botResumeMode,
+    reminderScheduledFor: millisecondDateFilter(expected.reminderScheduledFor),
+    reminderState: expected.reminderState
+  };
+}
+
+export async function applyCandidateVacancyFirstGateDecision(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const expected = normalizeVacancyFirstGateSnapshot(input.expected);
+  const update = normalizeVacancyFirstGateUpdate(input.update);
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...vacancyFirstGateExpectedWhere(expected)
+    },
+    data: update
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    update
+  };
+}
+
+
+
+const SILENT_PROFILE_CAPTURE_PROFILE_FIELDS = new Set([
+  'fullName',
+  'documentType',
+  'documentNumber',
+  'age',
+  'locality',
+  'neighborhood',
+  'medicalRestrictions',
+  'transportMode',
+  'experienceInfo',
+  'experienceTime',
+  'experienceSummary',
+  'gender'
+]);
+
+const SILENT_PROFILE_CAPTURE_UPDATE_FIELDS = new Set([
+  ...SILENT_PROFILE_CAPTURE_PROFILE_FIELDS,
+  'currentStep',
+  'botResumeMode',
+  'reminderScheduledFor',
+  'reminderState'
+]);
+
+const SILENT_PROFILE_CAPTURE_GENDERS = new Set(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']);
+
+function normalizeSilentProfileExpectedValue(field, value) {
+  if (field === 'age') {
+    if (value === null) return null;
+    if (!Number.isSafeInteger(value)) {
+      throw new TypeError('candidate_silent_profile_capture_expected_age_invalid');
+    }
+    return value;
+  }
+
+  if (field === 'gender') {
+    if (value === null) return null;
+    if (typeof value !== 'string' || !SILENT_PROFILE_CAPTURE_GENDERS.has(value)) {
+      throw new TypeError('candidate_silent_profile_capture_expected_gender_invalid');
+    }
+    return value;
+  }
+
+  return requireNullableSnapshotString(
+    value,
+    `candidate_silent_profile_capture_expected_${field}`
+  );
+}
+
+function normalizeSilentProfileUpdateValue(field, value) {
+  if (field === 'age') {
+    if (!Number.isSafeInteger(value)) {
+      throw new TypeError('candidate_silent_profile_capture_age_invalid');
+    }
+    return value;
+  }
+
+  if (field === 'gender') {
+    if (typeof value !== 'string' || !SILENT_PROFILE_CAPTURE_GENDERS.has(value)) {
+      throw new TypeError('candidate_silent_profile_capture_gender_invalid');
+    }
+    return value;
+  }
+
+  return requireStrictDecisionString(
+    value,
+    `candidate_silent_profile_capture_${field}`
+  );
+}
+
+function normalizeSilentProfileCaptureUpdate(update) {
+  if (!update || typeof update !== 'object' || Array.isArray(update)) {
+    throw new TypeError('candidate_silent_profile_capture_update_required');
+  }
+
+  const fields = Object.keys(update);
+  const requiredFields = ['currentStep', 'reminderScheduledFor', 'reminderState'];
+  if (requiredFields.some((field) => !Object.hasOwn(update, field))) {
+    throw new TypeError('candidate_silent_profile_capture_progress_update_required');
+  }
+
+  const invalidField = fields.find((field) => !SILENT_PROFILE_CAPTURE_UPDATE_FIELDS.has(field));
+  if (invalidField) {
+    throw new TypeError(`candidate_silent_profile_capture_update_field_not_allowed:${invalidField}`);
+  }
+
+  const currentStep = requireConversationStep(
+    update.currentStep,
+    'candidate_silent_profile_capture_next_step'
+  );
+  if (currentStep !== ConversationStep.GREETING_SENT) {
+    throw new TypeError('candidate_silent_profile_capture_next_step_invalid');
+  }
+  if (update.reminderScheduledFor !== null) {
+    throw new TypeError('candidate_silent_profile_capture_reminder_scheduled_for_must_be_null');
+  }
+
+  const reminderState = requireReminderState(
+    update.reminderState,
+    'candidate_silent_profile_capture_reminder_state'
+  );
+  if (reminderState !== ReminderState.SKIPPED) {
+    throw new TypeError('candidate_silent_profile_capture_reminder_state_invalid');
+  }
+
+  const normalized = {
+    currentStep,
+    reminderScheduledFor: null,
+    reminderState
+  };
+
+  if (Object.hasOwn(update, 'botResumeMode')) {
+    normalized.botResumeMode = requireNullableSnapshotString(
+      update.botResumeMode,
+      'candidate_silent_profile_capture_resume_mode'
+    );
+  }
+
+  const profileFields = fields.filter((field) => SILENT_PROFILE_CAPTURE_PROFILE_FIELDS.has(field));
+  for (const field of profileFields) {
+    normalized[field] = normalizeSilentProfileUpdateValue(field, update[field]);
+  }
+
+  if (!hasMaterialProfileData(normalized)) {
+    throw new TypeError('candidate_silent_profile_capture_material_profile_required');
+  }
+
+  return { update: normalized, profileFields };
+}
+
+function normalizeSilentProfileCaptureSnapshot(expected, profileFields) {
+  const requiredFields = [
+    'currentStep',
+    'vacancyId',
+    'botResumeMode',
+    'reminderScheduledFor',
+    'reminderState'
+  ];
+  if (
+    !expected
+    || typeof expected !== 'object'
+    || Array.isArray(expected)
+    || requiredFields.some((field) => !Object.hasOwn(expected, field))
+  ) {
+    throw new TypeError('candidate_silent_profile_capture_snapshot_required');
+  }
+
+  const vacancyId = requireNullableSnapshotString(
+    expected.vacancyId,
+    'candidate_silent_profile_capture_expected_vacancy_id'
+  );
+  if (vacancyId !== null) {
+    throw new TypeError('candidate_silent_profile_capture_vacancy_must_be_null');
+  }
+
+  const botResumeMode = requireNullableSnapshotString(
+    expected.botResumeMode,
+    'candidate_silent_profile_capture_expected_resume_mode'
+  );
+  if (!isSilentProfileCaptureMode(botResumeMode)) {
+    throw new TypeError('candidate_silent_profile_capture_mode_invalid');
+  }
+
+  const snapshot = {
+    currentStep: requireConversationStep(
+      expected.currentStep,
+      'candidate_silent_profile_capture_expected_step'
+    ),
+    vacancyId,
+    botResumeMode,
+    reminderScheduledFor: normalizeNullableDate(
+      expected.reminderScheduledFor,
+      'candidate_silent_profile_capture_expected_reminder_scheduled_for'
+    ),
+    reminderState: requireReminderState(
+      expected.reminderState,
+      'candidate_silent_profile_capture_expected_reminder_state'
+    )
+  };
+
+  for (const field of profileFields) {
+    if (!Object.hasOwn(expected, field)) {
+      throw new TypeError(`candidate_silent_profile_capture_expected_field_required:${field}`);
+    }
+    snapshot[field] = normalizeSilentProfileExpectedValue(field, expected[field]);
+  }
+
+  return snapshot;
+}
+
+function silentProfileCaptureExpectedWhere(expected, profileFields) {
+  const where = {
+    currentStep: expected.currentStep,
+    vacancyId: expected.vacancyId,
+    botResumeMode: expected.botResumeMode,
+    reminderScheduledFor: millisecondDateFilter(expected.reminderScheduledFor),
+    reminderState: expected.reminderState
+  };
+
+  for (const field of profileFields) {
+    where[field] = expected[field];
+  }
+
+  return where;
+}
+
+export async function applyCandidateSilentProfileCapture(client, input = {}) {
+  const candidateClient = requireCandidateClient(client);
+  const candidateId = requireCandidateId(input.candidateId);
+  const normalized = normalizeSilentProfileCaptureUpdate(input.update);
+  const expected = normalizeSilentProfileCaptureSnapshot(
+    input.expected,
+    normalized.profileFields
+  );
+
+  if (
+    Object.hasOwn(normalized.update, 'botResumeMode')
+    && normalized.update.botResumeMode !== expected.botResumeMode
+  ) {
+    throw new TypeError('candidate_silent_profile_capture_resume_mode_must_be_preserved');
+  }
+
+  const result = await candidateClient.candidate.updateMany({
+    where: {
+      id: candidateId,
+      ...silentProfileCaptureExpectedWhere(expected, normalized.profileFields)
+    },
+    data: normalized.update
+  });
+  const candidate = await candidateClient.candidate.findUnique({
+    where: { id: candidateId }
+  });
+
+  return {
+    count: Number(result?.count || 0),
+    candidate,
+    expected,
+    update: normalized.update,
+    profileFields: normalized.profileFields
   };
 }
