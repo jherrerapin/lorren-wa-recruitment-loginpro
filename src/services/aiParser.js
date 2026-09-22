@@ -118,6 +118,15 @@ function summarizeOpenAIError(error) {
   return [name, status, code, apiMessage || message || 'Unexpected error'].filter(Boolean).join(' | ');
 }
 
+function wrapOpenAIError(error) {
+  if (!error) return null;
+  const wrapped = new Error(summarizeOpenAIError(error));
+  wrapped.name = error?.name || 'OpenAIError';
+  wrapped.code = error?.code;
+  wrapped.response = error?.response?.status ? { status: error.response.status } : undefined;
+  return wrapped;
+}
+
 function parseOptionalTemperature() {
   const raw = process.env.OPENAI_TEMPERATURE;
   if (!raw?.trim()) return { value: null, reason: 'missing' };
@@ -147,7 +156,9 @@ export async function tryOpenAIParse(text, context = {}) {
       intent: extraction.replyIntent || null,
       parsedFields: extraction.fields || {},
       extraction,
-      model: extracted.model || OPENAI_EXTRACTION_MODEL
+      model: extracted.model || OPENAI_EXTRACTION_MODEL,
+      usage: extracted.usage || { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
+      error: wrapOpenAIError(extracted.error)
     };
   }
 
@@ -190,18 +201,13 @@ export async function tryOpenAIParse(text, context = {}) {
       temperature_value: useTemp ? temp.value : null
     };
   } catch (error) {
-    const summarized = summarizeOpenAIError(error);
-    const wrapped = new Error(summarized);
-    wrapped.name = error?.name || 'OpenAIError';
-    wrapped.code = error?.code;
-    wrapped.response = error?.response ? { status: error.response.status } : undefined;
     return {
       used: true, status: 'error',
       intent: null, parsedFields: {}, model,
       usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
       temperature_omitted: !useTemp,
       temperature_value: useTemp ? temp.value : null,
-      error: wrapped
+      error: wrapOpenAIError(error)
     };
   }
 }

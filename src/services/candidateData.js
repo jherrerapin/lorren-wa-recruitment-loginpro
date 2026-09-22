@@ -5,7 +5,6 @@
  * This module supports the conversational engine; it does not control it.
  */
 
-import { isSuspiciousFullName } from './debugTrace.js';
 import { normalizeBogotaLocalidad } from './geographyNormalization.js';
 import { normalizeTransportMode as deterministicNormalizeTransportMode } from './transportMode.js';
 import { extractExplicitAge, isWorkDurationNumber, isWorkMetricNumber } from './ageEvidence.js';
@@ -505,12 +504,6 @@ function normalizeExperienceInfo(value = '') {
 
 const EXPERIENCE_WORK_CUE = /\b(?:experien|trabaj|labor|coordin|operaci|logistic|despach|empaqu)\w*\b|\b(?:cargo|oficio|turnos?|personal)\b/;
 
-function looksLikeRoleOrIntentPhrase(value = '') {
-  const normalized = normalizeLooseText(value);
-  if (!normalized) return false;
-  return /\b(auxiliar|coordinador|coordinadora|operacion(?:es)?|logistica|logistico|cargue|descargue|bodega|vacante|cargo|requisit|interesad|cumplo|perfil|trabajo|anuncio|experien\w*|quedo atenta|quedo atento)\b/.test(normalized);
-}
-
 function detectDocumentTypeHint(text = '') {
   const patterns = [
     /\b(?:tipo(?:\s+de)?\s+documento|documento|identificacion|identificación)\s*(?:es|:|-)?\s*(c\.?\s*c\.?|c[ée]dula(?:\s+(?:de\s+)?ciudadan[ií]a)?|t\.?\s*i\.?|tarjeta\s+de\s+identidad|c\.?\s*e\.?|c[ée]dula\s+de\s+extranjer[ií]a|pasaporte|ppt)\b/i,
@@ -544,8 +537,6 @@ function sanitizeNameCandidate(value = '') {
   return String(value || '')
     .split(/[\n,]/)[0]
     .replace(/\b(?:c\.?\s*c\.?|c[ée]dula|documento|t\.?\s*i\.?|c\.?\s*e\.?|pasaporte|ppt)\b.*$/i, '')
-    .replace(/\b(?:deseo|quiero|estoy|me encuentro|me interesa|interesado|interesada|vacante|cargo|rol|puesto|documentacion|documentación|informacion|información|gracias)\b.*$/i, '')
-    .replace(/\b(?:cumplo|requisitos|coordinador|coordinadora|operaciones|logistica|logistico)\b.*$/i, '')
     .replace(/[.;:\-\s]+$/g, '')
     .trim();
 }
@@ -745,35 +736,30 @@ function detectLeadingName(text = '') {
   const compact = String(text || '').trim();
   if (!compact) return null;
 
+  // El parser local solo reconoce identidad cuando el propio mensaje trae una
+  // señal determinística fuerte. Una frase corta con 2–4 palabras no basta.
   const explicitLabel = compact.match(
-    /\b(?:nombre\s+completo|nombre)(?:\s+es)?\s*[:\-]?\s+([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.\s]{3,60})/i
-  );  if (explicitLabel?.[1]) {
-    const labeledName = capitalizeWords(sanitizeNameCandidate(explicitLabel[1]));
-    if (!isSuspiciousFullName(labeledName)) return labeledName;
-  }
-
-  const prefixed = compact.match(
-    /(?:me\s+llamo|soy|mi\s+nombre\s+es|nombre\s*[:\-]?)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.\s]{3,60})/i
+    /\b(?:nombre\s+completo|nombre)(?:\s+es)?\s*[:\-]?\s+([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*){1,3})(?=$|[,;.!\n]|\s+(?:c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|c\.?\s*e\.?|pasaporte|ppt|\d))/i
   );
-  if (prefixed?.[1]) {
-    const prefixedName = capitalizeWords(sanitizeNameCandidate(prefixed[1]));
-    if (!isSuspiciousFullName(prefixedName)) return prefixedName;
+  if (explicitLabel?.[1]) {
+    const labeledName = capitalizeWords(sanitizeNameCandidate(explicitLabel[1]));
+    if (hasNameTokens(labeledName)) return labeledName;
   }
 
-  const leading = compact.match(
+  const explicitIntroduction = compact.match(
+    /\b(?:me\s+llamo|mi\s+nombre\s+es)\s+([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*){1,3})(?=$|[,;.!\n]|\s+(?:c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|c\.?\s*e\.?|pasaporte|ppt|\d))/i
+  );
+  if (explicitIntroduction?.[1]) {
+    const introducedName = capitalizeWords(sanitizeNameCandidate(explicitIntroduction[1]));
+    if (hasNameTokens(introducedName)) return introducedName;
+  }
+
+  const identityBlock = compact.match(
     /^\s*([A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*(?:\s+[A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ'\-.]*){1,3})(?=\s+(?:c\.?\s*c\.?|c[ée]dula|t\.?\s*i\.?|c\.?\s*e\.?|pasaporte|ppt|\d))/i
   );
-  if (leading?.[1]) {
-    const cleaned = sanitizeNameCandidate(leading[1].replace(/\b(cc|ti|ce|ppt|pasaporte)\b$/i, '').trim());
-    if (!hasNameTokens(cleaned)) return null;
-    const candidate = capitalizeWords(cleaned);
-    if (!isSuspiciousFullName(candidate)) return candidate;
-  }
-
-  const firstChunk = sanitizeNameCandidate(compact.split(/[\n,]/)[0]?.trim() || '');
-  if (hasNameTokens(firstChunk) && !looksLikeRoleOrIntentPhrase(firstChunk)) {
-    const candidate = capitalizeWords(firstChunk);
-    if (!isSuspiciousFullName(candidate)) return candidate;
+  if (identityBlock?.[1]) {
+    const candidate = capitalizeWords(sanitizeNameCandidate(identityBlock[1]));
+    if (hasNameTokens(candidate)) return candidate;
   }
 
   return null;
@@ -988,7 +974,7 @@ export function isHighConfidenceLocalField(field, value) {
     const age = Number.parseInt(raw, 10);
     return Number.isFinite(age) && age >= 14 && age <= 80;
   }
-  if (field === 'fullName') return !isSuspiciousFullName(raw) && hasNameTokens(raw);
+  if (field === 'fullName') return hasNameTokens(raw);
   if (field === 'neighborhood') return raw.length >= 3;
   if (field === 'locality') return raw.length >= 3;
   if (field === 'medicalRestrictions') {

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
+import { parseNaturalData } from '../src/services/candidateData.js';
 import { buildCandidateDataCollectionMessage } from '../src/services/readinessGuard.js';
 
 const bogotaVacancyWithExperience = Object.freeze({
@@ -77,6 +78,97 @@ function evidenceFor(fields = {}, overrides = {}) {
 function sanitize({ text, fields, context = {}, turnType = 'PROVIDE_DATA', evidence = evidenceFor(fields) }) {
   return sanitizeCandidateFieldsForConversation({ fields, evidence, text, context, turnType });
 }
+
+test('parser local no convierte una pregunta de vacante en nombre', () => {
+  const parsed = parseNaturalData('cuentan con alguna vacante administrativa disponible ?');
+  assert.equal(parsed.fullName, undefined);
+});
+
+test('parser local no adivina nombre por la forma de una frase corta desconocida', () => {
+  const parsed = parseNaturalData('Manejan beneficios adicionales actualmente');
+  assert.equal(parsed.fullName, undefined);
+});
+
+test('parser local conserva identidad con señal determinística fuerte', () => {
+  assert.equal(parseNaturalData('Nombre completo: María Fernanda López Ruiz').fullName, 'María Fernanda López Ruiz');
+  assert.equal(parseNaturalData('Juan David Perez CC 1012345678').fullName, 'Juan David Perez');
+});
+
+test('ASK_QUESTION rechaza una propuesta de nombre aunque tenga alta confianza', () => {
+  const text = 'cuentan con alguna vacante administrativa disponible ?';
+  const fields = { fullName: 'Cuentan Con Alguna' };
+  const result = sanitize({
+    text,
+    fields,
+    context: { currentStep: 'GREETING_SENT' },
+    turnType: 'ASK_QUESTION',
+    evidence: evidenceFor(fields, {
+      fullName: { snippet: 'cuentan con alguna', confidence: 0.99, source: 'responses_extractor' }
+    })
+  });
+
+  assert.equal(result.fields.fullName, undefined);
+  assert.equal(result.rejectedFields.find((item) => item.field === 'fullName')?.reason, 'question_without_identity_evidence');
+});
+
+test('una pregunta no se vuelve nombre aunque el nombre sea el campo pendiente', () => {
+  const text = 'y tienen ruta para esa sede?';
+  const fields = { fullName: 'Tienen Ruta Para' };
+  const result = sanitize({
+    text,
+    fields,
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['fullName'],
+      lastBotQuestion: 'Confírmame por favor tu nombre completo'
+    },
+    turnType: 'ASK_QUESTION',
+    evidence: evidenceFor(fields, {
+      fullName: { snippet: 'tienen ruta para', confidence: 0.98, source: 'responses_extractor' }
+    })
+  });
+
+  assert.equal(result.fields.fullName, undefined);
+});
+
+test('parser local no puede autorizar un nombre desnudo solo por contexto pendiente', () => {
+  const fields = { fullName: 'Andrés Felipe Henao Patiño' };
+  const result = sanitize({
+    text: 'Andrés Felipe Henao Patiño',
+    fields,
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['fullName'],
+      lastBotQuestion: 'Confírmame por favor tu nombre completo'
+    },
+    turnType: 'PROVIDE_DATA',
+    evidence: evidenceFor(fields, {
+      fullName: { snippet: 'Andrés Felipe Henao Patiño', confidence: 0.99, source: 'local_parser' }
+    })
+  });
+
+  assert.equal(result.fields.fullName, undefined);
+  assert.equal(result.rejectedFields.find((item) => item.field === 'fullName')?.reason, 'local_name_without_strong_identity_evidence');
+});
+
+test('fuente semántica acepta nombre desnudo cuando responde al campo pendiente', () => {
+  const fields = { fullName: 'Andrés Felipe Henao Patiño' };
+  const result = sanitize({
+    text: 'Andrés Felipe Henao Patiño',
+    fields,
+    context: {
+      currentStep: 'COLLECTING_DATA',
+      pendingFields: ['fullName'],
+      lastBotQuestion: 'Confírmame por favor tu nombre completo'
+    },
+    turnType: 'PROVIDE_DATA',
+    evidence: evidenceFor(fields, {
+      fullName: { snippet: 'Andrés Felipe Henao Patiño', confidence: 0.99, source: 'responses_extractor' }
+    })
+  });
+
+  assert.equal(result.fields.fullName, 'Andrés Felipe Henao Patiño');
+});
 
 test('rechaza saludos propuestos erróneamente como nombre y barrio', () => {
   const result = sanitize({

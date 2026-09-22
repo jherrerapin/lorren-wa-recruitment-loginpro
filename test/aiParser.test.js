@@ -136,6 +136,91 @@ test('tryOpenAIParse returns safe summarized error', async (t) => {
   assert.doesNotMatch(result.error.message, /sk-secret/);
 });
 
+test('Responses extractor conserva usage cuando la extracción estructurada funciona', async (t) => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-key';
+  process.env.FF_RESPONSES_EXTRACTOR = 'true';
+
+  const originalPost = axios.post;
+  t.after(() => {
+    axios.post = originalPost;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  });
+
+  axios.post = async (url) => {
+    assert.equal(url, 'https://api.openai.com/v1/responses');
+    return {
+      data: {
+        output: [{
+          content: [{
+            parsed: {
+              turnType: 'ASK_QUESTION',
+              fields: {
+                fullName: null,
+                age: null,
+                documentType: null,
+                documentNumber: null,
+                gender: null,
+                locality: null,
+                neighborhood: null,
+                transportMode: null,
+                medicalRestrictions: null,
+                experienceInfo: null,
+                experienceTime: null
+              },
+              fieldEvidence: {},
+              conflicts: [],
+              attachment: { mentioned: false, kindHint: null },
+              replyIntent: 'continue_flow'
+            }
+          }]
+        }],
+        usage: { input_tokens: 31, output_tokens: 12, total_tokens: 43 }
+      }
+    };
+  };
+
+  const result = await tryOpenAIParse('¿Tienen vacantes administrativas?');
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.usage, { input_tokens: 31, output_tokens: 12, total_tokens: 43 });
+  assert.equal(result.error, null);
+});
+
+test('Responses extractor propaga un error saneado y usage seguro al fallback', async (t) => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-key';
+  process.env.FF_RESPONSES_EXTRACTOR = 'true';
+
+  const originalPost = axios.post;
+  t.after(() => {
+    axios.post = originalPost;
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  });
+
+  axios.post = async () => {
+    const err = new Error('Request failed');
+    err.name = 'AxiosError';
+    err.code = 'ERR_BAD_REQUEST';
+    err.response = {
+      status: 400,
+      data: {
+        error: { message: 'Structured output schema rejected' },
+        api_key: 'sk-never-log-this'
+      }
+    };
+    throw err;
+  };
+
+  const result = await tryOpenAIParse('cuentan con alguna vacante administrativa disponible ?');
+  assert.equal(result.status, 'error');
+  assert.deepEqual(result.usage, { input_tokens: 0, output_tokens: 0, total_tokens: 0 });
+  assert.match(result.error.message, /HTTP 400/);
+  assert.match(result.error.message, /Structured output schema rejected/);
+  assert.doesNotMatch(result.error.message, /sk-never-log-this/);
+});
+
 test('summarizeOpenAIError uses OpenAI message when available', () => {
   const summary = summarizeOpenAIError({
     name: 'AxiosError',
