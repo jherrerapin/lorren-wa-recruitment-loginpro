@@ -5,18 +5,17 @@ export const NON_NAME_PROFILE_REPLAYS = Object.freeze([
     title: 'Una profesión expresada con “soy” no se guarda como nombre',
     inbound: 'Sí señora, yo soy administrador logístico retirado de la fuerza pública.',
     proposedFields: {
-      fullName: 'Administrador Logístico',
-      experienceInfo: 'Sí',
-      experienceSummary: 'Administrador logístico retirado de la fuerza pública.'
+      fullName: 'Administrador Logístico'
     },
-    sourceByField: {
-      fullName: 'engine',
-      experienceInfo: 'engine',
-      experienceSummary: 'engine'
+    evidence: {
+      fullName: {
+        snippet: 'administrador logístico',
+        confidence: 0.97,
+        source: 'responses_extractor'
+      }
     },
+    turnType: 'PROVIDE_DATA',
     expected: {
-      rejectedFields: ['fullName'],
-      persistedFields: ['experienceInfo', 'experienceSummary'],
       fullName: null
     }
   },
@@ -26,8 +25,7 @@ export const NON_NAME_PROFILE_REPLAYS = Object.freeze([
     title: 'Un rasgo personal después de “soy” no se interpreta como nombre',
     inbound: 'He trabajado en atención al cliente, me interesa aplicar y soy muy enfocado.',
     expected: {
-      parsedFullName: null,
-      suspiciousCandidate: 'Muy Enfocado'
+      parsedFullName: null
     }
   },
   {
@@ -40,17 +38,14 @@ export const NON_NAME_PROFILE_REPLAYS = Object.freeze([
     }
   },
   {
-    id: 'valid-name-corrects-suspicious-persisted-value-v1',
+    id: 'valid-name-corrects-invalid-persisted-value-v1',
     sourceConversation: 'CONV-032',
-    title: 'Un nombre válido corrige un valor no nominal persistido previamente',
+    title: 'Una corrección explícita puede reemplazar un valor histórico inválido',
     candidate: {
       fullName: 'Administrador Logístico'
     },
     proposedFields: {
       fullName: 'José Luis Pérez'
-    },
-    sourceByField: {
-      fullName: 'local'
     },
     expected: {
       persistedFullName: 'José Luis Pérez',

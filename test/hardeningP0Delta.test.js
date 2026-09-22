@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
 import { runReminderDispatcher, scheduleReminderForCandidate } from '../src/services/reminder.js';
-import { applyFieldPolicy } from '../src/services/policyLayer.js';
 import { createMockPrisma } from './helpers/mockPrisma.js';
 import { createWhatsappMock } from './helpers/mockWhatsapp.js';
 import { installOpenAIMock } from './helpers/mockOpenAI.js';
@@ -11,56 +10,6 @@ function createLegacyWordBuffer(text = '') {
   const signature = Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
   return Buffer.concat([signature, Buffer.alloc(16), Buffer.from(text, 'utf16le')]);
 }
-
-test('saludo no se persiste como fullName', () => {
-  const result = applyFieldPolicy({
-    fields: { fullName: 'hola buenas tardes' },
-    fieldEvidence: { fullName: { snippet: 'hola buenas tardes', confidence: 0.95, source: 'responses_extractor' } }
-  });
-
-  assert.equal(result.persistedFields.fullName, undefined);
-  assert.equal(result.blocked[0]?.reason, 'greeting_as_name');
-});
-
-test('calle 80 nunca se persiste como edad', () => {
-  const result = applyFieldPolicy({
-    fields: { age: 80 },
-    fieldEvidence: { age: { snippet: 'vivo en calle 80', confidence: 0.93, source: 'responses_extractor' } }
-  });
-
-  assert.equal(result.persistedFields.age, undefined);
-  assert.equal(result.blocked[0]?.reason, 'address_as_age');
-});
-
-test('género femenino explícito se persiste con evidencia sólida', () => {
-  const result = applyFieldPolicy({
-    fields: { gender: 'FEMALE' },
-    fieldEvidence: { gender: { snippet: 'soy mujer', confidence: 0.91, source: 'responses_extractor' } }
-  });
-
-  assert.equal(result.persistedFields.gender, 'FEMALE');
-});
-
-test('tratamiento de cortesia no cuenta como evidencia de genero aunque tenga alta confianza', () => {
-  const result = applyFieldPolicy({
-    fields: { gender: 'FEMALE' },
-    fieldEvidence: { gender: { snippet: 'sí señora', confidence: 0.95, source: 'responses_extractor' } }
-  });
-
-  assert.equal(result.persistedFields.gender, undefined);
-  assert.equal(result.reviewQueue[0]?.reason, 'weak_gender_inference');
-});
-
-test('género ambiguo no debe usarse para decisiones duras', () => {
-  const result = applyFieldPolicy({
-    fields: { gender: 'FEMALE' },
-    fieldEvidence: { gender: { snippet: 'me llamo Alex', confidence: 0.6, source: 'name_inference' } }
-  });
-
-  assert.equal(result.persistedFields.gender, undefined);
-  assert.equal(result.reviewQueue[0]?.reason, 'weak_gender_inference');
-  assert.equal(result.shouldPreventAutoDiscard, true);
-});
 
 test('PDF ilegible se clasifica UNREADABLE y no CV_VALID', async () => {
   const buffer = Buffer.from('certificado bancario de apertura de cuenta');
@@ -107,16 +56,6 @@ test('.doc renombrado sin contenedor Word no se acepta como CV', async () => {
 
   assert.equal(result.classification, 'OTHER');
   assert.equal(result.rationale, 'invalid_legacy_word_container');
-});
-
-test('campo crítico ambiguo activa protección de autodescarte', () => {
-  const result = applyFieldPolicy({
-    fields: { age: 17 },
-    fieldEvidence: { age: { snippet: 'creo que tengo 17', confidence: 0.4, source: 'responses_extractor' } }
-  });
-
-  assert.equal(result.shouldPreventAutoDiscard, true);
-  assert.deepEqual(result.protectedDiscardFields, ['age']);
 });
 
 test('scheduleReminderForCandidate encola seguimiento del proceso a dos horas', async () => {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDebugTrace, isSuspiciousFullName, splitFieldDecisions, summarizeError } from '../src/services/debugTrace.js';
+import { createDebugTrace, splitFieldDecisions, summarizeError } from '../src/services/debugTrace.js';
 
 test('createDebugTrace starts with secure defaults', () => {
   const trace = createDebugTrace({ phone: '573001112233', currentStepBefore: 'MENU' });
@@ -12,16 +12,37 @@ test('createDebugTrace starts with secure defaults', () => {
   assert.ok(['disabled', 'fallback'].includes(trace.openai_status));
   assert.equal(typeof trace.openai_model, 'string');
   assert.equal(typeof trace.openai_temperature_omitted, 'boolean');
+  assert.equal(Object.hasOwn(trace, 'suspicious_full_name_rejected'), false);
+  assert.equal(Object.hasOwn(trace, 'rejected_name_reason'), false);
 });
 
-test('splitFieldDecisions persists only empty candidate fields and rejects suspicious name', () => {
-  const parsed = { fullName: 'Juan 123', age: 24, neighborhood: 'Centro' };
-  const candidate = { age: null, neighborhood: 'Modelia' };
+test('splitFieldDecisions persiste datos ya curados y protege valores existentes', () => {
+  const parsed = { fullName: 'Carlos Madrid', age: 24, neighborhood: 'Centro' };
+  const candidate = { fullName: null, age: null, neighborhood: 'Modelia' };
   const decisions = splitFieldDecisions(parsed, candidate);
-  assert.deepEqual(decisions.persistedFields, ['age']);
-  assert.equal(decisions.suspiciousFullNameRejected, true);
-  assert.ok(decisions.rejectedFields.includes('fullName'));
+
+  assert.deepEqual(decisions.persistedFields, ['fullName', 'age']);
+  assert.equal(decisions.persistedData.fullName, 'Carlos Madrid');
   assert.ok(decisions.rejectedFields.includes('neighborhood'));
+});
+
+test('persistencia no interpreta palabras del nombre como ciudad, cargo o intención', () => {
+  for (const fullName of ['Carlos Madrid', 'Andrés Salado', 'Auxilio Lara']) {
+    const decisions = splitFieldDecisions({ fullName }, { fullName: null });
+    assert.equal(decisions.persistedData.fullName, fullName);
+    assert.deepEqual(decisions.rejectedFields, []);
+  }
+});
+
+test('persistencia evita alias exacto entre nombre y residencia', () => {
+  const decisions = splitFieldDecisions(
+    { fullName: 'Carlos Madrid', neighborhood: 'Carlos Madrid' },
+    { fullName: null, neighborhood: null }
+  );
+
+  assert.equal(decisions.persistedData.fullName, 'Carlos Madrid');
+  assert.equal(decisions.persistedData.neighborhood, undefined);
+  assert.deepEqual(decisions.rejectedFields, ['neighborhood']);
 });
 
 test('summarizeError does not leak nested payloads', () => {
@@ -29,23 +50,6 @@ test('summarizeError does not leak nested payloads', () => {
   assert.match(summary, /AxiosError/);
   assert.match(summary, /HTTP 500/);
   assert.doesNotMatch(summary, /secret/);
-});
-
-test('isSuspiciousFullName rejects intention/question phrases as names', () => {
-  assert.equal(isSuspiciousFullName('me interesa'), true);
-  assert.equal(isSuspiciousFullName('si estoy interesado'), true);
-  assert.equal(isSuspiciousFullName('quiero continuar'), true);
-  assert.equal(isSuspiciousFullName('qué datos necesitas'), true);
-  assert.equal(isSuspiciousFullName('tengo moto'), true);
-  assert.equal(isSuspiciousFullName('poseo vehículo'), true);
-  assert.equal(isSuspiciousFullName('ok'), true);
-});
-
-test('isSuspiciousFullName keeps real names valid', () => {
-  assert.equal(isSuspiciousFullName('Carlos Lara'), false);
-  assert.equal(isSuspiciousFullName('Me llamo Carlos Lara'), true);
-  const decisions = splitFieldDecisions({ fullName: 'Carlos Lara' }, { fullName: null });
-  assert.deepEqual(decisions.persistedFields, ['fullName']);
 });
 
 test('permite sobrescritura explícita de transporte en corrección', () => {

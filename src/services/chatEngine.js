@@ -627,16 +627,27 @@ export async function runChatEngine({
       { snippet: String(inboundText || '').slice(0, 180), confidence: 0.78, source: 'engine' }
     ])
   );
+  const lastBotQuestion = [...(recentMessages || [])]
+    .reverse()
+    .find((message) => message?.direction === 'OUTBOUND')?.body || '';
   const sanitized = sanitizeCandidateFieldsForConversation({
     fields: candidateFields,
     evidence: engineEvidence,
     text: inboundText,
-    context: { currentStep },
+    context: {
+      currentStep,
+      pendingFields: readiness.missingFields || [],
+      lastBotQuestion
+    },
     turnType: null
   });
 
+  // `sanitized.fields` es la única autoridad de entidades que cruza hacia
+  // persistencia. `save_fields` crudo ya fue consumido como propuesta antes de
+  // la compuerta semántica y no vuelve a ejecutarse como un segundo canal.
+  const sideEffectActions = actions.filter((action) => action?.type !== 'save_fields');
   const actResult = await act({
-    actions,
+    actions: sideEffectActions,
     candidate,
     extractedFields: sanitized.fields,
     candidateFields: sanitized.fields,

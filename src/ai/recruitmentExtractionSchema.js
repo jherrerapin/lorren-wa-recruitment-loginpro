@@ -76,9 +76,13 @@ export const RECRUITMENT_EXTRACTION_SCHEMA = {
         properties: {
           snippet: { type: ['string', 'null'] },
           confidence: { type: 'number', minimum: 0, maximum: 1 },
-          source: { type: 'string' }
+          source: { type: 'string' },
+          relation: {
+            type: 'string',
+            enum: ['SELF_ATTRIBUTE', 'DIRECT_ANSWER', 'QUESTION_MENTION', 'THIRD_PARTY', 'VACANCY_CONTEXT', 'UNKNOWN']
+          }
         },
-        required: ['snippet', 'confidence', 'source']
+        required: ['snippet', 'confidence', 'source', 'relation']
       }
     }
   }
