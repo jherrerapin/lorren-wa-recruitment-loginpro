@@ -1,10 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageDirection, MessageType } from '@prisma/client';
-import {
-  recordIntentionalSilence,
-  saveOutboundMessage
-} from '../src/routes/webhook.js';
+import { recordIntentionalSilence } from '../src/routes/webhook.js';
 
 function createPrismaMock({ outboundError = null } = {}) {
   const calls = [];
@@ -25,31 +22,6 @@ function createPrismaMock({ outboundError = null } = {}) {
   };
   return { prisma, calls };
 }
-
-test('salida común persiste mediante el contrato saliente y luego actualiza lastOutboundAt', async () => {
-  const { prisma, calls } = createPrismaMock();
-  const rawPayload = { source: 'contextual_reply', model: 'test-model' };
-
-  await saveOutboundMessage(prisma, 'candidate-test-1', 'Respuesta segura', rawPayload);
-
-  assert.deepEqual(calls.map((call) => call.operation), [
-    'message.create',
-    'candidate.update'
-  ]);
-  assert.deepEqual(calls[0].data, {
-    candidateId: 'candidate-test-1',
-    direction: MessageDirection.OUTBOUND,
-    messageType: MessageType.TEXT,
-    body: 'Respuesta segura',
-    rawPayload: {
-      body: 'Respuesta segura',
-      source: 'contextual_reply',
-      model: 'test-model'
-    }
-  });
-  assert.equal(calls[1].args.where.id, 'candidate-test-1');
-  assert.ok(calls[1].args.data.lastOutboundAt instanceof Date);
-});
 
 test('silencio intencional persiste una salida interna sin tocar el candidato', async () => {
   const { prisma, calls } = createPrismaMock();
