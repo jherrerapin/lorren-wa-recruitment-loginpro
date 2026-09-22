@@ -77,30 +77,19 @@ const NORMALIZED_BOGOTA_LOCALIDAD_ALIASES = Object.freeze(
   )
 );
 
-export class GeographyNormalizationService {
-  normalizeBogotaLocalidad(value) {
-    const normalized = normalizeComparableText(value);
-    if (!normalized || NON_DATA_LOCATION_TEXT.has(normalized)) return null;
-    const exact = NORMALIZED_BOGOTA_LOCALIDAD_ALIASES[normalized];
-    if (exact) return exact;
-
-    const padded = ` ${normalized} `;
-    const embeddedMatches = new Set(
-      Object.entries(NORMALIZED_BOGOTA_LOCALIDAD_ALIASES)
-        .filter(([alias]) => padded.includes(` ${alias} `))
-        .map(([, locality]) => locality)
-    );
-
-    return embeddedMatches.size === 1 ? [...embeddedMatches][0] : null;
-  }
-}
-
-export const geographyNormalizationService = new GeographyNormalizationService();
-
 export function normalizeBogotaLocalidad(value) {
-  return geographyNormalizationService.normalizeBogotaLocalidad(value);
-}
+  const normalized = normalizeComparableText(value);
+  if (!normalized || NON_DATA_LOCATION_TEXT.has(normalized)) return null;
 
-export const __geographyNormalizationInternals = {
-  normalizeComparableText
-};
+  const exact = NORMALIZED_BOGOTA_LOCALIDAD_ALIASES[normalized];
+  if (exact) return exact;
+
+  const padded = ` ${normalized} `;
+  const embeddedMatches = new Set(
+    Object.entries(NORMALIZED_BOGOTA_LOCALIDAD_ALIASES)
+      .filter(([alias]) => padded.includes(` ${alias} `))
+      .map(([, locality]) => locality)
+  );
+
+  return embeddedMatches.size === 1 ? [...embeddedMatches][0] : null;
+}
