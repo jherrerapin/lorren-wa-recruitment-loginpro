@@ -234,6 +234,58 @@ test('chatEngine reutiliza una decisión válida sin ejecutar un segundo think',
   }
 });
 
+test('chatEngine no permite que save_fields raw reviva un nombre rechazado por la compuerta semántica', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const candidate = baseCandidate({
+      currentStep: ConversationStep.GREETING_SENT,
+      fullName: null
+    });
+    const currentVacancy = vacancy();
+    const prisma = createPrismaHarness(candidate);
+    const inboundText = '¿Cuentan con alguna vacante administrativa disponible?';
+    const preparedContext = await prepareEngineDecisionContext({
+      prisma,
+      candidate,
+      vacancy: currentVacancy,
+      inboundText,
+      recentMessages: [],
+      currentStep: candidate.currentStep
+    });
+
+    const result = await runChatEngine({
+      prisma,
+      candidate,
+      vacancy: currentVacancy,
+      inboundText,
+      recentMessages: [],
+      precomputedDecision: {
+        reply: 'Te ayudo a revisar la vacante disponible.',
+        nextStep: candidate.currentStep,
+        actions: [
+          { type: 'save_fields', data: { fullName: 'Cuentan Con Alguna' } },
+          { type: 'nothing' }
+        ],
+        extractedFields: { fullName: 'Cuentan Con Alguna' },
+        fallback: false,
+        fallbackReason: null,
+        loopGuardApplied: false,
+        contextFingerprint: preparedContext.contextFingerprint,
+        usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+      }
+    });
+
+    assert.equal(result.decisionReused, true);
+    assert.equal(result.candidateFields.fullName, undefined);
+    assert.equal(prisma.calls.update.some((call) => Object.hasOwn(call.data || {}, 'fullName')), false);
+    assert.equal(prisma.getState().fullName, null);
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
 test('chatEngine no reutiliza una decisión fallback', async () => {
   const previousKey = process.env.OPENAI_API_KEY;
   delete process.env.OPENAI_API_KEY;

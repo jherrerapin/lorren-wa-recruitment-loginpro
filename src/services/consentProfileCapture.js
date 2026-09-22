@@ -1,24 +1,10 @@
 import {
   alignCandidateLocationFields,
-  isHighConfidenceLocalField,
   normalizeCandidateFields,
   parseNaturalData
 } from './candidateData.js';
-
-const CAPTURABLE_FIELDS = new Set([
-  'fullName',
-  'documentType',
-  'documentNumber',
-  'age',
-  'gender',
-  'neighborhood',
-  'locality',
-  'medicalRestrictions',
-  'transportMode',
-  'experienceInfo',
-  'experienceTime',
-  'experienceSummary'
-]);
+import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
+import { getCandidateReadiness } from './readinessGuard.js';
 
 const CONSENT_PREFIX_TOKEN = String.raw`(?:si|sí|sii|sip|claro|correcto|de\s+acuerdo|dale|ok|listo)`;
 const CONSENT_PREFIXES = String.raw`(?:${CONSENT_PREFIX_TOKEN}[\s,;:-]*)*`;
@@ -43,18 +29,33 @@ function stripConsentDeclaration(text = '') {
   return remaining;
 }
 
-function extractHighConfidenceFields(text = '', vacancy = null) {
+function extractCuratedProfileFields(text = '', vacancy = null, candidate = {}) {
   const parsed = parseNaturalData(text);
   let normalized = normalizeCandidateFields(parsed);
   normalized = alignCandidateLocationFields(normalized, vacancy, { clearAlternate: false });
+  const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
 
-  const fields = {};
-  for (const [field, value] of Object.entries(normalized)) {
-    if (!CAPTURABLE_FIELDS.has(field) || !hasValue(value)) continue;
-    if (!isHighConfidenceLocalField(field, value)) continue;
-    fields[field] = value;
-  }
-  return fields;
+  const evidence = Object.fromEntries(
+    Object.keys(normalized).map((field) => [
+      field,
+      {
+        snippet: String(text || '').slice(0, 180),
+        confidence: 1,
+        source: 'local_parser'
+      }
+    ])
+  );
+
+  return sanitizeCandidateFieldsForConversation({
+    fields: normalized,
+    evidence,
+    text,
+    context: {
+      currentStep: candidate?.currentStep || null,
+      pendingFields: readiness.missingFields
+    },
+    turnType: null
+  }).fields;
 }
 
 export async function captureConsentedProfileData({
@@ -78,15 +79,15 @@ export async function captureConsentedProfileData({
     return { candidate, capturedFields: [], reason: 'no_consented_message_data' };
   }
 
-  // Solo se procesa la parte de datos del mismo mensaje en que se registró la autorización.
-  // Se retira la declaración de consentimiento para que sus palabras no se interpreten
-  // erróneamente como nombre u otro dato del candidato.
+  // La declaración de consentimiento se retira antes de comprender el perfil.
+  // El resto del mensaje pasa por la misma compuerta semántica que cualquier
+  // otro turno; este flujo no mantiene una autoridad paralela de entidades.
   const profileText = stripConsentDeclaration(consentMessageText);
   if (!profileText) {
     return { candidate, capturedFields: [], reason: 'no_new_profile_data' };
   }
 
-  const extracted = extractHighConfidenceFields(profileText, vacancy);
+  const extracted = extractCuratedProfileFields(profileText, vacancy, candidate);
   const update = {};
   for (const [field, value] of Object.entries(extracted)) {
     if (!hasValue(candidate[field])) update[field] = value;

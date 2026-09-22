@@ -7,16 +7,7 @@ import {
   normalizeCandidateFields,
   parseNaturalData
 } from '../src/services/candidateData.js';
-import { splitFieldDecisions } from '../src/services/debugTrace.js';
 import { getCandidateReadiness } from '../src/services/readinessGuard.js';
-
-test('frase de intención no se persiste como fullName', () => {
-  const normalized = normalizeCandidateFields({ fullName: 'me interesa' });
-  const decisions = splitFieldDecisions(normalized, { fullName: null });
-  assert.equal(decisions.suspiciousFullNameRejected, true);
-  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
-});
-
 
 test('normaliza C.C y cédula aisladas como tipo CC junto al número', () => {
   const ccParsed = parseNaturalData(`Mauricio Alejandro Cruz Barbosa
@@ -88,13 +79,13 @@ test('readiness no exige descripción de experiencia cuando el candidato declara
   assert.deepEqual(getCandidateReadiness(candidate, vacancy, { requireCv: false }).missingFields, []);
 });
 
-test('captura y normaliza nombre básico sin prefijo', () => {
+test('parser local no adivina un nombre aislado sin evidencia contextual', () => {
   const parsed = parseNaturalData('camilo hernandez');
   const normalized = normalizeCandidateFields(parsed);
-  assert.equal(normalized.fullName, 'Camilo Hernandez');
+  assert.equal(normalized.fullName, undefined);
 });
 
-test('captura línea compacta completa con barrio implícito y restricciones negativas', () => {
+test('captura línea compacta completa con identidad unida al documento', () => {
   const input = 'camilo hernandez cc 4654646654 25 picalena si tengo 6 meses no tengo restricciones, moto';
   const parsed = parseNaturalData(input);
   const normalized = normalizeCandidateFields(parsed);
@@ -147,7 +138,7 @@ test('normaliza ausencia de restricciones médicas', () => {
   assert.equal(normalized.medicalRestrictions, 'Sin restricciones médicas');
 });
 
-test('captura datos en orden libre con transporte al inicio y nombre al final', () => {
+test('captura datos en orden libre con transporte al inicio y nombre etiquetado al final', () => {
   const parsed = parseNaturalData('Transporte: moto, edad 28, barrio Jordán, CC 10203040, tengo 2 años de experiencia, sin restricciones, mi nombre es ana sofia perez');
   const normalized = normalizeCandidateFields(parsed);
   assert.equal(normalized.transportMode, 'Moto');
@@ -218,7 +209,7 @@ test('documento con puntos o prefijo no contamina edad', () => {
   assert.equal(normalized.age, 19);
 });
 
-test('negación compuesta de transporte termina en sin medio de transporte', () => {
+test('negación compuesta de transporte termina en transporte público', () => {
   const parsed = parseNaturalData('no tengo moto ni bicicleta');
   const normalized = normalizeCandidateFields(parsed);
   assert.equal(normalized.transportMode, 'Publico');
@@ -244,12 +235,8 @@ test('normaliza restricciones médicas cuando la negación viene al final', () =
 });
 
 test('no toma formatos de archivo como fullName', () => {
-  const parsed = parseNaturalData('Por pdf');
-  const normalized = normalizeCandidateFields(parsed);
-  const decisions = splitFieldDecisions(normalized, { fullName: null });
+  const normalized = normalizeCandidateFields(parseNaturalData('Por pdf'));
   assert.equal(normalized.fullName, undefined);
-  assert.equal(decisions.suspiciousFullNameRejected, false);
-  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
 });
 
 test('un si solo no se interpreta como experiencia', () => {
@@ -259,11 +246,8 @@ test('un si solo no se interpreta como experiencia', () => {
 });
 
 test('no toma frases de cargo como fullName', () => {
-  const parsed = parseNaturalData('Para el cargo de auxiliar de cargue y descargue');
-  const normalized = normalizeCandidateFields(parsed);
-  const decisions = splitFieldDecisions(normalized, { fullName: null });
+  const normalized = normalizeCandidateFields(parseNaturalData('Para el cargo de auxiliar de cargue y descargue'));
   assert.equal(normalized.fullName, undefined);
-  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
 });
 
 test('no toma frases de rol o requisitos como fullName', () => {
@@ -274,21 +258,15 @@ test('no toma frases de rol o requisitos como fullName', () => {
 });
 
 test('no toma restricciones medicas como fullName', () => {
-  const parsed = parseNaturalData('Sin restriccion medica');
-  const normalized = normalizeCandidateFields(parsed);
-  const decisions = splitFieldDecisions(normalized, { fullName: null });
+  const normalized = normalizeCandidateFields(parseNaturalData('Sin restriccion medica'));
   assert.equal(normalized.fullName, undefined);
   assert.equal(normalized.medicalRestrictions, 'Sin restricciones médicas');
-  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
 });
 
 test('no confunde calle 80 con edad ni con fullName', () => {
-  const parsed = parseNaturalData('Desde Bogota calle 80');
-  const normalized = normalizeCandidateFields(parsed);
-  const decisions = splitFieldDecisions(normalized, { fullName: null });
+  const normalized = normalizeCandidateFields(parseNaturalData('Desde Bogota calle 80'));
   assert.equal(normalized.age, undefined);
   assert.equal(normalized.fullName, undefined);
-  assert.equal(Object.hasOwn(decisions.persistedData, 'fullName'), false);
 });
 
 test('bloque con direccion no contamina la edad del candidato', () => {
@@ -366,9 +344,9 @@ test('captura nombre completo etiquetado con tildes y eñe', () => {
   assert.equal(normalized.fullName, 'José Ángel Peña');
 });
 
-test('captura un nombre acentuado enviado como respuesta aislada', () => {
+test('parser local no autoriza un nombre aislado aunque tenga forma nominal', () => {
   const parsed = parseNaturalData('José Ángel Peña');
   const normalized = normalizeCandidateFields(parsed);
 
-  assert.equal(normalized.fullName, 'José Ángel Peña');
+  assert.equal(normalized.fullName, undefined);
 });
