@@ -365,27 +365,44 @@ function splitMeaningfulSegments(text = '') {
     .filter(Boolean);
 }
 
+function splitRoleIntentClauses(text = '') {
+  const normalized = normalizeResolverText(text);
+  if (!normalized) return [];
+  return normalized
+    .split(/\b(?:pero|aunque|sin embargo|ademas|adicionalmente|por otro lado)\b/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+}
+
+function isExplicitRoleTargetClause(text = '') {
+  return /\b(?:vacante|cargo|rol|puesto)\b/.test(text)
+    || /\b(?:quiero aplicar|quiero postularme|me interesa|estoy interesad[oa] en|busco trabajo como|quiero trabajar como)\b/.test(text);
+}
+
 export function detectRoleHintFromText(text = '', options = {}) {
   const normalized = normalizeResolverText(text);
   if (!normalized) return null;
   const cityTokens = new Set(tokenize(options.city || ''));
-  const segments = splitMeaningfulSegments(text);
+  const explicitTargetClauses = splitRoleIntentClauses(text).filter(isExplicitRoleTargetClause);
+  const segments = explicitTargetClauses.length ? explicitTargetClauses : splitMeaningfulSegments(text);
   const preferredSegments = segments.filter((segment) => ROLE_SIGNAL_REGEX.test(segment));
   if (preferredSegments.length) {
     const preferredTokens = preferredSegments.flatMap((segment) => cleanRoleTokens(tokenize(segment), cityTokens));
     const preferredRoleHint = preferredTokens.length ? normalizeRoleHint(preferredTokens.join(' '), options.city || '') : null;
     if (preferredRoleHint) return preferredRoleHint;
   }
+  const explicitSource = explicitTargetClauses.length ? explicitTargetClauses.join(' ') : normalized;
   const explicitPatterns = [
     /\b(?:vacante|cargo|rol|puesto)\s+(?:de|para)?\s*([a-z0-9 ]{3,80})/i,
     /\b(?:quiero aplicar(?: a)?|quiero postularme(?: a)?|me interesa(?: la)?|estoy interesad[oa] en(?: la)?|informacion(?: de)?(?: la)?|para)\s+(?:vacante|cargo|rol|puesto)?\s*(?:de|para)?\s*([a-z0-9 ]{3,80})/i
   ];
   for (const pattern of explicitPatterns) {
-    const match = normalized.match(pattern);
+    const match = explicitSource.match(pattern);
     if (!match?.[1]) continue;
     const roleTokens = cleanRoleTokens(tokenize(match[1]), cityTokens);
     if (roleTokens.length) return normalizeRoleHint(roleTokens.join(' '), options.city || '');
   }
+  if (explicitTargetClauses.length) return null;
   if (ROLE_SIGNAL_REGEX.test(normalized)) {
     const roleTokens = cleanRoleTokens(tokenize(normalized), cityTokens);
     return roleTokens.length ? normalizeRoleHint(roleTokens.join(' '), options.city || '') : null;
