@@ -7,8 +7,8 @@
  * Objetivo:
  * - La IA puede proponer entidades, pero este módulo decide si esas entidades
  *   tienen evidencia suficiente para entrar al estado curado del candidato.
- * - No funciona con listas quemadas de saludos. Funciona con contexto,
- *   tipo de turno, campo pendiente, evidencia, confianza y estructura del dato.
+ * - La forma del dato no sustituye la semántica: contexto, tipo de turno,
+ *   campo pendiente y evidencia deben coincidir antes de aceptar una entidad.
  */
 
 import { hasAmbiguousGenderEvidence, hasStrongGenderEvidence } from './genderEvidencePolicy.js';
@@ -18,6 +18,7 @@ import { isAlreadySentIntent } from './conversationIntent.js';
 const DEFAULT_MIN_CONFIDENCE = 0.72;
 const CORE_IDENTITY_FIELDS = new Set(['fullName', 'documentType', 'documentNumber', 'age']);
 const RESIDENCE_FIELDS = new Set(['locality', 'neighborhood']);
+const NAME_CONNECTORS = new Set(['de', 'del', 'la', 'las', 'los', 'y']);
 const ALL_SANITIZED_FIELDS = [
   'fullName',
   'age',
@@ -259,9 +260,14 @@ function evidenceIsUsable(field, evidence = {}, options = {}) {
   return confidence >= minFieldConfidence();
 }
 
+function isLocalParserEvidence(evidence = {}) {
+  const source = normalizeText(getEvidence('fullName', evidence).source || '').replace(/\s+/g, '_');
+  return source === 'local_parser';
+}
+
 function turnLooksLikeOnlyConversation(turnType = '') {
   const normalizedTurn = String(turnType || '').toUpperCase();
-  return ['GREETING', 'CONFIRMATION', 'OBJECTION', 'OTHER'].includes(normalizedTurn);
+  return ['GREETING', 'ASK_QUESTION', 'QUESTION', 'CONFIRMATION', 'OBJECTION', 'OTHER'].includes(normalizedTurn);
 }
 
 function hasDocumentEvidence(text = '') {
@@ -282,7 +288,8 @@ function hasExperienceEvidence(text = '') {
 }
 
 function looksLikeQuestionText(text = '', turnType = null) {
-  if (String(turnType || '').toUpperCase() === 'QUESTION') return true;
+  const normalizedTurn = String(turnType || '').toUpperCase();
+  if (['ASK_QUESTION', 'QUESTION'].includes(normalizedTurn)) return true;
   const raw = String(text || '').trim();
   if (/[¿?]/.test(raw)) return true;
   const normalized = normalizeText(raw);
@@ -330,7 +337,8 @@ function hasMeaningfulExperienceSummaryDetail(value = '') {
 
 function hasNameEvidenceCue(text = '') {
   const normalized = normalizeText(text);
-  return /\b(mi nombre es|nombre completo|me llamo|soy)\b/.test(normalized);
+  return /\b(mi nombre es|nombre completo|me llamo)\b/.test(normalized)
+    || /^nombre\s*(?:es|:)?\s+/.test(normalized);
 }
 
 function hasResidenceEvidenceCue(text = '') {
@@ -349,25 +357,27 @@ function hasOnlyCourtesyTreatmentAsGenderCue(text = '') {
 function looksLikePersonalName(value = '') {
   const raw = String(value || '').trim();
   if (!raw || raw.length < 5 || raw.length > 80) return false;
-  if (/\d/.test(raw)) return false;
-
-  const normalized = normalizeText(raw);
-  if (/^(?:hola\b|b(?:ue)?n(?:a|as|o|os)?s?\s+(?:dia|dias|tarde|tardes|noche|noches)\b)/.test(normalized)) {
-    return false;
-  }
-  if (/\b(auxiliar|vacante|cargo|bodega|cargue|descargue|logistica|operacion|requisitos|documento|cedula|ppt|barrio|localidad|municipio|ciudad|transporte|moto|bicicleta|experiencia|informacion|info|interes|interesado|interesada|postulacion|trabajo|requisito|favor|gracias)\b/.test(normalized)) {
-    return false;
-  }
+  if (/\d|[?¿!¡,:;]/.test(raw)) return false;
 
   const tokens = raw.split(/\s+/).filter(Boolean);
-  if (tokens.length < 2 || tokens.length > 5) return false;
+  if (tokens.length < 2 || tokens.length > 6) return false;
 
-  const semanticNonNameTokens = new Set(['si', 'sii', 'sip', 'ok', 'okay', 'vale', 'listo', 'claro', 'para', 'por', 'de', 'del', 'la', 'el', 'los', 'las', 'un', 'una', 'y', 'o', 'que', 'quedo', 'atento', 'atenta', 'buenas', 'buenos', 'dias', 'tardes', 'noches', 'hola', 'cordial', 'saludo']);
-  const normalizedTokens = normalized.split(/\s+/).filter(Boolean);
-  const semanticTokenCount = normalizedTokens.filter((token) => semanticNonNameTokens.has(token)).length;
-  if (semanticNonNameTokens.has(normalizedTokens[0]) || semanticTokenCount === normalizedTokens.length) return false;
+  let lexicalTokens = 0;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const normalizedToken = normalizeText(token);
+    if (!normalizedToken) return false;
 
-  return tokens.every((token) => /^[A-Za-zÁÉÍÓÚÑáéíóúñ]{2,}$/.test(token));
+    if (NAME_CONNECTORS.has(normalizedToken)) {
+      if (index === 0 || index === tokens.length - 1) return false;
+      continue;
+    }
+
+    if (!/^[A-Za-zÁÉÍÓÚÑáéíóúñ'’-]{2,}$/.test(token)) return false;
+    lexicalTokens += 1;
+  }
+
+  return lexicalTokens >= 2;
 }
 
 function looksLikeResidenceValue(value = '') {
@@ -393,24 +403,38 @@ function sanitizeFullName(value, evidence, text, context, turnType) {
   const identityCue = hasNameEvidenceCue(text);
   const groupedIdentityEvidence = hasDocumentEvidence(text) || hasAgeEvidence(text);
   const usableEvidence = evidenceIsUsable('fullName', evidence, { allowLocalParser: true });
+  const localParserEvidence = isLocalParserEvidence(evidence);
+  const questionTurn = looksLikeQuestionText(text, turnType);
 
   if (getEvidence('fullName', evidence).snippet && !evidenceSnippetIsGrounded('fullName', evidence, text)) {
     return { ok: false, reason: 'name_evidence_not_grounded_in_candidate_text' };
   }
 
-  if (turnLooksLikeOnlyConversation(turnType) && !fieldContext && !identityCue && !groupedIdentityEvidence) {
-    return { ok: false, reason: 'conversational_turn_without_identity_evidence' };
+  if (questionTurn && !identityCue && !groupedIdentityEvidence) {
+    return { ok: false, reason: 'question_without_identity_evidence' };
   }
 
-  if (!usableEvidence && !fieldContext && !identityCue && !groupedIdentityEvidence) {
+  // El parser local es un fallback determinístico y no puede convertir por sí
+  // solo una frase con forma de nombre en identidad. Debe existir una señal
+  // fuerte en el propio mensaje: presentación/etiqueta o bloque de identidad.
+  if (localParserEvidence && !identityCue && !groupedIdentityEvidence) {
+    return { ok: false, reason: 'local_name_without_strong_identity_evidence' };
+  }
+
+  if (!usableEvidence) {
     return { ok: false, reason: 'missing_name_evidence' };
   }
 
-  if (!fieldContext && !identityCue && !groupedIdentityEvidence && !currentStepCollectsCandidateData(context)) {
-    return { ok: false, reason: 'outside_data_collection_context' };
+  if (identityCue || groupedIdentityEvidence) return { ok: true };
+
+  // Una respuesta libre como "Andrés Felipe Henao Patiño" solo se acepta
+  // cuando el bot estaba pidiendo nombre y una fuente semántica no-local la
+  // clasificó como dato. El paso general de la FSM no concede esa autoridad.
+  if (fieldContext && !turnLooksLikeOnlyConversation(turnType)) {
+    return { ok: true };
   }
 
-  return { ok: true };
+  return { ok: false, reason: 'missing_identity_context' };
 }
 
 function sanitizeResidence(field, value, evidence, text, context, turnType) {
@@ -585,5 +609,6 @@ export const __fieldSanitizerInternals = {
   looksLikeResidenceValue,
   hasGenderEvidenceCue,
   hasResidenceEvidenceCue,
-  hasNameEvidenceCue
+  hasNameEvidenceCue,
+  looksLikeQuestionText
 };
