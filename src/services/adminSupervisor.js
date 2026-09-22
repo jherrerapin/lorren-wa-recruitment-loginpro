@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { MessageDirection, MessageType } from '@prisma/client';
 import { sendAudioMessage, sendDocumentMessage, sendImageMessage, sendTextMessage } from './whatsapp.js';
-import { normalizeKnowledgeContent } from './botKnowledge.js';
+import { createBotKnowledgeEntry, normalizeKnowledgeContent } from './botKnowledge.js';
 import { isCvMimeTypeAllowed } from './cvFlow.js';
 import { fetchMediaMetadata, downloadMedia } from './media.js';
 import { storeCandidateCv } from './cvStorage.js';
@@ -506,19 +506,15 @@ async function saveSelectedDocumentAsCv(prisma, candidate, selectionText = '') {
 }
 
 async function addSupervisorKnowledge(prisma, candidate, content, tags = 'admin_whatsapp') {
-  if (!prisma?.botKnowledge?.create) return;
   const normalized = normalizeKnowledgeContent(content);
   if (!normalized) return;
-  await prisma.botKnowledge.create({
-    data: {
-      scope: candidate.vacancyId ? 'VACANCY' : 'GLOBAL',
-      content: normalized,
-      tags,
-      candidateId: null,
-      vacancyId: candidate.vacancyId || null,
-      createdBy: 'admin_whatsapp',
-      updatedBy: 'admin_whatsapp'
-    }
+  await createBotKnowledgeEntry(prisma, {
+    scope: candidate.vacancyId ? 'VACANCY' : 'GLOBAL',
+    content: normalized,
+    tags,
+    vacancyId: candidate.vacancyId || null,
+    createdBy: 'admin_whatsapp',
+    updatedBy: 'admin_whatsapp'
   }).catch((error) => console.warn('[ADMIN_SUPERVISOR_KNOWLEDGE_ERROR]', error?.message || error));
 }
 
