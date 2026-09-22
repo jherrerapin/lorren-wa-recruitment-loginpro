@@ -14,7 +14,10 @@ import {
   saveCrewAttendanceOperationCapability,
   saveCrewAttendanceServiceConfiguration
 } from '../modules/dispatch-attendance/application/crewAttendanceConfig.js';
-import { loadAttendanceBillingCounters } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
+import {
+  loadAttendanceBillingCounters,
+  saveAttendanceBillingStartDate
+} from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
 import { resolveIncompleteDispatchBreakPenaltyEndAt } from '../modules/dispatch-attendance/domain/attendanceWorkdayPolicy.js';
 import { loadAttendanceMapTile } from '../services/attendanceMapTileRelay.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
@@ -61,12 +64,16 @@ function actorFromRequest(req) {
   };
 }
 
-function crewAuditActorFromRequest(req) {
+function attendanceAuditActorFromRequest(req) {
   return {
     ...actorFromRequest(req),
     ipAddress: normalizeString(req.ip),
     userAgent: normalizeString(req.get?.('user-agent'))
   };
+}
+
+export function canConfigureAttendanceBilling(req = {}) {
+  return (req.session?.userRole || req.userRole) === 'dev';
 }
 
 function safeReturnParams(source = {}) {
@@ -317,14 +324,45 @@ export function dispatchAttendanceAdminRouter(prisma) {
     }
   });
 
-  router.get('/billing-counter', async (_req, res) => {
+  router.get('/billing-counter', async (req, res) => {
     applyNoStore(res);
     try {
       const counters = await loadAttendanceBillingCounters(prisma);
-      return res.status(200).json({ ok: true, ...counters });
+      return res.status(200).json({
+        ok: true,
+        canConfigure: canConfigureAttendanceBilling(req),
+        ...counters
+      });
     } catch (error) {
       console.error('[ATTENDANCE_BILLING_COUNTER_FAILED]', { code: error?.message });
       return res.status(500).json({ ok: false, error: 'No fue posible cargar el contador de auxiliares del ciclo.' });
+    }
+  });
+
+  router.post('/billing-counter/start-date', formParser, async (req, res) => {
+    applyNoStore(res);
+    if (!canConfigureAttendanceBilling(req)) {
+      return res.status(403).json({ ok: false, error: 'Esta configuración solo está disponible para DEV.' });
+    }
+    try {
+      const saved = await saveAttendanceBillingStartDate(prisma, {
+        billingStartDate: req.body?.billingStartDate,
+        ...attendanceAuditActorFromRequest(req)
+      });
+      const counters = await loadAttendanceBillingCounters(prisma);
+      return res.status(200).json({
+        ok: true,
+        canConfigure: true,
+        changed: saved.changed,
+        ...counters
+      });
+    } catch (error) {
+      const code = typeof error?.message === 'string' ? error.message : '';
+      if (code === 'attendance_billing_start_date_invalid') {
+        return res.status(400).json({ ok: false, error: 'Selecciona una fecha de inicio válida.' });
+      }
+      console.error('[ATTENDANCE_BILLING_START_DATE_SAVE_FAILED]', { code });
+      return res.status(500).json({ ok: false, error: 'No fue posible guardar la fecha oficial de inicio.' });
     }
   });
 
@@ -348,7 +386,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
       const result = await saveCrewAttendanceOperationCapability(prisma, {
         operationPointId: req.params.operationPointId,
         allowed: req.body.allowed,
-        ...crewAuditActorFromRequest(req)
+        ...attendanceAuditActorFromRequest(req)
       });
       return res.status(200).json({ ok: true, ...result });
     } catch (error) {
@@ -364,7 +402,7 @@ export function dispatchAttendanceAdminRouter(prisma) {
         serviceRequestId: req.params.serviceRequestId,
         mode: req.body.mode,
         crewLeaderWorkerId: req.body.crewLeaderWorkerId,
-        ...crewAuditActorFromRequest(req)
+        ...attendanceAuditActorFromRequest(req)
       });
       return res.status(200).json({ ok: true, ...result });
     } catch (error) {
