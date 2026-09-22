@@ -7,7 +7,6 @@ import {
   markConversationMessagesResponded,
   mergeConversationMessagePayload
 } from './conversationMessageRepository.js';
-import { processText } from '../routes/webhook.js';
 
 const DEFAULT_BATCH_LIMIT = 20;
 const MAX_PENDING_TEXTS = 12;
@@ -36,6 +35,13 @@ function requireProcessorClient(prisma) {
     throw new TypeError('multiline_batch_prisma_client_required');
   }
   return prisma;
+}
+
+function requireTextProcessor(value) {
+  if (typeof value !== 'function') {
+    throw new TypeError('multiline_batch_text_processor_required');
+  }
+  return value;
 }
 
 async function attachBatchDebugTrace(prisma, messageId, debugTrace) {
@@ -150,10 +156,7 @@ export async function processDueMultilineCandidates(prisma, options = {}) {
   const client = requireProcessorClient(prisma);
   const now = normalizeNow(options.now);
   const limit = normalizeLimit(options.limit);
-  const processCandidateText = options.processCandidateText || processText;
-  if (typeof processCandidateText !== 'function') {
-    throw new TypeError('multiline_batch_text_processor_required');
-  }
+  const processCandidateText = requireTextProcessor(options.processCandidateText);
 
   const dueCandidates = await client.candidate.findMany({
     where: {
