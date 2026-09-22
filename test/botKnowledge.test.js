@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  createBotKnowledgeEntry,
+  deleteBotKnowledgeEntry,
   formatBotKnowledgeForPrompt,
+  listBotKnowledgeEntries,
   loadBotKnowledgeForContext,
   normalizeKnowledgeContent,
-  normalizeKnowledgeScope
+  normalizeKnowledgeScope,
+  setBotKnowledgeActive,
+  updateBotKnowledgeEntry
 } from '../src/services/botKnowledge.js';
 
 test('normalizeKnowledgeScope solo permite alcances soportados', () => {
@@ -106,6 +111,103 @@ test('loadBotKnowledgeForContext filtra alcance, inactivos y filas ajenas al con
   });
 
   assert.deepEqual(entries.map((entry) => entry.id), ['global', 'vacancy-match', 'candidate-match']);
+});
+
+test('crear aprendizaje serializa metadatos dentro de value sin inventar columnas Prisma', async () => {
+  let createArgs = null;
+  const prisma = {
+    botKnowledge: {
+      create: async (args) => {
+        createArgs = args;
+        return {
+          id: 'k-new',
+          key: args.data.key,
+          value: args.data.value,
+          updatedAt: new Date('2026-09-22T12:00:00Z')
+        };
+      }
+    }
+  };
+
+  const entry = await createBotKnowledgeEntry(prisma, {
+    scope: 'VACANCY',
+    vacancyId: 'vac-1',
+    content: '  Regla   curada  ',
+    tags: 'tono',
+    createdBy: 'dev'
+  });
+
+  assert.match(createArgs.data.key, /^recruitment:knowledge:vacancy:/);
+  assert.deepEqual(Object.keys(createArgs.data).sort(), ['key', 'value']);
+  assert.equal(entry.scope, 'VACANCY');
+  assert.equal(entry.vacancyId, 'vac-1');
+  assert.equal(entry.content, 'Regla curada');
+  assert.equal(entry.createdBy, 'dev');
+});
+
+test('actualizar y pausar aprendizaje preserva key y modifica solo value', async () => {
+  const stored = {
+    id: 'k1',
+    key: 'recruitment:knowledge:global:1',
+    value: JSON.stringify({
+      scope: 'GLOBAL',
+      content: 'Regla original.',
+      tags: null,
+      isActive: true,
+      createdBy: 'dev-original',
+      updatedBy: 'dev-original'
+    }),
+    updatedAt: new Date('2026-09-22T12:00:00Z')
+  };
+  const updates = [];
+  const prisma = {
+    botKnowledge: {
+      findUnique: async () => stored,
+      update: async (args) => {
+        updates.push(args);
+        return { ...stored, value: args.data.value, updatedAt: new Date('2026-09-22T13:00:00Z') };
+      }
+    }
+  };
+
+  const updated = await updateBotKnowledgeEntry(prisma, 'k1', {
+    content: 'Regla actualizada.',
+    updatedBy: 'dev-nuevo'
+  });
+  assert.equal(updated.content, 'Regla actualizada.');
+  assert.equal(updated.createdBy, 'dev-original');
+  assert.equal(updated.updatedBy, 'dev-nuevo');
+  assert.deepEqual(Object.keys(updates[0].data), ['value']);
+
+  const paused = await setBotKnowledgeActive(prisma, 'k1', false, 'dev-nuevo');
+  assert.equal(paused.isActive, false);
+  assert.deepEqual(Object.keys(updates[1].data), ['value']);
+});
+
+test('listado y borrado ignoran filas fuera del namespace de reclutamiento', async () => {
+  let deletedId = null;
+  const validRow = {
+    id: 'k1',
+    key: 'recruitment:knowledge:global:1',
+    value: JSON.stringify({ scope: 'GLOBAL', content: 'Regla.', isActive: true }),
+    updatedAt: new Date('2026-09-22T12:00:00Z')
+  };
+  const prisma = {
+    botKnowledge: {
+      findMany: async () => [validRow, { id: 'foreign', key: 'other:key', value: '{}' }],
+      findUnique: async ({ where }) => where.id === 'k1' ? validRow : null,
+      delete: async ({ where }) => {
+        deletedId = where.id;
+        return validRow;
+      }
+    }
+  };
+
+  const entries = await listBotKnowledgeEntries(prisma);
+  assert.deepEqual(entries.map((entry) => entry.id), ['k1']);
+  await deleteBotKnowledgeEntry(prisma, 'k1');
+  assert.equal(deletedId, 'k1');
+  await assert.rejects(() => deleteBotKnowledgeEntry(prisma, 'foreign'), /bot_knowledge_not_found/);
 });
 
 test('formatBotKnowledgeForPrompt no convierte aprendizajes en plantilla literal', () => {
