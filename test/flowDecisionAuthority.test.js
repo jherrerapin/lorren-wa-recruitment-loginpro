@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as flowDeciderModule from '../src/services/flowDecider.js';
+import { access, readFile } from 'node:fs/promises';
 import { generateNaturalReply } from '../src/services/naturalReply.js';
 
-test('flowDecider conserva etiquetas pero ya no decide el avance conversacional', () => {
-  assert.deepEqual(Object.keys(flowDeciderModule), ['FlowDeciderAction']);
-  assert.equal(flowDeciderModule.decideNextAction, undefined);
+const FLOW_DECIDER_PATH = new URL('../src/services/flowDecider.js', import.meta.url);
+const NATURAL_REPLY_PATH = new URL('../src/services/naturalReply.js', import.meta.url);
+
+test('flowDecider legacy permanece eliminado y naturalReply no depende de esa autoridad ficticia', async () => {
+  await assert.rejects(access(FLOW_DECIDER_PATH));
+  const source = await readFile(NATURAL_REPLY_PATH, 'utf8');
+  assert.doesNotMatch(source, /flowDecider\.js|FlowDeciderAction/);
 });
 
 test('naturalReply redacta una acción recibida sin calcular un camino de flujo', async () => {
