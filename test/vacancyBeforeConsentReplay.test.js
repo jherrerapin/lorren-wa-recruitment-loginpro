@@ -4,7 +4,7 @@ import {
   VacancyFirstGateAction,
   resolveVacancyFirstGate
 } from '../src/services/vacancyFirstGate.js';
-import { buildVacancyQuestionReply } from '../src/services/dataConsentGate.js';
+import { buildVacancyTimingReply } from '../src/services/vacancyPublicInfo.js';
 import { VACANCY_CONSENT_ORDER_REPLAYS } from './conversation-replay/vacancyConsentOrderReplay.js';
 
 function activeVacancy(overrides = {}) {
@@ -125,7 +125,7 @@ test('replay #901: una pregunta de turnos recibe solo la información configurad
   assert.doesNotMatch(decision.reply, /funciones del cargo|documentación para el proceso/i);
 });
 
-test('las rutas comparten la autoridad temporal y no inventan fecha de inicio', async () => {
+test('la ruta de vacante usa la autoridad temporal compartida y no inventa fecha de inicio', async () => {
   const vacancy = activeVacancy();
   const text = '¿Cuándo empiezo?';
   const decision = await resolveVacancyFirstGate({
@@ -145,12 +145,12 @@ test('las rutas comparten la autoridad temporal y no inventan fecha de inicio', 
     vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
   });
 
-  assert.equal(decision.reply, buildVacancyQuestionReply(vacancy, text));
+  assert.equal(decision.reply, buildVacancyTimingReply(vacancy, text));
   assert.match(decision.reply, /no hay una fecha de inicio registrada/i);
 });
 
 test('la autoridad temporal conserva días configurados con tilde', () => {
-  const reply = buildVacancyQuestionReply(
+  const reply = buildVacancyTimingReply(
     activeVacancy({ conditions: 'Jornada de miércoles a sábado, de 8:00 a.m. a 5:00 p.m.' }),
     '¿Qué horario tiene la vacante?'
   );
