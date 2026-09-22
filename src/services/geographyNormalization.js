@@ -1,4 +1,4 @@
-export const BOGOTA_LOCALIDAD_ALIASES = Object.freeze({
+const BOGOTA_LOCALIDAD_ALIASES = Object.freeze({
   usaquen: 'Usaquén',
   'usaquén': 'Usaquén',
   chapinero: 'Chapinero',
