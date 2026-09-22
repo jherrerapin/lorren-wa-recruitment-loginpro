@@ -22,7 +22,13 @@ export async function classifyLeadOrigin(text = '') {
   const payload = {
     model: MODEL,
     input: [
-      { role: 'system', content: [{ type: 'input_text', text: 'Classify the lead origin semantically. Do not use fixed word lists, regex, or literal matching. If evidence is unclear, return UNKNOWN. Output JSON only.' }] },
+      {
+        role: 'system',
+        content: [{
+          type: 'input_text',
+          text: 'Classify lead origin semantically. PERSON is valid only when the message explicitly states that an identifiable person referred, recommended, invited, shared the opportunity with, or otherwise directly originated the contact. Experience, desired job, employer names, roles, cities, greetings, or ordinary conversation are not person-origin evidence. If evidence is unclear, return UNKNOWN. For PERSON, evidence must be an exact contiguous excerpt copied from the user message and label must name the person supported by that excerpt. For UNKNOWN or OTHER, evidence and label may be null. Output JSON only.'
+        }]
+      },
       { role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ message: String(text || '').slice(0, 1200) }) }] }
     ],
     text: { format: { type: 'json_schema', name: LEAD_ORIGIN_SCHEMA.name, strict: LEAD_ORIGIN_SCHEMA.strict, schema: LEAD_ORIGIN_SCHEMA.schema } }
