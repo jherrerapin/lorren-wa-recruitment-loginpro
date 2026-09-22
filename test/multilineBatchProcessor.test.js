@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { processDueMultilineCandidates } from '../src/services/multilineBatchProcessor.js';
 
 function createHarness({ paused = false } = {}) {
@@ -77,6 +78,17 @@ function createHarness({ paused = false } = {}) {
 
   return { prisma, now, calls, messages, processCandidateText };
 }
+
+test('el servicio multilinea no depende de la ruta HTTP y exige procesador explícito', async () => {
+  const source = await readFile(new URL('../src/services/multilineBatchProcessor.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /routes\/webhook|\bprocessText\b/);
+
+  const { prisma, now } = createHarness();
+  await assert.rejects(
+    () => processDueMultilineCandidates(prisma, { now }),
+    /multiline_batch_text_processor_required/
+  );
+});
 
 test('el worker reclama una sola versión vencida y procesa el turno consolidado', async () => {
   const { prisma, now, calls, messages, processCandidateText } = createHarness();
