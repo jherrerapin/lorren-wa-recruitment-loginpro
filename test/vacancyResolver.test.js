@@ -75,26 +75,28 @@ test('resolveVacancyFromText conserva ciudad previa y cargo objetivo ante experi
   assert.equal(resolution.roleHint, 'auxiliar bodega');
 });
 
-test('resolveVacancyFromText no autoasigna vacante cuando solo detecta ciudad', async () => {
+test('resolveVacancyFromText no convierte residencia declarada en ciudad objetivo', async () => {
   const resolution = await resolveVacancyFromText(null, 'Buenas noches te escribo desde Ibague para vacante de trabajo', {
     activeVacancies: [activeIbagueVacancy],
     allVacancies: [activeIbagueVacancy]
   });
 
   assert.equal(resolution.resolved, false);
-  assert.equal(resolution.city, 'Ibague');
-  assert.equal(resolution.reason, 'city_with_active_vacancies');
+  assert.equal(resolution.city, null);
+  assert.equal(resolution.residenceLocation, 'Ibague');
+  assert.equal(resolution.reason, 'missing_city_and_role');
 });
 
-test('resolveVacancyFromText no cruza a otra ciudad aunque el cargo coincida', async () => {
+test('resolveVacancyFromText usa residencia solo para compatibilidad y no cruza a otra ciudad', async () => {
   const resolution = await resolveVacancyFromText(null, 'Estoy en Bogota y me interesa auxiliar de cargue y descargue', {
     activeVacancies: [activeIbagueVacancy],
     allVacancies: [activeIbagueVacancy]
   });
 
   assert.equal(resolution.resolved, false);
-  assert.equal(resolution.city, 'Bogota');
-  assert.equal(resolution.reason, 'city_without_active_vacancies');
+  assert.equal(resolution.city, null);
+  assert.equal(resolution.residenceLocation, 'Bogota');
+  assert.equal(resolution.reason, 'residence_without_compatible_vacancy');
 });
 
 const bogotaOperation = {
@@ -164,15 +166,17 @@ test('detectRoleHintFromText ignora cargos incoherentes no configurados como gin
   assert.equal(roleHint, null);
 });
 
-test('resolveVacancyFromText no asigna vacante por cargo incoherente aunque haya una sola activa', async () => {
+test('resolveVacancyFromText conserva residencia y no inventa un cargo incoherente', async () => {
   const resolution = await resolveVacancyFromText(null, 'Estoy en Ibague y busco para ginecologo', {
     activeVacancies: [activeIbagueVacancy],
     allVacancies: [activeIbagueVacancy]
   });
 
   assert.equal(resolution.resolved, false);
-  assert.equal(resolution.city, 'Ibague');
-  assert.equal(resolution.reason, 'city_with_active_vacancies');
+  assert.equal(resolution.city, null);
+  assert.equal(resolution.residenceLocation, 'Ibague');
+  assert.equal(resolution.roleHint, null);
+  assert.equal(resolution.reason, 'missing_city_and_role');
 });
 
 const inactiveSiberiaCargueVacancy = {
