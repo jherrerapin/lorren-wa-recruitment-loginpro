@@ -88,7 +88,7 @@ const initialCandidate = {
 
 const scheduleNow = new Date('2026-07-18T15:00:00.000Z');
 
-test('programa la ventana, incrementa la versión y devuelve el snapshot adquirido', async () => {
+test('programa la ventana real sin bloquear al caller por defecto', async () => {
   const { client, calls, getState } = createHarness(initialCandidate);
 
   const result = await scheduleCandidateMultilineWindow(client, {
@@ -97,7 +97,8 @@ test('programa la ventana, incrementa la versión y devuelve el snapshot adquiri
     now: scheduleNow
   });
 
-  assert.equal(result.windowMs, 2500);
+  assert.equal(result.windowMs, 0);
+  assert.equal(result.scheduledWindowMs, 2500);
   assert.equal(result.batchVersion, 5);
   assert.equal(result.windowUntil.toISOString(), '2026-07-18T15:00:02.500Z');
   assert.equal(getState().multilineBatchVersion, 5);
@@ -111,6 +112,20 @@ test('programa la ventana, incrementa la versión y devuelve el snapshot adquiri
     select: { multilineBatchVersion: true }
   });
   assert.equal(calls.transactions, 0);
+});
+
+test('el modo síncrono conserva la espera solo cuando se solicita explícitamente', async () => {
+  const { client } = createHarness(initialCandidate);
+
+  const result = await scheduleCandidateMultilineWindow(client, {
+    candidateId: initialCandidate.id,
+    windowMs: 2500,
+    now: scheduleNow,
+    awaitWindow: true
+  });
+
+  assert.equal(result.windowMs, 2500);
+  assert.equal(result.scheduledWindowMs, 2500);
 });
 
 test('cada nueva programación invalida la versión anterior', async () => {
