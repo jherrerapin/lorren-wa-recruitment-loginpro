@@ -1,20 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { normalizeBogotaLocalidad, GeographyNormalizationService } from '../src/services/geographyNormalization.js';
+import { normalizeBogotaLocalidad } from '../src/services/geographyNormalization.js';
 import { normalizeTransportMode, uniqueNormalizedTransportModes } from '../src/services/transportMode.js';
 import { alignCandidateLocationFields, normalizeCandidateFields } from '../src/services/candidateData.js';
 
-test('GeographyNormalizationService normaliza localidades de Bogota desde aliases seguros', () => {
-  const service = new GeographyNormalizationService();
-  assert.equal(service.normalizeBogotaLocalidad('Suba Lisboa'), 'Suba');
-  assert.equal(service.normalizeBogotaLocalidad('Lisboa'), 'Suba');
-  assert.equal(service.normalizeBogotaLocalidad('Suba Bilbao'), 'Suba');
-  assert.equal(service.normalizeBogotaLocalidad('Bilbao'), 'Suba');
-  assert.equal(service.normalizeBogotaLocalidad('Kennedy Patio Bonito'), 'Kennedy');
-  assert.equal(service.normalizeBogotaLocalidad('Patio Bonito'), 'Kennedy');
-  assert.equal(service.normalizeBogotaLocalidad('Ciudad Bolívar'), 'Ciudad Bolívar');
-  assert.equal(service.normalizeBogotaLocalidad('Hola'), null);
+test('normalizeBogotaLocalidad resuelve localidades desde aliases seguros', () => {
+  assert.equal(normalizeBogotaLocalidad('Suba Lisboa'), 'Suba');
+  assert.equal(normalizeBogotaLocalidad('Lisboa'), 'Suba');
+  assert.equal(normalizeBogotaLocalidad('Suba Bilbao'), 'Suba');
+  assert.equal(normalizeBogotaLocalidad('Bilbao'), 'Suba');
+  assert.equal(normalizeBogotaLocalidad('Kennedy Patio Bonito'), 'Kennedy');
+  assert.equal(normalizeBogotaLocalidad('Patio Bonito'), 'Kennedy');
+  assert.equal(normalizeBogotaLocalidad('Ciudad Bolívar'), 'Ciudad Bolívar');
+  assert.equal(normalizeBogotaLocalidad('Hola'), null);
 });
 
 test('alineacion de residencia aplica localidad de Bogota solo con vacante Bogota', () => {
