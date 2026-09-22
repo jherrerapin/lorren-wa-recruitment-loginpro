@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { normalizeBogotaLocalidad, GeographyNormalizationService } from '../src/services/geographyNormalization.js';
-import { normalizeTransportMode, uniqueNormalizedTransportModes, TransportNormalizationService } from '../src/services/transportMode.js';
+import { normalizeTransportMode, uniqueNormalizedTransportModes } from '../src/services/transportMode.js';
 import { alignCandidateLocationFields, normalizeCandidateFields } from '../src/services/candidateData.js';
 
 test('GeographyNormalizationService normaliza localidades de Bogota desde aliases seguros', () => {
@@ -32,22 +32,21 @@ test('alineacion de residencia aplica localidad de Bogota solo con vacante Bogot
   );
 });
 
-test('TransportNormalizationService guarda solo valores finales normalizados', () => {
-  const service = new TransportNormalizationService();
-  assert.equal(service.normalize('No tengo transporte'), 'Publico');
-  assert.equal(service.normalize('No tengo medio de transporte'), 'Publico');
-  assert.equal(service.normalize('Bus'), 'Publico');
-  assert.equal(service.normalize('Transmilenio'), 'Publico');
-  assert.equal(service.normalize('Transmi'), 'Publico');
-  assert.equal(service.normalize('SITP'), 'Publico');
-  assert.equal(service.normalize('Uber'), 'Publico');
-  assert.equal(service.normalize('A pie'), 'Publico');
-  assert.equal(service.normalize('Moto'), 'Moto');
-  assert.equal(service.normalize('Carro'), 'Carro');
-  assert.equal(service.normalize('Bicicleta'), 'Bicicleta');
-  assert.equal(service.normalize('Patineta eléctrica'), 'Patineta eléctrica');
-  assert.equal(service.normalize('Hola'), null);
-  assert.equal(service.normalize('Estoy interesado'), null);
+test('normalizeTransportMode guarda solo valores finales normalizados', () => {
+  assert.equal(normalizeTransportMode('No tengo transporte'), 'Publico');
+  assert.equal(normalizeTransportMode('No tengo medio de transporte'), 'Publico');
+  assert.equal(normalizeTransportMode('Bus'), 'Publico');
+  assert.equal(normalizeTransportMode('Transmilenio'), 'Publico');
+  assert.equal(normalizeTransportMode('Transmi'), 'Publico');
+  assert.equal(normalizeTransportMode('SITP'), 'Publico');
+  assert.equal(normalizeTransportMode('Uber'), 'Publico');
+  assert.equal(normalizeTransportMode('A pie'), 'Publico');
+  assert.equal(normalizeTransportMode('Moto'), 'Moto');
+  assert.equal(normalizeTransportMode('Carro'), 'Carro');
+  assert.equal(normalizeTransportMode('Bicicleta'), 'Bicicleta');
+  assert.equal(normalizeTransportMode('Patineta eléctrica'), 'Patineta eléctrica');
+  assert.equal(normalizeTransportMode('Hola'), null);
+  assert.equal(normalizeTransportMode('Estoy interesado'), null);
 });
 
 test('normalizeCandidateFields no conserva texto basura como transporte', () => {
