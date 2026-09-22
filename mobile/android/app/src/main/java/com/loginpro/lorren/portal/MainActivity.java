@@ -33,6 +33,8 @@ public final class MainActivity extends Activity {
     private static final int REQUEST_APP_PREPARE = 4104;
     private static final int REQUEST_ENABLE_BLUETOOTH = 4105;
     private static final int REQUEST_ATTENDANCE_LOCATION = 4106;
+    private static final int REQUEST_BLUETOOTH_DISCOVERABLE = 4107;
+    private static final int BLUETOOTH_DISCOVERABLE_SECONDS = 300;
     private static final String PORTAL_PATH = "/operaciones/portal";
     private static final String HANDOFF_PATH = "/operaciones/portal/sesion-transferencia/continuar";
     private static final String NATIVE_USER_AGENT_TOKEN = "LorrenNative/1";
@@ -48,6 +50,7 @@ public final class MainActivity extends Activity {
     private boolean stoppedForSystemPrompt;
     private boolean stoppedForBackground;
     private boolean bluetoothEnableRequested;
+    private boolean bluetoothDiscoverableRequested;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -292,6 +295,19 @@ public final class MainActivity extends Activity {
         return "bluetooth_disabled";
     }
 
+    boolean ensureNearbyDiscoverable() {
+        BluetoothAdapter adapter = bluetoothAdapter();
+        if (adapter == null) return false;
+        try {
+            if (adapter.getScanMode() == BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE) return true;
+        } catch (SecurityException error) {
+            ensureNearbyPermissions();
+            return false;
+        }
+        requestBluetoothDiscoverable();
+        return false;
+    }
+
     private String[] locationRuntimePermissions() {
         return new String[] {
             Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -375,6 +391,24 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private void requestBluetoothDiscoverable() {
+        if (bluetoothDiscoverableRequested) return;
+        bluetoothDiscoverableRequested = true;
+        systemPromptInFlight = true;
+        try {
+            Intent request = new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
+            request.putExtra(
+                BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION,
+                BLUETOOTH_DISCOVERABLE_SECONDS
+            );
+            startActivityForResult(request, REQUEST_BLUETOOTH_DISCOVERABLE);
+        } catch (Exception error) {
+            bluetoothDiscoverableRequested = false;
+            systemPromptInFlight = false;
+            if (presenceBridge != null) presenceBridge.onBluetoothDiscoverableResult(false);
+        }
+    }
+
     private void requestRuntimePermissions(String[] permissions, int requestCode) {
         systemPromptInFlight = true;
         requestPermissions(permissions, requestCode);
@@ -445,6 +479,12 @@ public final class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQUEST_BLUETOOTH_DISCOVERABLE) {
+            systemPromptInFlight = false;
+            bluetoothDiscoverableRequested = false;
+            if (presenceBridge != null) presenceBridge.onBluetoothDiscoverableResult(resultCode > 0);
+            return;
+        }
         if (requestCode != REQUEST_ENABLE_BLUETOOTH) return;
         systemPromptInFlight = false;
         bluetoothEnableRequested = false;
@@ -470,7 +510,7 @@ public final class MainActivity extends Activity {
         JSONObject event = new JSONObject();
         try {
             event.put("type", type);
-            event.put("key", value);
+            event.put(key, value);
         } catch (Exception ignored) {
         }
         return event;

@@ -6,6 +6,14 @@ const managerPath = new URL(
   '../mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java',
   import.meta.url
 );
+const bridgePath = new URL(
+  '../mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java',
+  import.meta.url
+);
+const mainActivityPath = new URL(
+  '../mobile/android/app/src/main/java/com/loginpro/lorren/portal/MainActivity.java',
+  import.meta.url
+);
 const nativePresencePath = new URL(
   '../mobile/android/app/src/main/assets/native-presence.js',
   import.meta.url
@@ -15,54 +23,43 @@ async function read(url) {
   return readFile(url, 'utf8');
 }
 
-test('Nearby conserva el status nativo y capacidades locales sin cambiar el error público', async () => {
-  const [manager, nativePresence] = await Promise.all([
+test('la autoridad nativa permanece en Bluetooth Classic RFCOMM/SDP y no vuelve a Nearby Connections', async () => {
+  const [manager, bridge, mainActivity, nativePresence] = await Promise.all([
     read(managerPath),
+    read(bridgePath),
+    read(mainActivityPath),
     read(nativePresencePath)
   ]);
 
-  assert.match(manager, /import android\.content\.pm\.PackageManager;/);
-  assert.match(manager, /import android\.os\.Build;/);
-  assert.match(manager, /import com\.google\.android\.gms\.common\.GoogleApiAvailability;/);
-  assert.match(manager, /import com\.google\.android\.gms\.common\.api\.ApiException;/);
+  assert.match(manager, /BluetoothServerSocket/);
+  assert.match(manager, /BluetoothSocket/);
+  assert.match(manager, /listenUsingInsecureRfcommWithServiceRecord/);
+  assert.match(manager, /createInsecureRfcommSocketToServiceRecord/);
+  assert.match(manager, /bluetoothAdapter\.startDiscovery\(\)/);
+  assert.match(manager, /BluetoothAdapter\.ACTION_DISCOVERY_STARTED/);
+  assert.match(manager, /BluetoothAdapter\.ACTION_DISCOVERY_FINISHED/);
+  assert.match(manager, /BluetoothDevice\.ACTION_UUID/);
+  assert.match(manager, /fetchUuidsWithSdp\(\)/);
+  assert.match(manager, /INQUIRY_CHECKPOINT_MS = 15_000L/);
+  assert.match(manager, /RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L/);
+  assert.match(manager, /SCAN_MODE_CONNECTABLE_DISCOVERABLE/);
+  assert.match(manager, /DISCOVERABLE_CONFIRMED/);
+  assert.match(manager, /RFCOMM_SERVER_READY/);
+  assert.doesNotMatch(manager, /com\.google\.android\.gms\.nearby|Nearby\.getConnectionsClient|ConnectionsClient|Strategy\.P2P_/);
 
-  assert.match(
-    manager,
-    /private void emitEnvironmentDiagnostic\(String actor\)[\s\S]{0,900}CAP_ANDROID_SDK_[\s\S]{0,220}FEATURE_BLUETOOTH[\s\S]{0,320}FEATURE_BLUETOOTH_LE[\s\S]{0,320}CAP_PLAY_SERVICES[\s\S]{0,180}isGooglePlayServicesAvailable/
-  );
-  assert.match(manager, /READY_REQUESTED"\);\s*emitEnvironmentDiagnostic\("AUX"\);/);
-  assert.match(manager, /SCAN_REQUESTED"\);\s*emitEnvironmentDiagnostic\("ENC"\);/);
+  assert.match(bridge, /pendingReadyServiceRequestId/);
+  assert.match(bridge, /activity\.ensureNearbyDiscoverable\(\)/);
+  assert.match(bridge, /onBluetoothDiscoverableResult\(boolean granted\)/);
+  assert.match(bridge, /onBluetoothDiscoverableResult[\s\S]{0,700}manager\.startReady\(serviceRequestId\)/);
 
-  assert.match(
-    manager,
-    /private static Integer statusCode\(Exception error\)[\s\S]{0,220}error instanceof ApiException[\s\S]{0,120}getStatusCode\(\)/
-  );
-  assert.match(
-    manager,
-    /startAdvertising\([\s\S]{0,700}addOnFailureListener\(error -> \{[\s\S]{0,180}emitDiagnostic\("AUX", "ADVERTISING_FAILED", error\);[\s\S]{0,120}failReady\("advertising_failed"\)/
-  );
-  assert.match(
-    manager,
-    /startDiscovery\([\s\S]{0,900}addOnFailureListener\(error -> \{[\s\S]{0,180}emitDiagnostic\("ENC", "DISCOVERY_FAILED", error\);[\s\S]{0,120}failLeaderStart\("discovery_failed"\)/
-  );
-  assert.match(
-    manager,
-    /CONNECTION_FAILED[\s\S]{0,180}result\.getStatus\(\)\.getStatusCode\(\)/
-  );
-  assert.match(manager, /CONNECTION_REQUEST_FAILED", error/);
+  assert.match(mainActivity, /REQUEST_BLUETOOTH_DISCOVERABLE = 4107/);
+  assert.match(mainActivity, /BLUETOOTH_DISCOVERABLE_SECONDS = 300/);
+  assert.match(mainActivity, /BluetoothAdapter\.ACTION_REQUEST_DISCOVERABLE/);
+  assert.match(mainActivity, /BluetoothAdapter\.EXTRA_DISCOVERABLE_DURATION/);
+  assert.match(mainActivity, /onBluetoothDiscoverableResult\(resultCode > 0\)/);
+  assert.match(mainActivity, /event\.put\(key, value\)/);
+  assert.doesNotMatch(mainActivity, /event\.put\("key", value\)/);
 
-  assert.match(
-    manager,
-    /private void emitDiagnostic\(String actor, String stage, Integer statusCode\)[\s\S]{0,260}if \(statusCode != null\) event\.put\("statusCode", statusCode\)/
-  );
-  assert.doesNotMatch(manager, /Build\.(?:MODEL|MANUFACTURER|DEVICE|FINGERPRINT)/);
-  assert.doesNotMatch(manager, /event\.put\("(?:message|exception|stackTrace)"/);
-  assert.doesNotMatch(manager, /error\.getMessage\(\)|printStackTrace\(/);
-
-  assert.match(
-    nativePresence,
-    /if \(Number\.isFinite\(item\.statusCode\)\) metadata\.push\(`status=\$\{item\.statusCode\}`\)/
-  );
   assert.match(
     nativePresence,
     /discovery_failed:\s*'No fue posible iniciar la escucha Bluetooth para la marcación\. Intenta nuevamente\.'/
