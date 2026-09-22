@@ -8,6 +8,7 @@ import {
 import { runAutoCvMigration } from '../services/cvMigration.js';
 import { ensureSupervisorWindowOpen } from '../services/adminSupervisor.js';
 import { runDispatchWhatsappWindowReminderDispatcher } from '../services/dispatchWhatsappAdminAlerts.js';
+import { processDueMultilineCandidates } from '../services/multilineBatchProcessor.js';
 
 const prisma = new PrismaClient();
 const POLL_MS = Number.parseInt(process.env.JOB_WORKER_POLL_MS || '5000', 10);
@@ -43,6 +44,15 @@ async function runJob(job) {
 
 async function tick() {
   const now = new Date();
+
+  const multilineStats = await processDueMultilineCandidates(prisma, { now }).catch((error) => {
+    console.error('[MULTILINE_WORKER_SWEEP_ERROR]', error);
+    return null;
+  });
+  if (multilineStats?.claimed) {
+    console.info('[MULTILINE_WORKER_SWEEP]', multilineStats);
+  }
+
   const jobs = await claimDueJobs(prisma, { limit: 20, now });
 
   for (const job of jobs) {
