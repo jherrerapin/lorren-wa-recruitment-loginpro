@@ -73,6 +73,63 @@ test('cityHint sigue siendo util cuando el candidato no escribió una ciudad', a
   assert.equal(resolution.city, 'Neiva');
 });
 
+test('matching débil conserva residencia y cargo conocidos en vez de reiniciar ciudad y cargo', async () => {
+  const resolution = await resolveVacancyFromText(
+    null,
+    ['De Neiva Huila', 'Auxiliar de bodega', '.'].join('\n'),
+    {
+      activeVacancies: [activeNeivaVacancy],
+      allVacancies: [activeNeivaVacancy]
+    }
+  );
+
+  assert.equal(resolution.resolved, false);
+  assert.equal(resolution.city, null);
+  assert.equal(resolution.residenceLocation, 'Neiva');
+  assert.equal(resolution.roleHint, 'auxiliar bodega');
+  assert.equal(resolution.reason, 'residence_without_compatible_vacancy');
+});
+
+test('la compuerta no vuelve a pedir ciudad y cargo si ya conoce residencia y cargo pero falta desambiguar vacante', async () => {
+  const decision = await resolveVacancyFirstGate({
+    prisma: null,
+    candidate: {
+      id: 'cand-neiva-role',
+      status: 'NUEVO',
+      currentStep: 'GREETING_SENT',
+      vacancyId: null,
+      botResumeMode: null
+    },
+    currentVacancy: null,
+    inboundText: 'Auxiliar de bodega\n.',
+    currentStep: 'GREETING_SENT',
+    recentMessages: [
+      { direction: 'INBOUND', body: 'De Neiva Huila' },
+      {
+        direction: 'OUTBOUND',
+        body: 'Gracias por contarme desde dónde escribes. Para ubicar bien tu proceso, ¿recuerdas qué cargo viste en el anuncio por el que nos contactaste?',
+        rawPayload: {
+          source: 'vacancy_first_gate',
+          replyKind: 'ASK_VACANCY_ROLE',
+          reason: 'RESIDENCE_CAPTURED_VACANCY_NEEDED'
+        }
+      }
+    ],
+    vacancyHints: {
+      activeVacancies: [activeNeivaVacancy],
+      allVacancies: [activeNeivaVacancy]
+    }
+  });
+
+  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
+  assert.equal(decision.reason, 'RESIDENCE_AND_ROLE_CAPTURED_TARGET_NEEDED');
+  assert.equal(decision.replyKind, 'ASK_VACANCY_TARGET');
+  assert.equal(decision.resolution.residenceLocation, 'Neiva');
+  assert.equal(decision.resolution.roleHint, 'auxiliar bodega');
+  assert.doesNotMatch(decision.reply, /desde qué ciudad|qué cargo viste/i);
+  assert.match(decision.reply, /operaci[oó]n|zona|anuncio|lugar/i);
+});
+
 test('la compuerta inicial responde sin vacantes en Medellin y no asigna Neiva', async () => {
   const decision = await resolveVacancyFirstGate({
     prisma: null,
