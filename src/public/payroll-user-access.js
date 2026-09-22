@@ -193,7 +193,9 @@
 
   function hideLegacyModuleControl(input) {
     const label = input?.closest('label');
-    if (label) label.style.display = 'none';
+    if (!label) return;
+    label.hidden = true;
+    label.style.setProperty('display', 'none', 'important');
   }
 
   function hideLegacyOperationalModuleControls(form) {
