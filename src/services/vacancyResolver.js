@@ -695,7 +695,7 @@ export async function resolveVacancyFromText(prisma, text, options = {}) {
     if (canUseInactiveMatch(inactiveMatch, inactiveContext) && (!best || !activeHasRoleEvidence)) {
       return { resolved: true, vacancy: inactiveMatch.best.vacancy, city: city || canonicalVacancyCity(inactiveMatch.best.vacancy), residenceLocation, roleHint, reason: 'matched_inactive_vacancy', source: 'text_inference_fallback', fallback: true };
     }
-    return { resolved: false, vacancy: null, city, residenceLocation, roleHint, reason: 'low_confidence_match', source: 'text_inference_fallback', fallback: true };
+    return { resolved: false, vacancy: null, city, residenceLocation, roleHint, reason: shouldUseResidenceCompatibility ? 'residence_without_compatible_vacancy' : 'low_confidence_match', source: 'text_inference_fallback', fallback: true };
   }
   if (runnerUp && margin < 0.75) return { resolved: false, vacancy: null, city, residenceLocation, roleHint, reason: 'ambiguous_match', source: 'text_inference_fallback', fallback: true };
   return { resolved: true, vacancy: best.vacancy, city: city || canonicalVacancyCity(best.vacancy), residenceLocation, roleHint, reason: 'matched_active_vacancy', source: 'text_inference_fallback', fallback: true };
