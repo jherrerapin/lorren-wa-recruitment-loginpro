@@ -14,8 +14,17 @@ function webhookPayload(message) {
   };
 }
 
+function eligibleCandidate() {
+  return {
+    id: 'candidate-1',
+    campaignId: null,
+    sourceType: null,
+    referrerName: null
+  };
+}
+
 test('un candidato ya atribuido se descarta antes del clasificador de origen IA', async () => {
-  const calls = { findUnique: 0, update: 0, next: 0 };
+  const calls = { findUnique: 0, classify: 0, update: 0, next: 0 };
   const prisma = {
     candidate: {
       findUnique: async () => {
@@ -33,7 +42,12 @@ test('un candidato ya atribuido se descarta antes del clasificador de origen IA'
       }
     }
   };
-  const middleware = runtime(prisma);
+  const middleware = runtime(prisma, {
+    classifyLeadOrigin: async () => {
+      calls.classify += 1;
+      return null;
+    }
+  });
 
   await middleware(
     {
@@ -48,6 +62,77 @@ test('un candidato ya atribuido se descarta antes del clasificador de origen IA'
   );
 
   assert.equal(calls.findUnique, 1);
+  assert.equal(calls.classify, 0);
   assert.equal(calls.update, 0);
+  assert.equal(calls.next, 1);
+});
+
+test('una clasificación PERSON sin evidencia literal no persiste referidor', async () => {
+  const calls = { update: 0, next: 0 };
+  const prisma = {
+    candidate: {
+      findUnique: async () => eligibleCandidate(),
+      update: async () => { calls.update += 1; }
+    }
+  };
+  const middleware = runtime(prisma, {
+    classifyLeadOrigin: async () => ({
+      kind: 'PERSON',
+      score: 0.93,
+      label: 'Juan Pérez',
+      evidence: 'Juan Pérez me recomendó la vacante'
+    })
+  });
+
+  await middleware(
+    {
+      body: webhookPayload({
+        from: '3000000000',
+        type: 'text',
+        text: { body: 'Estoy interesado en auxiliar de bodega y tengo experiencia como conductor' }
+      })
+    },
+    {},
+    () => { calls.next += 1; }
+  );
+
+  assert.equal(calls.update, 0);
+  assert.equal(calls.next, 1);
+});
+
+test('una referencia explícita y sustentada sí puede persistirse', async () => {
+  const calls = { update: [], next: 0 };
+  const prisma = {
+    candidate: {
+      findUnique: async () => eligibleCandidate(),
+      update: async (args) => { calls.update.push(args); }
+    }
+  };
+  const middleware = runtime(prisma, {
+    classifyLeadOrigin: async () => ({
+      kind: 'PERSON',
+      score: 0.96,
+      label: 'Juan Pérez',
+      evidence: 'Juan Pérez me recomendó esta vacante'
+    })
+  });
+
+  await middleware(
+    {
+      body: webhookPayload({
+        from: '3000000000',
+        type: 'text',
+        text: { body: 'Juan Pérez me recomendó esta vacante y me compartió el número' }
+      })
+    },
+    {},
+    () => { calls.next += 1; }
+  );
+
+  assert.equal(calls.update.length, 1);
+  assert.deepEqual(calls.update[0], {
+    where: { id: 'candidate-1' },
+    data: { referrerName: 'Juan Pérez' }
+  });
   assert.equal(calls.next, 1);
 });
