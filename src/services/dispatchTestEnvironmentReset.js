@@ -3,6 +3,7 @@ import { recalculateDispatchServiceRequestStatus } from './dispatchOperationalCo
 
 export const DISPATCH_TEST_RESET_CONFIRMATION = 'REINICIAR';
 export const DISPATCH_TEST_RESET_ONCE_KEY = 'DISPATCH_TEST_ENVIRONMENT_RESET_2026_07_28_V1';
+const DISPATCH_TEST_RESET_ONCE_ACTION = 'DISPATCH_TEST_ENVIRONMENT_RESET_ONCE';
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
@@ -246,18 +247,28 @@ export async function resetDispatchTestEnvironment(prisma, options = {}) {
 }
 
 export async function resetDispatchTestEnvironmentOnce(prisma, options = {}) {
-  const marker = await prisma.botKnowledge.findUnique({
-    where: { key: DISPATCH_TEST_RESET_ONCE_KEY },
-    select: { value: true }
+  const marker = await prisma.devAuditEvent.findFirst({
+    where: {
+      entityType: 'SYSTEM',
+      entityId: DISPATCH_TEST_RESET_ONCE_KEY,
+      action: DISPATCH_TEST_RESET_ONCE_ACTION
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, metadata: true, createdAt: true }
   });
-  if (marker) return { skipped: true, marker: marker.value };
+  if (marker) return { skipped: true, marker: marker.metadata || marker.createdAt };
 
   const result = await resetDispatchTestEnvironment(prisma, options);
-  const value = JSON.stringify({ completedAt: new Date().toISOString(), result });
-  await prisma.botKnowledge.upsert({
-    where: { key: DISPATCH_TEST_RESET_ONCE_KEY },
-    update: { value },
-    create: { key: DISPATCH_TEST_RESET_ONCE_KEY, value }
+  const completedAt = new Date().toISOString();
+  await prisma.devAuditEvent.create({
+    data: {
+      entityType: 'SYSTEM',
+      entityId: DISPATCH_TEST_RESET_ONCE_KEY,
+      entityLabel: 'Dispatch test environment reset',
+      action: DISPATCH_TEST_RESET_ONCE_ACTION,
+      actorSource: 'SYSTEM',
+      metadata: { completedAt, result }
+    }
   });
   return { skipped: false, ...result };
 }
