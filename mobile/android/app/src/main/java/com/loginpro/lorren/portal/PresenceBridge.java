@@ -104,10 +104,47 @@ final class PresenceBridge {
         if (readinessError != null) return jsonError(readinessError);
         try {
             String normalizedServiceRequestId = requiredToken(serviceRequestId, "serviceRequestId");
+            synchronized (this) {
+                pendingReadyServiceRequestId = normalizedServiceRequestId;
+            }
+            if (!activity.ensureNearbyDiscoverable()) return jsonOk();
+            synchronized (this) {
+                pendingReadyServiceRequestId = "";
+            }
             manager.startReady(normalizedServiceRequestId);
             return jsonOk();
         } catch (Exception error) {
+            synchronized (this) {
+                pendingReadyServiceRequestId = "";
+            }
             return jsonError("ready_failed");
+        }
+    }
+
+    void onBluetoothDiscoverableResult(boolean granted) {
+        String serviceRequestId;
+        synchronized (this) {
+            serviceRequestId = pendingReadyServiceRequestId;
+            pendingReadyServiceRequestId = "";
+        }
+        if (serviceRequestId.isEmpty()) return;
+        if (!granted) {
+            emitPresenceError("discovery_failed");
+            return;
+        }
+        if (!hasUsablePresenceCredential()) {
+            emitPresenceError("native_presence_credential_required");
+            return;
+        }
+        String readinessError = activity.ensureNearbyRadioReady();
+        if (readinessError != null) {
+            emitPresenceError(readinessError);
+            return;
+        }
+        try {
+            manager.startReady(serviceRequestId);
+        } catch (Exception error) {
+            emitPresenceError("ready_failed");
         }
     }
 
