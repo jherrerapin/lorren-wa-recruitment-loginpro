@@ -36,6 +36,45 @@ test('detectRoleHintFromText ignora prompt previo del bot y conserva cargo del c
   assert.equal(roleHint, 'auxiliar bodega');
 });
 
+test('detectRoleHintFromText conserva el cargo objetivo y no mezcla experiencia secundaria', () => {
+  const roleHint = detectRoleHintFromText(
+    'Estoy interesado en la vacante de auxiliar de bodega pero también tengo experiencia como conductor'
+  );
+
+  assert.equal(roleHint, 'auxiliar bodega');
+});
+
+test('resolveVacancyFromText conserva ciudad previa y cargo objetivo ante experiencia secundaria', async () => {
+  const neivaOperation = {
+    id: 'op-neiva',
+    name: 'Operacion Neiva',
+    city: { id: 'city-neiva', name: 'Neiva' }
+  };
+  const neivaVacancy = {
+    id: 'vac-neiva-bodega',
+    title: 'Auxiliar de Bodega Neiva',
+    role: 'Auxiliar de bodega',
+    city: 'Neiva',
+    operation: neivaOperation,
+    operationAddress: 'Neiva',
+    isActive: true,
+    acceptingApplications: true
+  };
+
+  const resolution = await resolveVacancyFromText(null, [
+    'De Neiva Huila',
+    'Estoy interesado en la vacante de auxiliar de bodega Pero también tengo experiencia como conductor!'
+  ].join('\n'), {
+    activeVacancies: [neivaVacancy],
+    allVacancies: [neivaVacancy]
+  });
+
+  assert.equal(resolution.resolved, true);
+  assert.equal(resolution.vacancy.id, 'vac-neiva-bodega');
+  assert.equal(resolution.city, 'Neiva');
+  assert.equal(resolution.roleHint, 'auxiliar bodega');
+});
+
 test('resolveVacancyFromText no autoasigna vacante cuando solo detecta ciudad', async () => {
   const resolution = await resolveVacancyFromText(null, 'Buenas noches te escribo desde Ibague para vacante de trabajo', {
     activeVacancies: [activeIbagueVacancy],
