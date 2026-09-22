@@ -203,8 +203,13 @@ test('escala duda al administrador, aplica respuesta al candidato y crea aprendi
   assert.equal(supervisorAnswer.rawPayload.aiFallbackUsed, false);
   assert.equal(supervisorAnswer.rawPayload.originalSupervisorInstruction, 'Sí, el turno disponible es nocturno de domingo a domingo.');
   assert.equal(prisma.state.botKnowledge.length, 1);
-  assert.match(prisma.state.botKnowledge[0].content, /Instruccion validada por administrador/);
-  assert.match(prisma.state.botKnowledge[0].content, /Respuesta sugerida por Lorren/);
+  assert.match(prisma.state.botKnowledge[0].key, /^recruitment:knowledge:/);
+  assert.equal(Object.hasOwn(prisma.state.botKnowledge[0], 'content'), false);
+  const storedKnowledge = JSON.parse(prisma.state.botKnowledge[0].value);
+  assert.match(storedKnowledge.content, /Instruccion validada por administrador/);
+  assert.match(storedKnowledge.content, /Respuesta sugerida por Lorren/);
+  assert.equal(storedKnowledge.createdBy, 'admin_whatsapp');
+  assert.equal(storedKnowledge.updatedBy, 'admin_whatsapp');
 }));
 
 test('acuse interno contextual del administrador después de intervención manual no se reenvía al candidato', withWhatsappMock(async (whatsappMock) => {
