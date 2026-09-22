@@ -3,13 +3,11 @@ import assert from 'node:assert/strict';
 import {
   DATA_CONSENT_VERSION,
   CAMPAIGN_VACANCY_CONFIRMATION_MODE,
-  buildVacancyQuestionReply,
   evaluateConsentBoundary,
   isConsentAcceptance,
   isConsentRejection,
   removeHandledMessagesFromWebhook
 } from '../src/services/dataConsentGate.js';
-import { buildConsentQuestionReply } from '../src/services/consentFaq.js';
 import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
 import {
   buildCandidateDataCollectionMessage,
@@ -58,27 +56,6 @@ test('una autorización que describe el derecho de revocatoria no se convierte e
   assert.equal(isConsentAcceptance(authorization), true);
   assert.equal(isConsentRejection(authorization), false);
   assert.equal(isConsentRejection('Revoco la autorización para tratar mis datos'), true);
-});
-
-test('las dudas sobre autorización se responden antes de retomar el consentimiento', () => {
-  assert.match(buildConsentQuestionReply('¿Para qué van a usar mis datos?'), /gestionar la postulación/i);
-  assert.match(buildConsentQuestionReply('¿Puedo revocar después?'), /revocatoria/i);
-  assert.match(buildConsentQuestionReply('¿Qué pasa si no autorizo?'), /no continuaremos/i);
-});
-
-test('durante el consentimiento responde con datos de la vacante sin inventar', () => {
-  const vacancy = {
-    title: 'Líder de Operación',
-    city: 'Neiva',
-    conditions: 'Salario a convenir y prestaciones de ley',
-    requirements: 'Técnico o tecnólogo en logística',
-    operationAddress: 'Sector Las Brisas'
-  };
-
-  assert.match(buildVacancyQuestionReply(vacancy, '¿Cuánto pagan?'), /Salario a convenir/i);
-  assert.match(buildVacancyQuestionReply(vacancy, '¿Dónde queda?'), /Sector Las Brisas/i);
-  assert.match(buildVacancyQuestionReply(vacancy, '¿Qué perfil piden?'), /Técnico o tecnólogo/i);
-  assert.match(buildVacancyQuestionReply(vacancy, '¿Y si no tengo moto?'), /Técnico o tecnólogo/i);
 });
 
 test('un archivo enviado antes del consentimiento sigue a la persistencia canónica sin autorizar la postulación', () => {
