@@ -19,13 +19,3 @@ export function isFeatureEnabled(name, fallback = getFeatureFlagDefault(name)) {
   if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
   return TRUE_VALUES.has(String(raw).trim().toLowerCase());
 }
-
-export function getHardeningFlags() {
-  return {
-    responsesExtractor: isFeatureEnabled('FF_RESPONSES_EXTRACTOR'),
-    policyLayer: isFeatureEnabled('FF_POLICY_LAYER'),
-    postgresJobQueue: isFeatureEnabled('FF_POSTGRES_JOB_QUEUE'),
-    attachmentAnalyzer: isFeatureEnabled('FF_ATTACHMENT_ANALYZER'),
-    asyncAdminMediaForward: isFeatureEnabled('FF_ASYNC_ADMIN_MEDIA_FORWARD')
-  };
-}
