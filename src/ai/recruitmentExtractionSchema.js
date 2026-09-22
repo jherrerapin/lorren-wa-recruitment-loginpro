@@ -65,7 +65,7 @@ export const RECRUITMENT_EXTRACTION_SCHEMA = {
       },
       replyIntent: {
         type: 'string',
-        enum: ['request_cv_pdf_word', 'request_missing_cv', 'attachment_id_doc', 'attachment_unreadable', 'answer_question_then_continue', 'confirm_correction', 'continue_flow', 'request_missing_data']
+        enum: ['request_cv_pdf_word', 'request_missing_cv', 'attachment_id_doc', 'attachment_unreadable', 'answer_question', 'confirm_correction', 'continue_flow', 'request_missing_data']
       }
     },
     required: ['turnType', 'fields', 'fieldEvidence', 'conflicts', 'attachment', 'replyIntent'],
