@@ -234,6 +234,61 @@ test('chatEngine reutiliza una decisión válida sin ejecutar un segundo think',
   }
 });
 
+test('chatEngine mantiene la conversación pero bloquea avance paralelo mientras el consentimiento está pendiente', async () => {
+  const previousKey = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const candidate = baseCandidate({
+      currentStep: ConversationStep.GREETING_SENT,
+      dataConsentStatus: 'PENDING',
+      dataConsentVersion: null,
+      botResumeMode: 'awaiting_data_consent',
+      fullName: null
+    });
+    const currentVacancy = vacancy({ title: 'Auxiliar de Operación' });
+    const prisma = createPrismaHarness(candidate);
+    const inboundText = '¿Cómo se llama la empresa de la oferta?';
+    const preparedContext = await prepareEngineDecisionContext({
+      prisma,
+      candidate,
+      vacancy: currentVacancy,
+      inboundText,
+      recentMessages: [],
+      currentStep: candidate.currentStep
+    });
+
+    const result = await runChatEngine({
+      prisma,
+      candidate,
+      vacancy: currentVacancy,
+      inboundText,
+      recentMessages: [],
+      precomputedDecision: {
+        reply: 'El proceso está siendo gestionado por LoginPro. No tengo registrado un empleador distinto en la información de esta vacante.',
+        nextStep: ConversationStep.COLLECTING_DATA,
+        actions: [{ type: 'request_confirmation' }],
+        extractedFields: {},
+        fallback: false,
+        fallbackReason: null,
+        loopGuardApplied: false,
+        contextFingerprint: preparedContext.contextFingerprint,
+        usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 }
+      }
+    });
+
+    assert.equal(result.consentPendingConversation, true);
+    assert.equal(result.nextStep, ConversationStep.GREETING_SENT);
+    assert.deepEqual(result.actions, []);
+    assert.deepEqual(result.proposedActions, [{ type: 'request_confirmation' }]);
+    assert.ok(result.blockedActions.some((item) => item.action === 'request_confirmation' && item.reason === 'data_consent_pending'));
+    assert.match(result.reply, /LoginPro/i);
+    assert.equal(prisma.getState().currentStep, ConversationStep.GREETING_SENT);
+  } finally {
+    if (previousKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previousKey;
+  }
+});
+
 test('chatEngine no permite que save_fields raw reviva un nombre rechazado por la compuerta semántica', async () => {
   const previousKey = process.env.OPENAI_API_KEY;
   delete process.env.OPENAI_API_KEY;
