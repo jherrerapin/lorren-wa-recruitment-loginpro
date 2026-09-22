@@ -69,9 +69,9 @@ export const CONSENT_PROMPT_IDEMPOTENCY_REPLAYS = Object.freeze([
     }
   },
   {
-    id: 'conv-034-pending-question-retry-v1',
+    id: 'conv-034-pending-question-router-v1',
     sourceConversation: 'CONV-034',
-    title: 'Una pregunta durante consentimiento se responde una vez ante reintento',
+    title: 'Una pregunta durante consentimiento permanece intacta para el router conversacional',
     candidate: {
       id: 'TEST-CANDIDATE-CONV-034-PENDING-QUESTION',
       phone: 'TEST-PHONE-CONV-034-PENDING-QUESTION',
@@ -96,10 +96,38 @@ export const CONSENT_PROMPT_IDEMPOTENCY_REPLAYS = Object.freeze([
       }]
     ],
     expected: {
-      outboundMessages: 1,
-      inboundClaims: 1,
-      clarifierCount: 1,
-      finalPending: true
+      outboundMessages: 0,
+      inboundClaims: 0,
+      finalPending: true,
+      nextCalls: [1, 1],
+      remainingMessages: [1, 1]
+    }
+  },
+  {
+    id: 'production-company-question-pending-consent-v1',
+    sourceConversation: 'PROD-2026-09-21-NEIVA',
+    title: 'La pregunta por la empresa de la oferta no se convierte en FAQ de consentimiento',
+    candidate: {
+      id: 'TEST-CANDIDATE-PROD-COMPANY-QUESTION',
+      phone: 'TEST-PHONE-PROD-COMPANY-QUESTION',
+      vacancyId: 'TEST-VACANCY-CONSENT-IDEMPOTENCY',
+      dataConsentStatus: 'PENDING',
+      currentStep: 'GREETING_SENT',
+      botResumeMode: 'awaiting_data_consent',
+      botPaused: false
+    },
+    deliveries: [[{
+      id: 'TEST-WAMID-PROD-COMPANY-QUESTION',
+      from: 'TEST-PHONE-PROD-COMPANY-QUESTION',
+      type: 'text',
+      text: { body: '¿Cómo se llama la empresa de la oferta?' }
+    }]],
+    expected: {
+      outboundMessages: 0,
+      inboundClaims: 0,
+      finalPending: true,
+      nextCalls: [1],
+      remainingMessages: [1]
     }
   },
   {
