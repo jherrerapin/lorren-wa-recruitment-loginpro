@@ -8,7 +8,7 @@ export const FEATURE_FLAG_DEFAULTS = Object.freeze({
   FF_ASYNC_ADMIN_MEDIA_FORWARD: false
 });
 
-export function getFeatureFlagDefault(name) {
+function getFeatureFlagDefault(name) {
   return Object.hasOwn(FEATURE_FLAG_DEFAULTS, name)
     ? FEATURE_FLAG_DEFAULTS[name]
     : false;
