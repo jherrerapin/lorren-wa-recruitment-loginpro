@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import axios from 'axios';
-import { FEATURE_FLAG_DEFAULTS, getHardeningFlags, isFeatureEnabled } from '../src/services/featureFlags.js';
+import { FEATURE_FLAG_DEFAULTS, isFeatureEnabled } from '../src/services/featureFlags.js';
 import { tryOpenAIParse } from '../src/services/aiParser.js';
 
 const HARDENING_FLAG_NAMES = [
@@ -28,19 +28,18 @@ test('los defaults canónicos reflejan únicamente flags con caminos de runtime'
   try {
     for (const name of HARDENING_FLAG_NAMES) delete process.env[name];
 
+    assert.deepEqual(FEATURE_FLAG_DEFAULTS, {
+      FF_RESPONSES_EXTRACTOR: true,
+      FF_POLICY_LAYER: false,
+      FF_POSTGRES_JOB_QUEUE: false,
+      FF_ATTACHMENT_ANALYZER: false,
+      FF_ASYNC_ADMIN_MEDIA_FORWARD: false
+    });
     assert.equal(isFeatureEnabled('FF_RESPONSES_EXTRACTOR'), true);
     assert.equal(Object.hasOwn(FEATURE_FLAG_DEFAULTS, 'FF_SEMANTIC_SHORT_MEMORY'), false);
-    assert.deepEqual(getHardeningFlags(), {
-      responsesExtractor: true,
-      policyLayer: false,
-      postgresJobQueue: false,
-      attachmentAnalyzer: false,
-      asyncAdminMediaForward: false
-    });
 
     process.env.FF_RESPONSES_EXTRACTOR = 'false';
     assert.equal(isFeatureEnabled('FF_RESPONSES_EXTRACTOR'), false);
-    assert.equal(getHardeningFlags().responsesExtractor, false);
   } finally {
     restoreEnv(previous);
   }
