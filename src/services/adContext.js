@@ -29,7 +29,7 @@ function getReferral(message = {}) {
     || null;
 }
 
-export function getReferralAdId(referral = null) {
+function getReferralAdId(referral = null) {
   if (!referral || typeof referral !== 'object') return null;
   const value = referral.ad_id
     || referral.adId
@@ -78,7 +78,7 @@ function buildReferralText(referral = null) {
   ]);
 }
 
-export function extractAdContextFromMessage(message = {}) {
+function extractAdContextFromMessage(message = {}) {
   const referral = getReferral(message);
   if (!referral) {
     return {
@@ -122,12 +122,4 @@ export function attachAdContextToMessage(message = {}) {
       reason: adContext.reason
     }
   };
-}
-
-export function buildAdContextSystemHint(adContext = null) {
-  if (!adContext?.text) return '';
-  return [
-    'Pista interna de origen Meta Ads para acotar ciudad/vacante; no la repitas literal al candidato y no la uses como unica verdad si el candidato la contradice:',
-    adContext.text
-  ].join(' ');
 }
