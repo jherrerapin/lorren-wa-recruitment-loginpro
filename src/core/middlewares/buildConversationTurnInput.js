@@ -19,6 +19,18 @@ function asRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
+/** @param {Record<string, unknown>} record @param {string} key */
+function hasOwn(record, key) {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+/** Direct/enriched callers must provide explicit turn evidence. */
+function hasDirectTurnEvidence(body, turn, message) {
+  return ['id', 'receivedAt', 'rawText'].some((key) => hasOwn(turn, key))
+    || ['id', 'timestamp', 'rawText', 'content'].some((key) => hasOwn(message, key))
+    || ['turnId', 'timestamp', 'rawText', 'text', 'content'].some((key) => hasOwn(body, key));
+}
+
 /** @param {Record<string, unknown>} body */
 function findFirstMetaMessage(body) {
   const entry = asRecord(Array.isArray(body.entry) ? body.entry[0] : undefined);
@@ -32,6 +44,24 @@ function findFirstMetaMessage(body) {
 function hashTurnReference(value) {
   const digest = createHash('sha256').update(String(value || '')).digest('hex').slice(0, 10);
   return `turn-${digest}`;
+}
+
+const SAFE_ISSUE_PATH_SEGMENTS = new Set([
+  'turn', 'id', 'receivedAt', 'rawText',
+  'candidate', 'facts', 'updatedAt',
+  'history', 'messages', 'role', 'text', 'occurredAt', 'lastBotQuestion',
+  'pending', 'fields', 'actions', 'type', 'payload',
+  'execution', 'mayReply', 'dryRun'
+]);
+
+/** Keep validation telemetry useful without echoing submitted values or keys. */
+function sanitizeValidationIssues(error) {
+  return error.issues.map((issue) => ({
+    code: issue.code,
+    path: issue.path.map((segment) => (
+      typeof segment === 'number' || SAFE_ISSUE_PATH_SEGMENTS.has(segment) ? segment : '*'
+    ))
+  }));
 }
 
 /** Preserve the textual evidence exposed by each supported Meta message type. */
@@ -92,20 +122,22 @@ export function buildConversationTurnInput(options = {}) {
       const directMessage = asRecord(body.message);
       const metaMessage = findFirstMetaMessage(body);
       const isMetaWebhook = Array.isArray(body.entry);
-
-      // Status callbacks and traffic owned by another WhatsApp flow are not
-      // candidate conversation turns. Keep the shadow observer aligned with
-      // the same deterministic guards used by the legacy controller.
-      if (isMetaWebhook && (
-        Object.keys(metaMessage).length === 0
-        || !isRecruitmentWhatsappPayload(body)
-        || isSupervisorPhone(metaMessage.from)
-      )) return;
-
+      const hasMetaEnvelope = body.object === 'whatsapp_business_account' || hasOwn(body, 'entry');
       const sourceTurn = asRecord(body.turn);
       const sourceCandidate = asRecord(body.candidate);
       const sourceHistory = asRecord(body.history);
       const sourcePending = asRecord(body.pending);
+
+      // Status callbacks and traffic owned by another WhatsApp flow are not
+      // candidate conversation turns. Keep the shadow observer aligned with
+      // the same deterministic guards used by the legacy controller.
+      if (hasMetaEnvelope) {
+        if (!isMetaWebhook
+          || Object.keys(metaMessage).length === 0
+          || !isRecruitmentWhatsappPayload(body)
+          || isSupervisorPhone(metaMessage.from)) return;
+      } else if (!hasDirectTurnEvidence(body, sourceTurn, directMessage)) return;
+
       const rawText = sourceTurn.rawText
         ?? (Object.keys(metaMessage).length > 0 ? extractMetaRawText(metaMessage) : undefined)
         ?? directMessage.rawText
@@ -156,7 +188,7 @@ export function buildConversationTurnInput(options = {}) {
         logger.error?.({
           event: 'conversation_turn_input.shadow_invalid',
           latencyMs,
-          issues: result.error.flatten()
+          issues: sanitizeValidationIssues(result.error)
         }, 'Conversation input shadow validation failed');
       }
     } catch (error) {

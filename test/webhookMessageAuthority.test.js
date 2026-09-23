@@ -325,6 +325,25 @@ test('shadowing excluye comandos enviados por el supervisor', async () => {
   }
 });
 
+test('shadowing ignora requests sin evidencia de un turno entrante', async () => {
+  const { logger, nextCalls, req } = await runConversationTurnShadow({});
+
+  assert.equal(nextCalls, 1);
+  assert.equal(req.conversationTurnInput, undefined);
+  assert.deepEqual(logger.entries, []);
+});
+
+test('shadowing ignora envelopes Meta malformados sin mensajes', async () => {
+  const { logger, nextCalls, req } = await runConversationTurnShadow({
+    object: 'whatsapp_business_account',
+    entry: { unexpected: true }
+  });
+
+  assert.equal(nextCalls, 1);
+  assert.equal(req.conversationTurnInput, undefined);
+  assert.deepEqual(logger.entries, []);
+});
+
 test('shadowing reporta entrada inválida y libera la ruta legacy', async () => {
   const { logger, nextCalls, req } = await runConversationTurnShadow({
     turn: {
@@ -337,7 +356,44 @@ test('shadowing reporta entrada inválida y libera la ruta legacy', async () => 
   assert.equal(nextCalls, 1);
   assert.equal(req.conversationTurnInput, undefined);
   assert.equal(logger.entries[0].data.event, 'conversation_turn_input.shadow_invalid');
-  assert.ok(logger.entries[0].data.issues.fieldErrors.turn);
+  assert.deepEqual(logger.entries[0].data.issues, [{
+    code: 'invalid_type',
+    path: ['turn', 'rawText']
+  }]);
+});
+
+test('shadowing sanea valores y claves no confiables de errores Zod', async () => {
+  const sensitiveValue = 'candidate-private-role-value';
+  const sensitiveKey = 'candidate-private-fact-key';
+  const { logger, nextCalls, req } = await runConversationTurnShadow({
+    turn: {
+      id: 'test-turn-id',
+      receivedAt: '2026-09-22T19:00:00.000Z',
+      rawText: 'evidencia'
+    },
+    candidate: {
+      facts: { [sensitiveKey]: undefined }
+    },
+    history: {
+      messages: [{
+        role: sensitiveValue,
+        text: 'contenido privado',
+        occurredAt: '2026-09-22T19:00:00.000Z'
+      }],
+      lastBotQuestion: null
+    }
+  });
+
+  assert.equal(nextCalls, 1);
+  assert.equal(req.conversationTurnInput, undefined);
+  assert.equal(logger.entries[0].data.event, 'conversation_turn_input.shadow_invalid');
+  assert.deepEqual(logger.entries[0].data.issues, [
+    { code: 'invalid_enum_value', path: ['history', 'messages', 0, 'role'] },
+    { code: 'invalid_union', path: ['candidate', 'facts', '*'] }
+  ]);
+  assert.doesNotMatch(JSON.stringify(logger.entries), new RegExp(
+    `${sensitiveValue}|${sensitiveKey}|contenido privado`
+  ));
 });
 
 test('shadowing permanece fail-open si falla el acceso al body', async () => {
