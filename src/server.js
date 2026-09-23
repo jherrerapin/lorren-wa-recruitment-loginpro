@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import { PrismaClient } from '@prisma/client';
-import { conversationTurnInputShadow, webhookRouter } from './routes/webhook.js';
+import { webhookRouter } from './routes/webhook.js';
 import { adminRouter } from './routes/admin.js';
 import { adminCandidateGlobalExportRouter } from './routes/adminCandidateGlobalExport.js';
 import { interviewOutreachManagementRouter } from './routes/interviewOutreachManagement.js';
@@ -622,7 +622,6 @@ app.post('/logout', destroySession);
 app.get('/logout', destroySession);
 
 app.use(wrapAsyncRouter(dispatchMultiShiftRequestsRouter()));
-app.use('/webhook', conversationTurnInputShadow);
 app.use('/webhook', campaignAttributionMiddleware(prisma));
 app.use('/webhook', referralAttributionMiddleware(prisma));
 app.use('/webhook', interviewCoordinationHandoffMiddleware(prisma, {

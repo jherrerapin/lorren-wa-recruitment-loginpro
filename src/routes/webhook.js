@@ -1,7 +1,6 @@
 import { requestDataConsent, buildDataConsentPromptReply } from '../services/dataConsentGate.js';
 import { buildVacancyTimingReply } from '../services/vacancyPublicInfo.js';
 import express from 'express';
-import { buildConversationTurnInput } from '../core/middlewares/buildConversationTurnInput.js';
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendImageMessage, sendTextMessage } from '../services/whatsapp.js';
 import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
@@ -83,8 +82,6 @@ import {
   shouldSilentCaptureProfileData
 } from '../services/silentProfileCapture.js';
 import { getOpenAiModelConfig } from '../services/openAiModelConfig.js';
-
-export const conversationTurnInputShadow = buildConversationTurnInput();
 
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
