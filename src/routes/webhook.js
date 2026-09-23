@@ -84,6 +84,8 @@ import {
 } from '../services/silentProfileCapture.js';
 import { getOpenAiModelConfig } from '../services/openAiModelConfig.js';
 
+export const conversationTurnInputShadow = buildConversationTurnInput();
+
 const FAQ_RESPONSE = 'Con gusto te ayudo. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 const SALUDO_INICIAL = 'Hola, gracias por comunicarte con LoginPro. ¿Desde qué ciudad nos escribes y para qué vacante o cargo estás interesado?';
 
@@ -3022,7 +3024,6 @@ async function markPotentialDuplicateByDocument(prisma, candidateId) {
 
 export function webhookRouter(prisma) {
   const router = express.Router();
-  const conversationTurnInputShadow = buildConversationTurnInput();
 
   router.get('/', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -3030,11 +3031,6 @@ export function webhookRouter(prisma) {
     const challenge = req.query['hub.challenge'];
     if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) return res.status(200).send(challenge);
     return res.sendStatus(403);
-  });
-
-  router.use('/', (req, res, next) => {
-    if (req.method !== 'POST') return next();
-    return conversationTurnInputShadow(req, res, next);
   });
 
   router.post('/', async (req, res, next) => {

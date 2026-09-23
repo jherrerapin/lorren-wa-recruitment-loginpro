@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { ConversationTurnInputSchema } from '../contracts/ConversationTurnInputSchema.js';
 import { isRecruitmentWhatsappPayload } from '../../services/whatsapp.js';
@@ -21,21 +21,17 @@ function asRecord(value) {
 
 /** @param {Record<string, unknown>} body */
 function findFirstMetaMessage(body) {
-  const entries = Array.isArray(body.entry) ? body.entry : [];
+  const entry = asRecord(Array.isArray(body.entry) ? body.entry[0] : undefined);
+  const change = asRecord(Array.isArray(entry.changes) ? entry.changes[0] : undefined);
+  const value = asRecord(change.value);
+  const messages = Array.isArray(value.messages) ? value.messages : [];
+  return asRecord(messages[0]);
+}
 
-  for (const entryValue of entries) {
-    const entry = asRecord(entryValue);
-    const changes = Array.isArray(entry.changes) ? entry.changes : [];
-
-    for (const changeValue of changes) {
-      const change = asRecord(changeValue);
-      const value = asRecord(change.value);
-      const messages = Array.isArray(value.messages) ? value.messages : [];
-      if (messages.length > 0) return asRecord(messages[0]);
-    }
-  }
-
-  return {};
+/** Match the repository audit convention without exposing provider IDs. */
+function hashTurnReference(value) {
+  const digest = createHash('sha256').update(String(value || '')).digest('hex').slice(0, 10);
+  return `turn-${digest}`;
 }
 
 /** Preserve the textual evidence exposed by each supported Meta message type. */
@@ -90,6 +86,8 @@ export function buildConversationTurnInput(options = {}) {
     const startedAt = performance.now();
 
     try {
+      if (req.method && req.method !== 'POST') return;
+
       const body = asRecord(req.body);
       const directMessage = asRecord(body.message);
       const metaMessage = findFirstMetaMessage(body);
@@ -151,7 +149,7 @@ export function buildConversationTurnInput(options = {}) {
         req.conversationTurnInput = result.data;
         logger.debug?.({
           event: 'conversation_turn_input.shadow_valid',
-          turnId: result.data.turn.id,
+          turnRef: hashTurnReference(result.data.turn.id),
           latencyMs
         }, 'Conversation input shadow validation succeeded');
       } else {

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { MessageDirection, MessageType } from '@prisma/client';
 import {
   recordIntentionalSilence,
@@ -169,7 +170,9 @@ test('shadowing mapea texto Meta real sin cambiar rawText ni registrar PII', asy
     dryRun: true
   });
   assert.equal(logger.entries[0].data.event, 'conversation_turn_input.shadow_valid');
-  assert.doesNotMatch(JSON.stringify(logger.entries), /Hola|test-user-id/);
+  assert.match(logger.entries[0].data.turnRef, /^turn-[a-f0-9]{10}$/);
+  assert.equal(logger.entries[0].data.turnId, undefined);
+  assert.doesNotMatch(JSON.stringify(logger.entries), /Hola|test-user-id|wamid\.test-message-id/);
 });
 
 test('shadowing conserva la evidencia de respuestas rápidas template', async () => {
@@ -208,6 +211,55 @@ test('shadowing ignora callbacks Meta que no contienen mensajes', async () => {
   assert.equal(nextCalls, 1);
   assert.equal(req.conversationTurnInput, undefined);
   assert.deepEqual(logger.entries, []);
+});
+
+test('shadowing no mezcla el mensaje y la línea de cambios Meta distintos', async () => {
+  const previousPhoneNumberId = process.env.META_PHONE_NUMBER_ID;
+  process.env.META_PHONE_NUMBER_ID = 'recruitment-line';
+
+  try {
+    const { logger, nextCalls, req } = await runConversationTurnShadow({
+      object: 'whatsapp_business_account',
+      entry: [{
+        changes: [
+          {
+            value: {
+              metadata: { phone_number_id: 'recruitment-line' },
+              statuses: [{ id: 'wamid.status' }]
+            }
+          },
+          {
+            value: {
+              metadata: { phone_number_id: 'dispatch-line' },
+              messages: [{
+                from: 'test-user-id',
+                id: 'wamid.dispatch-later-change',
+                timestamp: '1750000000',
+                type: 'text',
+                text: { body: 'mensaje operativo' }
+              }]
+            }
+          }
+        ]
+      }]
+    });
+
+    assert.equal(nextCalls, 1);
+    assert.equal(req.conversationTurnInput, undefined);
+    assert.deepEqual(logger.entries, []);
+  } finally {
+    if (previousPhoneNumberId === undefined) delete process.env.META_PHONE_NUMBER_ID;
+    else process.env.META_PHONE_NUMBER_ID = previousPhoneNumberId;
+  }
+});
+
+test('shadowing está montado antes de los middlewares que consumen el turno', () => {
+  const serverSource = readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
+  const shadowIndex = serverSource.indexOf("app.use('/webhook', conversationTurnInputShadow)");
+  const attributionIndex = serverSource.indexOf("app.use('/webhook', campaignAttributionMiddleware(prisma))");
+
+  assert.ok(shadowIndex >= 0);
+  assert.ok(attributionIndex > shadowIndex);
 });
 
 test('shadowing ignora mensajes destinados a otra línea de WhatsApp', async () => {
