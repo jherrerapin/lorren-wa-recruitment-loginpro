@@ -1,6 +1,7 @@
 import { requestDataConsent, buildDataConsentPromptReply } from '../services/dataConsentGate.js';
 import { buildVacancyTimingReply } from '../services/vacancyPublicInfo.js';
 import express from 'express';
+import { buildConversationTurnInput } from '../core/middlewares/buildConversationTurnInput.js';
 import { CandidateStatus, ConversationStep, MessageDirection, MessageType } from '@prisma/client';
 import { extractMessages, sendImageMessage, sendTextMessage } from '../services/whatsapp.js';
 import { fetchMediaMetadata, downloadMedia } from '../services/media.js';
@@ -3030,7 +3031,7 @@ export function webhookRouter(prisma) {
     return res.sendStatus(403);
   });
 
-  router.post('/', async (req, res, next) => {
+  router.post('/', buildConversationTurnInput(), async (req, res, next) => {
     try {
       const messages = extractMessages(req.body);
       if (!messages.length) return res.sendStatus(200);

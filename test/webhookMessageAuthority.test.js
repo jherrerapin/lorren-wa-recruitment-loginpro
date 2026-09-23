@@ -5,6 +5,7 @@ import {
   recordIntentionalSilence,
   saveOutboundMessage
 } from '../src/routes/webhook.js';
+import { buildConversationTurnInput } from '../src/core/middlewares/buildConversationTurnInput.js';
 
 function createPrismaMock({ outboundError = null } = {}) {
   const calls = [];
@@ -102,4 +103,106 @@ test('silencio intencional conserva manejo tolerante cuando falla la persistenci
 
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0][0], '[BOT_SILENCE_TRACE_ERROR]');
+});
+
+function createShadowLogger() {
+  const entries = [];
+  return {
+    entries,
+    debug(data, message) {
+      entries.push({ level: 'debug', data, message });
+    },
+    error(data, message) {
+      entries.push({ level: 'error', data, message });
+    }
+  };
+}
+
+async function runConversationTurnShadow(body) {
+  const logger = createShadowLogger();
+  const middleware = buildConversationTurnInput({ logger });
+  const req = { body };
+  let nextCalls = 0;
+
+  await middleware(req, {}, () => {
+    nextCalls += 1;
+  });
+
+  return { logger, nextCalls, req };
+}
+
+test('shadowing mapea texto Meta real sin cambiar rawText ni registrar PII', async () => {
+  const rawText = '  Hola, Lórren  ';
+  const body = {
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: 'test-business-id',
+      changes: [{
+        field: 'messages',
+        value: {
+          messaging_product: 'whatsapp',
+          messages: [{
+            from: 'test-user-id',
+            id: 'wamid.test-message-id',
+            timestamp: '1750000000',
+            type: 'text',
+            text: { body: rawText }
+          }]
+        }
+      }]
+    }]
+  };
+
+  const { logger, nextCalls, req } = await runConversationTurnShadow(body);
+
+  assert.equal(nextCalls, 1);
+  assert.equal(req.conversationTurnInput.turn.rawText, rawText);
+  assert.equal(req.conversationTurnInput.turn.id, 'wamid.test-message-id');
+  assert.deepEqual(Object.keys(req.conversationTurnInput), [
+    'turn', 'candidate', 'history', 'pending', 'execution'
+  ]);
+  assert.deepEqual(Object.keys(req.conversationTurnInput.candidate), [
+    'id', 'facts', 'updatedAt'
+  ]);
+  assert.deepEqual(req.conversationTurnInput.execution, {
+    mayReply: true,
+    dryRun: true
+  });
+  assert.equal(logger.entries[0].data.event, 'conversation_turn_input.shadow_valid');
+  assert.doesNotMatch(JSON.stringify(logger.entries), /Hola|test-user-id/);
+});
+
+test('shadowing reporta entrada inválida y libera la ruta legacy', async () => {
+  const { logger, nextCalls, req } = await runConversationTurnShadow({
+    turn: {
+      id: 'test-turn-id',
+      receivedAt: '2026-09-22T19:00:00.000Z',
+      rawText: { unexpected: true }
+    }
+  });
+
+  assert.equal(nextCalls, 1);
+  assert.equal(req.conversationTurnInput, undefined);
+  assert.equal(logger.entries[0].data.event, 'conversation_turn_input.shadow_invalid');
+  assert.ok(logger.entries[0].data.issues.fieldErrors.turn);
+});
+
+test('shadowing permanece fail-open si falla el acceso al body', async () => {
+  const logger = createShadowLogger();
+  const middleware = buildConversationTurnInput({ logger });
+  const req = {};
+  let nextCalls = 0;
+  Object.defineProperty(req, 'body', {
+    get() {
+      throw new Error('synthetic body failure');
+    }
+  });
+
+  await middleware(req, {}, () => {
+    nextCalls += 1;
+  });
+
+  assert.equal(nextCalls, 1);
+  assert.equal(logger.entries[0].data.event, 'conversation_turn_input.shadow_error');
+  assert.equal(logger.entries[0].data.error.message, 'synthetic body failure');
 });
