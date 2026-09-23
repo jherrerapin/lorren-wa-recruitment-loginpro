@@ -3022,6 +3022,7 @@ async function markPotentialDuplicateByDocument(prisma, candidateId) {
 
 export function webhookRouter(prisma) {
   const router = express.Router();
+  const conversationTurnInputShadow = buildConversationTurnInput();
 
   router.get('/', (req, res) => {
     const mode = req.query['hub.mode'];
@@ -3031,7 +3032,12 @@ export function webhookRouter(prisma) {
     return res.sendStatus(403);
   });
 
-  router.post('/', buildConversationTurnInput(), async (req, res, next) => {
+  router.use('/', (req, res, next) => {
+    if (req.method !== 'POST') return next();
+    return conversationTurnInputShadow(req, res, next);
+  });
+
+  router.post('/', async (req, res, next) => {
     try {
       const messages = extractMessages(req.body);
       if (!messages.length) return res.sendStatus(200);
