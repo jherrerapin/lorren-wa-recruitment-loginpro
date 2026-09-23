@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { ConversationTurnInputSchema } from '../contracts/ConversationTurnInputSchema.js';
+import { isRecruitmentWhatsappPayload } from '../../services/whatsapp.js';
+import { isSupervisorPhone } from '../../services/adminSupervisor.js';
 
 /** @typedef {import('express').Request} Request */
 /** @typedef {import('express').Response} Response */
@@ -41,6 +43,10 @@ function extractMetaRawText(message) {
   const type = message.type;
 
   if (type === 'text') return asRecord(message.text).body ?? '';
+  if (type === 'button') {
+    const button = asRecord(message.button);
+    return button.text ?? button.payload ?? '';
+  }
   if (type === 'interactive') {
     const interactive = asRecord(message.interactive);
     return asRecord(interactive.button_reply).title
@@ -87,6 +93,17 @@ export function buildConversationTurnInput(options = {}) {
       const body = asRecord(req.body);
       const directMessage = asRecord(body.message);
       const metaMessage = findFirstMetaMessage(body);
+      const isMetaWebhook = Array.isArray(body.entry);
+
+      // Status callbacks and traffic owned by another WhatsApp flow are not
+      // candidate conversation turns. Keep the shadow observer aligned with
+      // the same deterministic guards used by the legacy controller.
+      if (isMetaWebhook && (
+        Object.keys(metaMessage).length === 0
+        || !isRecruitmentWhatsappPayload(body)
+        || isSupervisorPhone(metaMessage.from)
+      )) return;
+
       const sourceTurn = asRecord(body.turn);
       const sourceCandidate = asRecord(body.candidate);
       const sourceHistory = asRecord(body.history);

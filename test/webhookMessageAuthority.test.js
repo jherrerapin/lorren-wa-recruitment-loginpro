@@ -172,6 +172,107 @@ test('shadowing mapea texto Meta real sin cambiar rawText ni registrar PII', asy
   assert.doesNotMatch(JSON.stringify(logger.entries), /Hola|test-user-id/);
 });
 
+test('shadowing conserva la evidencia de respuestas rápidas template', async () => {
+  const rawText = '  NO QUIERO RECIBIR MÁS  ';
+  const body = {
+    object: 'whatsapp_business_account',
+    entry: [{
+      changes: [{
+        value: {
+          messages: [{
+            from: 'test-user-id',
+            id: 'wamid.quick-reply',
+            timestamp: '1750000000',
+            type: 'button',
+            button: { text: rawText, payload: 'OPT_OUT' }
+          }]
+        }
+      }]
+    }]
+  };
+
+  const { logger, nextCalls, req } = await runConversationTurnShadow(body);
+
+  assert.equal(nextCalls, 1);
+  assert.equal(req.conversationTurnInput.turn.rawText, rawText);
+  assert.equal(logger.entries[0].data.event, 'conversation_turn_input.shadow_valid');
+  assert.doesNotMatch(JSON.stringify(logger.entries), /NO QUIERO|test-user-id/);
+});
+
+test('shadowing ignora callbacks Meta que no contienen mensajes', async () => {
+  const { logger, nextCalls, req } = await runConversationTurnShadow({
+    object: 'whatsapp_business_account',
+    entry: [{ changes: [{ value: { statuses: [{ id: 'wamid.status' }] } }] }]
+  });
+
+  assert.equal(nextCalls, 1);
+  assert.equal(req.conversationTurnInput, undefined);
+  assert.deepEqual(logger.entries, []);
+});
+
+test('shadowing ignora mensajes destinados a otra línea de WhatsApp', async () => {
+  const previousPhoneNumberId = process.env.META_PHONE_NUMBER_ID;
+  process.env.META_PHONE_NUMBER_ID = 'recruitment-line';
+
+  try {
+    const { logger, nextCalls, req } = await runConversationTurnShadow({
+      object: 'whatsapp_business_account',
+      entry: [{
+        changes: [{
+          value: {
+            metadata: { phone_number_id: 'dispatch-line' },
+            messages: [{
+              from: 'test-user-id',
+              id: 'wamid.dispatch',
+              timestamp: '1750000000',
+              type: 'text',
+              text: { body: 'mensaje operativo' }
+            }]
+          }
+        }]
+      }]
+    });
+
+    assert.equal(nextCalls, 1);
+    assert.equal(req.conversationTurnInput, undefined);
+    assert.deepEqual(logger.entries, []);
+  } finally {
+    if (previousPhoneNumberId === undefined) delete process.env.META_PHONE_NUMBER_ID;
+    else process.env.META_PHONE_NUMBER_ID = previousPhoneNumberId;
+  }
+});
+
+test('shadowing excluye comandos enviados por el supervisor', async () => {
+  const previousSupervisorPhone = process.env.ADMIN_WHATSAPP_NUMBER;
+  process.env.ADMIN_WHATSAPP_NUMBER = '573001234567';
+
+  try {
+    const { logger, nextCalls, req } = await runConversationTurnShadow({
+      object: 'whatsapp_business_account',
+      entry: [{
+        changes: [{
+          value: {
+            messages: [{
+              from: '573001234567',
+              id: 'wamid.supervisor',
+              timestamp: '1750000000',
+              type: 'text',
+              text: { body: 'comando interno' }
+            }]
+          }
+        }]
+      }]
+    });
+
+    assert.equal(nextCalls, 1);
+    assert.equal(req.conversationTurnInput, undefined);
+    assert.deepEqual(logger.entries, []);
+  } finally {
+    if (previousSupervisorPhone === undefined) delete process.env.ADMIN_WHATSAPP_NUMBER;
+    else process.env.ADMIN_WHATSAPP_NUMBER = previousSupervisorPhone;
+  }
+});
+
 test('shadowing reporta entrada inválida y libera la ruta legacy', async () => {
   const { logger, nextCalls, req } = await runConversationTurnShadow({
     turn: {
