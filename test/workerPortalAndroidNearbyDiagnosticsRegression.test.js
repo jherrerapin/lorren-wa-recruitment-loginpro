@@ -108,12 +108,13 @@ test('status 8029 heredado se trata como permiso pendiente y no como discovery B
   assert.doesNotMatch(bridge, /DISCOVERY_FAILED_STATUS = 8029/);
 });
 
-test('hardware sin BLE Advertising activa fallback manual sin forzar el stack nativo', async () => {
+test('hardware sin BLE Advertising activa fallback manual sin forzar advertiser runtime', async () => {
   const [manager, nativePresence] = await Promise.all([read(managerPath), read(nativePresencePath)]);
 
   assert.match(manager, /supportsBleAdvertising\(\)/);
   assert.match(manager, /PackageManager\.FEATURE_BLUETOOTH_LE/);
-  assert.match(manager, /getBluetoothLeAdvertiser\(\)/);
+  assert.match(manager, /isMultipleAdvertisementSupported\(\)/);
+  assert.doesNotMatch(manager, /BluetoothLeAdvertiser/);
   assert.match(manager, /"advertising_unsupported"/);
   assert.match(manager, /emit\("bluetooth_unavailable"/);
 
