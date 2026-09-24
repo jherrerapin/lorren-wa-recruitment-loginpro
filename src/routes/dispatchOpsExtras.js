@@ -616,6 +616,7 @@ export function dispatchOpsExtrasRouter(prisma) {
 
   router.get('/personal/exportar-excel', requireOps, async (_req, res) => {
     const workers = await prisma.dispatchWorker.findMany({
+      where: buildDispatchEligibilityFilter(),
       select: {
         fullName: true,
         phone: true,
