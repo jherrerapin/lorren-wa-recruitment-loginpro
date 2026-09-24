@@ -30,6 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Autoridad nativa única de presencia local de cuadrilla.
@@ -62,6 +64,10 @@ final class NearbyPresenceManager {
     private static final long RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L;
     private static final int MAX_DISCOVERED_DEVICES = 24;
     private static final int MAX_MESSAGE_BYTES = 16_384;
+    private static final int DISCOVERY_FAILED_STATUS = 8029;
+    private static final Pattern BLUETOOTH_STATUS_PATTERN = Pattern.compile(
+        "(?i)status(?:code)?\\s*[=:]?\\s*(\\d{3,5})"
+    );
 
     private enum Role { IDLE, READY, LEADER }
 
@@ -117,7 +123,7 @@ final class NearbyPresenceManager {
 
     private synchronized void startAuxiliaryServer() {
         if (role != Role.READY || bluetoothAdapter == null) {
-            failReady("discovery_failed");
+            failReadyBluetooth("auxiliary_ready", null);
             return;
         }
         try {
@@ -127,7 +133,7 @@ final class NearbyPresenceManager {
                 return;
             }
         } catch (SecurityException error) {
-            failReady("discovery_failed");
+            failReadyBluetooth("auxiliary_discovery", error);
             return;
         }
         emitDiagnostic("AUX", "DISCOVERABLE_CONFIRMED");
@@ -141,12 +147,12 @@ final class NearbyPresenceManager {
                 SERVICE_NAME,
                 SERVICE_UUID
             );
-        } catch (IOException | SecurityException error) {
-            failReady("discovery_failed");
+        } catch (IOException | SecurityException | RuntimeException error) {
+            failReadyBluetooth("auxiliary_advertising", error);
             return;
         }
         if (auxiliaryServerSocket == null) {
-            failReady("discovery_failed");
+            failReadyBluetooth("auxiliary_advertising", null);
             return;
         }
         emitDiagnostic("AUX", "RFCOMM_SERVER_READY");
@@ -307,6 +313,13 @@ final class NearbyPresenceManager {
         emitError(code);
     }
 
+    private synchronized void failReadyBluetooth(String operation, Throwable error) {
+        stopReadyRuntime();
+        role = Role.IDLE;
+        readyServiceRequestId = "";
+        emitBluetoothUnavailable(operation, error);
+    }
+
     synchronized void startLeaderScan(JSONObject input) {
         String nextAttemptId = requiredToken(input.optString("attemptId"), "attemptId");
         String serviceRequestId = requiredToken(input.optString("serviceRequestId"), "serviceRequestId");
@@ -338,7 +351,7 @@ final class NearbyPresenceManager {
             return;
         }
         if (bluetoothAdapter == null) {
-            failLeaderStart("advertising_failed");
+            failLeaderBluetooth("leader_discovery", null);
             return;
         }
 
@@ -358,7 +371,7 @@ final class NearbyPresenceManager {
 
             emitDiagnostic("ENC", "CLASSIC_DISCOVERY_START");
             if (!bluetoothAdapter.startDiscovery()) {
-                failLeaderStart("advertising_failed");
+                failLeaderBluetooth("leader_discovery", null);
                 return;
             }
             challengeSentAt = System.currentTimeMillis();
@@ -366,7 +379,7 @@ final class NearbyPresenceManager {
             scheduleLeaderTimeout(nextAttemptId, timeoutMs);
             scheduleLeaderInquiryCheckpoint(nextAttemptId);
         } catch (RuntimeException error) {
-            failLeaderStart("advertising_failed");
+            failLeaderBluetooth("leader_discovery", error);
         }
     }
 
@@ -661,6 +674,15 @@ final class NearbyPresenceManager {
         closeLeaderSockets();
         role = Role.IDLE;
         emitError(code);
+    }
+
+    private synchronized void failLeaderBluetooth(String operation, Throwable error) {
+        if (role != Role.LEADER) return;
+        cancelLeaderTimeouts();
+        stopLeaderDiscovery();
+        closeLeaderSockets();
+        role = Role.IDLE;
+        emitBluetoothUnavailable(operation, error);
     }
 
     private synchronized void completeLeaderScan(String completedAttemptId) {
@@ -959,5 +981,40 @@ final class NearbyPresenceManager {
 
     private void emitError(String code) {
         emit("error", event -> event.put("code", code));
+    }
+
+    private void emitBluetoothUnavailable(String operation, Throwable error) {
+        int statusCode = bluetoothStatusCode(error);
+        emitDiagnostic(role == Role.READY ? "AUX" : "ENC", "BLUETOOTH_UNAVAILABLE");
+        emit("bluetooth_unavailable", event -> {
+            event.put("code", "bluetooth_unavailable");
+            event.put("operation", operation == null ? "" : operation);
+            event.put(
+                "reason",
+                statusCode == DISCOVERY_FAILED_STATUS ? "discovery_failed" : "startup_failed"
+            );
+            if (statusCode > 0) event.put("statusCode", statusCode);
+        });
+    }
+
+    private static int bluetoothStatusCode(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 6; depth += 1) {
+            String message = current.getMessage();
+            if (message != null) {
+                if (message.contains(String.valueOf(DISCOVERY_FAILED_STATUS))) {
+                    return DISCOVERY_FAILED_STATUS;
+                }
+                Matcher matcher = BLUETOOTH_STATUS_PATTERN.matcher(message);
+                if (matcher.find()) {
+                    try {
+                        return Integer.parseInt(matcher.group(1));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+            current = current.getCause();
+        }
+        return 0;
     }
 }
