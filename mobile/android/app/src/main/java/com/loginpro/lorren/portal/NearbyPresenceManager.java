@@ -68,8 +68,8 @@ final class NearbyPresenceManager {
     private static final int MAX_DISCOVERED_DEVICES = 24;
     private static final int MAX_MESSAGE_BYTES = 16_384;
 
-    // Google Nearby Connections usa 8029 para MISSING_PERMISSION_NEARBY_WIFI_DEVICES.
-    // No debe confundirse con un fallo genérico de discovery Bluetooth.
+    // 8029 apareció en la implementación histórica basada en Google Nearby y
+    // representa un fallo de permisos, no un fallo físico de discovery Bluetooth.
     private static final int MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS = 8029;
     private static final Pattern BLUETOOTH_STATUS_PATTERN = Pattern.compile(
         "(?i)status(?:code)?\\s*[=:]?\\s*(\\d{3,5})"
@@ -123,6 +123,7 @@ final class NearbyPresenceManager {
     synchronized void startReady(String serviceRequestId) {
         String normalizedService = requiredToken(serviceRequestId, "serviceRequestId");
         ensureNearbyTransportPermissions();
+        stopAllInternal(false);
         if (!supportsBleAdvertising()) {
             emitBluetoothUnavailable(
                 "AUX",
@@ -132,7 +133,6 @@ final class NearbyPresenceManager {
             );
             throw new IllegalStateException("advertising_unsupported");
         }
-        stopAllInternal(false);
         role = Role.READY;
         readyServiceRequestId = normalizedService;
         emitDiagnostic("AUX", "READY_REQUESTED");
@@ -271,7 +271,7 @@ final class NearbyPresenceManager {
                 }
             }
 
-            // CORRECCIÓN RELOJ: Permitimos la conexión offline aunque haya desfase.
+            // Permitimos la conexión offline aunque haya desfase; la firma mantiene integridad.
             if (sentAt <= 0L) {
                 finishAuxiliaryExchange(socket);
                 return;
@@ -377,6 +377,15 @@ final class NearbyPresenceManager {
 
         ensureNearbyTransportPermissions();
         stopAllInternal(false);
+        if (!supportsBleAdvertising()) {
+            emitBluetoothUnavailable(
+                "ENC",
+                "leader_advertising",
+                null,
+                "advertising_unsupported"
+            );
+            throw new IllegalStateException("advertising_unsupported");
+        }
         role = Role.LEADER;
         attemptId = nextAttemptId;
         scanServiceRequestId = serviceRequestId;
@@ -406,7 +415,6 @@ final class NearbyPresenceManager {
             registerLeaderReceiver();
             if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
 
-            // Evita que Android ignore auxiliares si ya fueron emparejados en el pasado.
             Set<BluetoothDevice> bonded = bluetoothAdapter.getBondedDevices();
             if (bonded != null) {
                 for (BluetoothDevice dev : bonded) {
@@ -606,7 +614,6 @@ final class NearbyPresenceManager {
                 return;
             }
 
-            // Aceptamos respuesta sin importar desfase temporal; la firma preserva integridad.
             long respondedAt = proof.optLong("respondedAt", 0L);
             if (respondedAt <= 0L) {
                 failLeaderPeer(address, "proof_invalid");
@@ -921,23 +928,13 @@ final class NearbyPresenceManager {
     }
 
     private boolean hasNearbyTransportPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (
-                appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
-                    != PackageManager.PERMISSION_GRANTED
-                || appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE)
-                    != PackageManager.PERMISSION_GRANTED
-                || appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
-                    != PackageManager.PERMISSION_GRANTED
-            ) {
-                return false;
-            }
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return appContext.checkSelfPermission(Manifest.permission.NEARBY_WIFI_DEVICES)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
+        return appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
+                == PackageManager.PERMISSION_GRANTED
+            && appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE)
+                == PackageManager.PERMISSION_GRANTED
+            && appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
                 == PackageManager.PERMISSION_GRANTED;
-        }
-        return true;
     }
 
     private boolean supportsBleAdvertising() {
@@ -1100,11 +1097,13 @@ final class NearbyPresenceManager {
 
     private void emitPermissionsRequired(String actor, String operation, Throwable error) {
         activity.ensureNearbyPermissions();
-        int statusCode = bluetoothStatusCode(error);
         emitDiagnostic(actor, "PERMISSIONS_REQUIRED");
-        emit("error", event -> {
-            event.put("code", "permissions_required");
+        // No se activa el fallback manual mientras Android está resolviendo permisos.
+        // MainActivity emitirá el evento `permissions` con granted=true/false.
+        emit("stopped", event -> {
+            event.put("reason", "permissions_pending");
             event.put("operation", operation == null ? "" : operation);
+            int statusCode = bluetoothStatusCode(error);
             if (statusCode > 0) event.put("statusCode", statusCode);
         });
     }
