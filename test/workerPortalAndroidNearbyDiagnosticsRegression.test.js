@@ -71,7 +71,7 @@ test('la autoridad nativa permanece en Bluetooth Classic RFCOMM/SDP y no vuelve 
   );
 });
 
-test('Android 12+ valida permisos Bluetooth antes de iniciar escucha, discovery o conexión', async () => {
+test('Android 12+ valida y solicita permisos Bluetooth antes de iniciar escucha, discovery o conexión', async () => {
   const [manager, mainActivity, manifest] = await Promise.all([
     read(managerPath),
     read(mainActivityPath),
@@ -81,15 +81,15 @@ test('Android 12+ valida permisos Bluetooth antes de iniciar escucha, discovery 
   assert.match(manager, /Manifest\.permission\.BLUETOOTH_SCAN/);
   assert.match(manager, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
   assert.match(manager, /Manifest\.permission\.BLUETOOTH_CONNECT/);
-  assert.match(manager, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
   assert.match(manager, /ensureNearbyTransportPermissions\(\)/);
   assert.match(manager, /activity\.ensureNearbyPermissions\(\)/);
   assert.match(manager, /checkSelfPermission/);
+  assert.doesNotMatch(manager, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
 
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
   assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
-  assert.match(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
+  assert.doesNotMatch(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
 
   assert.match(manifest, /android\.permission\.BLUETOOTH_SCAN/);
   assert.match(manifest, /android\.permission\.BLUETOOTH_ADVERTISE/);
@@ -97,7 +97,7 @@ test('Android 12+ valida permisos Bluetooth antes de iniciar escucha, discovery 
   assert.match(manifest, /android\.permission\.NEARBY_WIFI_DEVICES/);
 });
 
-test('status 8029 se trata como permiso de Nearby Wi-Fi y no como discovery Bluetooth roto', async () => {
+test('status 8029 heredado se trata como permiso pendiente y no como discovery Bluetooth roto', async () => {
   const [manager, bridge] = await Promise.all([read(managerPath), read(bridgePath)]);
 
   assert.match(manager, /MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS = 8029/);
