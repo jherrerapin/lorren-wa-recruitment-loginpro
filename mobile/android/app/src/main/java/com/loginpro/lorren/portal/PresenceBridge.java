@@ -17,6 +17,8 @@ import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 final class PresenceBridge {
     static final String JS_NAME = "LorrenAndroidPresence";
@@ -29,6 +31,10 @@ final class PresenceBridge {
     private static final long MAX_LAST_LOCATION_AGE_MS = 30_000L;
     private static final long LOCATION_TIMEOUT_MS = 15_000L;
     private static final float TARGET_LOCATION_ACCURACY_METERS = 50f;
+    private static final int DISCOVERY_FAILED_STATUS = 8029;
+    private static final Pattern BLUETOOTH_STATUS_PATTERN = Pattern.compile(
+        "(?i)status(?:code)?\\s*[=:]?\\s*(\\d{3,5})"
+    );
 
     private interface NativeLocationSink {
         void onLocation(Location location);
@@ -117,7 +123,8 @@ final class PresenceBridge {
             synchronized (this) {
                 pendingReadyServiceRequestId = "";
             }
-            return jsonError("ready_failed");
+            emitBluetoothUnavailable("auxiliary_ready", error);
+            return jsonError("bluetooth_unavailable");
         }
     }
 
@@ -129,7 +136,7 @@ final class PresenceBridge {
         }
         if (serviceRequestId.isEmpty()) return;
         if (!granted) {
-            emitPresenceError("discovery_failed");
+            emitBluetoothUnavailable("auxiliary_discovery", null);
             return;
         }
         if (!hasUsablePresenceCredential()) {
@@ -144,7 +151,7 @@ final class PresenceBridge {
         try {
             manager.startReady(serviceRequestId);
         } catch (Exception error) {
-            emitPresenceError("ready_failed");
+            emitBluetoothUnavailable("auxiliary_ready", error);
         }
     }
 
@@ -164,8 +171,15 @@ final class PresenceBridge {
         if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) return jsonError(readinessError);
+
+        final JSONObject input;
         try {
-            JSONObject input = new JSONObject(inputJson == null ? "{}" : inputJson);
+            input = new JSONObject(inputJson == null ? "{}" : inputJson);
+        } catch (Exception error) {
+            return jsonError("scan_input_invalid");
+        }
+
+        try {
             synchronized (this) {
                 leaderLocationProof = null;
             }
@@ -173,7 +187,9 @@ final class PresenceBridge {
             captureLeaderLocation(input);
             return jsonOk();
         } catch (Exception error) {
-            return jsonError("scan_input_invalid");
+            manager.stopLeaderScan();
+            emitBluetoothUnavailable("leader_discovery", error);
+            return jsonError("bluetooth_unavailable");
         }
     }
 
@@ -644,6 +660,44 @@ final class PresenceBridge {
             activity.emitPresenceEvent(event);
         } catch (Exception ignored) {
         }
+    }
+
+    private void emitBluetoothUnavailable(String operation, Throwable error) {
+        try {
+            int statusCode = bluetoothStatusCode(error);
+            JSONObject event = new JSONObject();
+            event.put("type", "bluetooth_unavailable");
+            event.put("code", "bluetooth_unavailable");
+            event.put("operation", operation == null ? "" : operation);
+            event.put(
+                "reason",
+                statusCode == DISCOVERY_FAILED_STATUS ? "discovery_failed" : "startup_failed"
+            );
+            if (statusCode > 0) event.put("statusCode", statusCode);
+            activity.emitPresenceEvent(event);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static int bluetoothStatusCode(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 6; depth += 1) {
+            String message = current.getMessage();
+            if (message != null) {
+                if (message.contains(String.valueOf(DISCOVERY_FAILED_STATUS))) {
+                    return DISCOVERY_FAILED_STATUS;
+                }
+                Matcher matcher = BLUETOOTH_STATUS_PATTERN.matcher(message);
+                if (matcher.find()) {
+                    try {
+                        return Integer.parseInt(matcher.group(1));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+            current = current.getCause();
+        }
+        return 0;
     }
 
     private void emitLocationError(String code) {
