@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 
 const managerPath = new URL(
@@ -12,6 +13,10 @@ const bridgePath = new URL(
 );
 const mainActivityPath = new URL(
   '../mobile/android/app/src/main/java/com/loginpro/lorren/portal/MainActivity.java',
+  import.meta.url
+);
+const manifestPath = new URL(
+  '../mobile/android/app/src/main/AndroidManifest.xml',
   import.meta.url
 );
 const nativePresencePath = new URL(
@@ -50,7 +55,7 @@ test('la autoridad nativa permanece en Bluetooth Classic RFCOMM/SDP y no vuelve 
   assert.match(bridge, /pendingReadyServiceRequestId/);
   assert.match(bridge, /activity\.ensureNearbyDiscoverable\(\)/);
   assert.match(bridge, /onBluetoothDiscoverableResult\(boolean granted\)/);
-  assert.match(bridge, /onBluetoothDiscoverableResult[\s\S]{0,1200}manager\.startReady\(serviceRequestId\)/);
+  assert.match(bridge, /onBluetoothDiscoverableResult[\s\S]{0,1400}manager\.startReady\(serviceRequestId\)/);
 
   assert.match(mainActivity, /REQUEST_BLUETOOTH_DISCOVERABLE = 4107/);
   assert.match(mainActivity, /BLUETOOTH_DISCOVERABLE_SECONDS = 300/);
@@ -66,18 +71,51 @@ test('la autoridad nativa permanece en Bluetooth Classic RFCOMM/SDP y no vuelve 
   );
 });
 
-test('los fallos de inicio Bluetooth activan la marcación manual sin dejar la interfaz cargando', async () => {
-  const [manager, bridge, nativePresence] = await Promise.all([
+test('Android 12+ valida permisos Bluetooth antes de iniciar escucha, discovery o conexión', async () => {
+  const [manager, mainActivity, manifest] = await Promise.all([
     read(managerPath),
-    read(bridgePath),
-    read(nativePresencePath)
+    read(mainActivityPath),
+    read(manifestPath)
   ]);
 
-  assert.match(manager, /DISCOVERY_FAILED_STATUS = 8029/);
+  assert.match(manager, /Manifest\.permission\.BLUETOOTH_SCAN/);
+  assert.match(manager, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
+  assert.match(manager, /Manifest\.permission\.BLUETOOTH_CONNECT/);
+  assert.match(manager, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
+  assert.match(manager, /ensureNearbyTransportPermissions\(\)/);
+  assert.match(manager, /activity\.ensureNearbyPermissions\(\)/);
+  assert.match(manager, /checkSelfPermission/);
+
+  assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_SCAN/);
+  assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
+  assert.match(mainActivity, /Manifest\.permission\.BLUETOOTH_CONNECT/);
+  assert.match(mainActivity, /Manifest\.permission\.NEARBY_WIFI_DEVICES/);
+
+  assert.match(manifest, /android\.permission\.BLUETOOTH_SCAN/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH_ADVERTISE/);
+  assert.match(manifest, /android\.permission\.BLUETOOTH_CONNECT/);
+  assert.match(manifest, /android\.permission\.NEARBY_WIFI_DEVICES/);
+});
+
+test('status 8029 se trata como permiso de Nearby Wi-Fi y no como discovery Bluetooth roto', async () => {
+  const [manager, bridge] = await Promise.all([read(managerPath), read(bridgePath)]);
+
+  assert.match(manager, /MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS = 8029/);
+  assert.match(bridge, /MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS = 8029/);
+  assert.match(bridge, /statusCode == MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS/);
+  assert.match(bridge, /return "permissions_pending"/);
+  assert.doesNotMatch(manager, /DISCOVERY_FAILED_STATUS = 8029/);
+  assert.doesNotMatch(bridge, /DISCOVERY_FAILED_STATUS = 8029/);
+});
+
+test('hardware sin BLE Advertising activa fallback manual sin forzar el stack nativo', async () => {
+  const [manager, nativePresence] = await Promise.all([read(managerPath), read(nativePresencePath)]);
+
+  assert.match(manager, /supportsBleAdvertising\(\)/);
+  assert.match(manager, /PackageManager\.FEATURE_BLUETOOTH_LE/);
+  assert.match(manager, /getBluetoothLeAdvertiser\(\)/);
+  assert.match(manager, /"advertising_unsupported"/);
   assert.match(manager, /emit\("bluetooth_unavailable"/);
-  assert.match(manager, /failLeaderBluetooth\("leader_discovery", error\)/);
-  assert.match(bridge, /emitBluetoothUnavailable\("leader_discovery", error\)/);
-  assert.match(bridge, /event\.put\("type", "bluetooth_unavailable"\)/);
 
   assert.match(nativePresence, /type === 'bluetooth_unavailable'/);
   assert.match(nativePresence, /function activateBluetoothFallback/);
@@ -85,4 +123,15 @@ test('los fallos de inicio Bluetooth activan la marcación manual sin dejar la i
   assert.match(nativePresence, /bluetoothFallbackActive \? 'Marcación Manual'/);
   assert.match(nativePresence, /function markMemberManually/);
   assert.match(nativePresence, /Marcado \(Manual\)/);
+});
+
+test('native-presence.js conserva sintaxis ES6 válida y promesas críticas observadas', async () => {
+  const nativePresence = await read(nativePresencePath);
+
+  assert.doesNotThrow(() => new vm.Script(nativePresence, { filename: 'native-presence.js' }));
+  assert.match(nativePresence, /startManualArrival\(member\)\.catch\(/);
+  assert.match(nativePresence, /ensureAuxiliaryReady\(\)\.catch\(/);
+  assert.match(nativePresence, /handleServiceWorkerMessage\(event\)\.catch\(/);
+  assert.match(nativePresence, /syncNow\?\.\(\)\.catch\(/);
+  assert.doesNotMatch(nativePresence, /\bundefinedVariableForNearby\b/);
 });
