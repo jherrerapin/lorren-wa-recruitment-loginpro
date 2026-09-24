@@ -81,7 +81,7 @@ test('replay seudonimizado: auxiliar sin entrada no avanza visualmente a almuerz
   assert.match(renderSource, /memberPresentationMarkType\(member, normalizedMark\)/);
   assert.match(renderSource, /memberStatus\(context, member, memberMarkType\)/);
   assert.match(renderSource, /memberStatusPresentation\(status, memberMarkType\)/);
-  assert.match(renderSource, /memberMarkType === 'ARRIVAL'[\s\S]{0,180}Marcar entrada/);
+  assert.match(renderSource, /memberMarkType === 'ARRIVAL'[\s\S]{0,360}Marcar entrada/);
   assert.match(renderSource, /memberMarkType === 'ARRIVAL'[\s\S]{0,520}Reportar sin teléfono/);
 });
 

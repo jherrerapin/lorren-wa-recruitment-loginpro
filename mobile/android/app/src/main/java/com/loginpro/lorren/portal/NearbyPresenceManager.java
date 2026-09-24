@@ -129,10 +129,10 @@ final class NearbyPresenceManager {
         try {
             if (bluetoothAdapter.getScanMode() != BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE) {
                 emitDiagnostic("AUX", "DISCOVERABLE_NOT_READY");
-                failReady("discovery_failed");
+                failReadyBluetooth("auxiliary_discovery", null);
                 return;
             }
-        } catch (SecurityException error) {
+        } catch (RuntimeException error) {
             failReadyBluetooth("auxiliary_discovery", error);
             return;
         }
