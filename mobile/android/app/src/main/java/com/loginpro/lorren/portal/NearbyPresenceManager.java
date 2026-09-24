@@ -147,7 +147,7 @@ final class NearbyPresenceManager {
                 SERVICE_NAME,
                 SERVICE_UUID
             );
-        } catch (IOException | SecurityException | RuntimeException error) {
+        } catch (IOException | RuntimeException error) {
             failReadyBluetooth("auxiliary_advertising", error);
             return;
         }
@@ -317,7 +317,7 @@ final class NearbyPresenceManager {
         stopReadyRuntime();
         role = Role.IDLE;
         readyServiceRequestId = "";
-        emitBluetoothUnavailable(operation, error);
+        emitBluetoothUnavailable("AUX", operation, error);
     }
 
     synchronized void startLeaderScan(JSONObject input) {
@@ -682,7 +682,7 @@ final class NearbyPresenceManager {
         stopLeaderDiscovery();
         closeLeaderSockets();
         role = Role.IDLE;
-        emitBluetoothUnavailable(operation, error);
+        emitBluetoothUnavailable("ENC", operation, error);
     }
 
     private synchronized void completeLeaderScan(String completedAttemptId) {
@@ -983,9 +983,9 @@ final class NearbyPresenceManager {
         emit("error", event -> event.put("code", code));
     }
 
-    private void emitBluetoothUnavailable(String operation, Throwable error) {
+    private void emitBluetoothUnavailable(String actor, String operation, Throwable error) {
         int statusCode = bluetoothStatusCode(error);
-        emitDiagnostic(role == Role.READY ? "AUX" : "ENC", "BLUETOOTH_UNAVAILABLE");
+        emitDiagnostic(actor, "BLUETOOTH_UNAVAILABLE");
         emit("bluetooth_unavailable", event -> {
             event.put("code", "bluetooth_unavailable");
             event.put("operation", operation == null ? "" : operation);
