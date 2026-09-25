@@ -327,8 +327,7 @@ test('altas manuales bloquean identidad repetida, avisan en el formulario y Pers
   assert.match(createView, /if \(mode === 'create'\)/);
   assert.doesNotMatch(createView, /\b(?:window\.)?alert\s*\(/);
   assert.doesNotMatch(createView, /No se permiten auxiliares duplicados/i);
-  assert.match(exportRoute, /dispatchWorker\.findMany\(\{\s*select:/);
-  assert.doesNotMatch(exportRoute, /\bwhere\s*:/);
+  assert.match(exportRoute, /dispatchWorker\.findMany\(\{\s*where:\s*buildDispatchEligibilityFilter\(\),\s*select:/);
   assert.match(exportRoute, /buildDispatchWorkersExportWorkbook\(workers\)/);
   assert.match(exportRoute, /Content-Disposition/);
   assert.match(personalView, /href="\/admin\/operaciones\/personal\/exportar-excel"/);
