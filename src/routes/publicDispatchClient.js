@@ -2,7 +2,11 @@ import express from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
-import { loadUnifiedCityOptions, resolveUserCityScope } from '../services/cityOptions.js';
+import {
+  loadUnifiedCityOptions,
+  operationalCityScopeAllowsName,
+  resolveUserCityScope
+} from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 import { findDispatchWorkerByDocumentIdentity } from '../services/dispatchWorkerExcelImport.js';
@@ -363,6 +367,15 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-delete/solicitudes/:serviceRequestId', requireOps, async (req, res) => {
+    const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+      where: { id: req.params.serviceRequestId },
+      select: { cityName: true }
+    });
+    if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
+    const cityScope = await resolveUserCityScope(prisma, req);
+    if (!operationalCityScopeAllowsName(cityScope, serviceRequest.cityName, { selected: false })) {
+      return res.status(403).send('No tienes permiso para eliminar solicitudes de esta ciudad.');
+    }
     const result = await deleteDispatchServiceRequestWithPolicy(prisma, req.params.serviceRequestId);
     if (result.status === 'NOT_FOUND') return res.status(404).send('Solicitud no encontrada');
     if (result.status === 'BLOCKED') {
