@@ -7,12 +7,9 @@ import {
 import {
   filterOperationalClientsByCityScope,
   operationalCityNamesEquivalent,
-  operationalCityScopeAllowsName
+  operationalCityScopeAllowsName,
+  resolveUserCityScope
 } from '../services/cityOptions.js';
-import {
-  operationalCityIdsFromSource,
-  resolveOperationalCityScope
-} from '../services/operationalAccess.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const ASSIGNMENT_VIEW = 'operacionesAsignacionesConfirmacion';
@@ -44,24 +41,8 @@ function hasExplicitCitySelection(query = {}) {
     || Boolean(normalizeString(query.operationalCityId));
 }
 
-function unrestrictedOperationalCityScope() {
-  return {
-    restricted: false,
-    selectionExplicit: false,
-    configuredCityIds: null,
-    allowedCities: null,
-    allowedCityIds: [],
-    selectedCities: null,
-    selectedCityIds: [],
-    selectedCityNames: [],
-    unauthorizedRequestedCityIds: []
-  };
-}
-
 async function resolveAssignmentCityScope(prisma, req, { requestedCityIds = [], selectionExplicit = false } = {}) {
-  const configuredCityIds = operationalCityIdsFromSource(req);
-  if (configuredCityIds === null && !selectionExplicit) return unrestrictedOperationalCityScope();
-  return resolveOperationalCityScope(prisma, req, { requestedCityIds, selectionExplicit });
+  return resolveUserCityScope(prisma, req, { requestedCityIds, selectionExplicit });
 }
 
 function workerMatchesCity(worker, cityName) {
@@ -338,7 +319,7 @@ export function dispatchAssignmentDateGuard(prisma) {
         });
         req.operationalCityScope = cityScope;
         if (cityScope.unauthorizedRequestedCityIds.length) {
-          return res.status(403).send('Una o más ciudades seleccionadas están fuera de tu alcance operativo.');
+          return res.status(403).send('Una o más ciudades seleccionadas están fuera de tu alcance territorial.');
         }
 
         const requestedServiceRequestId = normalizeString(query.serviceRequestId);
