@@ -1,3 +1,23 @@
+import {
+  normalizeUserAccessCities,
+  normalizeUserAccessScope
+} from './appUsers.js';
+
+function normalizeString(value) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text || null;
+}
+
+function sourceValue(source = {}, key) {
+  return source?.[key] ?? source?.session?.[key] ?? null;
+}
+
+function normalizeStringList(value) {
+  const values = Array.isArray(value) ? value : value === null || value === undefined ? [] : [value];
+  return [...new Set(values.map((item) => normalizeString(item)).filter(Boolean))];
+}
+
 export function normalizeCityKey(value) {
   return String(value || '')
     .normalize('NFD')
@@ -24,6 +44,23 @@ export function operationalCityScopeAllowsName(scope, cityName, { selected = tru
   if (!normalizeCityKey(cityName)) return false;
   const cities = selected ? scope?.selectedCities : scope?.allowedCities;
   return (cities || []).some((city) => operationalCityNamesEquivalent(city?.name, cityName));
+}
+
+export function operationalCityIdsAllowed(scope, cityIds) {
+  if (!scope?.restricted) return true;
+  const allowedIds = new Set(scope.allowedCityIds || []);
+  return normalizeStringList(cityIds).every((cityId) => allowedIds.has(cityId));
+}
+
+export function workerMatchesOperationalCityScope(worker, scope, { selected = false } = {}) {
+  if (!scope?.restricted && (!selected || scope?.selectionExplicit !== true)) return true;
+  const assignedCityNames = (worker?.cities || [])
+    .map((entry) => entry?.city?.name || entry?.name)
+    .filter(Boolean);
+  if (assignedCityNames.length) {
+    return assignedCityNames.some((name) => operationalCityScopeAllowsName(scope, name, { selected }));
+  }
+  return operationalCityScopeAllowsName(scope, worker?.residenceCity, { selected });
 }
 
 export function filterOperationalClientsByCityScope(clients, scope, { selected = false } = {}) {
@@ -77,6 +114,125 @@ export async function loadUnifiedCityOptions(prisma) {
     orderBy: { name: 'asc' }
   });
   return dedupeCitiesByNormalizedName(cities);
+}
+
+async function loadUserTerritorialAccess(prisma, source = {}) {
+  const sourceScope = sourceValue(source, 'userAccessScope') ?? sourceValue(source, 'accessScope');
+  const sourceCities = sourceValue(source, 'userAccessCity') ?? sourceValue(source, 'scopeCity');
+  const sourceVacancyId = sourceValue(source, 'userAccessVacancyId') ?? sourceValue(source, 'scopeVacancyId');
+  if (sourceScope !== null && sourceScope !== undefined) {
+    return {
+      accessScope: normalizeUserAccessScope(sourceScope),
+      scopeCity: sourceCities,
+      scopeVacancyId: sourceVacancyId
+    };
+  }
+
+  const userId = normalizeString(sourceValue(source, 'userId') || sourceValue(source, 'id'));
+  const username = normalizeString(sourceValue(source, 'username'));
+  if (!userId && !username) return null;
+  if (!prisma?.appUser?.findUnique) return null;
+
+  const user = await prisma.appUser.findUnique({
+    where: userId ? { id: userId } : { username },
+    select: { accessScope: true, scopeCity: true, scopeVacancyId: true, isActive: true }
+  });
+  if (!user?.isActive) return null;
+  return {
+    accessScope: normalizeUserAccessScope(user.accessScope),
+    scopeCity: user.scopeCity,
+    scopeVacancyId: user.scopeVacancyId
+  };
+}
+
+async function configuredCityNamesForAccess(prisma, territorialAccess, accessScope) {
+  const configuredCityNames = accessScope === 'ALL'
+    ? []
+    : normalizeUserAccessCities(territorialAccess.scopeCity);
+  if (configuredCityNames.length || accessScope !== 'VACANCY' || !territorialAccess.scopeVacancyId) {
+    return configuredCityNames;
+  }
+  if (!prisma?.vacancy?.findUnique) return configuredCityNames;
+  const vacancy = await prisma.vacancy.findUnique({
+    where: { id: territorialAccess.scopeVacancyId },
+    select: { city: true }
+  });
+  const vacancyCity = normalizeString(vacancy?.city);
+  return vacancyCity ? [vacancyCity] : configuredCityNames;
+}
+
+/**
+ * Única proyección territorial para módulos operativos.
+ *
+ * La autoridad persistida vive en AppUser.accessScope + AppUser.scopeCity, la misma
+ * configuración usada por Reclutamiento. Este adaptador solo traduce nombres de
+ * ciudad a los IDs canónicos del catálogo operativo y aplica un filtro temporal
+ * opcional de la pantalla de Asignaciones; no persiste un segundo alcance.
+ */
+export async function resolveUserCityScope(prisma, source = {}, options = {}) {
+  const allCities = await loadUnifiedCityOptions(prisma);
+  const appRole = normalizeString(sourceValue(source, 'userRole') || sourceValue(source, 'role'))?.toLowerCase();
+  const requestedCityIds = normalizeStringList(options.requestedCityIds);
+  const selectionExplicit = options.selectionExplicit === true;
+
+  if (appRole === 'dev') {
+    const selectedCities = selectionExplicit
+      ? allCities.filter((city) => requestedCityIds.includes(city.id))
+      : allCities;
+    return {
+      restricted: false,
+      selectionExplicit,
+      accessScope: 'ALL',
+      configuredCityNames: [],
+      allowedCities: allCities,
+      allowedCityIds: allCities.map((city) => city.id),
+      selectedCities,
+      selectedCityIds: selectedCities.map((city) => city.id),
+      selectedCityNames: selectedCities.map((city) => city.name),
+      unauthorizedRequestedCityIds: requestedCityIds.filter((id) => !allCities.some((city) => city.id === id))
+    };
+  }
+
+  const territorialAccess = await loadUserTerritorialAccess(prisma, source);
+  if (!territorialAccess) {
+    return {
+      restricted: true,
+      selectionExplicit,
+      accessScope: null,
+      configuredCityNames: [],
+      allowedCities: [],
+      allowedCityIds: [],
+      selectedCities: [],
+      selectedCityIds: [],
+      selectedCityNames: [],
+      unauthorizedRequestedCityIds: requestedCityIds
+    };
+  }
+
+  const accessScope = normalizeUserAccessScope(territorialAccess.accessScope);
+  const configuredCityNames = await configuredCityNamesForAccess(prisma, territorialAccess, accessScope);
+  const restricted = accessScope !== 'ALL';
+  const allowedCities = restricted
+    ? allCities.filter((city) => configuredCityNames.some((name) => operationalCityNamesEquivalent(name, city.name)))
+    : allCities;
+  const allowedCityIds = allowedCities.map((city) => city.id);
+  const allowedIdSet = new Set(allowedCityIds);
+  const selectedCities = selectionExplicit
+    ? allowedCities.filter((city) => requestedCityIds.includes(city.id))
+    : allowedCities;
+
+  return {
+    restricted,
+    selectionExplicit,
+    accessScope,
+    configuredCityNames,
+    allowedCities,
+    allowedCityIds,
+    selectedCities,
+    selectedCityIds: selectedCities.map((city) => city.id),
+    selectedCityNames: selectedCities.map((city) => city.name),
+    unauthorizedRequestedCityIds: requestedCityIds.filter((id) => !allowedIdSet.has(id))
+  };
 }
 
 export async function resolveEquivalentCityIds(prisma, cityId) {

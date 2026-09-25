@@ -2,7 +2,11 @@ import express from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
-import { loadUnifiedCityOptions } from '../services/cityOptions.js';
+import {
+  loadUnifiedCityOptions,
+  operationalCityScopeAllowsName,
+  resolveUserCityScope
+} from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 import { findDispatchWorkerByDocumentIdentity } from '../services/dispatchWorkerExcelImport.js';
@@ -146,20 +150,19 @@ function buildInitialClientServiceNames(body = {}) {
   });
 }
 
-async function loadWorkerFormOptions() {
-  return { cities: await loadUnifiedCityOptions(prisma) };
+async function loadWorkerFormOptions(req) {
+  const scope = await resolveUserCityScope(prisma, req);
+  return { cities: scope.allowedCities };
 }
 
-async function validateSelectedBranches(cityIds) {
+async function validateSelectedBranches(req, cityIds) {
   const uniqueIds = [...new Set(cityIds)];
   if (!uniqueIds.length) throw new Error('Selecciona al menos una sucursal operativa.');
 
-  const branches = await prisma.city.findMany({
-    where: { id: { in: uniqueIds }, NOT: { id: { startsWith: 'city_' } } },
-    select: { id: true }
-  });
-  if (branches.length !== uniqueIds.length) {
-    throw new Error('Una o más sucursales seleccionadas ya no existen.');
+  const scope = await resolveUserCityScope(prisma, req);
+  const allowedIds = new Set(scope.allowedCityIds);
+  if (uniqueIds.some((cityId) => !allowedIds.has(cityId))) {
+    throw new Error('Una o más sucursales seleccionadas están fuera de tu alcance territorial.');
   }
   return uniqueIds;
 }
@@ -364,6 +367,15 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-delete/solicitudes/:serviceRequestId', requireOps, async (req, res) => {
+    const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+      where: { id: req.params.serviceRequestId },
+      select: { cityName: true }
+    });
+    if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
+    const cityScope = await resolveUserCityScope(prisma, req);
+    if (!operationalCityScopeAllowsName(cityScope, serviceRequest.cityName, { selected: false })) {
+      return res.status(403).send('No tienes permiso para eliminar solicitudes de esta ciudad.');
+    }
     const result = await deleteDispatchServiceRequestWithPolicy(prisma, req.params.serviceRequestId);
     if (result.status === 'NOT_FOUND') return res.status(404).send('Solicitud no encontrada');
     if (result.status === 'BLOCKED') {
@@ -387,7 +399,7 @@ export function publicDispatchClientRouter() {
   });
 
   router.get('/admin-worker/nuevo', requireOps, async (req, res) => {
-    const { cities } = await loadWorkerFormOptions();
+    const { cities } = await loadWorkerFormOptions(req);
     return res.render('operacionesPersonalNuevo', {
       cities,
       worker: null,
@@ -402,7 +414,7 @@ export function publicDispatchClientRouter() {
     try {
       const workerData = buildWorkerData(req.body);
       if (!workerData.fullName) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent('Nombre requerido.'));
-      const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
+      const cityIds = await validateSelectedBranches(req, normalizeStringList(req.body.cityIds));
       const worker = await createWorkerWithBranches(workerData, cityIds);
       if (!worker) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent(DUPLICATE_WORKER_DOCUMENT_MESSAGE));
       await saveWorkerCv(worker.id, req.file);
@@ -414,7 +426,7 @@ export function publicDispatchClientRouter() {
   });
 
   router.get('/admin-worker/:workerId/editar', requireOps, async (req, res) => {
-    const [worker, options] = await Promise.all([findWorkerOr404(req.params.workerId), loadWorkerFormOptions()]);
+    const [worker, options] = await Promise.all([findWorkerOr404(req.params.workerId), loadWorkerFormOptions(req)]);
     if (!worker) return res.status(404).send('Auxiliar no encontrado');
     return res.render('operacionesPersonalNuevo', {
       cities: options.cities,
@@ -432,7 +444,7 @@ export function publicDispatchClientRouter() {
       if (!existing) return res.status(404).send('Auxiliar no encontrado');
       const workerData = buildWorkerData(req.body);
       if (!workerData.fullName) return res.redirect(`/operaciones/admin-worker/${existing.id}/editar?error=` + encodeURIComponent('Nombre requerido.'));
-      const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
+      const cityIds = await validateSelectedBranches(req, normalizeStringList(req.body.cityIds));
       const candidateData = existing.candidateId ? {
         fullName: workerData.fullName,
         phone: workerData.phone || existing.candidate.phone,

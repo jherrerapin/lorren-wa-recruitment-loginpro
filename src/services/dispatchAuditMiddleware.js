@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
 import { canManageUserModulePermissions } from './appUsers.js';
-import { operationalCityNamesEquivalent } from './cityOptions.js';
+import {
+  filterOperationalClientsByCityScope,
+  operationalCityScopeAllowsName,
+  resolveUserCityScope
+} from './cityOptions.js';
 import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.js';
 import { injectAdminModuleNavigation } from './adminNavigation.js';
@@ -8,8 +12,7 @@ import {
   canManageOperationalPermissions,
   hasOperationalCapability,
   OPERATIONAL_CAPABILITY,
-  resolveOperationalAccess,
-  resolveOperationalCityScope
+  resolveOperationalAccess
 } from './operationalAccess.js';
 
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
@@ -20,11 +23,19 @@ const GUARDED_PRISMA_CLIENTS = new WeakSet();
 const AUDIT_FINGERPRINT_CONTEXT = 'lorren-dispatch-audit-v1';
 const SERVICE_REQUESTS_PATH = '/admin/operaciones/solicitudes';
 const SERVICE_REQUESTS_VIEW = 'operacionesSolicitudes';
+const CLIENTS_PATH = '/admin/operaciones/clientes';
+const PERSONNEL_PATH = '/admin/operaciones/personal';
+const OPERATIONS_CITY_API_PATH = '/operaciones/api/ciudades';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeStringList(value) {
+  const values = Array.isArray(value) ? value : value === null || value === undefined ? [] : [value];
+  return [...new Set(values.map((item) => normalizeString(item)).filter(Boolean))];
 }
 
 function requestPath(req = {}) {
@@ -259,12 +270,10 @@ function clearOperationalAccess(req) {
   req.session.operationalRole = null;
   req.session.operationalEffectivePermissions = [];
   req.session.operationalDelegablePermissions = [];
-  req.session.operationalCityIds = null;
   req.operationalAccessConfigured = false;
   req.operationalRole = null;
   req.operationalEffectivePermissions = [];
   req.operationalDelegablePermissions = [];
-  req.operationalCityIds = null;
 }
 
 function applyOperationalAccess(req, access = {}) {
@@ -272,19 +281,14 @@ function applyOperationalAccess(req, access = {}) {
   const role = normalizeString(access.role);
   const effectivePermissions = Array.isArray(access.effectivePermissions) ? access.effectivePermissions : [];
   const delegablePermissions = Array.isArray(access.delegablePermissions) ? access.delegablePermissions : [];
-  const operationalCityIds = access.operationalCityIds === null || access.operationalCityIds === undefined
-    ? null
-    : Array.isArray(access.operationalCityIds) ? [...new Set(access.operationalCityIds.filter(Boolean))] : [];
   req.session.operationalAccessConfigured = configured;
   req.session.operationalRole = role;
   req.session.operationalEffectivePermissions = effectivePermissions;
   req.session.operationalDelegablePermissions = delegablePermissions;
-  req.session.operationalCityIds = operationalCityIds;
   req.operationalAccessConfigured = configured;
   req.operationalRole = role;
   req.operationalEffectivePermissions = effectivePermissions;
   req.operationalDelegablePermissions = delegablePermissions;
-  req.operationalCityIds = operationalCityIds;
 }
 
 function denyOperationalAccess(req) {
@@ -292,8 +296,7 @@ function denyOperationalAccess(req) {
     configured: true,
     role: null,
     effectivePermissions: [],
-    delegablePermissions: [],
-    operationalCityIds: []
+    delegablePermissions: []
   });
 }
 
@@ -377,7 +380,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
   let canAccessPayroll = false;
   let canAccessTestWorkspace = false;
-  let operationalAccess = { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], operationalCityIds: null };
+  let operationalAccess = { configured: false, role: null, effectivePermissions: [], delegablePermissions: [] };
   try {
     const payrollAccess = await resolvePayrollFeatureAccess(prisma, {
       userRole: req.session?.userRole || req.userRole,
@@ -406,7 +409,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     });
   } catch (error) {
     console.warn('No fue posible refrescar el rol operativo.', error);
-    operationalAccess = { configured: true, role: null, effectivePermissions: [], delegablePermissions: [], operationalCityIds: [] };
+    operationalAccess = { configured: true, role: null, effectivePermissions: [], delegablePermissions: [] };
   }
 
   req.session.userAccessScope = accessScope;
@@ -436,23 +439,35 @@ async function refreshDatabaseUserPermissions(prisma, req) {
 }
 
 function operationalCityAllowed(scope, cityName) {
+  return operationalCityScopeAllowsName(scope, cityName, { selected: false });
+}
+
+function workerInCityScope(worker, scope) {
   if (!scope?.restricted) return true;
-  if (!normalizeString(cityName)) return false;
-  return (scope.allowedCities || []).some((city) => operationalCityNamesEquivalent(city?.name, cityName));
+  const assignedCityNames = (worker?.cities || [])
+    .map((entry) => entry?.city?.name || entry?.name)
+    .filter(Boolean);
+  if (assignedCityNames.length) return assignedCityNames.some((name) => operationalCityAllowed(scope, name));
+  return operationalCityAllowed(scope, worker?.residenceCity);
 }
 
-function filterClientsByOperationalCityScope(clients, scope) {
-  if (!Array.isArray(clients) || !scope?.restricted) return clients;
-  return clients.flatMap((client) => {
-    const operationPoints = (client.operationPoints || []).filter((point) => (
-      operationalCityAllowed(scope, point.cityName || client.cityName)
-    ));
-    if (!operationalCityAllowed(scope, client.cityName) && !operationPoints.length) return [];
-    return [{ ...client, operationPoints }];
-  });
+function filterWorkersByCityScope(workers, scope) {
+  if (!Array.isArray(workers) || !scope?.restricted) return workers;
+  return workers.filter((worker) => workerInCityScope(worker, scope));
 }
 
-function installServiceRequestCityRenderGate(req, res, scope) {
+function filterVacanciesByCityScope(vacancies, scope) {
+  if (!Array.isArray(vacancies) || !scope?.restricted) return vacancies;
+  return vacancies.filter((vacancy) => operationalCityAllowed(scope, vacancy?.city));
+}
+
+function filterCityOptions(cities, scope) {
+  if (!Array.isArray(cities) || !scope?.restricted) return cities;
+  const allowedIds = new Set(scope.allowedCityIds || []);
+  return cities.filter((city) => allowedIds.has(city?.id));
+}
+
+function installOperationalCityRenderGate(res, scope) {
   const originalRender = res.render.bind(res);
   res.render = (view, locals, callback) => {
     let renderLocals = locals || {};
@@ -461,17 +476,174 @@ function installServiceRequestCityRenderGate(req, res, scope) {
       renderCallback = locals;
       renderLocals = {};
     }
-    if (view !== SERVICE_REQUESTS_VIEW) return originalRender(view, renderLocals, renderCallback);
-    const nextLocals = {
-      ...renderLocals,
-      serviceRequests: Array.isArray(renderLocals.serviceRequests)
-        ? renderLocals.serviceRequests.filter((request) => operationalCityAllowed(scope, request.cityName))
-        : renderLocals.serviceRequests,
-      clients: filterClientsByOperationalCityScope(renderLocals.clients, scope),
-      operationalCityScope: scope
-    };
+
+    const nextLocals = { ...renderLocals, operationalCityScope: scope };
+    if (Array.isArray(nextLocals.cities)) nextLocals.cities = filterCityOptions(nextLocals.cities, scope);
+    if (Array.isArray(nextLocals.vacancies)) nextLocals.vacancies = filterVacanciesByCityScope(nextLocals.vacancies, scope);
+    if (Array.isArray(nextLocals.clients)) nextLocals.clients = filterOperationalClientsByCityScope(nextLocals.clients, scope);
+    if (Array.isArray(nextLocals.serviceRequests)) {
+      nextLocals.serviceRequests = nextLocals.serviceRequests.filter((request) => operationalCityAllowed(scope, request?.cityName));
+    }
+    if (Array.isArray(nextLocals.workers)) nextLocals.workers = filterWorkersByCityScope(nextLocals.workers, scope);
+    if (Array.isArray(nextLocals.availableWorkers)) nextLocals.availableWorkers = filterWorkersByCityScope(nextLocals.availableWorkers, scope);
+    if (nextLocals.client && Array.isArray(nextLocals.client.operationPoints)) {
+      nextLocals.client = {
+        ...nextLocals.client,
+        operationPoints: nextLocals.client.operationPoints.filter((point) => operationalCityAllowed(scope, point?.cityName || nextLocals.client?.cityName))
+      };
+    }
+    if (nextLocals.selectedServiceRequest && !operationalCityAllowed(scope, nextLocals.selectedServiceRequest.cityName)) {
+      nextLocals.selectedServiceRequest = null;
+      nextLocals.selectedServiceRequestId = '';
+    }
+
     return originalRender(view, nextLocals, renderCallback);
   };
+}
+
+function installOperationalCityJsonGate(res, scope) {
+  if (!res || typeof res.json !== 'function') return;
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    if (!body || !Array.isArray(body.cities)) return originalJson(body);
+    return originalJson({ ...body, cities: filterCityOptions(body.cities, scope) });
+  };
+}
+
+function clientIdFromPath(path) {
+  const patterns = [
+    /^\/admin\/operaciones\/clientes\/([^/]+)/,
+    /^\/operaciones\/admin-clientes\/([^/]+)/,
+    /^\/operaciones\/admin-delete\/clientes\/([^/]+)/
+  ];
+  for (const pattern of patterns) {
+    const match = path.match(pattern);
+    if (match?.[1]) return decodeURIComponent(match[1]);
+  }
+  return null;
+}
+
+function operationPointIdFromPath(path) {
+  const patterns = [
+    /^\/admin\/operaciones\/clientes\/[^/]+\/operaciones\/([^/]+)/,
+    /^\/operaciones\/admin-clientes\/[^/]+\/operaciones\/([^/]+)/,
+    /^\/operaciones\/admin-delete\/clientes\/[^/]+\/operaciones\/([^/]+)/
+  ];
+  for (const pattern of patterns) {
+    const match = path.match(pattern);
+    if (match?.[1]) return decodeURIComponent(match[1]);
+  }
+  return null;
+}
+
+function isOperationPointPath(path) {
+  return /^\/admin\/operaciones\/clientes\/[^/]+\/operaciones(?:\/|$)/.test(path)
+    || /^\/operaciones\/admin-clientes\/[^/]+\/operaciones(?:\/|$)/.test(path)
+    || /^\/operaciones\/admin-delete\/clientes\/[^/]+\/operaciones(?:\/|$)/.test(path);
+}
+
+function workerIdFromPath(path) {
+  const patterns = [
+    /^\/admin\/operaciones\/personal\/([^/]+)/,
+    /^\/operaciones\/admin-worker\/([^/]+)/,
+    /^\/operaciones\/admin-delete\/personal\/([^/]+)/
+  ];
+  const reserved = new Set(['nuevo', 'importar-excel', 'exportar-excel', 'eliminar-bulk', 'documento-existe']);
+  for (const pattern of patterns) {
+    const match = path.match(pattern);
+    const id = match?.[1] ? decodeURIComponent(match[1]) : null;
+    if (id && !reserved.has(id)) return id;
+  }
+  return null;
+}
+
+async function enforceClientCityScope(prisma, req, res, scope) {
+  const path = requestPath(req);
+  const method = String(req.method || 'GET').toUpperCase();
+  const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  if (!path.startsWith(CLIENTS_PATH)
+    && !path.startsWith('/operaciones/admin-clientes')
+    && !path.startsWith('/operaciones/admin-delete/clientes')) return true;
+
+  if (isWrite && normalizeString(req.body?.cityName) && !operationalCityAllowed(scope, req.body.cityName)) {
+    res.status(403).send('No tienes permiso para gestionar clientes u operaciones en esta ciudad.');
+    return false;
+  }
+
+  const isClientCreate = method === 'POST' && (path === CLIENTS_PATH || path === '/operaciones/admin-clientes');
+  if (isClientCreate && scope.restricted && !normalizeString(req.body?.cityName)) {
+    res.status(403).send('Debes seleccionar una ciudad dentro de tu alcance.');
+    return false;
+  }
+
+  const clientId = clientIdFromPath(path);
+  if (!clientId) return true;
+  const client = await prisma.dispatchClient.findUnique({
+    where: { id: clientId },
+    select: {
+      id: true,
+      cityName: true,
+      operationPoints: { select: { id: true, cityName: true } }
+    }
+  });
+
+  if (isOperationPointPath(path)) {
+    const operationPointId = operationPointIdFromPath(path);
+    if (operationPointId) {
+      const operationPoint = client?.operationPoints?.find((point) => point.id === operationPointId) || null;
+      if (operationPoint && !operationalCityAllowed(scope, operationPoint.cityName || client?.cityName)) {
+        res.status(403).send('No tienes permiso para gestionar este punto de operación.');
+        return false;
+      }
+      return true;
+    }
+
+    if (isWrite && normalizeString(req.body?.cityName)) return true;
+    const hasVisiblePoint = (client?.operationPoints || []).some((point) => operationalCityAllowed(scope, point.cityName || client?.cityName));
+    if (client && !operationalCityAllowed(scope, client.cityName) && !hasVisiblePoint) {
+      res.status(403).send('No tienes permiso para gestionar operaciones de este cliente.');
+      return false;
+    }
+    return true;
+  }
+
+  if (client && !operationalCityAllowed(scope, client.cityName)) {
+    res.status(403).send('No tienes permiso para gestionar este cliente.');
+    return false;
+  }
+  return true;
+}
+
+async function enforceWorkerCityScope(prisma, req, res, scope) {
+  const path = requestPath(req);
+  if (!path.startsWith(PERSONNEL_PATH)
+    && !path.startsWith('/operaciones/admin-worker')
+    && !path.startsWith('/operaciones/admin-delete/personal')) return true;
+
+  const requestedCityIds = normalizeStringList(req.body?.cityIds);
+  if (scope.restricted && requestedCityIds.length) {
+    const allowedIds = new Set(scope.allowedCityIds || []);
+    if (requestedCityIds.some((id) => !allowedIds.has(id))) {
+      res.status(403).send('No tienes permiso para gestionar auxiliares en una de las ciudades seleccionadas.');
+      return false;
+    }
+  }
+
+  const workerId = workerIdFromPath(path);
+  if (!workerId) return true;
+  const worker = await prisma.dispatchWorker.findUnique({
+    where: { id: workerId },
+    select: {
+      id: true,
+      residenceCity: true,
+      cities: { select: { city: { select: { name: true } } } }
+    }
+  });
+  if (worker && !workerInCityScope(worker, scope)) {
+    res.status(403).send('No tienes permiso para gestionar este auxiliar.');
+    return false;
+  }
+  return true;
 }
 
 async function enforceServiceRequestCityScope(prisma, req, res, scope) {
@@ -513,15 +685,31 @@ async function enforceServiceRequestCityScope(prisma, req, res, scope) {
   return true;
 }
 
-async function applyServiceRequestCityAccess(prisma, req, res) {
+function needsOperationalCityScope(path) {
+  return path.startsWith(SERVICE_REQUESTS_PATH)
+    || path.startsWith(CLIENTS_PATH)
+    || path.startsWith(PERSONNEL_PATH)
+    || path.startsWith('/operaciones/admin-clientes')
+    || path.startsWith('/operaciones/admin-delete/clientes')
+    || path.startsWith('/operaciones/admin-worker')
+    || path.startsWith('/operaciones/admin-delete/personal')
+    || path === OPERATIONS_CITY_API_PATH;
+}
+
+async function applyOperationalCityAccess(prisma, req, res) {
   const path = requestPath(req);
-  if (!path.startsWith(SERVICE_REQUESTS_PATH)) return true;
-  const scope = await resolveOperationalCityScope(prisma, req);
+  if (!needsOperationalCityScope(path)) return true;
+  const scope = await resolveUserCityScope(prisma, req);
   req.operationalCityScope = scope;
-  if (String(req.method || 'GET').toUpperCase() === 'GET' && path === SERVICE_REQUESTS_PATH) {
-    installServiceRequestCityRenderGate(req, res, scope);
+
+  if (String(req.method || 'GET').toUpperCase() === 'GET') {
+    installOperationalCityRenderGate(res, scope);
+    if (path === OPERATIONS_CITY_API_PATH) installOperationalCityJsonGate(res, scope);
   }
-  return enforceServiceRequestCityScope(prisma, req, res, scope);
+
+  if (!await enforceServiceRequestCityScope(prisma, req, res, scope)) return false;
+  if (!await enforceClientCityScope(prisma, req, res, scope)) return false;
+  return enforceWorkerCityScope(prisma, req, res, scope);
 }
 
 function isHtmlDocumentBody(body) {
@@ -711,9 +899,9 @@ export function dispatchAuditMiddleware(prisma) {
 
     if (!enforceOperationalCapability(req, res)) return;
     try {
-      if (!await applyServiceRequestCityAccess(prisma, req, res)) return;
+      if (!await applyOperationalCityAccess(prisma, req, res)) return;
     } catch (error) {
-      console.warn('No fue posible aplicar el alcance territorial de solicitudes.', error);
+      console.warn('No fue posible aplicar el alcance territorial operativo.', error);
       return res.status(500).send('No fue posible validar el alcance territorial operativo.');
     }
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
