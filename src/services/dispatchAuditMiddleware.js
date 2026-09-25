@@ -536,6 +536,12 @@ function operationPointIdFromPath(path) {
   return null;
 }
 
+function isOperationPointPath(path) {
+  return /^\/admin\/operaciones\/clientes\/[^/]+\/operaciones(?:\/|$)/.test(path)
+    || /^\/operaciones\/admin-clientes\/[^/]+\/operaciones(?:\/|$)/.test(path)
+    || /^\/operaciones\/admin-delete\/clientes\/[^/]+\/operaciones(?:\/|$)/.test(path);
+}
+
 function workerIdFromPath(path) {
   const patterns = [
     /^\/admin\/operaciones\/personal\/([^/]+)/,
@@ -572,20 +578,37 @@ async function enforceClientCityScope(prisma, req, res, scope) {
 
   const clientId = clientIdFromPath(path);
   if (!clientId) return true;
-  const client = await prisma.dispatchClient.findUnique({ where: { id: clientId }, select: { id: true, cityName: true } });
-  if (client && !operationalCityAllowed(scope, client.cityName)) {
-    res.status(403).send('No tienes permiso para gestionar este cliente.');
-    return false;
+  const client = await prisma.dispatchClient.findUnique({
+    where: { id: clientId },
+    select: {
+      id: true,
+      cityName: true,
+      operationPoints: { select: { id: true, cityName: true } }
+    }
+  });
+
+  if (isOperationPointPath(path)) {
+    const operationPointId = operationPointIdFromPath(path);
+    if (operationPointId) {
+      const operationPoint = client?.operationPoints?.find((point) => point.id === operationPointId) || null;
+      if (operationPoint && !operationalCityAllowed(scope, operationPoint.cityName || client?.cityName)) {
+        res.status(403).send('No tienes permiso para gestionar este punto de operación.');
+        return false;
+      }
+      return true;
+    }
+
+    if (isWrite && normalizeString(req.body?.cityName)) return true;
+    const hasVisiblePoint = (client?.operationPoints || []).some((point) => operationalCityAllowed(scope, point.cityName || client?.cityName));
+    if (client && !operationalCityAllowed(scope, client.cityName) && !hasVisiblePoint) {
+      res.status(403).send('No tienes permiso para gestionar operaciones de este cliente.');
+      return false;
+    }
+    return true;
   }
 
-  const operationPointId = operationPointIdFromPath(path);
-  if (!operationPointId) return true;
-  const operationPoint = await prisma.dispatchOperationPoint.findFirst({
-    where: { id: operationPointId, clientId },
-    select: { cityName: true }
-  });
-  if (operationPoint && !operationalCityAllowed(scope, operationPoint.cityName || client?.cityName)) {
-    res.status(403).send('No tienes permiso para gestionar este punto de operación.');
+  if (client && !operationalCityAllowed(scope, client.cityName)) {
+    res.status(403).send('No tienes permiso para gestionar este cliente.');
     return false;
   }
   return true;
