@@ -422,7 +422,13 @@ export function canManageOperationalPermissions(source = {}) {
 
 export async function resolveOperationalCityScope(prisma, source = {}, options = {}) {
   const allCities = await loadUnifiedCityOptions(prisma);
-  const configuredCityIds = operationalCityIdsFromSource(source);
+  const appRole = normalizeString(sourceValue(source, 'userRole') || sourceValue(source, 'role'), 40)?.toLowerCase();
+  const explicitSourceScope = sourceOptionalValue(source, 'operationalCityIds');
+  let configuredCityIds = operationalCityIdsFromSource(source);
+  if (appRole === 'admin' && explicitSourceScope === undefined) {
+    const access = await resolveOperationalAccess(prisma, source);
+    configuredCityIds = access?.operationalCityIds ?? null;
+  }
   const restricted = configuredCityIds !== null;
   const configuredSet = restricted ? new Set(configuredCityIds) : null;
   const allowedCities = restricted ? allCities.filter((city) => configuredSet.has(city.id)) : allCities;
@@ -492,6 +498,14 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
   const actorIsDev = actor.userRole === 'dev';
   const actorIsSupervisor = canManageOperationalPermissions(actor);
   if (!actorIsDev && !actorIsSupervisor) throw new Error('operational_access_manager_required');
+
+  if (actorIsSupervisor && actor.userId) {
+    const persistedActorAccess = await getOperationalAccessForUser(prisma, actor.userId);
+    if (!persistedActorAccess?.configured || persistedActorAccess.role !== OPERATIONAL_ROLE.SUPERVISOR) {
+      throw new Error('operational_access_manager_required');
+    }
+    actor.operationalCityIds = persistedActorAccess.operationalCityIds ?? null;
+  }
 
   const hasModuleAccessInput = Object.prototype.hasOwnProperty.call(input, 'moduleAccess');
   const moduleAccess = hasModuleAccessInput ? normalizeOperationalModuleAccess(input.moduleAccess) : null;
