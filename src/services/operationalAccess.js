@@ -419,7 +419,7 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
     const permissionStates = moduleAccess
       ? permissionStatesWithModuleAccess(input.permissions || {}, moduleAccess)
       : input.permissions || {};
-    next = configFromPermissionStates(role, permissionStates, null, CAPABILITY_KEYS);
+    next = configFromPermissionStates(role, permissionStates, previous, CAPABILITY_KEYS);
   } else {
     if (actor.userId && actor.userId === target.id) throw new Error('operational_access_self_forbidden');
     if (!previous) throw new Error('operational_role_dev_required');
