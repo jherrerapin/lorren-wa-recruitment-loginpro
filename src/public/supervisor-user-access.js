@@ -2,8 +2,6 @@
 
 (() => {
   const API_BASE = '/admin/locations/users';
-  const CITIES_URL = '/admin/locations/api/cities';
-  let citiesPromise = null;
 
   async function request(url, options = {}) {
     const response = await fetch(url, {
@@ -23,21 +21,6 @@
       throw error;
     }
     return payload;
-  }
-
-  async function loadCities() {
-    if (!citiesPromise) {
-      citiesPromise = fetch(CITIES_URL, {
-        credentials: 'same-origin',
-        cache: 'no-store',
-        headers: { 'X-Requested-With': 'operational-supervisor-access' }
-      }).then(async (response) => {
-        const payload = await response.json().catch(() => []);
-        if (!response.ok || !Array.isArray(payload)) throw new Error('operational_cities_failed');
-        return payload;
-      });
-    }
-    return citiesPromise;
   }
 
   function normalizeModuleAccess(value = {}) {
@@ -142,52 +125,6 @@
     return { fieldset, rootInput };
   }
 
-  function cityControl(cities, selectedCityIds) {
-    const fieldset = document.createElement('fieldset');
-    fieldset.className = 'supervisor-module';
-    fieldset.dataset.operationalCityScope = 'true';
-
-    const legend = document.createElement('legend');
-    legend.textContent = 'Ciudades operativas';
-    fieldset.append(legend);
-
-    const hint = document.createElement('small');
-    hint.className = 'hint';
-    hint.textContent = 'Solo puedes asignar ciudades que estén dentro de tu propio alcance operativo.';
-    fieldset.append(hint);
-
-    const grid = document.createElement('div');
-    grid.className = 'supervisor-module-functions';
-    const selected = selectedCityIds === null
-      ? new Set(cities.map((city) => city.id))
-      : new Set(Array.isArray(selectedCityIds) ? selectedCityIds : []);
-
-    for (const city of cities) {
-      const label = document.createElement('label');
-      label.className = 'supervisor-function';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.dataset.operationalCityId = city.id;
-      input.checked = selected.has(city.id);
-      const text = document.createElement('span');
-      const strong = document.createElement('strong');
-      strong.textContent = city.name;
-      text.append(strong);
-      label.append(input, text);
-      grid.append(label);
-    }
-
-    if (!cities.length) {
-      const empty = document.createElement('small');
-      empty.className = 'hint status-error';
-      empty.textContent = 'No tienes ciudades operativas disponibles para delegar.';
-      grid.append(empty);
-    }
-
-    fieldset.append(grid);
-    return { fieldset, grid };
-  }
-
   function readModuleAccess(container, previous = {}) {
     const next = normalizeModuleAccess(previous);
     container.querySelectorAll('input[data-supervisor-module-access]').forEach((input) => {
@@ -205,12 +142,6 @@
       if (key && editable.has(key)) states[key] = input.checked;
     });
     return states;
-  }
-
-  function readOperationalCityIds(container) {
-    return [...container.querySelectorAll('input[data-operational-city-id]:checked')]
-      .map((input) => input.dataset.operationalCityId)
-      .filter(Boolean);
   }
 
   function applyReturnedModules(container, moduleAccess) {
@@ -245,12 +176,10 @@
     if (code === 'operational_access_self_forbidden') return 'No puedes modificar tus propios permisos.';
     if (code === 'operational_access_supervisor_target_forbidden') return 'Solo DEV puede modificar otro Supervisor.';
     if (code === 'operational_role_dev_required') return 'Solo DEV puede cambiar roles.';
-    if (code === 'operational_city_scope_not_delegable') return 'Solo puedes asignar ciudades que estén dentro de tu propio alcance.';
-    if (code === 'operational_city_scope_invalid') return 'Una de las ciudades seleccionadas ya no es válida.';
     return 'No fue posible guardar los permisos operativos.';
   }
 
-  function userEditor(user, payload, cities) {
+  function userEditor(user, payload) {
     const details = document.createElement('details');
     details.className = 'supervisor-user';
 
@@ -262,13 +191,6 @@
     body.className = 'supervisor-user-body';
     const moduleAccess = normalizeModuleAccess(user.moduleAccess || {});
     const roots = rootDefinitions(payload.capabilities, payload.editableModules);
-
-    const cityControlState = cityControl(cities, Object.prototype.hasOwnProperty.call(user, 'operationalCityIds') ? user.operationalCityIds : null);
-    body.append(cityControlState.fieldset);
-    let cityScopeDirty = false;
-    cityControlState.grid.querySelectorAll('input[data-operational-city-id]').forEach((input) => {
-      input.addEventListener('change', () => { cityScopeDirty = true; });
-    });
 
     for (const root of roots) {
       const functions = functionDefinitions(payload.capabilities, payload.editableCapabilities, root.moduleAccessKey);
@@ -287,11 +209,11 @@
     const save = document.createElement('button');
     save.type = 'button';
     save.className = 'btn btn-primary';
-    save.textContent = 'Guardar ciudades, módulos y funciones';
-    save.disabled = roots.length === 0 && cities.length === 0;
+    save.textContent = 'Guardar módulos y funciones';
+    save.disabled = roots.length === 0;
     const status = document.createElement('small');
     status.className = 'hint';
-    if (save.disabled) status.textContent = 'No hay permisos operativos configurables.';
+    if (save.disabled) status.textContent = 'No hay módulos operativos configurables.';
     actions.append(save, status);
     body.append(actions);
 
@@ -302,21 +224,15 @@
       try {
         const nextModules = readModuleAccess(body, user.moduleAccess || {});
         const permissions = readPermissions(body, payload.editableCapabilities);
-        const requestBody = { moduleAccess: nextModules, permissions };
-        if (cityScopeDirty) requestBody.operationalCityIds = readOperationalCityIds(body);
         const result = await request(`${API_BASE}/${encodeURIComponent(user.userId)}/operational-access`, {
           method: 'POST',
-          body: JSON.stringify(requestBody)
+          body: JSON.stringify({ moduleAccess: nextModules, permissions })
         });
         user.moduleAccess = normalizeModuleAccess(result.moduleAccess || nextModules);
         user.effectivePermissions = result.access?.effectivePermissions || user.effectivePermissions || [];
-        if (Object.prototype.hasOwnProperty.call(result.access || {}, 'operationalCityIds')) {
-          user.operationalCityIds = result.access.operationalCityIds;
-        }
-        cityScopeDirty = false;
         applyReturnedModules(body, user.moduleAccess);
         status.className = 'hint status-success';
-        status.textContent = 'Ciudades, módulos y funciones actualizados.';
+        status.textContent = 'Módulos y funciones actualizados.';
       } catch (error) {
         status.className = 'hint status-error';
         status.textContent = errorMessage(error?.code);
@@ -333,10 +249,7 @@
     const host = document.querySelector('[data-supervisor-users-list]');
     if (!host) return;
     try {
-      const [payload, cities] = await Promise.all([
-        request(`${API_BASE}/operational-access`, { method: 'GET' }),
-        loadCities()
-      ]);
+      const payload = await request(`${API_BASE}/operational-access`, { method: 'GET' });
       host.replaceChildren();
       const users = payload.users || [];
       if (!users.length) {
@@ -346,7 +259,7 @@
         host.append(empty);
         return;
       }
-      users.forEach((user) => host.append(userEditor(user, payload, cities)));
+      users.forEach((user) => host.append(userEditor(user, payload)));
     } catch {
       host.replaceChildren();
       const error = document.createElement('div');

@@ -6,7 +6,6 @@
   const operationalActorRole = script?.dataset?.operationalActorRole || 'none';
   const OPERATIONAL_PENDING_KEY = 'lorren-operational-access-after-create';
   const OPERATIONAL_API_BASE = '/admin/locations/users';
-  const OPERATIONAL_CITIES_URL = '/admin/locations/api/cities';
 
   const testWorkspacePermission = {
     id: 'test-workspace',
@@ -20,7 +19,6 @@
   const PERMISSIONS = canManageTestWorkspace ? [testWorkspacePermission] : [];
 
   let operationalCatalogPromise = null;
-  let operationalCitiesPromise = null;
 
   function accessUrl(config, userId) {
     return `${config.apiBase}/${encodeURIComponent(userId)}/${config.accessSuffix}`;
@@ -44,21 +42,6 @@
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok !== true) throw new Error(payload.error || 'feature_access_failed');
     return payload;
-  }
-
-  async function loadOperationalCities() {
-    if (!operationalCitiesPromise) {
-      operationalCitiesPromise = fetch(OPERATIONAL_CITIES_URL, {
-        credentials: 'same-origin',
-        cache: 'no-store',
-        headers: { 'X-Requested-With': 'feature-user-access' }
-      }).then(async (response) => {
-        const payload = await response.json().catch(() => []);
-        if (!response.ok || !Array.isArray(payload)) throw new Error('operational_cities_failed');
-        return payload;
-      });
-    }
-    return operationalCitiesPromise;
   }
 
   function permissionHost(form) {
@@ -350,71 +333,9 @@
 
   async function operationalCatalog() {
     if (!operationalCatalogPromise) {
-      operationalCatalogPromise = Promise.all([
-        request(`${OPERATIONAL_API_BASE}/operational-access/catalog`, { method: 'GET' }),
-        loadOperationalCities()
-      ]).then(([catalog, operationalCities]) => ({ ...catalog, operationalCities }));
+      operationalCatalogPromise = request(`${OPERATIONAL_API_BASE}/operational-access/catalog`, { method: 'GET' });
     }
     return operationalCatalogPromise;
-  }
-
-  function renderOperationalCityScope(shell, cities = [], selectedIds = null) {
-    shell.cityHost.replaceChildren();
-    shell.cityHost.append(operationalSectionTitle(
-      'Ciudades operativas',
-      'Este alcance limita los clientes, solicitudes y auxiliares que el usuario puede gestionar en Operaciones.'
-    ));
-
-    const allLabel = document.createElement('label');
-    allLabel.className = 'dispatch-row';
-    const allInput = document.createElement('input');
-    allInput.type = 'checkbox';
-    allInput.dataset.operationalAllCities = 'true';
-    allInput.checked = selectedIds === null;
-    const allText = document.createElement('span');
-    const allStrong = document.createElement('strong');
-    allStrong.textContent = 'Todas las ciudades operativas';
-    const allHint = document.createElement('small');
-    allHint.textContent = 'Sin restricción territorial. Las ciudades nuevas también quedarán disponibles.';
-    allText.append(allStrong, allHint);
-    allLabel.append(allInput, allText);
-    shell.cityHost.append(allLabel);
-
-    const cityGrid = document.createElement('div');
-    cityGrid.style.display = 'grid';
-    cityGrid.style.gridTemplateColumns = 'repeat(auto-fit,minmax(160px,1fr))';
-    cityGrid.style.gap = '6px 12px';
-    const selected = selectedIds === null ? null : new Set(Array.isArray(selectedIds) ? selectedIds : []);
-    for (const city of cities) {
-      const label = document.createElement('label');
-      label.className = 'dispatch-row';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.dataset.operationalCityId = city.id;
-      input.checked = selected === null || selected.has(city.id);
-      const text = document.createElement('span');
-      text.textContent = city.name;
-      label.append(input, text);
-      cityGrid.append(label);
-    }
-    shell.cityHost.append(cityGrid);
-
-    const sync = () => {
-      const unrestricted = allInput.checked;
-      cityGrid.querySelectorAll('input[data-operational-city-id]').forEach((input) => {
-        input.disabled = unrestricted;
-        if (unrestricted) input.checked = true;
-      });
-    };
-    allInput.addEventListener('change', sync);
-    sync();
-  }
-
-  function readOperationalCityIds(shell) {
-    if (shell.cityHost.querySelector('input[data-operational-all-cities]')?.checked) return null;
-    return [...shell.cityHost.querySelectorAll('input[data-operational-city-id]:checked')]
-      .map((input) => input.dataset.operationalCityId)
-      .filter(Boolean);
   }
 
   function buildOperationalEditorShell(form, createMode = false) {
@@ -428,10 +349,10 @@
     section.style.borderRadius = '12px';
 
     section.append(operationalSectionTitle(
-      'Rol, módulos, ciudades y funciones',
+      'Rol, módulos y funciones',
       createMode
-        ? 'DEV asigna el rol, el alcance territorial y los módulos que verá el usuario.'
-        : 'DEV administra el rol, el alcance territorial, los módulos y las funciones del usuario.'
+        ? 'DEV asigna el rol. Después habilita únicamente los módulos que verá el usuario y, dentro de cada uno, sus funciones.'
+        : 'DEV asigna el rol y configura módulos y funciones. Los Supervisores podrán administrar estos mismos accesos de usuarios Consulta sin cambiar su rol.'
     ));
 
     const roleRow = document.createElement('label');
@@ -443,11 +364,6 @@
     roleSelect.dataset.operationalRole = 'true';
     roleRow.append(roleTitle, roleSelect);
 
-    const cityHost = document.createElement('div');
-    cityHost.dataset.operationalCities = 'true';
-    cityHost.style.display = 'grid';
-    cityHost.style.gap = '8px';
-
     const capabilityHost = document.createElement('div');
     capabilityHost.dataset.operationalCapabilities = 'true';
     capabilityHost.style.display = 'grid';
@@ -456,8 +372,8 @@
     const status = document.createElement('small');
     status.className = 'hint';
 
-    section.append(roleRow, cityHost, capabilityHost, status);
-    return { form, section, roleSelect, cityHost, capabilityHost, status };
+    section.append(roleRow, capabilityHost, status);
+    return { form, section, roleSelect, capabilityHost, status };
   }
 
   function fillRoleSelect(select, roles, selected = null, allowEmpty = true) {
@@ -491,8 +407,7 @@
       role,
       moduleAccess: readModuleAccess(shell),
       permissions: readCapabilityStates(shell, catalog),
-      delegablePermissions: [],
-      operationalCityIds: readOperationalCityIds(shell)
+      delegablePermissions: []
     };
   }
 
@@ -510,7 +425,6 @@
     const catalog = await operationalCatalog();
     const shell = buildOperationalEditorShell(form, true);
     fillRoleSelect(shell.roleSelect, catalog.roles, null, true);
-    renderOperationalCityScope(shell, catalog.operationalCities || [], null);
     applyRoleDefaults(shell, catalog, null, null, moduleAccessFromLegacy(form));
     permissionHost(form).append(shell.section);
 
@@ -518,7 +432,7 @@
       const roots = readModuleAccess(shell);
       applyRoleDefaults(shell, catalog, shell.roleSelect.value || null, null, roots);
       shell.status.textContent = shell.roleSelect.value
-        ? 'Configura las ciudades, los módulos y las funciones necesarias.'
+        ? 'Habilita los módulos necesarios y ajusta sus funciones internas.'
         : 'Sin rol no se habilitan módulos operativos para este usuario.';
     });
 
@@ -541,13 +455,11 @@
     } catch {
       return;
     }
-    const catalogBase = await operationalCatalog();
-    const catalog = { roles: payload.roles || catalogBase.roles || [], capabilities: payload.capabilities || catalogBase.capabilities || [], operationalCities: catalogBase.operationalCities || [] };
+    const catalog = { roles: payload.roles || [], capabilities: payload.capabilities || [] };
     const access = payload.access || {};
     const shell = buildOperationalEditorShell(form, false);
     const currentModuleAccess = payload.moduleAccess || moduleAccessFromLegacy(form);
     fillRoleSelect(shell.roleSelect, catalog.roles, access.role || null, true);
-    renderOperationalCityScope(shell, catalog.operationalCities, Object.prototype.hasOwnProperty.call(access, 'operationalCityIds') ? access.operationalCityIds : null);
     applyRoleDefaults(shell, catalog, access.role || null, access.effectivePermissions || [], currentModuleAccess);
 
     const hidden = document.createElement('input');
@@ -561,7 +473,7 @@
       const roots = readModuleAccess(shell);
       applyRoleDefaults(shell, catalog, role, null, roots);
       shell.status.textContent = role
-        ? 'Se cargó la base del nuevo rol. Revisa ciudades, módulos y funciones antes de guardar.'
+        ? 'Se cargó la base del nuevo rol. Revisa módulos y funciones antes de guardar el formulario.'
         : 'Sin rol no se puede habilitar un módulo operativo.';
     });
 
@@ -625,7 +537,7 @@
         method: 'POST',
         body: JSON.stringify(config)
       });
-      showNotice('Rol, ciudades, módulos y funciones aplicados al usuario creado.');
+      showNotice('Rol, módulos y funciones aplicados al usuario creado.');
     } catch {
       showNotice('El usuario se creó, pero no fue posible aplicar su configuración operativa.', false);
     }
