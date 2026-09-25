@@ -7,10 +7,13 @@ import {
   dispatchAssignmentDateGuard,
   loadAssignmentDateContext
 } from '../src/routes/dispatchAssignmentDateGuard.js';
+import { resolveUserCityScope } from '../src/services/cityOptions.js';
 
 function readSource(path) {
   return readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 }
+
+const emptyCityRepository = { findMany: async () => [] };
 
 test('assignment date query uses explicit date and respects allDates', () => {
   assert.equal(assignmentDateFromQuery({ fecha: '2026-08-12' }), '2026-08-12');
@@ -22,10 +25,11 @@ test('assignment date query uses explicit date and respects allDates', () => {
 test('bare assignment entry makes today explicit for the downstream assignment route', async () => {
   const expectedToday = assignmentDateFromQuery({});
   const prisma = {
+    city: emptyCityRepository,
     dispatchServiceRequest: { findMany: async () => [] },
     dispatchAssignment: { findMany: async () => [] }
   };
-  const req = { method: 'GET', query: {} };
+  const req = { method: 'GET', query: {}, userRole: 'dev' };
   const res = { render() {} };
   let nextCalls = 0;
 
@@ -41,6 +45,7 @@ test('serviceRequestId without date opens the board on that request service date
   const serviceDate = new Date('2026-08-03T05:00:00.000Z');
   let findUniqueCalls = 0;
   const prisma = {
+    city: emptyCityRepository,
     dispatchServiceRequest: {
       findUnique: async ({ where }) => {
         findUniqueCalls += 1;
@@ -51,7 +56,7 @@ test('serviceRequestId without date opens the board on that request service date
     },
     dispatchAssignment: { findMany: async () => [] }
   };
-  const req = { method: 'GET', query: { serviceRequestId: 'TEST-REQUEST-HISTORICAL' } };
+  const req = { method: 'GET', query: { serviceRequestId: 'TEST-REQUEST-HISTORICAL' }, userRole: 'dev' };
   const res = { render() {} };
 
   await dispatchAssignmentDateGuard(prisma)(req, res, () => {});
@@ -65,13 +70,14 @@ test('explicit assignment date keeps priority over the service request inferred 
   const serviceDate = new Date('2026-08-12T05:00:00.000Z');
   let findUniqueCalls = 0;
   const prisma = {
+    city: emptyCityRepository,
     dispatchServiceRequest: {
       findUnique: async () => { findUniqueCalls += 1; return { serviceDate: new Date('2026-08-03T05:00:00.000Z') }; },
       findMany: async () => [{ id: 'TEST-REQUEST-EXPLICIT', serviceDate, assignments: [] }]
     },
     dispatchAssignment: { findMany: async () => [] }
   };
-  const req = { method: 'GET', query: { serviceRequestId: 'TEST-REQUEST-EXPLICIT', fecha: '2026-08-12' } };
+  const req = { method: 'GET', query: { serviceRequestId: 'TEST-REQUEST-EXPLICIT', fecha: '2026-08-12' }, userRole: 'dev' };
   const res = { render() {} };
 
   await dispatchAssignmentDateGuard(prisma)(req, res, () => {});
@@ -84,10 +90,11 @@ test('explicit assignment date keeps priority over the service request inferred 
 test('allDates remains explicit and is not replaced by today', async () => {
   let serviceRequestQueries = 0;
   const prisma = {
+    city: emptyCityRepository,
     dispatchServiceRequest: { findMany: async () => { serviceRequestQueries += 1; return []; } },
     dispatchAssignment: { findMany: async () => [] }
   };
-  const req = { method: 'GET', query: { allDates: '1' } };
+  const req = { method: 'GET', query: { allDates: '1' }, userRole: 'dev' };
   const res = { render() {} };
 
   await dispatchAssignmentDateGuard(prisma)(req, res, () => {});
@@ -166,6 +173,47 @@ test('manual assignment redirects preserve the service date without touching unr
   assert.equal(addDateToAssignmentRedirect('/admin/operaciones', '2026-08-12'), '/admin/operaciones');
 });
 
+test('global user scope is the only territorial authority consumed by operations', async () => {
+  const cities = [
+    { id: 'city-bogota', name: 'Bogota' },
+    { id: 'city-medellin', name: 'Medellin' }
+  ];
+  const prisma = {
+    city: { findMany: async () => cities },
+    appUser: {
+      findUnique: async ({ where }) => {
+        assert.deepEqual(where, { id: 'user-1' });
+        return { isActive: true, accessScope: 'CITY', scopeCity: '["Bogota"]' };
+      }
+    }
+  };
+
+  const scope = await resolveUserCityScope(prisma, { userId: 'user-1', userRole: 'admin' });
+  assert.equal(scope.restricted, true);
+  assert.deepEqual(scope.allowedCityIds, ['city-bogota']);
+  assert.deepEqual(scope.selectedCityIds, ['city-bogota']);
+
+  const forged = await resolveUserCityScope(
+    prisma,
+    { userId: 'user-1', userRole: 'admin' },
+    { requestedCityIds: ['city-medellin'], selectionExplicit: true }
+  );
+  assert.deepEqual(forged.selectedCityIds, []);
+  assert.deepEqual(forged.unauthorizedRequestedCityIds, ['city-medellin']);
+});
+
+test('operational permissions no longer persist or render a second city authority', () => {
+  const operationalAccess = readSource('src/services/operationalAccess.js');
+  const devEditor = readSource('src/public/payroll-user-access.js');
+  const supervisorEditor = readSource('src/public/supervisor-user-access.js');
+  const locations = readSource('src/routes/locations.js');
+
+  assert.doesNotMatch(operationalAccess, /operationalCityIds|operationalCityMode|allowedCityIds/);
+  assert.doesNotMatch(devEditor, /Ciudades operativas|operationalCityIds|data-operational-city/);
+  assert.doesNotMatch(supervisorEditor, /Ciudades operativas|operationalCityIds|data-operational-city/);
+  assert.doesNotMatch(locations, /operationalCityIds|operationalCityMode/);
+});
+
 test('server date guard is the sole date authority and does not inject client patches or mix dates', () => {
   const guard = readSource('src/routes/dispatchAssignmentDateGuard.js');
 
@@ -176,6 +224,20 @@ test('server date guard is the sole date authority and does not inject client pa
   assert.doesNotMatch(guard, /bridgeLink|MutationObserver|stopImmediatePropagation|window\.location/);
 });
 
+test('assignment view keeps one city filter beside the operational date and submits through the existing board form', () => {
+  const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
+  const requestsPanel = view.indexOf('<h2>Solicitudes de servicio</h2>');
+  const dateFilter = view.indexOf('<label for="assignmentDateFilter">Fecha operativa</label>');
+  const cityFilter = view.indexOf('<label>Ciudades</label>');
+
+  assert.ok(requestsPanel >= 0);
+  assert.ok(dateFilter > requestsPanel);
+  assert.ok(cityFilter > dateFilter);
+  assert.match(view, /form="workerFilterForm" type="checkbox" name="operationalCityIds"/);
+  assert.equal(view.match(/id="operationalCityFilter"/g)?.length, 1);
+  assert.doesNotMatch(view.slice(view.indexOf('<h2>Auxiliares disponibles</h2>'), requestsPanel), /<label>Ciudad<\/label>/);
+});
+
 test('assignment view renders the selected date and uses one dedicated board controller', () => {
   const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
 
@@ -184,6 +246,15 @@ test('assignment view renders the selected date and uses one dedicated board con
   assert.match(view, /src="\/public\/dispatch-assignment-board\.js"/);
   assert.doesNotMatch(view, /Filtro activo:|assignmentDateNote|assignmentDateLabel/);
   assert.doesNotMatch(view, /replaceBoardFromUrl|maybeAutoSelectFirstVisibleRequest|BOARD_POS_KEY/);
+});
+
+test('canonical worker forms validate submitted branches against the same global city scope', () => {
+  const route = readSource('src/routes/publicDispatchClient.js');
+
+  assert.match(route, /resolveUserCityScope/);
+  assert.match(route, /loadWorkerFormOptions\(req\)/);
+  assert.match(route, /validateSelectedBranches\(req, normalizeStringList\(req\.body\.cityIds\)\)/);
+  assert.match(route, /allowedIds = new Set\(scope\.allowedCityIds\)/);
 });
 
 test('board controller fetches one server state for date/selection and updates granular regions without page navigation', () => {
