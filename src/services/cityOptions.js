@@ -46,6 +46,23 @@ export function operationalCityScopeAllowsName(scope, cityName, { selected = tru
   return (cities || []).some((city) => operationalCityNamesEquivalent(city?.name, cityName));
 }
 
+export function operationalCityIdsAllowed(scope, cityIds) {
+  if (!scope?.restricted) return true;
+  const allowedIds = new Set(scope.allowedCityIds || []);
+  return normalizeStringList(cityIds).every((cityId) => allowedIds.has(cityId));
+}
+
+export function workerMatchesOperationalCityScope(worker, scope, { selected = false } = {}) {
+  if (!scope?.restricted && (!selected || scope?.selectionExplicit !== true)) return true;
+  const assignedCityNames = (worker?.cities || [])
+    .map((entry) => entry?.city?.name || entry?.name)
+    .filter(Boolean);
+  if (assignedCityNames.length) {
+    return assignedCityNames.some((name) => operationalCityScopeAllowsName(scope, name, { selected }));
+  }
+  return operationalCityScopeAllowsName(scope, worker?.residenceCity, { selected });
+}
+
 export function filterOperationalClientsByCityScope(clients, scope, { selected = false } = {}) {
   if (!Array.isArray(clients) || (!scope?.restricted && (!selected || scope?.selectionExplicit !== true))) return clients;
   return clients.flatMap((client) => {
@@ -102,10 +119,12 @@ export async function loadUnifiedCityOptions(prisma) {
 async function loadUserTerritorialAccess(prisma, source = {}) {
   const sourceScope = sourceValue(source, 'userAccessScope') ?? sourceValue(source, 'accessScope');
   const sourceCities = sourceValue(source, 'userAccessCity') ?? sourceValue(source, 'scopeCity');
+  const sourceVacancyId = sourceValue(source, 'userAccessVacancyId') ?? sourceValue(source, 'scopeVacancyId');
   if (sourceScope !== null && sourceScope !== undefined) {
     return {
       accessScope: normalizeUserAccessScope(sourceScope),
-      scopeCity: sourceCities
+      scopeCity: sourceCities,
+      scopeVacancyId: sourceVacancyId
     };
   }
 
@@ -116,13 +135,30 @@ async function loadUserTerritorialAccess(prisma, source = {}) {
 
   const user = await prisma.appUser.findUnique({
     where: userId ? { id: userId } : { username },
-    select: { accessScope: true, scopeCity: true, isActive: true }
+    select: { accessScope: true, scopeCity: true, scopeVacancyId: true, isActive: true }
   });
   if (!user?.isActive) return null;
   return {
     accessScope: normalizeUserAccessScope(user.accessScope),
-    scopeCity: user.scopeCity
+    scopeCity: user.scopeCity,
+    scopeVacancyId: user.scopeVacancyId
   };
+}
+
+async function configuredCityNamesForAccess(prisma, territorialAccess, accessScope) {
+  const configuredCityNames = accessScope === 'ALL'
+    ? []
+    : normalizeUserAccessCities(territorialAccess.scopeCity);
+  if (configuredCityNames.length || accessScope !== 'VACANCY' || !territorialAccess.scopeVacancyId) {
+    return configuredCityNames;
+  }
+  if (!prisma?.vacancy?.findUnique) return configuredCityNames;
+  const vacancy = await prisma.vacancy.findUnique({
+    where: { id: territorialAccess.scopeVacancyId },
+    select: { city: true }
+  });
+  const vacancyCity = normalizeString(vacancy?.city);
+  return vacancyCity ? [vacancyCity] : configuredCityNames;
 }
 
 /**
@@ -174,9 +210,7 @@ export async function resolveUserCityScope(prisma, source = {}, options = {}) {
   }
 
   const accessScope = normalizeUserAccessScope(territorialAccess.accessScope);
-  const configuredCityNames = accessScope === 'ALL'
-    ? []
-    : normalizeUserAccessCities(territorialAccess.scopeCity);
+  const configuredCityNames = await configuredCityNamesForAccess(prisma, territorialAccess, accessScope);
   const restricted = accessScope !== 'ALL';
   const allowedCities = restricted
     ? allCities.filter((city) => configuredCityNames.some((name) => operationalCityNamesEquivalent(name, city.name)))
