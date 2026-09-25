@@ -16,6 +16,7 @@ import {
   listOperationalAccess,
   normalizeOperationalModuleAccess,
   operationalAccessCatalog,
+  resolveOperationalCityScope,
   setOperationalAccess,
   supervisorAssignableOperationalCapabilities
 } from '../services/operationalAccess.js';
@@ -113,6 +114,7 @@ function operationalAccessErrorStatus(error) {
     'operational_module_access_dev_required',
     'operational_role_dev_required',
     'operational_delegation_dev_required',
+    'operational_city_scope_not_delegable',
     'payroll_access_manager_required'
   ].includes(code)) return 403;
   return 400;
@@ -135,7 +137,10 @@ function parseOperationalAccessConfig(value) {
     role: parsed.role,
     permissions: parsed.permissions || {},
     delegablePermissions: parsed.delegablePermissions || [],
-    moduleAccess
+    moduleAccess,
+    ...(Object.prototype.hasOwnProperty.call(parsed, 'operationalCityIds')
+      ? { operationalCityIds: parsed.operationalCityIds }
+      : {})
   };
 }
 
@@ -189,6 +194,9 @@ async function persistUnifiedOperationalAccess(prisma, req, targetUserId, config
     moduleAccess,
     ...operationalAccessActor(req)
   };
+  if (Object.prototype.hasOwnProperty.call(config || {}, 'operationalCityIds')) {
+    accessInput.operationalCityIds = config.operationalCityIds;
+  }
   if (req.userRole === 'dev') {
     accessInput.role = config.role;
     accessInput.delegablePermissions = config.delegablePermissions;
@@ -220,7 +228,8 @@ function operationalConfigFromExisting(access, moduleAccess) {
     role: access.role,
     permissions: buildOperationalPermissionStates(access.role, access.effectivePermissions || []),
     delegablePermissions: [],
-    moduleAccess
+    moduleAccess,
+    operationalCityIds: access.operationalCityIds ?? null
   };
 }
 
@@ -430,9 +439,15 @@ export function locationsRouter(prisma) {
   });
 
   router.get('/api/cities', async (req, res) => {
-    if (!canManageRecruiterUsers(req)) return res.status(403).json({ error: 'forbidden' });
-    const cities = await loadUnifiedCityOptions(prisma);
-    res.json(cities.map((city) => ({ id: city.id, name: city.name })));
+    if (!canManageRecruiterUsers(req) && !canManageOperationalPermissions(req)) {
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    if (canManageRecruiterUsers(req)) {
+      const cities = await loadUnifiedCityOptions(prisma);
+      return res.json(cities.map((city) => ({ id: city.id, name: city.name })));
+    }
+    const scope = await resolveOperationalCityScope(prisma, req);
+    return res.json(scope.allowedCities.map((city) => ({ id: city.id, name: city.name })));
   });
 
   router.get('/api/operations', async (_req, res) => {
@@ -711,6 +726,9 @@ export function locationsRouter(prisma) {
         permissions: req.body?.permissions,
         ...operationalAccessActor(req)
       };
+      if (Object.prototype.hasOwnProperty.call(req.body || {}, 'operationalCityIds')) {
+        accessInput.operationalCityIds = req.body.operationalCityIds;
+      }
       if (req.userRole === 'dev') {
         accessInput.role = req.body?.role;
         accessInput.delegablePermissions = [];
@@ -803,7 +821,7 @@ export function locationsRouter(prisma) {
     try {
       operationalConfig = req.userRole === 'dev' ? parseOperationalAccessConfig(req.body.operationalAccessConfig) : null;
     } catch (error) {
-      return res.redirect(usersRedirect('error', 'La configuración de módulos y funciones no es válida.', user.username));
+      return res.redirect(usersRedirect('error', 'La configuración de módulos, funciones y ciudades no es válida.', user.username));
     }
 
     const existingOperational = await getOperationalAccessForUser(prisma, user.id);
@@ -850,7 +868,7 @@ export function locationsRouter(prisma) {
         }
       });
     } catch (error) {
-      return res.redirect(usersRedirect('error', 'No fue posible guardar el rol, los módulos y sus funciones.', user.username));
+      return res.redirect(usersRedirect('error', 'No fue posible guardar el rol, los módulos, las funciones y las ciudades.', user.username));
     }
 
     const accessDescription = accessUpdate.accessScope === 'ALL'

@@ -11,12 +11,20 @@ import {
   OPERATIONAL_CAPABILITY,
   operationalAccessCatalog,
   operationalRoleBasePermissions,
+  resolveOperationalCityScope,
   setOperationalAccess,
   supervisorAssignableOperationalCapabilities
 } from '../src/services/operationalAccess.js';
 import { injectAdminModuleNavigation } from '../src/services/adminNavigation.js';
 import { requiredOperationalCapability } from '../src/services/dispatchAuditMiddleware.js';
 import { locationsRouter } from '../src/routes/locations.js';
+
+const TEST_CITIES = Object.freeze([
+  { id: 'CITY-BOGOTA', name: 'Bogotá' },
+  { id: 'CITY-IBAGUE', name: 'Ibagué' },
+  { id: 'CITY-MEDELLIN', name: 'Medellín' },
+  { id: 'CITY-NEIVA', name: 'Neiva' }
+]);
 
 function createPrisma() {
   const users = new Map([
@@ -59,6 +67,9 @@ function createPrisma() {
   return {
     users,
     events,
+    city: {
+      findMany: async () => TEST_CITIES.map((city) => ({ ...city }))
+    },
     appUser: {
       findUnique: async ({ where }) => {
         if (where?.id) return users.get(where.id) || null;
@@ -120,6 +131,16 @@ function effectiveState(role, overrides = {}) {
   return { ...states, ...overrides };
 }
 
+async function configureSupervisor(prisma, operationalCityIds = null) {
+  return setOperationalAccess(prisma, {
+    targetUserId: 'TEST-USER-SUP',
+    role: 'SUPERVISOR',
+    permissions: effectiveState('SUPERVISOR'),
+    operationalCityIds,
+    ...devActor()
+  });
+}
+
 function listen(app) {
   return new Promise((resolve, reject) => {
     const server = app.listen(0, '127.0.0.1', () => resolve(server));
@@ -176,6 +197,88 @@ test('DEV asigna Consulta y puede ampliar o restringir funciones individuales', 
   assert.equal(prisma.events.at(-1).metadata.roleAssignedByDev, true);
 });
 
+test('DEV persiste el alcance territorial operativo por IDs canónicos de ciudad', async () => {
+  const prisma = createPrisma();
+  const result = await setOperationalAccess(prisma, {
+    targetUserId: 'TEST-USER-NORMAL',
+    role: 'CONSULTA',
+    permissions: effectiveState('CONSULTA'),
+    operationalCityIds: ['CITY-MEDELLIN', 'CITY-BOGOTA', 'CITY-MEDELLIN'],
+    ...devActor()
+  });
+
+  assert.deepEqual(result.operationalCityIds, ['CITY-MEDELLIN', 'CITY-BOGOTA']);
+  assert.equal(prisma.events.at(-1).metadata.operationalCityScopeUpdated, true);
+  const access = await getOperationalAccessForUser(prisma, 'TEST-USER-NORMAL');
+  assert.deepEqual(access.operationalCityIds, ['CITY-MEDELLIN', 'CITY-BOGOTA']);
+
+  await assert.rejects(
+    setOperationalAccess(prisma, {
+      targetUserId: 'TEST-USER-NORMAL',
+      role: 'CONSULTA',
+      permissions: effectiveState('CONSULTA'),
+      operationalCityIds: ['CITY-INEXISTENTE'],
+      ...devActor()
+    }),
+    /operational_city_scope_invalid/
+  );
+});
+
+test('configuración histórica sin ciudades conserva acceso territorial sin restricción', async () => {
+  const prisma = createPrisma();
+  prisma.events.push({
+    id: 'TEST-LEGACY-CITIES',
+    entityType: OPERATIONAL_ACCESS_ENTITY_TYPE,
+    entityId: 'TEST-USER-NORMAL',
+    action: OPERATIONAL_ACCESS_ACTION,
+    toValue: {
+      role: 'CONSULTA',
+      grants: [],
+      denials: [],
+      delegablePermissions: []
+    },
+    createdAt: new Date('2026-08-01T00:00:00Z')
+  });
+
+  const access = await getOperationalAccessForUser(prisma, 'TEST-USER-NORMAL');
+  assert.equal(access.operationalCityIds, null);
+  const scope = await resolveOperationalCityScope(prisma, {
+    userRole: 'admin',
+    operationalAccessConfigured: true,
+    operationalCityIds: access.operationalCityIds
+  });
+  assert.equal(scope.restricted, false);
+  assert.deepEqual(scope.allowedCityIds, TEST_CITIES.map((city) => city.id));
+});
+
+test('alcance de Asignaciones intersecta selección temporal con las ciudades autorizadas', async () => {
+  const prisma = createPrisma();
+  const scope = await resolveOperationalCityScope(prisma, {
+    userRole: 'admin',
+    operationalAccessConfigured: true,
+    operationalCityIds: ['CITY-BOGOTA', 'CITY-MEDELLIN', 'CITY-NEIVA']
+  }, {
+    requestedCityIds: ['CITY-MEDELLIN', 'CITY-BOGOTA'],
+    selectionExplicit: true
+  });
+
+  assert.equal(scope.restricted, true);
+  assert.deepEqual(scope.allowedCityIds, ['CITY-BOGOTA', 'CITY-MEDELLIN', 'CITY-NEIVA']);
+  assert.deepEqual(scope.selectedCityIds, ['CITY-BOGOTA', 'CITY-MEDELLIN']);
+  assert.deepEqual(scope.unauthorizedRequestedCityIds, []);
+
+  const tampered = await resolveOperationalCityScope(prisma, {
+    userRole: 'admin',
+    operationalAccessConfigured: true,
+    operationalCityIds: ['CITY-BOGOTA', 'CITY-MEDELLIN']
+  }, {
+    requestedCityIds: ['CITY-NEIVA'],
+    selectionExplicit: true
+  });
+  assert.deepEqual(tampered.selectedCityIds, []);
+  assert.deepEqual(tampered.unauthorizedRequestedCityIds, ['CITY-NEIVA']);
+});
+
 test('configuración histórica Coordinador se lee como Consulta sin perder permisos efectivos', async () => {
   const prisma = createPrisma();
   prisma.events.push({
@@ -198,6 +301,7 @@ test('configuración histórica Coordinador se lee como Consulta sin perder perm
   assert.equal(access.effectivePermissions.includes(OPERATIONAL_CAPABILITY.DISPATCH_ASSIGNMENT_MANAGE), false);
   assert.equal(access.effectivePermissions.includes(OPERATIONAL_CAPABILITY.DISPATCH_PERSONNEL_MANAGE), true);
   assert.deepEqual(access.delegablePermissions, []);
+  assert.equal(access.operationalCityIds, null);
 });
 
 test('catálogo marca una sola raíz visible por módulo', () => {
@@ -249,6 +353,7 @@ test('Asistencia conserva la dependencia histórica de Operaciones / Despacho', 
 
 test('Supervisor administra permisos por rol, sin techo delegable ni dependencia de sus módulos propios', async () => {
   const prisma = createPrisma();
+  await configureSupervisor(prisma);
   await setOperationalAccess(prisma, {
     targetUserId: 'TEST-USER-NORMAL',
     role: 'CONSULTA',
@@ -295,6 +400,36 @@ test('Supervisor administra permisos por rol, sin techo delegable ni dependencia
   assert.equal(prisma.events.at(-1).metadata.delegatedBySupervisor, true);
 });
 
+test('Supervisor solo puede delegar un subconjunto de sus propias ciudades', async () => {
+  const prisma = createPrisma();
+  await configureSupervisor(prisma, ['CITY-BOGOTA', 'CITY-MEDELLIN']);
+  await setOperationalAccess(prisma, {
+    targetUserId: 'TEST-USER-NORMAL',
+    role: 'CONSULTA',
+    permissions: effectiveState('CONSULTA'),
+    operationalCityIds: ['CITY-BOGOTA'],
+    ...devActor()
+  });
+
+  const delegated = await setOperationalAccess(prisma, {
+    targetUserId: 'TEST-USER-NORMAL',
+    permissions: {},
+    operationalCityIds: ['CITY-MEDELLIN'],
+    ...supervisorActor()
+  });
+  assert.deepEqual(delegated.operationalCityIds, ['CITY-MEDELLIN']);
+
+  await assert.rejects(
+    setOperationalAccess(prisma, {
+      targetUserId: 'TEST-USER-NORMAL',
+      permissions: {},
+      operationalCityIds: ['CITY-NEIVA'],
+      ...supervisorActor({ actorOperationalCityIds: ['CITY-NEIVA'] })
+    }),
+    /operational_city_scope_not_delegable/
+  );
+});
+
 test('Supervisor no puede cambiar roles, autoeditarse, editar otro Supervisor ni conceder supervisión', async () => {
   const prisma = createPrisma();
   await setOperationalAccess(prisma, {
@@ -303,12 +438,7 @@ test('Supervisor no puede cambiar roles, autoeditarse, editar otro Supervisor ni
     permissions: effectiveState('CONSULTA'),
     ...devActor()
   });
-  await setOperationalAccess(prisma, {
-    targetUserId: 'TEST-USER-SUP',
-    role: 'SUPERVISOR',
-    permissions: effectiveState('SUPERVISOR'),
-    ...devActor()
-  });
+  await configureSupervisor(prisma);
 
   await assert.rejects(
     setOperationalAccess(prisma, {
@@ -372,6 +502,7 @@ test('Supervisor no puede cambiar roles, autoeditarse, editar otro Supervisor ni
 
 test('delegación parcial de Supervisor conserva overrides previos que no fueron enviados', async () => {
   const prisma = createPrisma();
+  await configureSupervisor(prisma);
   await setOperationalAccess(prisma, {
     targetUserId: 'TEST-USER-NORMAL',
     role: 'CONSULTA',
@@ -483,8 +614,9 @@ test('navegación usa capacidades internas y no muestra Crear solicitud sin su p
   assert.match(enabled, /href="\/admin\/operaciones\/solicitudes">Crear solicitud<\/a>/);
 });
 
-test('API unificada deja a Supervisor administrar todos los módulos y funciones de Consulta sin cambiar rol', async () => {
+test('API unificada deja a Supervisor administrar módulos, funciones y ciudades de Consulta sin cambiar rol', async () => {
   const prisma = createPrisma();
+  await configureSupervisor(prisma, ['CITY-BOGOTA', 'CITY-MEDELLIN']);
   const app = express();
   app.use(express.json());
   let mode = 'dev';
@@ -499,7 +631,8 @@ test('API unificada deja a Supervisor administrar todos los módulos y funciones
           operationalAccessConfigured: true,
           operationalRole: 'SUPERVISOR',
           operationalEffectivePermissions: [],
-          operationalDelegablePermissions: []
+          operationalDelegablePermissions: [],
+          operationalCityIds: ['CITY-BOGOTA', 'CITY-MEDELLIN']
         };
     next();
   });
@@ -514,7 +647,8 @@ test('API unificada deja a Supervisor administrar todos los módulos y funciones
       body: JSON.stringify({
         role: 'CONSULTA',
         moduleAccess: { dispatch: true, attendance: false, time: false },
-        permissions: effectiveState('CONSULTA')
+        permissions: effectiveState('CONSULTA'),
+        operationalCityIds: ['CITY-BOGOTA']
       })
     });
     assert.equal(devResponse.status, 200);
@@ -528,6 +662,11 @@ test('API unificada deja a Supervisor administrar todos los módulos y funciones
     assert.equal(listPayload.editableCapabilities.includes(OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE), true);
     assert.equal(listPayload.editableCapabilities.includes(OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS), false);
 
+    const citiesResponse = await fetch(`http://127.0.0.1:${port}/admin/locations/api/cities`);
+    assert.equal(citiesResponse.status, 200);
+    const citiesPayload = await citiesResponse.json();
+    assert.deepEqual(citiesPayload.map((city) => city.id), ['CITY-BOGOTA', 'CITY-MEDELLIN']);
+
     const delegated = await fetch(`http://127.0.0.1:${port}/admin/locations/users/TEST-USER-NORMAL/operational-access`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -537,17 +676,20 @@ test('API unificada deja a Supervisor administrar todos los módulos y funciones
         permissions: {
           [OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT]: true,
           [OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE]: true
-        }
+        },
+        operationalCityIds: ['CITY-MEDELLIN']
       })
     });
     assert.equal(delegated.status, 200);
     const payload = await delegated.json();
     assert.deepEqual(payload.moduleAccess, { dispatch: true, attendance: true, time: true });
+    assert.deepEqual(payload.access.operationalCityIds, ['CITY-MEDELLIN']);
     assert.equal(prisma.users.get('TEST-USER-NORMAL').canAccessDispatch, true);
     assert.equal(prisma.users.get('TEST-USER-NORMAL').canAccessAttendance, true);
 
     const access = await getOperationalAccessForUser(prisma, 'TEST-USER-NORMAL');
     assert.equal(access.role, 'CONSULTA');
+    assert.deepEqual(access.operationalCityIds, ['CITY-MEDELLIN']);
     assert.equal(access.effectivePermissions.includes(OPERATIONAL_CAPABILITY.ATTENDANCE_CORRECT), true);
     assert.equal(access.effectivePermissions.includes(OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE), true);
     assert.equal(prisma.events.some((event) => event.action === 'PAYROLL_ACCESS_ENABLED'), true);
@@ -556,25 +698,37 @@ test('API unificada deja a Supervisor administrar todos los módulos y funciones
   }
 });
 
-test('UI DEV no ofrece Coordinador ni techo delegable y UI Supervisor administra módulos y funciones', () => {
+test('UI DEV y Supervisor administran el alcance territorial dentro del editor operativo existente', () => {
   const devUi = readFileSync(new URL('../src/public/payroll-user-access.js', import.meta.url), 'utf8');
   const supervisorUi = readFileSync(new URL('../src/public/supervisor-user-access.js', import.meta.url), 'utf8');
+  const assignmentView = readFileSync(new URL('../src/views/operacionesAsignacionesConfirmacion.ejs', import.meta.url), 'utf8');
 
-  assert.match(devUi, /Rol, módulos y funciones/);
+  assert.match(devUi, /Rol, módulos, ciudades y funciones/);
+  assert.match(devUi, /Ciudades operativas/);
+  assert.match(devUi, /Todas las ciudades operativas/);
   assert.match(devUi, /Selecciona Consulta o Supervisor/);
   assert.doesNotMatch(devUi, /Funciones internas que este Supervisor puede delegar/);
   assert.doesNotMatch(devUi, /Solo DEV define este techo/);
   assert.doesNotMatch(devUi, /const payrollPermission\s*=/);
 
-  assert.match(supervisorUi, /Guardar módulos y funciones/);
+  assert.match(supervisorUi, /Guardar ciudades, módulos y funciones/);
+  assert.match(supervisorUi, /Solo puedes asignar ciudades que estén dentro de tu propio alcance operativo/);
+  assert.match(supervisorUi, /operationalCityIds/);
   assert.match(supervisorUi, /No hay usuarios Consulta disponibles para administrar/);
   assert.doesNotMatch(supervisorUi, /DEV no delegó funciones/);
   assert.doesNotMatch(supervisorUi, /Consulta o Coordinador/);
+
+  assert.match(assignmentView, /name="operationalCityIds"/);
+  assert.match(assignmentView, /id="operationalCityFilter"/);
+  assert.match(assignmentView, /form\.requestSubmit\(\)/);
+  assert.doesNotMatch(assignmentView, /select name="operationalCityId"/);
 });
 
-test('middleware ejecutado refresca permisos, falla cerrado y aplica la guarda antes de continuar', () => {
+test('middleware ejecutado refresca permisos, falla cerrado y aplica guardas funcional y territorial antes de continuar', () => {
   const source = readFileSync(new URL('../src/services/dispatchAuditMiddleware.js', import.meta.url), 'utf8');
   assert.match(source, /if \(!enforceOperationalCapability\(req, res\)\) return;/);
   assert.match(source, /await refreshDatabaseUserPermissions\(prisma, req\)/);
+  assert.match(source, /applyServiceRequestCityAccess\(prisma, req, res\)/);
+  assert.match(source, /operationalCityIds/);
   assert.match(source, /else denyOperationalAccess\(req\);/);
 });

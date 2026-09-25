@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { canManageUserModulePermissions } from './appUsers.js';
+import { operationalCityNamesEquivalent } from './cityOptions.js';
 import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.js';
 import { injectAdminModuleNavigation } from './adminNavigation.js';
@@ -7,7 +8,8 @@ import {
   canManageOperationalPermissions,
   hasOperationalCapability,
   OPERATIONAL_CAPABILITY,
-  resolveOperationalAccess
+  resolveOperationalAccess,
+  resolveOperationalCityScope
 } from './operationalAccess.js';
 
 const PAYROLL_USERS_SCRIPT = '/public/payroll-user-access.js';
@@ -16,6 +18,8 @@ const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 const DEV_TEST_ASSIGNMENT_STATUSES = new Set(['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED']);
 const GUARDED_PRISMA_CLIENTS = new WeakSet();
 const AUDIT_FINGERPRINT_CONTEXT = 'lorren-dispatch-audit-v1';
+const SERVICE_REQUESTS_PATH = '/admin/operaciones/solicitudes';
+const SERVICE_REQUESTS_VIEW = 'operacionesSolicitudes';
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
@@ -255,10 +259,12 @@ function clearOperationalAccess(req) {
   req.session.operationalRole = null;
   req.session.operationalEffectivePermissions = [];
   req.session.operationalDelegablePermissions = [];
+  req.session.operationalCityIds = null;
   req.operationalAccessConfigured = false;
   req.operationalRole = null;
   req.operationalEffectivePermissions = [];
   req.operationalDelegablePermissions = [];
+  req.operationalCityIds = null;
 }
 
 function applyOperationalAccess(req, access = {}) {
@@ -266,14 +272,19 @@ function applyOperationalAccess(req, access = {}) {
   const role = normalizeString(access.role);
   const effectivePermissions = Array.isArray(access.effectivePermissions) ? access.effectivePermissions : [];
   const delegablePermissions = Array.isArray(access.delegablePermissions) ? access.delegablePermissions : [];
+  const operationalCityIds = access.operationalCityIds === null || access.operationalCityIds === undefined
+    ? null
+    : Array.isArray(access.operationalCityIds) ? [...new Set(access.operationalCityIds.filter(Boolean))] : [];
   req.session.operationalAccessConfigured = configured;
   req.session.operationalRole = role;
   req.session.operationalEffectivePermissions = effectivePermissions;
   req.session.operationalDelegablePermissions = delegablePermissions;
+  req.session.operationalCityIds = operationalCityIds;
   req.operationalAccessConfigured = configured;
   req.operationalRole = role;
   req.operationalEffectivePermissions = effectivePermissions;
   req.operationalDelegablePermissions = delegablePermissions;
+  req.operationalCityIds = operationalCityIds;
 }
 
 function denyOperationalAccess(req) {
@@ -281,7 +292,8 @@ function denyOperationalAccess(req) {
     configured: true,
     role: null,
     effectivePermissions: [],
-    delegablePermissions: []
+    delegablePermissions: [],
+    operationalCityIds: []
   });
 }
 
@@ -365,7 +377,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   const canAccessStatistics = canAccessMetaAds || canAccessCvAnalysis;
   let canAccessPayroll = false;
   let canAccessTestWorkspace = false;
-  let operationalAccess = { configured: false, role: null, effectivePermissions: [], delegablePermissions: [] };
+  let operationalAccess = { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], operationalCityIds: null };
   try {
     const payrollAccess = await resolvePayrollFeatureAccess(prisma, {
       userRole: req.session?.userRole || req.userRole,
@@ -394,7 +406,7 @@ async function refreshDatabaseUserPermissions(prisma, req) {
     });
   } catch (error) {
     console.warn('No fue posible refrescar el rol operativo.', error);
-    operationalAccess = { configured: true, role: null, effectivePermissions: [], delegablePermissions: [] };
+    operationalAccess = { configured: true, role: null, effectivePermissions: [], delegablePermissions: [], operationalCityIds: [] };
   }
 
   req.session.userAccessScope = accessScope;
@@ -421,6 +433,95 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.canAccessStatistics = canAccessStatistics;
   req.canAccessMetaAds = canAccessMetaAds;
   req.canAccessCvAnalysis = canAccessCvAnalysis;
+}
+
+function operationalCityAllowed(scope, cityName) {
+  if (!scope?.restricted) return true;
+  if (!normalizeString(cityName)) return false;
+  return (scope.allowedCities || []).some((city) => operationalCityNamesEquivalent(city?.name, cityName));
+}
+
+function filterClientsByOperationalCityScope(clients, scope) {
+  if (!Array.isArray(clients) || !scope?.restricted) return clients;
+  return clients.flatMap((client) => {
+    const operationPoints = (client.operationPoints || []).filter((point) => (
+      operationalCityAllowed(scope, point.cityName || client.cityName)
+    ));
+    if (!operationalCityAllowed(scope, client.cityName) && !operationPoints.length) return [];
+    return [{ ...client, operationPoints }];
+  });
+}
+
+function installServiceRequestCityRenderGate(req, res, scope) {
+  const originalRender = res.render.bind(res);
+  res.render = (view, locals, callback) => {
+    let renderLocals = locals || {};
+    let renderCallback = callback;
+    if (typeof locals === 'function') {
+      renderCallback = locals;
+      renderLocals = {};
+    }
+    if (view !== SERVICE_REQUESTS_VIEW) return originalRender(view, renderLocals, renderCallback);
+    const nextLocals = {
+      ...renderLocals,
+      serviceRequests: Array.isArray(renderLocals.serviceRequests)
+        ? renderLocals.serviceRequests.filter((request) => operationalCityAllowed(scope, request.cityName))
+        : renderLocals.serviceRequests,
+      clients: filterClientsByOperationalCityScope(renderLocals.clients, scope),
+      operationalCityScope: scope
+    };
+    return originalRender(view, nextLocals, renderCallback);
+  };
+}
+
+async function enforceServiceRequestCityScope(prisma, req, res, scope) {
+  const path = requestPath(req);
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method !== 'POST' || !path.startsWith(SERVICE_REQUESTS_PATH)) return true;
+
+  if (path === SERVICE_REQUESTS_PATH) {
+    const clientId = normalizeString(req.body?.clientId);
+    const operationPointId = normalizeString(req.body?.operationPointId);
+    if (!clientId || !operationPointId) return true;
+    const client = await prisma.dispatchClient.findFirst({
+      where: { id: clientId, isActive: true },
+      select: {
+        cityName: true,
+        operationPoints: { where: { id: operationPointId, isActive: true }, select: { id: true, cityName: true } }
+      }
+    });
+    const operationPoint = client?.operationPoints?.[0] || null;
+    if (!client || !operationPoint) return true;
+    const cityName = operationPoint.cityName || client.cityName;
+    if (!operationalCityAllowed(scope, cityName)) {
+      res.status(403).send('No tienes permiso para crear solicitudes en esta ciudad.');
+      return false;
+    }
+    return true;
+  }
+
+  const deleteMatch = path.match(/^\/admin\/operaciones\/solicitudes\/([^/]+)\/eliminar\/?$/);
+  if (!deleteMatch) return true;
+  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+    where: { id: decodeURIComponent(deleteMatch[1]) },
+    select: { cityName: true }
+  });
+  if (serviceRequest && !operationalCityAllowed(scope, serviceRequest.cityName)) {
+    res.status(403).send('No tienes permiso para gestionar solicitudes de esta ciudad.');
+    return false;
+  }
+  return true;
+}
+
+async function applyServiceRequestCityAccess(prisma, req, res) {
+  const path = requestPath(req);
+  if (!path.startsWith(SERVICE_REQUESTS_PATH)) return true;
+  const scope = await resolveOperationalCityScope(prisma, req);
+  req.operationalCityScope = scope;
+  if (String(req.method || 'GET').toUpperCase() === 'GET' && path === SERVICE_REQUESTS_PATH) {
+    installServiceRequestCityRenderGate(req, res, scope);
+  }
+  return enforceServiceRequestCityScope(prisma, req, res, scope);
 }
 
 function isHtmlDocumentBody(body) {
@@ -609,6 +710,12 @@ export function dispatchAuditMiddleware(prisma) {
     }
 
     if (!enforceOperationalCapability(req, res)) return;
+    try {
+      if (!await applyServiceRequestCityAccess(prisma, req, res)) return;
+    } catch (error) {
+      console.warn('No fue posible aplicar el alcance territorial de solicitudes.', error);
+      return res.status(500).send('No fue posible validar el alcance territorial operativo.');
+    }
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
     const startedAt = Date.now();
     res.on('finish', () => {

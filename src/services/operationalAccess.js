@@ -1,3 +1,5 @@
+import { loadUnifiedCityOptions, normalizeCityKey } from './cityOptions.js';
+
 export const OPERATIONAL_ACCESS_ENTITY_TYPE = 'APP_USER_OPERATIONAL_ACCESS';
 export const OPERATIONAL_ACCESS_ACTION = 'OPERATIONAL_ACCESS_SET';
 
@@ -123,6 +125,12 @@ function sourceValue(source = {}, key) {
   return source?.[key] ?? source?.session?.[key] ?? null;
 }
 
+function sourceOptionalValue(source = {}, key) {
+  if (Object.prototype.hasOwnProperty.call(source || {}, key)) return source[key];
+  if (Object.prototype.hasOwnProperty.call(source?.session || {}, key)) return source.session[key];
+  return undefined;
+}
+
 export function normalizeOperationalRole(value) {
   const normalized = normalizeString(value, 40)?.toUpperCase();
   return normalized && ROLE_SET.has(normalized) ? normalized : null;
@@ -136,6 +144,26 @@ function normalizeAssignableOperationalRole(value) {
 function normalizeCapabilities(values = []) {
   const list = Array.isArray(values) ? values : [values];
   return [...new Set(list.map((value) => normalizeString(value, 80)?.toUpperCase()).filter((value) => value && CAPABILITY_SET.has(value)))];
+}
+
+export function normalizeOperationalCityIds(value) {
+  if (value === null || value === undefined) return null;
+  const values = Array.isArray(value) ? value : [value];
+  return [...new Set(values.map((item) => normalizeString(item, 120)).filter(Boolean))];
+}
+
+function operationalCityIdsFromConfig(value = {}) {
+  if (!Object.prototype.hasOwnProperty.call(value || {}, 'operationalCityIds')) return null;
+  return normalizeOperationalCityIds(value.operationalCityIds);
+}
+
+export function operationalCityIdsFromSource(source = {}) {
+  const appRole = normalizeString(sourceValue(source, 'userRole') || sourceValue(source, 'role'), 40)?.toLowerCase();
+  if (appRole === 'dev') return null;
+  const configured = sourceValue(source, 'operationalAccessConfigured') ?? sourceValue(source, 'configured');
+  if (configured !== true) return null;
+  const value = sourceOptionalValue(source, 'operationalCityIds');
+  return value === undefined ? null : normalizeOperationalCityIds(value);
 }
 
 export function normalizeOperationalModuleAccess(value) {
@@ -197,7 +225,8 @@ function normalizedLegacyCoordinatorConfig(value = {}) {
     role: OPERATIONAL_ROLE.CONSULTA,
     grants: CAPABILITY_KEYS.filter((capability) => legacyEffective.has(capability) && !consultaBase.has(capability)),
     denials: CAPABILITY_KEYS.filter((capability) => consultaBase.has(capability) && !legacyEffective.has(capability)),
-    delegablePermissions: []
+    delegablePermissions: [],
+    operationalCityIds: operationalCityIdsFromConfig(value)
   };
 }
 
@@ -211,7 +240,13 @@ function normalizedConfig(value = {}) {
   const grants = normalizeCapabilities(value?.grants)
     .filter((capability) => !denied.has(capability))
     .filter((capability) => role === OPERATIONAL_ROLE.SUPERVISOR || capability !== OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS);
-  return { role, grants, denials, delegablePermissions: [] };
+  return {
+    role,
+    grants,
+    denials,
+    delegablePermissions: [],
+    operationalCityIds: operationalCityIdsFromConfig(value)
+  };
 }
 
 function configFromPermissionStates(role, permissionStates, previous = null, editableCapabilities = CAPABILITY_KEYS) {
@@ -242,7 +277,8 @@ function configFromPermissionStates(role, permissionStates, previous = null, edi
     role: normalizedRole,
     grants: CAPABILITY_KEYS.filter((capability) => grants.has(capability) && !denials.has(capability)),
     denials: CAPABILITY_KEYS.filter((capability) => denials.has(capability)),
-    delegablePermissions: []
+    delegablePermissions: [],
+    operationalCityIds: previous?.operationalCityIds ?? null
   };
 }
 
@@ -272,6 +308,22 @@ async function loadUser(prisma, source = {}) {
     where: userId ? { id: userId } : { username },
     select: { id: true, username: true, displayName: true, role: true, isActive: true }
   });
+}
+
+async function validateOperationalCityIds(prisma, value) {
+  const normalized = normalizeOperationalCityIds(value);
+  if (normalized === null || !normalized.length) return normalized;
+  const cities = await loadUnifiedCityOptions(prisma);
+  const validIds = new Set(cities.map((city) => city.id));
+  if (normalized.some((cityId) => !validIds.has(cityId))) throw new Error('operational_city_scope_invalid');
+  return normalized;
+}
+
+function cityScopeIsSubset(requestedCityIds, actorCityIds) {
+  if (actorCityIds === null) return true;
+  if (requestedCityIds === null) return false;
+  const actorIds = new Set(actorCityIds);
+  return requestedCityIds.every((cityId) => actorIds.has(cityId));
 }
 
 export function operationalAccessCatalog() {
@@ -305,6 +357,7 @@ export async function getOperationalAccessForUser(prisma, userId) {
       grants: [],
       denials: [],
       delegablePermissions: [],
+      operationalCityIds: null,
       effectivePermissions: []
     };
   }
@@ -330,21 +383,22 @@ export async function resolveOperationalAccess(prisma, source = {}) {
       delegablePermissions: [],
       grants: [],
       denials: [],
+      operationalCityIds: null,
       userId: sourceValue(source, 'userId') || null,
       username: sourceValue(source, 'username') || null
     };
   }
-  if (appRole !== 'admin') return { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], grants: [], denials: [] };
+  if (appRole !== 'admin') return { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], grants: [], denials: [], operationalCityIds: null };
   requirePrisma(prisma);
   const user = await loadUser(prisma, {
     userId: sourceValue(source, 'userId'),
     username: sourceValue(source, 'username')
   });
   if (!user || !user.isActive || String(user.role || '').toUpperCase() !== 'ADMIN') {
-    return { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], grants: [], denials: [], userId: user?.id || null };
+    return { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], grants: [], denials: [], operationalCityIds: null, userId: user?.id || null };
   }
   const access = await getOperationalAccessForUser(prisma, user.id);
-  return access || { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], grants: [], denials: [], userId: user.id };
+  return access || { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], grants: [], denials: [], operationalCityIds: null, userId: user.id };
 }
 
 export function hasOperationalCapability(source = {}, capability) {
@@ -366,6 +420,50 @@ export function canManageOperationalPermissions(source = {}) {
   return configured === true && operationalRole === OPERATIONAL_ROLE.SUPERVISOR;
 }
 
+export async function resolveOperationalCityScope(prisma, source = {}, options = {}) {
+  const allCities = await loadUnifiedCityOptions(prisma);
+  const appRole = normalizeString(sourceValue(source, 'userRole') || sourceValue(source, 'role'), 40)?.toLowerCase();
+  const explicitSourceScope = sourceOptionalValue(source, 'operationalCityIds');
+  let configuredCityIds = operationalCityIdsFromSource(source);
+  if (appRole === 'admin' && explicitSourceScope === undefined) {
+    const access = await resolveOperationalAccess(prisma, source);
+    configuredCityIds = access?.operationalCityIds ?? null;
+  }
+  const restricted = configuredCityIds !== null;
+  const configuredSet = restricted ? new Set(configuredCityIds) : null;
+  const allowedCities = restricted ? allCities.filter((city) => configuredSet.has(city.id)) : allCities;
+  const allowedIds = new Set(allowedCities.map((city) => city.id));
+  const requestedCityIds = normalizeOperationalCityIds(options.requestedCityIds) || [];
+  const selectionExplicit = options.selectionExplicit === true;
+  const unauthorizedRequestedCityIds = requestedCityIds.filter((cityId) => !allowedIds.has(cityId));
+  const requestedSet = new Set(requestedCityIds.filter((cityId) => allowedIds.has(cityId)));
+  const selectedCities = selectionExplicit
+    ? allowedCities.filter((city) => requestedSet.has(city.id))
+    : allowedCities;
+
+  return {
+    restricted,
+    selectionExplicit,
+    configuredCityIds,
+    allowedCities,
+    allowedCityIds: allowedCities.map((city) => city.id),
+    selectedCities,
+    selectedCityIds: selectedCities.map((city) => city.id),
+    selectedCityNames: selectedCities.map((city) => city.name),
+    unauthorizedRequestedCityIds
+  };
+}
+
+export function operationalCityNameInScope(scope = {}, cityName, options = {}) {
+  const normalized = normalizeCityKey(cityName);
+  if (!normalized) return false;
+  const selected = options.selected !== false;
+  if (!scope.restricted && selected && scope.selectionExplicit !== true) return true;
+  if (!scope.restricted && !selected) return true;
+  const cities = selected ? scope.selectedCities : scope.allowedCities;
+  return (cities || []).some((city) => normalizeCityKey(city?.name) === normalized);
+}
+
 export async function listOperationalAccess(prisma, users = []) {
   const entries = [];
   for (const user of Array.isArray(users) ? users : []) {
@@ -382,7 +480,8 @@ function actorContext(input = {}) {
     username: normalizeString(input.actorUsername, 160),
     operationalRole: normalizeOperationalRole(input.actorOperationalRole),
     operationalAccessConfigured: input.actorOperationalAccessConfigured === true,
-    operationalEffectivePermissions: normalizeCapabilities(input.actorEffectivePermissions)
+    operationalEffectivePermissions: normalizeCapabilities(input.actorEffectivePermissions),
+    operationalCityIds: normalizeOperationalCityIds(input.actorOperationalCityIds)
   };
 }
 
@@ -400,9 +499,22 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
   const actorIsSupervisor = canManageOperationalPermissions(actor);
   if (!actorIsDev && !actorIsSupervisor) throw new Error('operational_access_manager_required');
 
+  if (actorIsSupervisor && actor.userId) {
+    const persistedActorAccess = await getOperationalAccessForUser(prisma, actor.userId);
+    if (!persistedActorAccess?.configured || persistedActorAccess.role !== OPERATIONAL_ROLE.SUPERVISOR) {
+      throw new Error('operational_access_manager_required');
+    }
+    actor.operationalCityIds = persistedActorAccess.operationalCityIds ?? null;
+  }
+
   const hasModuleAccessInput = Object.prototype.hasOwnProperty.call(input, 'moduleAccess');
   const moduleAccess = hasModuleAccessInput ? normalizeOperationalModuleAccess(input.moduleAccess) : null;
   if (hasModuleAccessInput && !moduleAccess) throw new Error('operational_module_access_invalid');
+
+  const hasOperationalCityInput = Object.prototype.hasOwnProperty.call(input, 'operationalCityIds');
+  const requestedOperationalCityIds = hasOperationalCityInput
+    ? await validateOperationalCityIds(prisma, input.operationalCityIds)
+    : undefined;
 
   const targetUserId = normalizeString(input.targetUserId, 120);
   if (!targetUserId) throw new Error('operational_access_target_required');
@@ -419,13 +531,17 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
     const permissionStates = moduleAccess
       ? permissionStatesWithModuleAccess(input.permissions || {}, moduleAccess)
       : input.permissions || {};
-    next = configFromPermissionStates(role, permissionStates, null, CAPABILITY_KEYS);
+    next = configFromPermissionStates(role, permissionStates, previous, CAPABILITY_KEYS);
   } else {
     if (actor.userId && actor.userId === target.id) throw new Error('operational_access_self_forbidden');
     if (!previous) throw new Error('operational_role_dev_required');
     if (previous.role === OPERATIONAL_ROLE.SUPERVISOR) throw new Error('operational_access_supervisor_target_forbidden');
     if (Object.prototype.hasOwnProperty.call(input, 'role')) throw new Error('operational_role_dev_required');
     if (Object.prototype.hasOwnProperty.call(input, 'delegablePermissions')) throw new Error('operational_delegation_dev_required');
+
+    if (hasOperationalCityInput && !cityScopeIsSubset(requestedOperationalCityIds, actor.operationalCityIds)) {
+      throw new Error('operational_city_scope_not_delegable');
+    }
 
     const requestedStates = capabilityStateMap(input.permissions || {});
     for (const capability of requestedStates.keys()) {
@@ -444,9 +560,11 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
     next = configFromPermissionStates(previous.role, permissionStates, previous, [...editableForUpdate]);
   }
 
+  if (hasOperationalCityInput) next.operationalCityIds = requestedOperationalCityIds;
+
   const now = options.now || new Date();
   if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new Error('operational_access_now_invalid');
-  const previousSnapshot = previous || { role: null, grants: [], denials: [], delegablePermissions: [] };
+  const previousSnapshot = previous || { role: null, grants: [], denials: [], delegablePermissions: [], operationalCityIds: null };
   await prisma.devAuditEvent.create({
     data: {
       entityType: OPERATIONAL_ACCESS_ENTITY_TYPE,
@@ -466,7 +584,8 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
         roleAssignedByDev: actorIsDev,
         delegatedBySupervisor: actorIsSupervisor && !actorIsDev,
         moduleAccessSynchronized: Boolean(moduleAccess),
-        modulesDelegatedBySupervisor: Boolean(moduleAccess) && actorIsSupervisor && !actorIsDev
+        modulesDelegatedBySupervisor: Boolean(moduleAccess) && actorIsSupervisor && !actorIsDev,
+        operationalCityScopeUpdated: hasOperationalCityInput
       },
       createdAt: now
     }
