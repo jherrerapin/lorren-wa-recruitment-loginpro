@@ -238,6 +238,15 @@ test('assignment view keeps one city filter beside the operational date and subm
   assert.doesNotMatch(view.slice(view.indexOf('<h2>Auxiliares disponibles</h2>'), requestsPanel), /<label>Ciudad<\/label>/);
 });
 
+test('assignment date controls stack before the narrow board breakpoint and keep the reset as a secondary action', () => {
+  const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
+
+  assert.match(view, /\.date-toolbar-fields\{display:grid;grid-template-columns:minmax\(0,\.85fr\) minmax\(0,1\.15fr\)/);
+  assert.match(view, /@media\(max-width:1150px\)\{\.date-toolbar-fields\{grid-template-columns:minmax\(0,1fr\)\}/);
+  assert.match(view, /class="date-toolbar-actions"><button class="btn date-filter-reset"[^>]*id="clearAssignmentDateFilter"/);
+  assert.doesNotMatch(view, /\.date-toolbar \.btn\{width:100%/);
+});
+
 test('assignment view renders the selected date and uses one dedicated board controller', () => {
   const view = readSource('src/views/operacionesAsignacionesConfirmacion.ejs');
 
