@@ -4,10 +4,8 @@ import {
   filterDispatchServiceRequestsByDate,
   normalizeDispatchDateParam
 } from '../services/dispatchDate.js';
-import {
-  operationalCityNameInScope,
-  resolveOperationalCityScope
-} from '../services/operationalAccess.js';
+import { operationalCityNamesEquivalent } from '../services/cityOptions.js';
+import { resolveOperationalCityScope } from '../services/operationalAccess.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const ASSIGNMENT_VIEW = 'operacionesAsignacionesConfirmacion';
@@ -36,6 +34,19 @@ function hasExplicitCitySelection(query = {}) {
     || query.cityFilter === 'true'
     || Object.prototype.hasOwnProperty.call(query, 'operationalCityIds')
     || Boolean(normalizeString(query.operationalCityId));
+}
+
+function cityNameInScope(scope, cityName, { selected = true } = {}) {
+  if (!scope) return true;
+  if (!scope.restricted && (!selected || scope.selectionExplicit !== true)) return true;
+  if (!normalizeString(cityName)) return false;
+  const cities = selected ? scope.selectedCities : scope.allowedCities;
+  return (cities || []).some((city) => operationalCityNamesEquivalent(city?.name, cityName));
+}
+
+function workerMatchesCity(worker, cityName) {
+  if (!worker || !normalizeString(cityName)) return false;
+  return (worker.cities || []).some((entry) => operationalCityNamesEquivalent(entry?.city?.name, cityName));
 }
 
 function showsAllDates(query = {}) {
@@ -73,7 +84,7 @@ export async function loadAssignmentDateContext(prisma, selectedDate, requestedS
   });
   const serviceRequestsByDate = filterDispatchServiceRequestsByDate(serviceRequestsRaw, selectedDate);
   const serviceRequests = cityScope
-    ? serviceRequestsByDate.filter((request) => operationalCityNameInScope(cityScope, request.cityName))
+    ? serviceRequestsByDate.filter((request) => cityNameInScope(cityScope, request.cityName))
     : serviceRequestsByDate;
 
   const selectedServiceRequest = requestedServiceRequestId
@@ -94,10 +105,10 @@ export async function loadAssignmentDateContext(prisma, selectedDate, requestedS
         select: { workerId: true, serviceRequest: { select: { serviceDate: true, cityName: true } } }
       })
     : [];
-  const sameDayAssignments = sameDayAssignmentsRaw.filter((assignment) => (
-    dispatchServiceDateKey(assignment.serviceRequest?.serviceDate) === selectedDate
-    && (!cityScope || operationalCityNameInScope(cityScope, assignment.serviceRequest?.cityName))
-  ));
+  const sameDayAssignments = sameDayAssignmentsRaw.filter(
+    (assignment) => dispatchServiceDateKey(assignment.serviceRequest?.serviceDate) === selectedDate
+      && (!cityScope || cityNameInScope(cityScope, assignment.serviceRequest?.cityName))
+  );
 
   return {
     selectedDate,
@@ -106,6 +117,16 @@ export async function loadAssignmentDateContext(prisma, selectedDate, requestedS
     blockedWorkerIds,
     assignedWorkerIdsOnSelectedDate: new Set(sameDayAssignments.map((assignment) => assignment.workerId))
   };
+}
+
+function filterWorkersByCityScope(workers, cityScope) {
+  if (!Array.isArray(workers) || !cityScope) return workers;
+  if (!cityScope.restricted && cityScope.selectionExplicit !== true) return workers;
+  return workers.filter((worker) => (
+    (worker.cities || []).some((entry) => (
+      (cityScope.selectedCities || []).some((city) => operationalCityNamesEquivalent(city?.name, entry?.city?.name))
+    ))
+  ));
 }
 
 function installAssignmentRenderGate(req, res, next, selectedDate, context, cityScope) {
@@ -120,21 +141,38 @@ function installAssignmentRenderGate(req, res, next, selectedDate, context, city
 
     if (view !== ASSIGNMENT_VIEW) return originalRender(view, renderLocals, renderCallback);
 
+    const scopedWorkers = filterWorkersByCityScope(renderLocals.workers, cityScope) || [];
+    const scopedAvailableWorkers = filterWorkersByCityScope(renderLocals.availableWorkers, cityScope) || [];
     const nextLocals = {
       ...renderLocals,
+      workers: scopedWorkers,
+      availableWorkers: scopedAvailableWorkers,
+      cities: cityScope?.allowedCities || renderLocals.cities,
+      operationalCityScope: cityScope || renderLocals.operationalCityScope || null,
       selectedAssignmentDate: selectedDate || '',
-      operationalCityScope: cityScope || renderLocals.operationalCityScope || null
+      transportModes: [...new Set(scopedWorkers.map((worker) => normalizeString(worker.transportMode)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')),
+      localities: [...new Set(scopedWorkers.map((worker) => normalizeString(worker.residenceLocality)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')),
+      filters: {
+        ...(renderLocals.filters || {}),
+        operationalCityIds: cityScope?.selectedCityIds || [],
+        cityFilterExplicit: cityScope?.selectionExplicit === true
+      }
     };
 
     if (context) {
       nextLocals.serviceRequests = context.serviceRequests;
       nextLocals.selectedServiceRequest = context.selectedServiceRequest;
       nextLocals.selectedServiceRequestId = context.selectedServiceRequest?.id || '';
-      nextLocals.availableWorkers = Array.isArray(renderLocals.workers)
-        ? renderLocals.workers.filter((worker) => !context.blockedWorkerIds.has(worker.id))
-        : renderLocals.availableWorkers;
+      nextLocals.availableWorkers = scopedWorkers.filter((worker) => !context.blockedWorkerIds.has(worker.id));
       nextLocals.assignedWorkerIdsOnSelectedDate = context.assignedWorkerIdsOnSelectedDate;
       nextLocals.restDate = context.selectedDate;
+    } else if (Array.isArray(renderLocals.serviceRequests)) {
+      nextLocals.serviceRequests = renderLocals.serviceRequests.filter((request) => cityNameInScope(cityScope, request.cityName));
+      const requestedId = normalizeString(req.query?.serviceRequestId);
+      nextLocals.selectedServiceRequest = requestedId
+        ? nextLocals.serviceRequests.find((request) => request.id === requestedId) || nextLocals.serviceRequests[0] || null
+        : nextLocals.serviceRequests[0] || null;
+      nextLocals.selectedServiceRequestId = nextLocals.selectedServiceRequest?.id || '';
     }
 
     return originalRender(view, nextLocals, renderCallback);
@@ -150,9 +188,22 @@ async function installAssignmentRedirectDate(prisma, req, res, cityScope) {
     select: { serviceDate: true, cityName: true }
   });
   if (!serviceRequest) return true;
-  if (cityScope && !operationalCityNameInScope(cityScope, serviceRequest.cityName, { selected: false })) {
+  if (cityScope && !cityNameInScope(cityScope, serviceRequest.cityName, { selected: false })) {
     res.status(403).send('No tienes permiso para gestionar asignaciones de esta ciudad.');
     return false;
+  }
+
+  const path = String(req.originalUrl || req.url || '').split('?')[0];
+  const workerId = path.endsWith('/asignaciones/assign') ? normalizeString(req.body?.workerId) : null;
+  if (workerId && normalizeString(serviceRequest.cityName)) {
+    const worker = await prisma.dispatchWorker.findUnique({
+      where: { id: workerId },
+      select: { cities: { select: { city: { select: { name: true } } } } }
+    });
+    if (worker && !workerMatchesCity(worker, serviceRequest.cityName)) {
+      res.status(403).send('El auxiliar no está habilitado para la ciudad de esta solicitud.');
+      return false;
+    }
   }
 
   const dateKey = dispatchServiceDateKey(serviceRequest.serviceDate);
@@ -174,7 +225,7 @@ async function inferAssignmentDateFromRequestedService(prisma, serviceRequestId,
     where: { id: serviceRequestId },
     select: { serviceDate: true, cityName: true }
   });
-  if (cityScope && !operationalCityNameInScope(cityScope, serviceRequest?.cityName)) return null;
+  if (cityScope && !cityNameInScope(cityScope, serviceRequest?.cityName)) return null;
   return dispatchServiceDateKey(serviceRequest?.serviceDate);
 }
 
