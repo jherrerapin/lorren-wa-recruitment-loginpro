@@ -3,7 +3,6 @@ import {
   DATA_CONSENT_VERSION,
   buildConsentAcceptedReply,
   buildConsentPendingMode,
-  buildVacancyQuestionReply,
   deriveConsentResumeUpdate,
   evaluateConsentBoundary,
   parseConsentPendingMode
@@ -13,6 +12,7 @@ import {
   evaluateContextualResponseGate
 } from '../../src/services/contextualResponseGate.js';
 import { applyFieldPolicy } from '../../src/services/policyLayer.js';
+import { buildVacancyTimingReply } from '../../src/services/vacancyPublicInfo.js';
 
 const CONSENT_SOURCE = 'WHATSAPP_CANDIDATE';
 const CONSENT_ACTOR = 'candidate_whatsapp';
@@ -229,9 +229,12 @@ function planVacancyQuestion(fixture, state) {
     throw new Error(`${fixture.id}: el gate contextual no permitió responder la pregunta dentro del flujo`);
   }
 
-  const answer = buildVacancyQuestionReply(state.vacancy, fixture.inbound.body);
+  // El replay ASK_VACANCY_SCHEDULE solo necesita la autoridad estructurada de
+  // tiempo. La interpretación conversacional ya no pertenece al gate legal de
+  // consentimiento.
+  const answer = buildVacancyTimingReply(state.vacancy, fixture.inbound.body);
   if (!answer) {
-    throw new Error(`${fixture.id}: la autoridad de vacante no produjo una respuesta sustentada`);
+    throw new Error(`${fixture.id}: la autoridad temporal no produjo una respuesta sustentada`);
   }
 
   const actions = [{ type: 'ANSWER_VACANCY_QUESTION' }];

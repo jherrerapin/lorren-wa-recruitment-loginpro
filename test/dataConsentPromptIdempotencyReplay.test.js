@@ -243,20 +243,32 @@ test('replay CONV-062: el interés se reclama y el dato adyacente sigue al webho
   assert.equal(observed.deliveries[0].remainingMessages, replay.expected.remainingMessages);
 });
 
-test('replay CONV-034: una pregunta pendiente se responde una vez ante reintento', async () => {
-  const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'conv-034-pending-question-retry-v1');
+test('replay CONV-034: la pregunta pendiente no pertenece al gate legal', async () => {
+  const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'conv-034-pending-question-router-v1');
   const observed = await executeReplay(replay);
   const pending = parseConsentPendingMode(observed.getCandidate().botResumeMode);
 
   assert.equal(observed.outboundRecords.length, replay.expected.outboundMessages);
   assert.equal(observed.metrics.inboundClaims, replay.expected.inboundClaims);
-  assert.equal(
-    countBodiesMatching(observed.sentBodies, /Para continuar necesito saber si autorizas/i),
-    replay.expected.clarifierCount
-  );
   assert.equal(pending.pending, replay.expected.finalPending);
-  assert.match(observed.sentBodies[0], /gestionar (?:tu|la) postulación|fines de reclutamiento/i);
-  assert.deepEqual(observed.deliveries.map((item) => item.statuses), [[200], [200]]);
+  assert.deepEqual(observed.deliveries.map((item) => item.nextCalls), replay.expected.nextCalls);
+  assert.deepEqual(observed.deliveries.map((item) => item.remainingMessages), replay.expected.remainingMessages);
+  assert.deepEqual(observed.deliveries.map((item) => item.statuses), [[], []]);
+  assert.deepEqual(observed.sentBodies, []);
+});
+
+test('producción: preguntar por la empresa durante consentimiento llega intacto al router conversacional', async () => {
+  const replay = CONSENT_PROMPT_IDEMPOTENCY_REPLAYS.find((item) => item.id === 'production-company-question-pending-consent-v1');
+  const observed = await executeReplay(replay);
+  const pending = parseConsentPendingMode(observed.getCandidate().botResumeMode);
+
+  assert.equal(observed.outboundRecords.length, replay.expected.outboundMessages);
+  assert.equal(observed.metrics.inboundClaims, replay.expected.inboundClaims);
+  assert.equal(pending.pending, replay.expected.finalPending);
+  assert.deepEqual(observed.deliveries.map((item) => item.nextCalls), replay.expected.nextCalls);
+  assert.deepEqual(observed.deliveries.map((item) => item.remainingMessages), replay.expected.remainingMessages);
+  assert.deepEqual(observed.deliveries[0].statuses, []);
+  assert.deepEqual(observed.sentBodies, []);
 });
 
 test('replay CONV-008: un adjunto pendiente queda para persistencia sin repetir consentimiento', async () => {

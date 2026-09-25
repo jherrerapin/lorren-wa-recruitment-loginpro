@@ -17,10 +17,12 @@ import { classifyInterviewIntent } from './interviewIntentClassifier.js';
 import { evaluateContextualResponseGate, inferContextualSemanticIntent, ContextualAllowedAction } from './contextualResponseGate.js';
 import { OPENAI_EXTRACTION_MODEL } from './openAiModelConfig.js';
 import { buildInterviewAttendanceConfirmedReply, buildInterviewCancellationReply } from './naturalReply.js';
+import { isCurrentDataConsent, parseConsentPendingMode } from './dataConsentGate.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const PAUSED_VACANCY_FLAG = 'paused_vacancy';
 const PAUSED_VACANCY_CAPTURE = 'paused_vacancy_capture';
+const CONSENT_PENDING_SAFE_ACTIONS = new Set(['nothing', 'pause_bot', 'mark_no_interest']);
 
 const COMPLETION_REPLY = 'Tu información y hoja de vida quedaron registradas correctamente. El equipo de selección revisará tu perfil y, si el proceso continúa, te contactará por este medio.';
 
@@ -29,6 +31,11 @@ function buildDeterministicProgressReply(actResult = {}) {
     return COMPLETION_REPLY;
   }
   return null;
+}
+
+function isPendingConsentConversation(candidate = {}) {
+  return !isCurrentDataConsent(candidate)
+    && parseConsentPendingMode(candidate?.botResumeMode).pending;
 }
 
 const CONSENT_MODEL = OPENAI_EXTRACTION_MODEL;
@@ -642,23 +649,39 @@ export async function runChatEngine({
     turnType: null
   });
 
+  // Si el turno alcanzó el engine con el consentimiento todavía pendiente,
+  // entonces el middleware legal ya determinó que NO es una decisión de
+  // consentimiento. Se permite comprender/responder y persistir datos que el
+  // candidato haya enviado espontáneamente, pero no avanzar el proceso por una
+  // segunda vía. Esa transición sigue perteneciendo exclusivamente al gate.
+  const consentPendingConversation = isPendingConsentConversation(candidate);
+  const blockedConsentActions = consentPendingConversation
+    ? actions.filter((action) => action?.type !== 'save_fields' && !CONSENT_PENDING_SAFE_ACTIONS.has(action?.type))
+    : [];
+
   // `sanitized.fields` es la única autoridad de entidades que cruza hacia
   // persistencia. `save_fields` crudo ya fue consumido como propuesta antes de
   // la compuerta semántica y no vuelve a ejecutarse como un segundo canal.
-  const sideEffectActions = actions.filter((action) => action?.type !== 'save_fields');
+  const sideEffectActions = actions.filter((action) => (
+    action?.type !== 'save_fields'
+    && (!consentPendingConversation || CONSENT_PENDING_SAFE_ACTIONS.has(action?.type))
+  ));
+  const effectiveNextStep = consentPendingConversation ? currentStep : result.nextStep;
   const actResult = await act({
     actions: sideEffectActions,
     candidate,
     extractedFields: sanitized.fields,
     candidateFields: sanitized.fields,
-    nextStep: result.nextStep,
+    nextStep: effectiveNextStep,
     nextSlot,
     vacancy,
     prisma,
   });
 
   const staleStepConflict = Boolean(actResult?.stepTransition?.conflict);
-  const progressReply = staleStepConflict ? null : buildDeterministicProgressReply(actResult);
+  const progressReply = staleStepConflict || consentPendingConversation
+    ? null
+    : buildDeterministicProgressReply(actResult);
   const guardedReply = staleStepConflict
     ? null
     : (actResult?.blockedActions?.length
@@ -678,17 +701,18 @@ export async function runChatEngine({
   });
   const effectiveReply = staleStepConflict ? null : safeReply.reply;
   const hasSilentManualPause = !String(effectiveReply || '').trim()
-    && actions.some((action) => action?.type === 'pause_bot');
+    && sideEffectActions.some((action) => action?.type === 'pause_bot');
   const noUsefulReply = staleStepConflict || (
     !String(effectiveReply || '').trim()
-    && actions.length
-    && (hasSilentManualPause || actions.every((action) => action?.type === 'nothing'))
+    && sideEffectActions.length
+    && (hasSilentManualPause || sideEffectActions.every((action) => action?.type === 'nothing'))
   );
 
   return {
     reply: effectiveReply,
-    actions,
-    nextStep: result.nextStep,
+    actions: sideEffectActions,
+    proposedActions: actions,
+    nextStep: effectiveNextStep,
     extractedFields: sanitized.fields,
     candidateFields: sanitized.fields,
     rejectedFields: sanitized.rejectedFields,
@@ -696,12 +720,17 @@ export async function runChatEngine({
     readiness: actResult?.readiness || null,
     blockedActions: [
       ...(actResult?.blockedActions || []),
+      ...blockedConsentActions.map((action) => ({
+        action: action?.type || 'unknown',
+        reason: 'data_consent_pending'
+      })),
       ...(profileScopeGuard.blocked ? [{
         action: 'reply_scope_guard',
         reason: profileScopeGuard.reason,
         requestedFieldsOutsideReadiness: profileScopeGuard.requestedFieldsOutsideReadiness
       }] : [])
     ],
+    consentPendingConversation,
     fallback: result.fallback,
     fallbackReason: result.fallbackReason || null,
     loopGuardApplied: Boolean(result.loopGuardApplied),

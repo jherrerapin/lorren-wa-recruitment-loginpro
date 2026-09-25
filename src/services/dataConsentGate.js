@@ -9,12 +9,11 @@ import {
 } from './candidateData.js';
 import { analyzeConversationTurn } from './conversationIntent.js';
 import { captureConsentedProfileData } from './consentProfileCapture.js';
-import { buildConsentQuestionReply } from './consentFaq.js';
 import { isSupervisorPhone } from './adminSupervisor.js';
 import { recordCandidateDataConsent } from './consentStateService.js';
 import { cancelActiveInterviewBookings } from './interviewBookingStateService.js';
 import { cancelReminderOnInbound } from './reminder.js';
-import { buildProfessionalVacancyPresentation, buildVacancyTimingReply, cleanConfiguredFragment, getConfiguredAgeRequirementText, getConfiguredExperienceRequirementText } from './vacancyPublicInfo.js';
+import { buildProfessionalVacancyPresentation } from './vacancyPublicInfo.js';
 import {
   compareAndSwapConversationMessagePayload,
   findInboundConversationMessage,
@@ -66,7 +65,6 @@ const CONSENT_SUBJECT_PATTERN = /\b(tratamiento|datos|dato personal|datos person
 const OFFER_SUBJECT_PATTERN = /\b(vacante|oferta|cargo|trabajo|empleo|postulacion|entrevista)\b/;
 
 const CONSENT_PROMPT = process.env.DATA_CONSENT_PROMPT || `Para continuar con tu postulación necesito que me indiques si autorizas a LoginPro a tratar tus datos con fines de reclutamiento.\n\n${DATA_CONSENT_TEXT}\n\nElige Sí autorizo o No autorizo. También puedes responder por escrito.`;
-const CONSENT_CLARIFIER_REPLY = 'Para continuar necesito saber si autorizas a LoginPro a tratar tus datos y hoja de vida para este proceso. Elige Sí autorizo o No autorizo. También puedes responder por escrito.';
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
 const VACANCY_NOT_CONFIRMED_REPLY = 'Entendido. Para ubicar bien tu proceso, cuéntame la ciudad y el cargo o vacante que te interesa.';
 const APPLICATION_INTEREST_REQUIRED_REPLY = 'Antes de solicitar tu autorización, confírmame si deseas postularte a esta vacante.';
@@ -267,7 +265,7 @@ function isNegativeVacancyConfirmation(text = '') {
   ]);
 }
 
-function isConsentAlreadyAccepted(candidate = {}) {
+export function isCurrentDataConsent(candidate = {}) {
   return candidate?.dataConsentStatus === 'ACCEPTED'
     && candidate.dataConsentVersion === DATA_CONSENT_VERSION;
 }
@@ -661,7 +659,7 @@ export function evaluateConsentBoundary(candidate = {}, message = {}, options = 
   const body = inboundText(message);
   const withdrawalRequested = isExplicitConsentRevocation(body);
   if (withdrawalRequested) return { block: true, reason: 'explicit_consent_revocation' };
-  if (isConsentAlreadyAccepted(candidate)) return { block: false, reason: 'consent_already_accepted' };
+  if (isCurrentDataConsent(candidate)) return { block: false, reason: 'consent_already_accepted' };
 
   const profileDataDecision = options.profileDataDecision || evaluateProfileDataEvidence(body, { candidate });
   const consentPromptPending = parseConsentPendingMode(candidate?.botResumeMode).pending;
@@ -939,8 +937,8 @@ async function sendConsentTurnReply(prisma, candidate, message, to, body, source
       if (!fresh) return false;
       if (source === 'data_consent_revoked') return fresh.dataConsentStatus === 'REVOKED';
       if (fresh.botPaused) return false;
-      if (source.startsWith('data_consent_accepted')) return isConsentAlreadyAccepted(fresh);
-      return !isConsentAlreadyAccepted(fresh) && fresh.dataConsentStatus !== 'REVOKED';
+      if (source.startsWith('data_consent_accepted')) return isCurrentDataConsent(fresh);
+      return !isCurrentDataConsent(fresh) && fresh.dataConsentStatus !== 'REVOKED';
     }
   });
 }
@@ -975,11 +973,11 @@ export async function requestDataConsent(prisma, {
     sendText: (recipient, text) => sendReplyButtonsMessage(recipient, text, DATA_CONSENT_BUTTONS),
     beforeSend: async () => {
       const fresh = await prisma.candidate.findUnique({ where: { id: candidate.id } });
-      return fresh && !fresh.botPaused && !isConsentAlreadyAccepted(fresh) && fresh.dataConsentStatus !== 'REVOKED';
+      return fresh && !fresh.botPaused && !isCurrentDataConsent(fresh) && fresh.dataConsentStatus !== 'REVOKED';
     },
     prepareClaim: async (tx) => {
       const current = await tx.candidate.findUnique({ where: { id: candidate.id } });
-      if (!current || current.botPaused || isConsentAlreadyAccepted(current) || current.dataConsentStatus === 'REVOKED') return false;
+      if (!current || current.botPaused || isCurrentDataConsent(current) || current.dataConsentStatus === 'REVOKED') return false;
       const inbound = await findInboundConversationMessage(tx, { candidateId: candidate.id, waMessageId: inboundMessageId });
       if (!inbound.found) return false;
       const historical = await tx.message.findMany({
@@ -1031,10 +1029,6 @@ function vacancyTitle(vacancy = {}) {
   return vacancy?.title || vacancy?.role || 'esta vacante';
 }
 
-function vacancyLocation(vacancy = {}) {
-  return vacancy?.operationAddress || vacancy?.operation?.name || vacancyCity(vacancy) || '';
-}
-
 function buildVacancyConfirmationPrompt(vacancy = {}) {
   const city = vacancyCity(vacancy);
   const place = city ? ` en ${city}` : '';
@@ -1043,66 +1037,6 @@ function buildVacancyConfirmationPrompt(vacancy = {}) {
 
 function buildVacancyInfoReply(vacancy = {}, { includeInterestPrompt = true } = {}) {
   return buildProfessionalVacancyPresentation(vacancy, { includeInterestPrompt });
-}
-
-export function buildVacancyQuestionReply(vacancy = {}, text = '') {
-  if (!vacancy || !isQuestionLike(text)) return '';
-  const normalized = normalize(text);
-  const timingReply = buildVacancyTimingReply(vacancy, text);
-  if (timingReply) return timingReply;
-  const lead = `Sobre la vacante de ${vacancyTitle(vacancy)}`;
-
-  if (/\b(empresa|compania|cliente|quien contrata|para que empresa|operacion)\b/.test(normalized)) {
-    const operationName = String(vacancy?.operation?.name || '').trim();
-    return operationName
-      ? `El proceso de selección lo gestiona LoginPro Service. La operación asociada a esta vacante es ${operationName}.`
-      : 'El proceso de selección lo gestiona LoginPro Service.';
-  }
-
-  if (/\b(salario|sueldo|pago|cuanto pagan|cuanto es)\b/.test(normalized)) {
-    return cleanConfiguredFragment(vacancy.conditions)
-      ? `${lead}, las condiciones son: ${cleanConfiguredFragment(vacancy.conditions)}.`
-      : 'La información disponible de esta vacante no especifica el salario.';
-  }
-  if (/\b(contrato|prestacion|beneficio|condicion)\b/.test(normalized)) {
-    return cleanConfiguredFragment(vacancy.conditions)
-      ? `${lead}, las condiciones son: ${cleanConfiguredFragment(vacancy.conditions)}.`
-      : 'La información disponible de esta vacante no especifica ese detalle.';
-  }
-  if (/\b(edad|rango de edad)\b/.test(normalized)) {
-    const ageRequirement = getConfiguredAgeRequirementText(vacancy);
-    return ageRequirement
-      ? `${lead}, ${ageRequirement}.`
-      : 'La información disponible de esta vacante no especifica un rango de edad.';
-  }
-  if (/\b(experiencia|tiempo de experiencia)\b/.test(normalized)) {
-    const experienceRequirement = getConfiguredExperienceRequirementText(vacancy);
-    if (experienceRequirement) return `${lead}, ${experienceRequirement}.`;
-    return vacancy.requirements && /\bexperiencia\b/i.test(vacancy.requirements)
-      ? `${lead}, los requisitos son: ${vacancy.requirements}.`
-      : 'La información disponible de esta vacante no especifica un requisito adicional de experiencia.';
-  }
-  if (/\b(requisito|perfil|estudio|formacion|documento|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
-    const parts = [];
-    if (vacancy.requirements) parts.push(vacancy.requirements);
-    if (cleanConfiguredFragment(vacancy.requiredDocuments) && /\bdocumento\b/.test(normalized)) parts.push(`Documentos: ${cleanConfiguredFragment(vacancy.requiredDocuments)}`);
-    return parts.length
-      ? `${lead}, los requisitos son: ${parts.join('. ')}.`
-      : 'Ese requisito no aparece en la información disponible de esta vacante.';
-  }
-
-  if (/\b(funcion|funciones|labor|hacer|cargo|rol|consiste|tarea|tareas|responsabilidad|responsabilidades)\b/.test(normalized)) {
-    return cleanConfiguredFragment(vacancy.roleDescription)
-      ? `${lead}, las funciones del cargo son: ${cleanConfiguredFragment(vacancy.roleDescription)}.`
-      : `El cargo es ${vacancyTitle(vacancy)}, pero no tengo una descripción adicional.`;
-  }
-  if (/\b(donde|direccion|ubicacion|zona|sector|queda)\b/.test(normalized)) {
-    const location = vacancyLocation(vacancy);
-    return location
-      ? `${lead}, el lugar de trabajo es: ${location}.`
-      : 'La información disponible de esta vacante no incluye una ubicación más específica.';
-  }
-  return 'Ese detalle no aparece en la información disponible de esta vacante.';
 }
 
 export function buildConsentAcceptedReply(candidate = {}, vacancy = null) {
@@ -1220,12 +1154,11 @@ async function handleCampaignVacancyConfirmation(prisma, candidate, message, fro
     return true;
   }
 
-  const questionReply = buildVacancyQuestionReply(vacancy, body);
   if (isAffirmativeVacancyConfirmation(body)) {
     const explicitApplicationInterest = Boolean(analyzeConversationTurn(body).interest);
     if (explicitApplicationInterest) {
       await sendConsentTurnReply(prisma, candidate, message, from,
-        [questionReply, buildVacancyInfoReply(vacancy, { includeInterestPrompt: false })].filter(Boolean).join('\n\n'),
+        buildVacancyInfoReply(vacancy, { includeInterestPrompt: false }),
         'campaign_vacancy_information');
       await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id,
         context: { cvResendRequired: false }, candidateUpdates: { currentStep: ConversationStep.GREETING_SENT } });
@@ -1235,8 +1168,7 @@ async function handleCampaignVacancyConfirmation(prisma, candidate, message, fro
       currentStep: ConversationStep.GREETING_SENT,
       botResumeMode: APPLICATION_INTEREST_PENDING_MODE
     })) return true;
-    const reply = [questionReply, buildVacancyInfoReply(vacancy)].filter(Boolean).join('\n\n');
-    await sendConsentTurnReply(prisma, candidate, message, from, reply, 'campaign_vacancy_confirmed', { vacancyId: vacancy.id });
+    await sendConsentTurnReply(prisma, candidate, message, from, buildVacancyInfoReply(vacancy), 'campaign_vacancy_confirmed', { vacancyId: vacancy.id });
     return true;
   }
 
@@ -1246,8 +1178,7 @@ async function handleCampaignVacancyConfirmation(prisma, candidate, message, fro
     return true;
   }
 
-  const reply = [questionReply, buildVacancyConfirmationPrompt(vacancy)].filter(Boolean).join('\n\n');
-  await sendConsentTurnReply(prisma, candidate, message, from, reply, 'campaign_vacancy_confirmation_prompt', { vacancyId: vacancy.id });
+  await sendConsentTurnReply(prisma, candidate, message, from, buildVacancyConfirmationPrompt(vacancy), 'campaign_vacancy_confirmation_prompt', { vacancyId: vacancy.id });
   return true;
 }
 
@@ -1309,7 +1240,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     if (!recoveringRejection) context.pending = true;
   }
 
-  if (candidate.dataConsentStatus === 'ACCEPTED' && !isConsentAlreadyAccepted(candidate)
+  if (candidate.dataConsentStatus === 'ACCEPTED' && !isCurrentDataConsent(candidate)
       && !isExplicitConsentRevocation(body)) {
     // Historical acceptance proves prior interest, not acceptance of new terms.
     // Require a current-version prompt before interpreting even an old pending
@@ -1326,8 +1257,6 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     context.pending = true;
     consentEligible = true;
   }
-
-  const questionReply = buildConsentQuestionReply(body) || buildVacancyQuestionReply(vacancy, body);
 
   if (shouldRecordConsentRejection(body, { consentPromptPending: context.pending })) {
     const claimed = await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'REVOKED');
@@ -1367,8 +1296,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     const consentedCandidate = consentResult.candidate;
 
     if (resumeContext.alternativeUnavailable) {
-      const reply = [questionReply, ALTERNATIVE_VACANCY_UNAVAILABLE_REPLY].filter(Boolean).join('\n\n');
-      await sendConsentTurnReply(prisma, candidate, message, from, reply, 'data_consent_accepted_alternative_unavailable', {
+      await sendConsentTurnReply(prisma, candidate, message, from, ALTERNATIVE_VACANCY_UNAVAILABLE_REPLY, 'data_consent_accepted_alternative_unavailable', {
         resumedMode: context.resumeMode,
         requestedVacancyId: resumeContext.requestedVacancyId
       });
@@ -1390,38 +1318,19 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
     }
 
     const acceptedCandidate = captured.candidate || consentedCandidate;
-    const reply = [
-      questionReply,
-      buildConsentAcceptedReply(acceptedCandidate, vacancy)
-    ].filter(Boolean).join('\n\n');
-    await sendConsentTurnReply(prisma, candidate, message, from, reply, 'data_consent_accepted', {
-      capturedFields: captured.capturedFields || [],
-      resumedMode: context.resumeMode
-    });
+    await sendConsentTurnReply(prisma, candidate, message, from,
+      buildConsentAcceptedReply(acceptedCandidate, vacancy), 'data_consent_accepted', {
+        capturedFields: captured.capturedFields || [],
+        resumedMode: context.resumeMode
+      });
     return true;
   }
 
-  if (context.pending) {
-    const claimed = await saveInboundConsentEvidence(
-      prisma,
-      candidate.id,
-      message,
-      body,
-      questionReply ? 'PENDING_QUESTION' : 'PENDING_NO_REPLY'
-    );
-    if (!claimed) return true;
-    if (!questionReply) {
-      // A new inbound can recover a confirmed failed prompt. The same outbox
-      // policy still suppresses pending/sent/uncertain deliveries.
-      await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id, context });
-      return true;
-    }
-    const reply = [questionReply, CONSENT_CLARIFIER_REPLY].filter(Boolean).join('\n\n');
-    await sendConsentTurnReply(prisma, candidate, message, from, reply, 'data_consent_pending_question', {
-      resumedMode: context.resumeMode
-    }, true);
-    return true;
-  }
+  // Un turno que no decide consentimiento no pertenece a esta autoridad. Si
+  // llega aquí por recuperación histórica, no inventamos una respuesta ni una
+  // FAQ: el mensaje debe quedar en manos del router conversacional canónico en
+  // una entrega nueva. Los turnos nuevos se desvían antes de adquirir claim.
+  if (context.pending) return true;
 
   if (!consentEligible) {
     return handleConsentPrerequisite(prisma, candidate, message, from, vacancy, boundaryReason, profileDataEvidence);
@@ -1429,8 +1338,7 @@ async function handleConsentDecision(prisma, req, candidate, message, from, body
 
   const claimed = await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'PROMPTED');
   if (!claimed) return true;
-  await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id, context,
-    prefix: questionReply });
+  await requestDataConsent(prisma, { candidate, to: from, inboundMessageId: message.id, context });
   return true;
 }
 
@@ -1484,7 +1392,7 @@ export function dataConsentGateMiddleware(prisma) {
         const body = inboundText(message);
         const withdrawalRequested = isExplicitConsentRevocation(body);
         const consentButton = String(message.interactive?.button_reply?.id || '').startsWith('data_consent:');
-        if (isConsentAlreadyAccepted(candidate) && !withdrawalRequested && !recovering) {
+        if (isCurrentDataConsent(candidate) && !withdrawalRequested && !recovering) {
           if (consentButton) {
             await saveInboundConsentEvidence(prisma, candidate.id, message, body, 'ACCEPTED');
             handledMessages.push(message);
@@ -1505,6 +1413,16 @@ export function dataConsentGateMiddleware(prisma) {
         const consentPromptPending = parseConsentPendingMode(candidate.botResumeMode).pending;
         const consentDecisionTurn = shouldRecordConsentAcceptance(body, { consentPromptPending })
           || shouldRecordConsentRejection(body, { consentPromptPending });
+
+        // Una autorización pendiente es una guarda de transición, no una
+        // autoridad conversacional. Preguntas, aclaraciones y cualquier turno
+        // que no decida consentimiento siguen hacia el router canónico con el
+        // estado pendiente intacto. Así una FAQ nunca se convierte en una
+        // repetición mecánica del consentimiento.
+        if (!recovering && consentPromptPending && !withdrawalRequested && !consentDecisionTurn) {
+          continue;
+        }
+
         // Datos y archivos nunca se consumen por falta de consentimiento. Se
         // dejan intactos para que webhook.js los persista con las autoridades
         // normales de candidato/HV.

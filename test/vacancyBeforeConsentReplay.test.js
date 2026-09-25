@@ -4,7 +4,7 @@ import {
   VacancyFirstGateAction,
   resolveVacancyFirstGate
 } from '../src/services/vacancyFirstGate.js';
-import { buildVacancyQuestionReply } from '../src/services/dataConsentGate.js';
+import { buildVacancyTimingReply } from '../src/services/vacancyPublicInfo.js';
 import { VACANCY_CONSENT_ORDER_REPLAYS } from './conversation-replay/vacancyConsentOrderReplay.js';
 
 function activeVacancy(overrides = {}) {
@@ -96,12 +96,11 @@ test('una vacante resuelta después de consentimiento conserva el flujo post-con
 });
 
 
-test('replay #901: una pregunta de turnos recibe solo la información configurada', async () => {
+test('una pregunta de turnos con vacante asignada sale del gate y llega al motor conversacional', async () => {
   const vacancy = activeVacancy({
     requirements: 'Experiencia mínima. Disponibilidad para turnos rotativos y tiempo extra.',
     conditions: 'Vinculación inmediata. Pagos quincenales.'
   });
-  const text = '¿Los turnos son de domingo a domingo o de lunes a sábado?';
   const decision = await resolveVacancyFirstGate({
     prisma: null,
     candidate: {
@@ -113,21 +112,19 @@ test('replay #901: una pregunta de turnos recibe solo la información configurad
       botResumeMode: null
     },
     currentVacancy: vacancy,
-    inboundText: text,
+    inboundText: '¿Los turnos son de domingo a domingo o de lunes a sábado?',
     currentStep: 'GREETING_SENT',
     recentMessages: [],
     vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
   });
 
-  assert.equal(decision.reason, 'ACTIVE_VACANCY_INFORMATION_ANSWER');
-  assert.match(decision.reply, /turnos rotativos/i);
-  assert.match(decision.reply, /no hay días ni un horario exacto/i);
-  assert.doesNotMatch(decision.reply, /funciones del cargo|documentación para el proceso/i);
+  assert.equal(decision.action, VacancyFirstGateAction.ALLOW_ENGINE);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_ALREADY_RESOLVED');
+  assert.equal(decision.reply, undefined);
 });
 
-test('las rutas comparten la autoridad temporal y no inventan fecha de inicio', async () => {
+test('una pregunta de fecha con vacante asignada tampoco se responde dentro del gate', async () => {
   const vacancy = activeVacancy();
-  const text = '¿Cuándo empiezo?';
   const decision = await resolveVacancyFirstGate({
     prisma: null,
     candidate: {
@@ -139,18 +136,19 @@ test('las rutas comparten la autoridad temporal y no inventan fecha de inicio', 
       botResumeMode: null
     },
     currentVacancy: vacancy,
-    inboundText: text,
+    inboundText: '¿Cuándo empiezo?',
     currentStep: 'GREETING_SENT',
     recentMessages: [],
     vacancyHints: { allVacancies: [vacancy], activeVacancies: [vacancy] }
   });
 
-  assert.equal(decision.reply, buildVacancyQuestionReply(vacancy, text));
-  assert.match(decision.reply, /no hay una fecha de inicio registrada/i);
+  assert.equal(decision.action, VacancyFirstGateAction.ALLOW_ENGINE);
+  assert.equal(decision.reason, 'ACTIVE_VACANCY_ALREADY_RESOLVED');
+  assert.equal(decision.reply, undefined);
 });
 
-test('la autoridad temporal conserva días configurados con tilde', () => {
-  const reply = buildVacancyQuestionReply(
+test('la autoridad temporal estructurada conserva días configurados con tilde', () => {
+  const reply = buildVacancyTimingReply(
     activeVacancy({ conditions: 'Jornada de miércoles a sábado, de 8:00 a.m. a 5:00 p.m.' }),
     '¿Qué horario tiene la vacante?'
   );

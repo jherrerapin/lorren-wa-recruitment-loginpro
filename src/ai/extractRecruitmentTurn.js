@@ -132,6 +132,9 @@ Criterios de entidad:
 - experienceInfo/experienceTime: experiencia propia o respuesta directa al campo; requisitos de la vacante no son experiencia del candidato.
 
 Clasifica turnType por el propósito principal. Si el propósito principal es preguntar, usa ASK_QUESTION aun cuando el mismo turno contenga un dato personal válido.
+
+replyIntent describe únicamente lo que requiere ESTE turno; no ordena retomar automáticamente el trámite pendiente. Para ASK_QUESTION usa answer_question. El estado pendiente se conserva aparte y el orquestador decidirá en un turno posterior cuándo corresponde retomarlo. Usa request_missing_data o request_missing_cv solo cuando el mensaje actual realmente está continuando la recolección y no tiene una pregunta u objeción prioritaria.
+
 Devuelve solo JSON válido bajo el schema estricto.`
           }
         ]
