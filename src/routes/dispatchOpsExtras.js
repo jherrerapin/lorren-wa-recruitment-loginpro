@@ -2,7 +2,12 @@ import express from 'express';
 import multer from 'multer';
 import ExcelJS from 'exceljs';
 import { sendDispatchCompletionEmail } from '../services/dispatchCompletionEmail.js';
-import { loadUnifiedCityOptions } from '../services/cityOptions.js';
+import {
+  loadUnifiedCityOptions,
+  operationalCityIdsAllowed,
+  operationalCityScopeAllowsName,
+  workerMatchesOperationalCityScope
+} from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { ACTIVE_DISPATCH_ASSIGNMENT_STATUSES, recalculateDispatchServiceRequestStatus } from '../services/dispatchOperationalCoverage.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
@@ -203,12 +208,44 @@ function buildWorkerFormModelFromBody(body = {}, existing = null) {
     candidateId: existing?.candidateId || null
   };
 }
-async function loadWorkerFormLists(prisma) {
-  return Promise.all([loadDispatchCities(prisma), prisma.vacancy.findMany({ select: { id: true, title: true, city: true }, orderBy: { title: 'asc' } })]);
+async function loadWorkerFormLists(prisma, req = null) {
+  const [cities, vacancies] = await Promise.all([
+    loadDispatchCities(prisma),
+    prisma.vacancy.findMany({ select: { id: true, title: true, city: true }, orderBy: { title: 'asc' } })
+  ]);
+  const scope = req?.operationalCityScope;
+  if (!scope?.restricted) return [cities, vacancies];
+  const allowedIds = new Set(scope.allowedCityIds || []);
+  return [
+    cities.filter((city) => allowedIds.has(city.id)),
+    vacancies.filter((vacancy) => operationalCityScopeAllowsName(scope, vacancy.city, { selected: false }))
+  ];
 }
 async function renderWorkerFormWithError(req, res, prisma, { worker = null, mode, formAction, error, status = 400 }) {
-  const [cities, vacancies] = await loadWorkerFormLists(prisma);
+  const [cities, vacancies] = await loadWorkerFormLists(prisma, req);
   return res.status(status).render('operacionesPersonalNuevo', { cities, vacancies, worker: buildWorkerFormModelFromBody(req.body, worker), mode, formAction, role: req.session?.userRole || req.userRole, error });
+}
+function workerCitySelectionAllowed(req, body = {}) {
+  return operationalCityIdsAllowed(req.operationalCityScope, normalizeStringList(body.cityIds));
+}
+async function importBatchWithinCityScope(prisma, req, batchId, selectedItemIds = [], applyAll = false) {
+  const scope = req.operationalCityScope;
+  if (!scope?.restricted) return true;
+  const batch = await prisma.dispatchWorkerImportBatch.findFirst({
+    where: { id: batchId, createdByUsername: dispatchWorkerImportOwnerKey(req), status: 'PENDING' },
+    select: { items: true }
+  });
+  if (!batch) return true;
+  const selected = new Set(selectedItemIds.map(String));
+  const targets = (Array.isArray(batch.items) ? batch.items : []).filter((item) => item?.actionable && (applyAll || selected.has(String(item.id))));
+  if (targets.some((item) => !operationalCityIdsAllowed(scope, item?.incoming?.cityIds || []))) return false;
+  const workerIds = [...new Set(targets.map((item) => item?.workerId).filter(Boolean))];
+  if (!workerIds.length) return true;
+  const workers = await prisma.dispatchWorker.findMany({
+    where: { id: { in: workerIds } },
+    select: { id: true, residenceCity: true, cities: { select: { city: { select: { name: true } } } } }
+  });
+  return workers.every((worker) => workerMatchesOperationalCityScope(worker, scope));
 }
 async function resolveDispatchService(prisma, serviceId) { const normalizedServiceId = normalizeString(serviceId); if (!normalizedServiceId) return null; return prisma.dispatchClientService.findFirst({ where: { id: normalizedServiceId, isActive: true }, include: { client: true } }); }
 async function loadDispatchCities(prisma) { return loadUnifiedCityOptions(prisma); }
@@ -614,7 +651,7 @@ export function dispatchOpsExtrasRouter(prisma) {
     });
   });
 
-  router.get('/personal/exportar-excel', requireOps, async (_req, res) => {
+  router.get('/personal/exportar-excel', requireOps, async (req, res) => {
     const workers = await prisma.dispatchWorker.findMany({
       where: buildDispatchEligibilityFilter(),
       select: {
@@ -636,7 +673,8 @@ export function dispatchOpsExtrasRouter(prisma) {
       },
       orderBy: [{ fullName: 'asc' }, { createdAt: 'asc' }]
     });
-    const workbook = buildDispatchWorkersExportWorkbook(workers);
+    const visibleWorkers = workers.filter((worker) => workerMatchesOperationalCityScope(worker, req.operationalCityScope));
+    const workbook = buildDispatchWorkersExportWorkbook(visibleWorkers);
     res.setHeader('Content-Type', XLSX_MIME_TYPE);
     res.setHeader('Content-Disposition', `attachment; filename="personal-operativo-${todayIsoDate()}.xlsx"`);
     await workbook.xlsx.write(res);
@@ -645,7 +683,7 @@ export function dispatchOpsExtrasRouter(prisma) {
 
   router.get('/personal/importar-excel', requireOps, async (req, res) => {
     await prisma.dispatchWorkerImportBatch.deleteMany({ where: { expiresAt: { lt: new Date() } } });
-    const [cities, vacancies] = await loadWorkerFormLists(prisma);
+    const [cities, vacancies] = await loadWorkerFormLists(prisma, req);
     return res.render('operacionesPersonalImportar', {
       role: req.session?.userRole || req.userRole,
       message: normalizeString(req.query.message),
@@ -656,8 +694,8 @@ export function dispatchOpsExtrasRouter(prisma) {
     });
   });
 
-  router.get('/personal/importar-excel/plantilla', requireOps, async (_req, res) => {
-    const [cities, vacancies] = await loadWorkerFormLists(prisma);
+  router.get('/personal/importar-excel/plantilla', requireOps, async (req, res) => {
+    const [cities, vacancies] = await loadWorkerFormLists(prisma, req);
     const workbook = buildDispatchWorkerImportTemplate({ cities, vacancies });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="plantilla-importacion-auxiliares.xlsx"');
@@ -676,7 +714,7 @@ export function dispatchOpsExtrasRouter(prisma) {
     try {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(req.file.buffer);
-      const [cities, vacancies] = await loadWorkerFormLists(prisma);
+      const [cities, vacancies] = await loadWorkerFormLists(prisma, req);
       const review = await buildDispatchWorkerImportReview({ prisma, workbook, cities, vacancies });
       const now = new Date();
       await prisma.dispatchWorkerImportBatch.deleteMany({ where: { expiresAt: { lt: now } } });
@@ -690,6 +728,10 @@ export function dispatchOpsExtrasRouter(prisma) {
           expiresAt: new Date(now.getTime() + DISPATCH_WORKER_IMPORT_REVIEW_TTL_MS)
         }
       });
+      if (!await importBatchWithinCityScope(prisma, req, batch.id, [], true)) {
+        await prisma.dispatchWorkerImportBatch.delete({ where: { id: batch.id } });
+        throw new Error('El archivo incluye auxiliares o sucursales fuera de tu alcance territorial.');
+      }
       return res.redirect(`/admin/operaciones/personal/importar-excel/${batch.id}/revision`);
     } catch (error) {
       console.error('[Dispatch worker Excel review]', {
@@ -710,6 +752,10 @@ export function dispatchOpsExtrasRouter(prisma) {
       if (batch) await prisma.dispatchWorkerImportBatch.delete({ where: { id: batch.id } });
       return res.redirect('/admin/operaciones/personal/importar-excel?error=' + encodeURIComponent('La revisión no existe o expiró. Vuelve a subir el archivo.'));
     }
+    if (!await importBatchWithinCityScope(prisma, req, batch.id, [], true)) {
+      await prisma.dispatchWorkerImportBatch.delete({ where: { id: batch.id } });
+      return res.status(403).send('La revisión contiene auxiliares fuera de tu alcance territorial actual.');
+    }
     return res.render('operacionesPersonalImportarRevision', {
       role: req.session?.userRole || req.userRole,
       batchId: batch.id,
@@ -723,12 +769,16 @@ export function dispatchOpsExtrasRouter(prisma) {
   router.post('/personal/importar-excel/:batchId/aplicar', requireOps, async (req, res) => {
     try {
       const selectedItemIds = normalizeStringList(req.body.selectedItemIds);
+      const applyAll = normalizeString(req.body.applyMode) === 'all';
+      if (!await importBatchWithinCityScope(prisma, req, req.params.batchId, selectedItemIds, applyAll)) {
+        return res.status(403).send('La selección contiene auxiliares o sucursales fuera de tu alcance territorial actual.');
+      }
       const result = await applyDispatchWorkerImportBatch({
         prisma,
         batchId: req.params.batchId,
         ownerKey: dispatchWorkerImportOwnerKey(req),
         selectedItemIds,
-        applyAll: normalizeString(req.body.applyMode) === 'all'
+        applyAll
       });
       const parts = [];
       if (result.created) parts.push(`${result.created} auxiliar${result.created !== 1 ? 'es creados' : ' creado'}`);
@@ -748,7 +798,7 @@ export function dispatchOpsExtrasRouter(prisma) {
   });
 
   router.get('/personal/nuevo', requireOps, async (req, res) => {
-    const [cities, vacancies] = await loadWorkerFormLists(prisma);
+    const [cities, vacancies] = await loadWorkerFormLists(prisma, req);
     return res.render('operacionesPersonalNuevo', { cities, vacancies, worker: null, mode: 'create', formAction: '/admin/operaciones/personal/nuevo', role: req.session?.userRole || req.userRole });
   });
   router.post('/personal/nuevo', requireOps, parseWorkerCvUpload, async (req, res) => {
@@ -756,6 +806,9 @@ export function dispatchOpsExtrasRouter(prisma) {
     const missingFields = validateRequiredWorkerFields(workerData, req.body);
     if (req.workerCvUploadError) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: req.workerCvUploadError });
     if (missingFields.length) return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: buildRequiredWorkerFieldsMessage(missingFields) });
+    if (!workerCitySelectionAllowed(req, req.body)) {
+      return renderWorkerFormWithError(req, res, prisma, { mode: 'create', formAction: '/admin/operaciones/personal/nuevo', error: 'Una o más ciudades operativas están fuera de tu alcance territorial.', status: 403 });
+    }
     try {
       const duplicate = await findDispatchWorkerByDocumentIdentity(prisma, workerData.documentNumber);
       if (duplicate) return res.redirect('/admin/operaciones/personal');
@@ -768,8 +821,9 @@ export function dispatchOpsExtrasRouter(prisma) {
     }
   });
   router.get('/personal/:workerId/editar', requireOps, async (req, res) => {
-    const [worker, cities, vacancies] = await Promise.all([findWorkerOr404(prisma, req.params.workerId), loadDispatchCities(prisma), prisma.vacancy.findMany({ select: { id: true, title: true, city: true }, orderBy: { title: 'asc' } })]);
+    const [worker, lists] = await Promise.all([findWorkerOr404(prisma, req.params.workerId), loadWorkerFormLists(prisma, req)]);
     if (!worker) return res.status(404).send('Auxiliar no encontrado');
+    const [cities, vacancies] = lists;
     return res.render('operacionesPersonalNuevo', { cities, vacancies, worker, mode: 'edit', formAction: `/admin/operaciones/personal/${worker.id}/editar`, role: req.session?.userRole || req.userRole });
   });
   router.post('/personal/:workerId/editar', requireOps, parseWorkerCvUpload, async (req, res) => {
@@ -779,6 +833,9 @@ export function dispatchOpsExtrasRouter(prisma) {
     const missingFields = validateRequiredWorkerFields(workerData, req.body);
     if (req.workerCvUploadError) return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: req.workerCvUploadError });
     if (missingFields.length) return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: buildRequiredWorkerFieldsMessage(missingFields) });
+    if (!workerCitySelectionAllowed(req, req.body)) {
+      return renderWorkerFormWithError(req, res, prisma, { worker: existing, mode: 'edit', formAction: `/admin/operaciones/personal/${existing.id}/editar`, error: 'Una o más ciudades operativas están fuera de tu alcance territorial.', status: 403 });
+    }
     try {
       await prisma.dispatchWorker.update({ where: { id: existing.id }, data: applyWorkerCvFile(workerData, req.file) });
       await replaceWorkerRelations(prisma, existing.id, req.body);
@@ -836,8 +893,16 @@ export function dispatchOpsExtrasRouter(prisma) {
     if (!ids.length) return res.redirect(`/admin/operaciones/personal?message=${encodeURIComponent('No se recibieron IDs validos.')}`);
     const workers = await prisma.dispatchWorker.findMany({
       where: { id: { in: ids }, source: { in: DISPATCH_OWNED_SOURCES } },
-      select: { id: true, fullName: true }
+      select: {
+        id: true,
+        fullName: true,
+        residenceCity: true,
+        cities: { select: { city: { select: { name: true } } } }
+      }
     });
+    if (workers.some((worker) => !workerMatchesOperationalCityScope(worker, req.operationalCityScope))) {
+      return res.status(403).send('No tienes permiso para eliminar uno o más auxiliares seleccionados.');
+    }
     let eliminados = 0;
     let omitidos = 0;
     for (const worker of workers) {
