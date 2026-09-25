@@ -1,5 +1,6 @@
 package com.loginpro.lorren.portal;
 
+import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothServerSocket;
@@ -8,6 +9,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -30,15 +32,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Autoridad nativa única de presencia local de cuadrilla.
  *
  * La prueba local usa Bluetooth Classic RFCOMM/SDP de extremo a extremo para no
- * depender de Wi-Fi, WAN ni del rol BLE peripheral/advertiser que falló en los
- * replays físicos. El auxiliar preparado expone un servicio RFCOMM y el encargado
- * descubre dispositivos cercanos, resuelve el UUID técnico de Lórren y conecta.
- * Esta clase transporta y verifica challenge/proof; no escribe asistencia.
+ * depender de Wi-Fi, WAN ni de Google Nearby durante el intercambio local. Antes
+ * de tocar el stack Bluetooth se validan los permisos modernos que Android exige;
+ * si falta alguno se solicita desde MainActivity y la operación no continúa hasta
+ * que Android resuelva el permiso. Esta clase transporta y verifica challenge/proof;
+ * no escribe asistencia.
  */
 final class NearbyPresenceManager {
     interface EventSink {
@@ -63,8 +68,16 @@ final class NearbyPresenceManager {
     private static final int MAX_DISCOVERED_DEVICES = 24;
     private static final int MAX_MESSAGE_BYTES = 16_384;
 
+    // 8029 apareció en la implementación histórica basada en Google Nearby y
+    // representa un fallo de permisos, no un fallo físico de discovery Bluetooth.
+    private static final int MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS = 8029;
+    private static final Pattern BLUETOOTH_STATUS_PATTERN = Pattern.compile(
+        "(?i)status(?:code)?\\s*[=:]?\\s*(\\d{3,5})"
+    );
+
     private enum Role { IDLE, READY, LEADER }
 
+    private final MainActivity activity;
     private final Context appContext;
     private final BluetoothAdapter bluetoothAdapter;
     private final EventSink eventSink;
@@ -99,8 +112,9 @@ final class NearbyPresenceManager {
     private Runnable leaderTimeout;
     private Runnable leaderCompleteTimeout;
 
-    NearbyPresenceManager(Context context, EventSink eventSink, CredentialProvider credentialProvider) {
-        this.appContext = context.getApplicationContext();
+    NearbyPresenceManager(MainActivity activity, EventSink eventSink, CredentialProvider credentialProvider) {
+        this.activity = activity;
+        this.appContext = activity.getApplicationContext();
         this.bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
         this.eventSink = eventSink;
         this.credentialProvider = credentialProvider;
@@ -108,7 +122,17 @@ final class NearbyPresenceManager {
 
     synchronized void startReady(String serviceRequestId) {
         String normalizedService = requiredToken(serviceRequestId, "serviceRequestId");
+        ensureNearbyTransportPermissions();
         stopAllInternal(false);
+        if (!supportsBleAdvertising()) {
+            emitBluetoothUnavailable(
+                "AUX",
+                "auxiliary_advertising",
+                null,
+                "advertising_unsupported"
+            );
+            throw new IllegalStateException("advertising_unsupported");
+        }
         role = Role.READY;
         readyServiceRequestId = normalizedService;
         emitDiagnostic("AUX", "READY_REQUESTED");
@@ -117,17 +141,21 @@ final class NearbyPresenceManager {
 
     private synchronized void startAuxiliaryServer() {
         if (role != Role.READY || bluetoothAdapter == null) {
-            failReady("discovery_failed");
+            failReadyBluetooth("auxiliary_ready", null);
             return;
         }
         try {
+            ensureNearbyTransportPermissions();
             if (bluetoothAdapter.getScanMode() != BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE) {
                 emitDiagnostic("AUX", "DISCOVERABLE_NOT_READY");
-                failReady("discovery_failed");
+                failReadyBluetooth("auxiliary_discovery", null);
                 return;
             }
         } catch (SecurityException error) {
-            failReady("discovery_failed");
+            failReadyPermissions("auxiliary_discovery", error);
+            return;
+        } catch (RuntimeException error) {
+            failReadyBluetooth("auxiliary_discovery", error);
             return;
         }
         emitDiagnostic("AUX", "DISCOVERABLE_CONFIRMED");
@@ -137,16 +165,20 @@ final class NearbyPresenceManager {
         }
         emitDiagnostic("AUX", "RFCOMM_SERVER_START");
         try {
+            ensureNearbyTransportPermissions();
             auxiliaryServerSocket = bluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord(
                 SERVICE_NAME,
                 SERVICE_UUID
             );
-        } catch (IOException | SecurityException error) {
-            failReady("discovery_failed");
+        } catch (SecurityException error) {
+            failReadyPermissions("auxiliary_advertising", error);
+            return;
+        } catch (IOException | RuntimeException error) {
+            failReadyBluetooth("auxiliary_advertising", error);
             return;
         }
         if (auxiliaryServerSocket == null) {
-            failReady("discovery_failed");
+            failReadyBluetooth("auxiliary_advertising", null);
             return;
         }
         emitDiagnostic("AUX", "RFCOMM_SERVER_READY");
@@ -168,7 +200,14 @@ final class NearbyPresenceManager {
                 BluetoothSocket socket;
                 try {
                     socket = serverSocket.accept();
-                } catch (IOException | SecurityException error) {
+                } catch (SecurityException error) {
+                    synchronized (NearbyPresenceManager.this) {
+                        if (role == Role.READY && auxiliaryServerSocket == serverSocket) {
+                            failReadyPermissions("auxiliary_accept", error);
+                        }
+                    }
+                    return;
+                } catch (IOException error) {
                     synchronized (NearbyPresenceManager.this) {
                         if (role == Role.READY && auxiliaryServerSocket == serverSocket) {
                             emitDiagnostic("AUX", "RFCOMM_ACCEPT_FAILED");
@@ -232,7 +271,7 @@ final class NearbyPresenceManager {
                 }
             }
 
-            // CORRECCIÓN RELOJ: Permitimos la conexión offline aunque haya desfase
+            // Permitimos la conexión offline aunque haya desfase; la firma mantiene integridad.
             if (sentAt <= 0L) {
                 finishAuxiliaryExchange(socket);
                 return;
@@ -269,6 +308,11 @@ final class NearbyPresenceManager {
                 emitDiagnostic("AUX", "PROOF_DISPATCHED");
                 emit("proof_sent", event -> event.put("serviceRequestId", completedService));
                 finishAuxiliaryExchange(socket);
+            }
+        } catch (SecurityException error) {
+            synchronized (this) {
+                if (role != Role.READY || auxiliarySocket != socket) return;
+                failReadyPermissions("auxiliary_exchange", error);
             }
         } catch (Exception error) {
             synchronized (this) {
@@ -307,6 +351,20 @@ final class NearbyPresenceManager {
         emitError(code);
     }
 
+    private synchronized void failReadyPermissions(String operation, Throwable error) {
+        stopReadyRuntime();
+        role = Role.IDLE;
+        readyServiceRequestId = "";
+        emitPermissionsRequired("AUX", operation, error);
+    }
+
+    private synchronized void failReadyBluetooth(String operation, Throwable error) {
+        stopReadyRuntime();
+        role = Role.IDLE;
+        readyServiceRequestId = "";
+        emitBluetoothUnavailable("AUX", operation, error);
+    }
+
     synchronized void startLeaderScan(JSONObject input) {
         String nextAttemptId = requiredToken(input.optString("attemptId"), "attemptId");
         String serviceRequestId = requiredToken(input.optString("serviceRequestId"), "serviceRequestId");
@@ -317,7 +375,17 @@ final class NearbyPresenceManager {
         );
         int nextExpectedProofCount = Math.max(0, input.optInt("expectedProofCount", 0));
 
+        ensureNearbyTransportPermissions();
         stopAllInternal(false);
+        if (!supportsBleAdvertising()) {
+            emitBluetoothUnavailable(
+                "ENC",
+                "leader_advertising",
+                null,
+                "advertising_unsupported"
+            );
+            throw new IllegalStateException("advertising_unsupported");
+        }
         role = Role.LEADER;
         attemptId = nextAttemptId;
         scanServiceRequestId = serviceRequestId;
@@ -338,35 +406,35 @@ final class NearbyPresenceManager {
             return;
         }
         if (bluetoothAdapter == null) {
-            failLeaderStart("advertising_failed");
+            failLeaderBluetooth("leader_discovery", null);
             return;
         }
 
         try {
+            ensureNearbyTransportPermissions();
             registerLeaderReceiver();
             if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
 
-            // CORRECCIÓN: Evitar que Android ignore auxiliares si ya fueron emparejados en el pasado
-            try {
-                Set<BluetoothDevice> bonded = bluetoothAdapter.getBondedDevices();
-                if (bonded != null) {
-                    for (BluetoothDevice dev : bonded) {
-                        rememberDiscoveredDevice(dev);
-                    }
+            Set<BluetoothDevice> bonded = bluetoothAdapter.getBondedDevices();
+            if (bonded != null) {
+                for (BluetoothDevice dev : bonded) {
+                    rememberDiscoveredDevice(dev);
                 }
-            } catch (SecurityException ignored) {}
+            }
 
             emitDiagnostic("ENC", "CLASSIC_DISCOVERY_START");
             if (!bluetoothAdapter.startDiscovery()) {
-                failLeaderStart("advertising_failed");
+                failLeaderBluetooth("leader_discovery", null);
                 return;
             }
             challengeSentAt = System.currentTimeMillis();
             emitLeaderScanStarted();
             scheduleLeaderTimeout(nextAttemptId, timeoutMs);
             scheduleLeaderInquiryCheckpoint(nextAttemptId);
+        } catch (SecurityException error) {
+            failLeaderPermissions("leader_discovery", error);
         } catch (RuntimeException error) {
-            failLeaderStart("advertising_failed");
+            failLeaderBluetooth("leader_discovery", error);
         }
     }
 
@@ -430,12 +498,19 @@ final class NearbyPresenceManager {
                 if (role != Role.LEADER || !sdpRequestedAddresses.add(address)) continue;
             }
             try {
+                ensureNearbyTransportPermissions();
                 emitDiagnostic("ENC", "SDP_REQUESTED");
                 if (!device.fetchUuidsWithSdp()) {
                     synchronized (this) {
                         sdpRequestedAddresses.remove(address);
                     }
                 }
+            } catch (SecurityException error) {
+                synchronized (this) {
+                    sdpRequestedAddresses.remove(address);
+                    if (role == Role.LEADER) failLeaderPermissions("leader_sdp", error);
+                }
+                return;
             } catch (RuntimeException error) {
                 synchronized (this) {
                     sdpRequestedAddresses.remove(address);
@@ -466,6 +541,7 @@ final class NearbyPresenceManager {
     private void runLeaderConnection(BluetoothDevice device, String address) {
         BluetoothSocket socket = null;
         try {
+            ensureNearbyTransportPermissions();
             emitDiagnostic("ENC", "RFCOMM_CONNECTING");
             socket = device.createInsecureRfcommSocketToServiceRecord(SERVICE_UUID);
             if (socket == null) throw new IOException("rfcomm_socket_unavailable");
@@ -499,6 +575,13 @@ final class NearbyPresenceManager {
             JSONObject proof = readMessage(socket);
             emitDiagnostic("ENC", "PROOF_RECEIVED_RAW");
             acceptLeaderProof(address, proof);
+        } catch (SecurityException error) {
+            synchronized (this) {
+                if (role == Role.LEADER) {
+                    removeLeaderConnection(address, true);
+                    failLeaderPermissions("leader_connection", error);
+                }
+            }
         } catch (Exception error) {
             synchronized (this) {
                 if (role == Role.LEADER && leaderConnectionAddresses.contains(address)) {
@@ -530,8 +613,7 @@ final class NearbyPresenceManager {
                 failLeaderPeer(address, "proof_invalid");
                 return;
             }
-            
-            // CORRECCIÓN RELOJ: Aceptamos respuesta sin importar desfase temporal
+
             long respondedAt = proof.optLong("respondedAt", 0L);
             if (respondedAt <= 0L) {
                 failLeaderPeer(address, "proof_invalid");
@@ -611,9 +693,13 @@ final class NearbyPresenceManager {
                 if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
                 emitDiagnostic("ENC", "CLASSIC_INQUIRY_CHECKPOINT");
                 try {
+                    ensureNearbyTransportPermissions();
                     if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
                         bluetoothAdapter.cancelDiscovery();
                     }
+                } catch (SecurityException error) {
+                    failLeaderPermissions("leader_discovery", error);
+                    return;
                 } catch (RuntimeException ignored) {
                 }
             }
@@ -661,6 +747,24 @@ final class NearbyPresenceManager {
         closeLeaderSockets();
         role = Role.IDLE;
         emitError(code);
+    }
+
+    private synchronized void failLeaderPermissions(String operation, Throwable error) {
+        if (role != Role.LEADER) return;
+        cancelLeaderTimeouts();
+        stopLeaderDiscovery();
+        closeLeaderSockets();
+        role = Role.IDLE;
+        emitPermissionsRequired("ENC", operation, error);
+    }
+
+    private synchronized void failLeaderBluetooth(String operation, Throwable error) {
+        if (role != Role.LEADER) return;
+        cancelLeaderTimeouts();
+        stopLeaderDiscovery();
+        closeLeaderSockets();
+        role = Role.IDLE;
+        emitBluetoothUnavailable("ENC", operation, error);
     }
 
     private synchronized void completeLeaderScan(String completedAttemptId) {
@@ -777,6 +881,7 @@ final class NearbyPresenceManager {
         if (bluetoothAdapter != null) {
             try {
                 if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
+            } catch (SecurityException ignored) {
             } catch (RuntimeException ignored) {
             }
         }
@@ -814,6 +919,35 @@ final class NearbyPresenceManager {
         if (leaderCompleteTimeout != null) handler.removeCallbacks(leaderCompleteTimeout);
         leaderTimeout = null;
         leaderCompleteTimeout = null;
+    }
+
+    private void ensureNearbyTransportPermissions() {
+        if (hasNearbyTransportPermissions()) return;
+        activity.ensureNearbyPermissions();
+        throw new SecurityException("permissions_required");
+    }
+
+    private boolean hasNearbyTransportPermissions() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true;
+        return appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)
+                == PackageManager.PERMISSION_GRANTED
+            && appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_ADVERTISE)
+                == PackageManager.PERMISSION_GRANTED
+            && appContext.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private boolean supportsBleAdvertising() {
+        if (bluetoothAdapter == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false;
+        if (!appContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) return false;
+        try {
+            ensureNearbyTransportPermissions();
+            return bluetoothAdapter.isMultipleAdvertisementSupported();
+        } catch (SecurityException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            return false;
+        }
     }
 
     private String safeCredential() {
@@ -959,5 +1093,64 @@ final class NearbyPresenceManager {
 
     private void emitError(String code) {
         emit("error", event -> event.put("code", code));
+    }
+
+    private void emitPermissionsRequired(String actor, String operation, Throwable error) {
+        activity.ensureNearbyPermissions();
+        emitDiagnostic(actor, "PERMISSIONS_REQUIRED");
+        // No se activa el fallback manual mientras Android está resolviendo permisos.
+        // MainActivity emitirá el evento `permissions` con granted=true/false.
+        emit("stopped", event -> {
+            event.put("reason", "permissions_pending");
+            event.put("operation", operation == null ? "" : operation);
+            int statusCode = bluetoothStatusCode(error);
+            if (statusCode > 0) event.put("statusCode", statusCode);
+        });
+    }
+
+    private void emitBluetoothUnavailable(String actor, String operation, Throwable error) {
+        int statusCode = bluetoothStatusCode(error);
+        if (statusCode == MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS) {
+            emitPermissionsRequired(actor, operation, error);
+            return;
+        }
+        emitBluetoothUnavailable(actor, operation, error, "startup_failed");
+    }
+
+    private void emitBluetoothUnavailable(
+        String actor,
+        String operation,
+        Throwable error,
+        String reason
+    ) {
+        int statusCode = bluetoothStatusCode(error);
+        emitDiagnostic(actor, "BLUETOOTH_UNAVAILABLE");
+        emit("bluetooth_unavailable", event -> {
+            event.put("code", "bluetooth_unavailable");
+            event.put("operation", operation == null ? "" : operation);
+            event.put("reason", reason == null ? "startup_failed" : reason);
+            if (statusCode > 0) event.put("statusCode", statusCode);
+        });
+    }
+
+    private static int bluetoothStatusCode(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 6; depth += 1) {
+            String message = current.getMessage();
+            if (message != null) {
+                if (message.contains(String.valueOf(MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS))) {
+                    return MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS;
+                }
+                Matcher matcher = BLUETOOTH_STATUS_PATTERN.matcher(message);
+                if (matcher.find()) {
+                    try {
+                        return Integer.parseInt(matcher.group(1));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+            current = current.getCause();
+        }
+        return 0;
     }
 }

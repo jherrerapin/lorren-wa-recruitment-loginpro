@@ -174,7 +174,7 @@ test('auxiliar queda listo por visibilidad con discoverability confirmada y serv
   assert.match(presenceManager, /SCAN_MODE_CONNECTABLE_DISCOVERABLE[\s\S]{0,300}DISCOVERABLE_CONFIRMED[\s\S]{0,420}RFCOMM_SERVER_READY[\s\S]{0,80}emitReady\(\)/);
   assert.match(presenceManager, /listenUsingInsecureRfcommWithServiceRecord/);
   assert.match(bridge, /if \(!activity\.ensureNearbyDiscoverable\(\)\) return jsonOk\(\)/);
-  assert.match(bridge, /onBluetoothDiscoverableResult[\s\S]{0,650}manager\.startReady\(serviceRequestId\)/);
+  assert.match(bridge, /onBluetoothDiscoverableResult[\s\S]{0,1200}manager\.startReady\(serviceRequestId\)/);
   assert.match(onlineHandler[1], /ensureAuxiliaryReady\(\)/);
   assert.match(offlineHandler[1], /ensureAuxiliaryReady\(\)/);
   assert.doesNotMatch(onlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);

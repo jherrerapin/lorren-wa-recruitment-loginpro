@@ -17,6 +17,8 @@ import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 final class PresenceBridge {
     static final String JS_NAME = "LorrenAndroidPresence";
@@ -29,6 +31,12 @@ final class PresenceBridge {
     private static final long MAX_LAST_LOCATION_AGE_MS = 30_000L;
     private static final long LOCATION_TIMEOUT_MS = 15_000L;
     private static final float TARGET_LOCATION_ACCURACY_METERS = 50f;
+
+    // Google Nearby Connections define 8029 como MISSING_PERMISSION_NEARBY_WIFI_DEVICES.
+    private static final int MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS = 8029;
+    private static final Pattern BLUETOOTH_STATUS_PATTERN = Pattern.compile(
+        "(?i)status(?:code)?\\s*[=:]?\\s*(\\d{3,5})"
+    );
 
     private interface NativeLocationSink {
         void onLocation(Location location);
@@ -99,7 +107,7 @@ final class PresenceBridge {
     @JavascriptInterface
     public String setReady(String serviceRequestId) {
         if (!hasUsablePresenceCredential()) return jsonError("native_presence_credential_required");
-        if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
+        if (!activity.ensureNearbyPermissions()) return jsonError("permissions_pending");
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) return jsonError(readinessError);
         try {
@@ -117,7 +125,7 @@ final class PresenceBridge {
             synchronized (this) {
                 pendingReadyServiceRequestId = "";
             }
-            return jsonError("ready_failed");
+            return jsonError(handleBluetoothStartFailure("auxiliary_ready", error));
         }
     }
 
@@ -129,13 +137,14 @@ final class PresenceBridge {
         }
         if (serviceRequestId.isEmpty()) return;
         if (!granted) {
-            emitPresenceError("discovery_failed");
+            emitBluetoothUnavailable("auxiliary_discovery", null);
             return;
         }
         if (!hasUsablePresenceCredential()) {
             emitPresenceError("native_presence_credential_required");
             return;
         }
+        if (!activity.ensureNearbyPermissions()) return;
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) {
             emitPresenceError(readinessError);
@@ -144,7 +153,7 @@ final class PresenceBridge {
         try {
             manager.startReady(serviceRequestId);
         } catch (Exception error) {
-            emitPresenceError("ready_failed");
+            handleBluetoothStartFailure("auxiliary_ready", error);
         }
     }
 
@@ -160,12 +169,19 @@ final class PresenceBridge {
     @JavascriptInterface
     public String startCrewScan(String inputJson) {
         if (!hasUsablePresenceCredential()) return jsonError("native_presence_credential_required");
-        if (!activity.ensureAttendanceLocationPermission()) return jsonError("permissions_required");
-        if (!activity.ensureNearbyPermissions()) return jsonError("permissions_required");
+        if (!activity.ensureAttendanceLocationPermission()) return jsonError("permissions_pending");
+        if (!activity.ensureNearbyPermissions()) return jsonError("permissions_pending");
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) return jsonError(readinessError);
+
+        final JSONObject input;
         try {
-            JSONObject input = new JSONObject(inputJson == null ? "{}" : inputJson);
+            input = new JSONObject(inputJson == null ? "{}" : inputJson);
+        } catch (Exception error) {
+            return jsonError("scan_input_invalid");
+        }
+
+        try {
             synchronized (this) {
                 leaderLocationProof = null;
             }
@@ -173,7 +189,8 @@ final class PresenceBridge {
             captureLeaderLocation(input);
             return jsonOk();
         } catch (Exception error) {
-            return jsonError("scan_input_invalid");
+            manager.stopLeaderScan();
+            return jsonError(handleBluetoothStartFailure("leader_discovery", error));
         }
     }
 
@@ -644,6 +661,76 @@ final class PresenceBridge {
             activity.emitPresenceEvent(event);
         } catch (Exception ignored) {
         }
+    }
+
+    private String handleBluetoothStartFailure(String operation, Throwable error) {
+        String code = bluetoothFailureCode(error);
+        if ("permissions_pending".equals(code)) {
+            activity.ensureNearbyPermissions();
+            return code;
+        }
+        if ("advertising_unsupported".equals(code)) {
+            // NearbyPresenceManager ya emitió bluetooth_unavailable con la causa de hardware.
+            return code;
+        }
+        emitBluetoothUnavailable(operation, error);
+        return "bluetooth_unavailable";
+    }
+
+    private static String bluetoothFailureCode(Throwable error) {
+        int statusCode = bluetoothStatusCode(error);
+        if (statusCode == MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS) {
+            return "permissions_pending";
+        }
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 6; depth += 1) {
+            String message = current.getMessage();
+            if ("permissions_required".equals(message) || "permissions_pending".equals(message)) {
+                return "permissions_pending";
+            }
+            if ("advertising_unsupported".equals(message)) return "advertising_unsupported";
+            current = current.getCause();
+        }
+        return "bluetooth_unavailable";
+    }
+
+    private void emitBluetoothUnavailable(String operation, Throwable error) {
+        try {
+            int statusCode = bluetoothStatusCode(error);
+            if (statusCode == MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS) {
+                activity.ensureNearbyPermissions();
+                return;
+            }
+            JSONObject event = new JSONObject();
+            event.put("type", "bluetooth_unavailable");
+            event.put("code", "bluetooth_unavailable");
+            event.put("operation", operation == null ? "" : operation);
+            event.put("reason", "startup_failed");
+            if (statusCode > 0) event.put("statusCode", statusCode);
+            activity.emitPresenceEvent(event);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static int bluetoothStatusCode(Throwable error) {
+        Throwable current = error;
+        for (int depth = 0; current != null && depth < 6; depth += 1) {
+            String message = current.getMessage();
+            if (message != null) {
+                if (message.contains(String.valueOf(MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS))) {
+                    return MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS;
+                }
+                Matcher matcher = BLUETOOTH_STATUS_PATTERN.matcher(message);
+                if (matcher.find()) {
+                    try {
+                        return Integer.parseInt(matcher.group(1));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+            }
+            current = current.getCause();
+        }
+        return 0;
     }
 
     private void emitLocationError(String code) {
