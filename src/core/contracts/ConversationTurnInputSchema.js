@@ -93,6 +93,25 @@ export const VacancySchema = z.object({
   operation: VacancyOperationSchema.nullable().default(null)
 }).strict().readonly();
 
+/**
+ * Immutable attachment evidence for the current turn. Provider-specific raw
+ * payloads stay outside the Functional Core; only normalized facts cross the
+ * boundary. `isCv` is evidence produced by the shell, never inferred here.
+ */
+export const AttachmentItemSchema = z.object({
+  type: z.enum(['document', 'image', 'audio', 'video', 'sticker', 'unknown']).default('unknown'),
+  mediaId: z.string().trim().min(1).nullable().default(null),
+  fileName: z.string().nullable().default(null),
+  mimeType: z.string().trim().min(1).nullable().default(null),
+  caption: z.string().nullable().default(null),
+  isCv: z.boolean().default(false)
+}).strict().readonly();
+
+export const AttachmentsSchema = z.object({
+  items: z.array(AttachmentItemSchema).readonly().default([]),
+  hasCv: z.boolean().default(false)
+}).strict().readonly();
+
 export const InterpretationSchedulingSchema = z.object({
   slot: SchedulingSlotSchema.nullable().default(null)
 }).strict().readonly();
@@ -102,11 +121,32 @@ export const InterpretationConsentSchema = z.object({
 }).strict().readonly();
 
 /**
+ * Candidate entities extracted from the current turn. The shape is explicit
+ * and strict so unknown semantic fields cannot silently enter persistence.
+ * Business validation remains the responsibility of pure policies/guards.
+ */
+export const InterpretationCandidateFieldsSchema = z.object({
+  fullName: z.string().trim().min(1).nullable().optional(),
+  documentType: z.string().trim().min(1).nullable().optional(),
+  documentNumber: z.string().trim().min(1).nullable().optional(),
+  age: z.number().int().nullable().optional(),
+  gender: z.string().trim().min(1).nullable().optional(),
+  neighborhood: z.string().trim().min(1).nullable().optional(),
+  locality: z.string().trim().min(1).nullable().optional(),
+  medicalRestrictions: z.string().trim().min(1).nullable().optional(),
+  transportMode: z.string().trim().min(1).nullable().optional(),
+  experienceInfo: z.string().trim().min(1).nullable().optional(),
+  experienceTime: z.string().trim().min(1).nullable().optional(),
+  experienceSummary: z.string().trim().min(1).nullable().optional()
+}).strict().readonly();
+
+/**
  * Semantic interpretation already resolved upstream. The functional core does
  * not call models or external classifiers; it only consumes this evidence.
  */
 export const InterpretationSchema = z.object({
   intent: z.string().trim().min(1).nullable().default(null),
+  fields: InterpretationCandidateFieldsSchema.default({}),
   scheduling: InterpretationSchedulingSchema.default({ slot: null }),
   consent: InterpretationConsentSchema.default({ decision: null })
 }).strict().readonly();
@@ -115,9 +155,9 @@ export const InterpretationSchema = z.object({
  * Sole input contract for the functional conversation core. Transport details
  * and tenant/account identifiers intentionally remain outside this boundary.
  *
- * `vacancy` and `interpretation` have safe defaults so the existing fail-open
- * shadow middleware can continue validating legacy turns while enrichment is
- * migrated into the imperative shell.
+ * `vacancy`, `attachments` and `interpretation` have safe defaults so the
+ * existing fail-open shadow middleware can continue validating legacy turns
+ * while enrichment is migrated into the imperative shell.
  */
 export const ConversationTurnInputSchema = z.object({
   turn: TurnSchema,
@@ -126,8 +166,13 @@ export const ConversationTurnInputSchema = z.object({
   pending: PendingSchema,
   execution: ExecutionSchema,
   vacancy: VacancySchema.nullable().default(null),
+  attachments: AttachmentsSchema.default({
+    items: [],
+    hasCv: false
+  }),
   interpretation: InterpretationSchema.default({
     intent: null,
+    fields: {},
     scheduling: { slot: null },
     consent: { decision: null }
   })
