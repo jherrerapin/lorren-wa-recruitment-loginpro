@@ -202,11 +202,6 @@
       "risk": "high",
       "writers": [
         {
-          "path": "src/routes/webhook.js",
-          "role": "legacy",
-          "reason": "Clasificación inicial dentro del webhook"
-        },
-        {
           "path": "src/services/cvIntelligence.js",
           "role": "boundary",
           "reason": "Análisis estructurado de hoja de vida"
