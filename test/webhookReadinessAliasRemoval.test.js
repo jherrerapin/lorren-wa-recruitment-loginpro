@@ -11,15 +11,26 @@ const retiredAliases = new Set([
   'formatFieldList',
   'buildDataRequestPrompt'
 ]);
+const retiredReadinessInternals = new Set([
+  'getMissingFieldLabels',
+  'getRequiredCandidateFieldKeys',
+  'formatFieldListForVacancy',
+  'buildCandidateDataCollectionMessage'
+]);
 
-test('el webhook usa directamente las autoridades canónicas retiradas de los aliases', () => {
+test('el webhook delega readiness en la autoridad canónica sin reconstruirla en HTTP', () => {
   for (const symbol of retiredAliases) {
     assert.doesNotMatch(webhook, new RegExp('\\b' + symbol + '\\b'));
   }
-  assert.ok((webhook.match(/\bgetMissingFieldLabels\(/g) || []).length >= 5);
-  assert.ok((webhook.match(/\bgetRequiredCandidateFieldKeys\(/g) || []).length >= 5);
-  assert.ok((webhook.match(/\bformatFieldListForVacancy\(/g) || []).length >= 2);
-  assert.ok((webhook.match(/\bbuildCandidateDataCollectionMessage\(/g) || []).length >= 2);
+  for (const symbol of retiredReadinessInternals) {
+    assert.doesNotMatch(webhook, new RegExp('\\b' + symbol + '\\b'));
+  }
+
+  assert.match(webhook, /\bgetCandidateReadiness\b/);
+  assert.ok((webhook.match(/\bgetCandidateReadiness\(/g) || []).length >= 1);
+  assert.match(webhook, /\bbuildConversationTurnInput\b/);
+  assert.match(webhook, /\bcalculateConversationDecision\b/);
+  assert.match(webhook, /\bexecuteConversationDecision\b/);
 });
 
 test('el inventario no conserva aliases retirados ni referencias hacia ellos', () => {
