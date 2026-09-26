@@ -21,22 +21,22 @@ export const ConversationTransitionsSchema = z.object({
 
 const SuggestSlotsSchedulingSchema = z.object({
   action: z.literal('suggest_slots')
-}).strict().readonly();
+}).strict();
 
 const ReserveSlotSchedulingSchema = z.object({
   action: z.literal('reserve_slot'),
   slot: SchedulingSlotSchema
-}).strict().readonly();
+}).strict();
 
 const CancelBookingSchedulingSchema = z.object({
   action: z.literal('cancel_booking')
-}).strict().readonly();
+}).strict();
 
 export const ConversationSchedulingSchema = z.discriminatedUnion('action', [
   SuggestSlotsSchedulingSchema,
   ReserveSlotSchedulingSchema,
   CancelBookingSchedulingSchema
-]);
+]).readonly();
 
 /**
  * Canonical output of the functional conversation core.
