@@ -14,8 +14,16 @@ test('saveInboundMessage cae a UNKNOWN si la base rechaza IMAGE en MessageType',
         }
         return { count: 1 };
       },
-      async findUnique() {
-        return { id: 'msg-1' };
+      async findFirst() {
+        return {
+          id: 'msg-1',
+          waMessageId: 'wa-1',
+          messageType: 'UNKNOWN',
+          body: 'soporte',
+          rawPayload: null,
+          respondedAt: null,
+          createdAt: new Date('2026-09-26T12:00:00.000Z')
+        };
       }
     },
     candidate: {
