@@ -65,25 +65,79 @@ function getPendingSlot(input = {}) {
   return normalizeSlot(action?.payload?.slot || action?.payload || null);
 }
 
+function getSuggestedSlots(input = {}) {
+  const actions = Array.isArray(input?.pending?.actions)
+    ? input.pending.actions
+    : [];
+
+  const action = actions.find((item) => (
+    String(item?.type || '').trim() === 'suggested_slots'
+  ));
+
+  const slots = Array.isArray(action?.payload?.slots)
+    ? action.payload.slots
+    : [];
+
+  return slots
+    .map(normalizeSlot)
+    .filter(Boolean);
+}
+
+function selectedSlotIndex(rawText = '') {
+  const normalized = String(rawText || '').trim();
+  const match = normalized.match(/^(\d{1,2})(?:[.)-])?$/);
+  if (!match) return null;
+
+  const index = Number(match[1]) - 1;
+  return Number.isInteger(index) && index >= 0
+    ? index
+    : null;
+}
+
+function resolveNumberedSuggestedSlot(input = {}) {
+  const index = selectedSlotIndex(input?.turn?.rawText || '');
+  if (index === null) return null;
+
+  const slots = getSuggestedSlots(input);
+  return slots[index] || null;
+}
+
 function resolveRequestedSlot(input = {}) {
-  return getInterpretedSlot(input) || getPendingSlot(input);
+  return getInterpretedSlot(input)
+    || resolveNumberedSuggestedSlot(input)
+    || getPendingSlot(input);
 }
 
 /**
  * Pure scheduling policy. It describes the scheduling effect; the imperative
  * shell owns availability queries, reservation locks, persistence and retries.
  *
+ * A numbered response can resolve a previously offered slot even when the NLU
+ * classified the turn generically, because the pending suggested-slots action
+ * is the deterministic conversational context for that number.
+ *
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
 export async function schedulingPolicy(input) {
+  if (!schedulingEnabled(input?.vacancy)) return {};
+
+  const numberedSlot = resolveNumberedSuggestedSlot(input);
+  if (numberedSlot) {
+    return {
+      scheduling: {
+        action: 'reserve_slot',
+        slot: numberedSlot
+      }
+    };
+  }
+
   const intent = getIntent(input);
   const isSchedule = SCHEDULE_INTENTS.has(intent);
   const isReschedule = RESCHEDULE_INTENTS.has(intent);
   const isCancellation = CANCEL_INTENTS.has(intent);
 
   if (!isSchedule && !isReschedule && !isCancellation) return {};
-  if (!schedulingEnabled(input?.vacancy)) return {};
 
   if (isCancellation) {
     return {
