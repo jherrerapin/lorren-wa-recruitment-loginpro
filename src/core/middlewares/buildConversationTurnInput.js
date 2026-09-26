@@ -4,15 +4,34 @@ import { ConversationTurnInputSchema } from '../contracts/ConversationTurnInputS
 import { isRecruitmentWhatsappPayload } from '../../services/whatsapp.js';
 import { isSupervisorPhone } from '../../services/adminSupervisor.js';
 
-/** @typedef {import('express').Request} Request */
-/** @typedef {import('express').Response} Response */
-/** @typedef {import('express').NextFunction} NextFunction */
-/** @typedef {import('../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} ConversationTurnInput */
-
-/**
- * @typedef {object} BuildConversationTurnInputOptions
- * @property {{ debug?: Function, error?: Function }} [logger]
- */
+const CANDIDATE_FACT_KEYS = Object.freeze([
+  'phone',
+  'vacancyId',
+  'currentStep',
+  'status',
+  'stage',
+  'fullName',
+  'documentType',
+  'documentNumber',
+  'age',
+  'gender',
+  'locality',
+  'neighborhood',
+  'transportMode',
+  'medicalRestrictions',
+  'experienceInfo',
+  'experienceTime',
+  'experienceSummary',
+  'cvStorageKey',
+  'cvOriginalName',
+  'dataConsentStatus',
+  'dataConsentVersion',
+  'botPaused',
+  'botResumeMode',
+  'reminderState',
+  'lastInboundAt',
+  'lastOutboundAt'
+]);
 
 /** @param {unknown} value */
 function asRecord(value) {
@@ -24,14 +43,118 @@ function hasOwn(record, key) {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
 
-/** Direct/enriched callers must provide explicit turn evidence. */
-function hasDirectTurnEvidence(body, turn, message) {
-  return ['id', 'receivedAt', 'rawText'].some((key) => hasOwn(turn, key))
-    || ['id', 'timestamp', 'rawText', 'content'].some((key) => hasOwn(message, key))
-    || ['turnId', 'timestamp', 'rawText', 'text', 'content'].some((key) => hasOwn(body, key));
+function toJsonValue(value) {
+  if (value === null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (['string', 'number', 'boolean'].includes(typeof value)) return value;
+  if (Array.isArray(value)) {
+    return value
+      .map(toJsonValue)
+      .filter((item) => item !== undefined);
+  }
+  if (value && typeof value === 'object') {
+    const output = {};
+    for (const [key, nested] of Object.entries(value)) {
+      const normalized = toJsonValue(nested);
+      if (normalized !== undefined) output[key] = normalized;
+    }
+    return output;
+  }
+  return undefined;
 }
 
-/** @param {Record<string, unknown>} body */
+function normalizeIsoTimestamp(value, fallback = null) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (value instanceof Date) return value.toISOString();
+  if ((typeof value === 'string' && /^\d{10,13}$/.test(value)) || typeof value === 'number') {
+    const numericValue = Number(value);
+    const milliseconds = numericValue < 1_000_000_000_000 ? numericValue * 1000 : numericValue;
+    const date = new Date(milliseconds);
+    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
+function buildCandidateFacts(candidate = {}) {
+  const facts = {};
+  for (const key of CANDIDATE_FACT_KEYS) {
+    if (!hasOwn(candidate, key)) continue;
+    const value = toJsonValue(candidate[key]);
+    if (value !== undefined) facts[key] = value;
+  }
+  return facts;
+}
+
+function buildVacancySnapshot(vacancy = null) {
+  if (!vacancy) return null;
+  const operation = asRecord(vacancy.operation);
+  const city = asRecord(operation.city);
+  return {
+    id: vacancy.id ?? null,
+    title: vacancy.title ?? null,
+    role: vacancy.role ?? null,
+    city: vacancy.city ?? null,
+    schedulingEnabled: vacancy.schedulingEnabled ?? null,
+    interviewSchedulingEnabled: vacancy.interviewSchedulingEnabled ?? null,
+    requirements: vacancy.requirements ?? null,
+    conditions: vacancy.conditions ?? null,
+    roleDescription: vacancy.roleDescription ?? null,
+    requiredDocuments: vacancy.requiredDocuments ?? null,
+    operationAddress: vacancy.operationAddress ?? null,
+    minAge: vacancy.minAge ?? null,
+    maxAge: vacancy.maxAge ?? null,
+    experienceRequired: vacancy.experienceRequired ?? null,
+    experienceTimeText: vacancy.experienceTimeText ?? null,
+    operation: Object.keys(operation).length
+      ? {
+          name: operation.name ?? null,
+          city: Object.keys(city).length ? { name: city.name ?? null } : null
+        }
+      : null
+  };
+}
+
+function buildHistory(history = []) {
+  const rows = Array.isArray(history) ? history : (Array.isArray(history?.messages) ? history.messages : []);
+  const messages = rows.map((message) => {
+    const row = asRecord(message);
+    const role = row.role
+      || (String(row.direction || '').toUpperCase() === 'OUTBOUND' ? 'assistant' : 'user');
+    return {
+      role,
+      text: String(row.text ?? row.body ?? ''),
+      occurredAt: normalizeIsoTimestamp(row.occurredAt ?? row.createdAt, new Date().toISOString())
+    };
+  });
+  const lastBotQuestion = !Array.isArray(history)
+    ? (history?.lastBotQuestion ?? null)
+    : [...messages].reverse().find((message) => message.role === 'assistant' && message.text.includes('?'))?.text ?? null;
+  return { messages, lastBotQuestion };
+}
+
+function buildInterpretation(interpretation = {}) {
+  const source = asRecord(interpretation);
+  const scheduling = asRecord(source.scheduling);
+  const consent = asRecord(source.consent);
+  const slot = asRecord(scheduling.slot);
+  return {
+    intent: source.intent ?? null,
+    scheduling: {
+      slot: Object.keys(slot).length
+        ? {
+            startsAt: slot.startsAt,
+            endsAt: slot.endsAt,
+            timezone: slot.timezone
+          }
+        : null
+    },
+    consent: {
+      decision: consent.decision ?? null
+    }
+  };
+}
+
 function findFirstMetaMessage(body) {
   const entry = asRecord(Array.isArray(body.entry) ? body.entry[0] : undefined);
   const change = asRecord(Array.isArray(entry.changes) ? entry.changes[0] : undefined);
@@ -40,34 +163,8 @@ function findFirstMetaMessage(body) {
   return asRecord(messages[0]);
 }
 
-/** Match the repository audit convention without exposing provider IDs. */
-function hashTurnReference(value) {
-  const digest = createHash('sha256').update(String(value || '')).digest('hex').slice(0, 10);
-  return `turn-${digest}`;
-}
-
-const SAFE_ISSUE_PATH_SEGMENTS = new Set([
-  'turn', 'id', 'receivedAt', 'rawText',
-  'candidate', 'facts', 'updatedAt',
-  'history', 'messages', 'role', 'text', 'occurredAt', 'lastBotQuestion',
-  'pending', 'fields', 'actions', 'type', 'payload',
-  'execution', 'mayReply', 'dryRun'
-]);
-
-/** Keep validation telemetry useful without echoing submitted values or keys. */
-function sanitizeValidationIssues(error) {
-  return error.issues.map((issue) => ({
-    code: issue.code,
-    path: issue.path.map((segment) => (
-      typeof segment === 'number' || SAFE_ISSUE_PATH_SEGMENTS.has(segment) ? segment : '*'
-    ))
-  }));
-}
-
-/** Preserve the textual evidence exposed by each supported Meta message type. */
 function extractMetaRawText(message) {
   const type = message.type;
-
   if (type === 'text') return asRecord(message.text).body ?? '';
   if (type === 'button') {
     const button = asRecord(message.button);
@@ -84,125 +181,134 @@ function extractMetaRawText(message) {
     const document = asRecord(message.document);
     return document.caption ?? document.filename ?? '';
   }
-
   return '';
 }
 
-/** Convert Meta's epoch timestamp to the ISO timestamp required by the core. */
-function normalizeReceivedAt(value) {
-  if (value === undefined || value === null || value === '') return new Date().toISOString();
+function hashTurnReference(value) {
+  const digest = createHash('sha256').update(String(value || '')).digest('hex').slice(0, 10);
+  return `turn-${digest}`;
+}
 
-  if ((typeof value === 'string' && /^\d{10,13}$/.test(value)) || typeof value === 'number') {
-    const numericValue = Number(value);
-    const milliseconds = numericValue < 1_000_000_000_000 ? numericValue * 1000 : numericValue;
-    const date = new Date(milliseconds);
-    if (!Number.isNaN(date.getTime())) return date.toISOString();
+function looksLikeRuntimeBuildRequest(source = {}) {
+  return ['turn', 'message', 'rawMessage', 'candidate', 'vacancy', 'history', 'pending', 'interpretation', 'execution']
+    .some((key) => hasOwn(source, key));
+}
+
+export class ConversationTurnInputValidationError extends Error {
+  constructor(zodError) {
+    super('conversation_turn_input_invalid');
+    this.name = 'ConversationTurnInputValidationError';
+    this.cause = zodError;
+    this.issues = zodError?.issues || [];
   }
-
-  return value;
 }
 
 /**
- * Build a fail-open shadow observer. Validation and logging failures always end
- * at `next()` and therefore cannot block the existing webhook controller.
- *
- * @param {BuildConversationTurnInputOptions} [options]
- * @returns {(req: Request & { conversationTurnInput?: ConversationTurnInput }, res: Response, next: NextFunction) => Promise<void>}
+ * Runtime builder for the Functional Core. All database/provider objects are
+ * reduced to the strict, read-only ConversationTurnInput boundary here.
  */
-export function buildConversationTurnInput(options = {}) {
+export async function buildValidatedConversationTurnInput(source = {}) {
+  const request = asRecord(source);
+  const turn = asRecord(request.turn);
+  const rawMessage = asRecord(request.rawMessage ?? request.message);
+  const candidate = asRecord(request.candidate);
+  const pending = asRecord(request.pending);
+  const execution = asRecord(request.execution);
+
+  const input = {
+    turn: {
+      id: turn.id ?? rawMessage.id ?? randomUUID(),
+      receivedAt: normalizeIsoTimestamp(
+        turn.receivedAt ?? rawMessage.timestamp,
+        new Date().toISOString()
+      ),
+      rawText: String(turn.rawText ?? request.rawText ?? extractMetaRawText(rawMessage) ?? '')
+    },
+    candidate: {
+      id: candidate.id ?? null,
+      facts: request.candidateFacts ?? buildCandidateFacts(candidate),
+      updatedAt: normalizeIsoTimestamp(candidate.updatedAt, null)
+    },
+    history: buildHistory(request.history ?? []),
+    pending: {
+      fields: Array.isArray(pending.fields) ? pending.fields : [],
+      actions: Array.isArray(pending.actions) ? pending.actions : []
+    },
+    execution: {
+      mayReply: execution.mayReply ?? true,
+      dryRun: execution.dryRun ?? false
+    },
+    vacancy: buildVacancySnapshot(request.vacancy),
+    interpretation: buildInterpretation(request.interpretation)
+  };
+
+  const validation = await ConversationTurnInputSchema.safeParseAsync(input);
+  if (!validation.success) {
+    throw new ConversationTurnInputValidationError(validation.error);
+  }
+  return validation.data;
+}
+
+/**
+ * Transitional compatibility export.
+ * - With runtime data, returns Promise<ConversationTurnInput>.
+ * - With no runtime data (or only logger), returns the fail-open Express shadow
+ *   middleware expected by the current server until webhook cutover is complete.
+ */
+export function buildConversationTurnInput(sourceOrOptions = {}) {
+  const source = asRecord(sourceOrOptions);
+  if (looksLikeRuntimeBuildRequest(source)) {
+    return buildValidatedConversationTurnInput(source);
+  }
+  return createConversationTurnInputShadowMiddleware(source);
+}
+
+export function createConversationTurnInputShadowMiddleware(options = {}) {
   const logger = options.logger ?? console;
 
   return async function conversationTurnInputShadow(req, _res, next) {
     const startedAt = performance.now();
-
     try {
       if (req.method && req.method !== 'POST') return;
-
       const body = asRecord(req.body);
-      const directMessage = asRecord(body.message);
       const metaMessage = findFirstMetaMessage(body);
-      const isMetaWebhook = Array.isArray(body.entry);
       const hasMetaEnvelope = body.object === 'whatsapp_business_account' || hasOwn(body, 'entry');
-      const sourceTurn = asRecord(body.turn);
-      const sourceCandidate = asRecord(body.candidate);
-      const sourceHistory = asRecord(body.history);
-      const sourcePending = asRecord(body.pending);
 
-      // Status callbacks and traffic owned by another WhatsApp flow are not
-      // candidate conversation turns. Keep the shadow observer aligned with
-      // the same deterministic guards used by the legacy controller.
       if (hasMetaEnvelope) {
-        if (!isMetaWebhook
+        if (!Array.isArray(body.entry)
           || Object.keys(metaMessage).length === 0
           || !isRecruitmentWhatsappPayload(body)
           || isSupervisorPhone(metaMessage.from)) return;
-      } else if (!hasDirectTurnEvidence(body, sourceTurn, directMessage)) return;
-
-      const rawText = sourceTurn.rawText
-        ?? (Object.keys(metaMessage).length > 0 ? extractMetaRawText(metaMessage) : undefined)
-        ?? directMessage.rawText
-        ?? directMessage.content
-        ?? body.rawText
-        ?? body.text
-        ?? body.content
-        ?? '';
-
-      const input = {
-        turn: {
-          id: sourceTurn.id ?? metaMessage.id ?? body.turnId ?? directMessage.id ?? randomUUID(),
-          receivedAt: normalizeReceivedAt(
-            sourceTurn.receivedAt ?? metaMessage.timestamp ?? directMessage.timestamp ?? body.timestamp
-          ),
-          rawText
-        },
-        candidate: {
-          id: sourceCandidate.id ?? null,
-          facts: sourceCandidate.facts ?? {},
-          updatedAt: sourceCandidate.updatedAt ?? null
-        },
-        history: {
-          messages: sourceHistory.messages ?? [],
-          lastBotQuestion: sourceHistory.lastBotQuestion ?? null
-        },
-        pending: {
-          fields: sourcePending.fields ?? [],
-          actions: sourcePending.actions ?? []
-        },
-        execution: {
-          mayReply: true,
-          dryRun: true
-        }
-      };
-
-      const result = await ConversationTurnInputSchema.safeParseAsync(input);
-      const latencyMs = Number((performance.now() - startedAt).toFixed(3));
-
-      if (result.success) {
-        req.conversationTurnInput = result.data;
-        logger.debug?.({
-          event: 'conversation_turn_input.shadow_valid',
-          turnRef: hashTurnReference(result.data.turn.id),
-          latencyMs
-        }, 'Conversation input shadow validation succeeded');
-      } else {
-        logger.error?.({
-          event: 'conversation_turn_input.shadow_invalid',
-          latencyMs,
-          issues: sanitizeValidationIssues(result.error)
-        }, 'Conversation input shadow validation failed');
       }
+
+      req.conversationTurnInput = await buildValidatedConversationTurnInput({
+        turn: asRecord(body.turn),
+        rawMessage: Object.keys(metaMessage).length ? metaMessage : asRecord(body.message),
+        rawText: body.rawText ?? body.text ?? body.content,
+        candidate: asRecord(body.candidate),
+        history: asRecord(body.history),
+        pending: asRecord(body.pending),
+        interpretation: asRecord(body.interpretation),
+        execution: { mayReply: true, dryRun: true }
+      });
+
+      logger.debug?.({
+        event: 'conversation_turn_input.shadow_valid',
+        turnRef: hashTurnReference(req.conversationTurnInput.turn.id),
+        latencyMs: Number((performance.now() - startedAt).toFixed(3))
+      }, 'Conversation input shadow validation succeeded');
     } catch (error) {
-      const latencyMs = Number((performance.now() - startedAt).toFixed(3));
       try {
         logger.error?.({
-          event: 'conversation_turn_input.shadow_error',
-          latencyMs,
-          error: error instanceof Error
-            ? { name: error.name, message: error.message }
-            : String(error)
+          event: error?.name === 'ConversationTurnInputValidationError'
+            ? 'conversation_turn_input.shadow_invalid'
+            : 'conversation_turn_input.shadow_error',
+          latencyMs: Number((performance.now() - startedAt).toFixed(3)),
+          issues: error?.issues?.map((issue) => ({ code: issue.code, path: issue.path })) || undefined,
+          error: error instanceof Error ? { name: error.name, message: error.message } : String(error)
         }, 'Conversation input shadow processing failed');
       } catch {
-        // Logging must never interrupt the legacy request path.
+        // Shadow telemetry must never interrupt the legacy request path.
       }
     } finally {
       next();
