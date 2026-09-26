@@ -13,12 +13,6 @@ const INTERVIEW_LIFECYCLE_INTENTS = new Set([
   'CONFIRM_ATTENDANCE'
 ]);
 
-const CONSENT_ACCEPTANCE_INTENTS = new Set([
-  'ACCEPT_DATA_CONSENT',
-  'CONSENT_ACCEPTED',
-  'DATA_CONSENT_ACCEPTED'
-]);
-
 function candidateFacts(input = {}) {
   const facts = input?.candidate?.facts;
   return facts && typeof facts === 'object' && !Array.isArray(facts)
@@ -63,17 +57,6 @@ function hasCvEvidence(input = {}) {
     || hasValue(facts.cvStorageKey);
 }
 
-function consentAllowsProgression(input = {}) {
-  const facts = candidateFacts(input);
-  const status = String(facts.dataConsentStatus || '').trim().toUpperCase();
-  const interpretedDecision = input?.interpretation?.consent?.decision;
-  const intent = intentOf(input);
-
-  return status === 'ACCEPTED'
-    || interpretedDecision === 'ACCEPTED'
-    || CONSENT_ACCEPTANCE_INTENTS.has(intent);
-}
-
 function schedulingEnabled(vacancy = null) {
   if (!vacancy) return false;
   return vacancy.schedulingEnabled === true
@@ -94,7 +77,7 @@ function shouldDeferCandidateFacingProgression(intent = '') {
 
 function hasExplicitSchedulingSlot(input = {}) {
   const slot = input?.interpretation?.scheduling?.slot;
-  return Boolean(slot?.startsAt && slot?.endsAt && slot?.timezone);
+  return Boolean(slot?.startsAt && slot?.timezone);
 }
 
 /**
@@ -102,13 +85,17 @@ function hasExplicitSchedulingSlot(input = {}) {
  *
  * `pending.fields` is the shell-provided readiness snapshot. Fields extracted
  * in the current turn are subtracted before progressing so state is not one
- * turn behind. Scheduling proposed by schedulingPolicy is cleared whenever
- * core data, consent or CV evidence is incomplete.
+ * turn behind. Candidate-facing readiness is disabled until persisted consent
+ * is ACCEPTED, so callers never need to filter pending fields or CV state.
  *
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
 export async function progressionPolicy(input) {
+  if (input?.candidate?.facts?.dataConsentStatus !== 'ACCEPTED') {
+    return {};
+  }
+
   const facts = candidateFacts(input);
   const intent = intentOf(input);
   const currentStep = String(facts.currentStep || '').trim().toUpperCase();
@@ -119,12 +106,6 @@ export async function progressionPolicy(input) {
 
   if (currentStep === 'SCHEDULED' && INTERVIEW_LIFECYCLE_INTENTS.has(intent)) {
     return {};
-  }
-
-  if (!consentAllowsProgression(input)) {
-    return {
-      scheduling: null
-    };
   }
 
   if (remainingPendingFields(input).length > 0) {
