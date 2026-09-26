@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { isDeepStrictEqual } from 'node:util';
-import { parseConsentPendingMode } from '../src/services/dataConsentGate.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 import { replayFixtureInterpretation } from './conversation-replay/interpretationReplay.js';
 import { replayFixturePlanning } from './conversation-replay/planningReplay.js';
@@ -59,11 +58,10 @@ function assertAuthorityEvidence(intent, replay, label) {
   }
 
   if (intent === 'SEND_ATTACHMENT') {
-    assert.equal(replay.evidence.consentBoundary.block, true, `${label}: el adjunto debe quedar bloqueado antes del consentimiento`);
-    assert.equal(replay.evidence.consentBoundary.reason, 'attachment_before_consent', `${label}: razón de bloqueo incorrecta`);
-    const pending = parseConsentPendingMode(replay.finalState.botResumeMode);
-    assert.equal(pending.pending, true, `${label}: debe quedar consentimiento pendiente`);
-    assert.equal(pending.cvResendRequired, true, `${label}: debe solicitarse reenvío del archivo después de autorizar`);
+    assert.equal(replay.evidence.consentStatus, 'PENDING', `${label}: el consentimiento debe seguir pendiente`);
+    assert.equal(replay.evidence.attachments.items.length, 1, `${label}: debe conservarse la evidencia estructurada del adjunto`);
+    assert.equal(replay.plan.actions[0].type, 'functional_core_attachment', `${label}: el adjunto debe pasar al contrato del núcleo funcional`);
+    assert.doesNotMatch(replay.evidence.consentPrompt, /no lo descargué|ni lo guardé/i, `${label}: no debe conservar semántica previa a #1685`);
   }
 
   if (intent === 'ASK_VACANCY_SCHEDULE') {
