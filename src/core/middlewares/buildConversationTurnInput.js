@@ -86,6 +86,11 @@ function buildCandidateFacts(candidate = {}) {
   return facts;
 }
 
+function normalizeExperienceRequirement(value) {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  return ['YES', 'NO', 'INDIFFERENT'].includes(normalized) ? normalized : null;
+}
+
 function buildVacancySnapshot(vacancy = null) {
   if (!vacancy) return null;
   const operation = asRecord(vacancy.operation);
@@ -104,7 +109,7 @@ function buildVacancySnapshot(vacancy = null) {
     operationAddress: vacancy.operationAddress ?? null,
     minAge: vacancy.minAge ?? null,
     maxAge: vacancy.maxAge ?? null,
-    experienceRequired: vacancy.experienceRequired ?? null,
+    experienceRequired: normalizeExperienceRequirement(vacancy.experienceRequired),
     experienceTimeText: vacancy.experienceTimeText ?? null,
     operation: Object.keys(operation).length
       ? {
