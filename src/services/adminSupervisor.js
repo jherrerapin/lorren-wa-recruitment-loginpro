@@ -10,7 +10,10 @@ import {
   persistOutboundConversationMessage,
   updateConversationMessagePayload
 } from './conversationMessageRepository.js';
-import { completeSupervisorReviewAfterDelivery } from './candidateStateService.js';
+import {
+  completeSupervisorReviewAfterDelivery,
+  pauseCandidateAutomationFromAdmin
+} from './candidateStateService.js';
 import { OPENAI_SUPERVISOR_REPLY_MODEL } from './openAiModelConfig.js';
 
 const DEFAULT_SUPERVISOR_PHONE = '3052982551';
@@ -19,6 +22,7 @@ const WINDOW_CLOSED_AFTER_MS = 24 * 60 * 60 * 1000;
 const DOT_COOLDOWN_MS = 60 * 60 * 1000;
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const SUPERVISOR_REPLY_MODEL = OPENAI_SUPERVISOR_REPLY_MODEL;
+const AUDIO_REVIEW_REASON = 'Audio recibido pendiente de revisión humana';
 
 export function getSupervisorPhone() {
   return String(process.env.ADMIN_WHATSAPP_NUMBER || process.env.FORWARD_MEDIA_TO || DEFAULT_SUPERVISOR_PHONE).replace(/\D/g, '');
@@ -57,6 +61,9 @@ export function localizeManualReviewReason(reason = '', reviewType = 'question',
   }
   if (normalizedReason.includes('document')) {
     return 'El candidato envió o preguntó por documentos y se requiere validación del equipo.';
+  }
+  if (reviewType === 'audio') {
+    return 'El candidato envió un audio. Debe escucharse manualmente antes de responderle.';
   }
   return 'Se requiere apoyo del equipo para responder con precisión al candidato.';
 }
@@ -127,12 +134,22 @@ function formatInterviewStatus(hasInterview) {
 
 function candidatePauseSnapshot(candidate = {}) {
   return {
-    botPaused: candidate.botPaused,
+    botPaused: Boolean(candidate.botPaused),
     botPausedAt: candidate.botPausedAt ?? null,
     botPausedBy: candidate.botPausedBy ?? null,
     botPauseReason: candidate.botPauseReason ?? null,
     botResumeMode: candidate.botResumeMode ?? null,
     lastOutboundAt: candidate.lastOutboundAt ?? null
+  };
+}
+
+function candidateAdminPauseSnapshot(candidate = {}) {
+  return {
+    botPaused: Boolean(candidate.botPaused),
+    botPausedAt: candidate.botPausedAt ?? null,
+    botPausedBy: candidate.botPausedBy ?? null,
+    botPauseReason: candidate.botPauseReason ?? null,
+    botResumeMode: candidate.botResumeMode ?? null
   };
 }
 
@@ -226,6 +243,44 @@ export async function notifySupervisorManualReview(prisma, candidate, { reason =
   });
 }
 
+async function beginAudioHumanReview(prisma, candidate, media = {}) {
+  let reviewCandidate = candidate;
+
+  if (!candidate?.botPaused) {
+    const transition = await pauseCandidateAutomationFromAdmin(prisma, {
+      candidateId: candidate.id,
+      expected: candidateAdminPauseSnapshot(candidate),
+      actor: 'audio_human_review',
+      reason: AUDIO_REVIEW_REASON,
+      now: new Date()
+    });
+
+    reviewCandidate = transition.candidate || candidate;
+    if (transition.count !== 1 && !reviewCandidate?.botPaused) {
+      console.warn('[ADMIN_SUPERVISOR_AUDIO_PAUSE_CONFLICT]', JSON.stringify({
+        candidateId: candidate.id,
+        mediaId: media?.id || null,
+        observed: candidateStateDiagnostic(reviewCandidate)
+      }));
+      return { pendingCreated: false, candidate: reviewCandidate };
+    }
+  }
+
+  await notifySupervisorManualReview(prisma, reviewCandidate, {
+    reason: AUDIO_REVIEW_REASON,
+    reviewType: 'audio',
+    extra: {
+      mediaType: 'audio',
+      mediaId: media?.id || null,
+      mimeType: media?.mime_type || null,
+      audioRequiresHumanListening: true,
+      transcriptionUsed: false
+    }
+  });
+
+  return { pendingCreated: true, candidate: reviewCandidate };
+}
+
 export async function notifySupervisorAttachment(prisma, candidate, { mediaType, media = {}, caption = '', sequence = null, total = null } = {}) {
   const supervisorPhone = getSupervisorPhone();
   const scheduledInterview = await hasScheduledInterview(prisma, candidate);
@@ -256,6 +311,7 @@ export async function notifySupervisorAttachment(prisma, candidate, { mediaType,
     await sendImageMessage(supervisorPhone, { id: media.id });
   } else if (mediaType === 'audio' && media?.id) {
     await sendAudioMessage(supervisorPhone, { id: media.id });
+    await beginAudioHumanReview(prisma, candidate, media);
   }
 }
 
