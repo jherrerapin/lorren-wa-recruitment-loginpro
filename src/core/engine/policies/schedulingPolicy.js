@@ -118,6 +118,7 @@ function resolveRequestedSlot(input = {}) {
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
 export async function schedulingPolicy(input) {
+  if (input?.candidate?.facts?.dataConsentStatus !== 'ACCEPTED') return {};
   if (!schedulingEnabled(input?.vacancy)) return {};
 
   const numberedSlot = resolveNumberedSuggestedSlot(input);
