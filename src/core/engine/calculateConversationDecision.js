@@ -2,6 +2,7 @@ import { ConversationDecisionSchema } from '../contracts/ConversationDecisionSch
 import { candidateDataPolicy } from './policies/candidateDataPolicy.js';
 import { vacancyAssignmentPolicy } from './policies/vacancyAssignmentPolicy.js';
 import { eligibilityPolicy } from './policies/eligibilityPolicy.js';
+import { vacancyChangePolicy } from './policies/vacancyChangePolicy.js';
 import { chatPolicy } from './policies/chatPolicy.js';
 import { schedulingPolicy } from './policies/schedulingPolicy.js';
 import { progressionPolicy } from './policies/progressionPolicy.js';
@@ -10,22 +11,29 @@ import { consentPolicy } from './policies/consentPolicy.js';
 import { vacancyPolicy } from './policies/vacancyPolicy.js';
 
 const DEFAULT_TERMINAL_STATUS = 'REGISTRADO';
+const EXCLUSIVE_POLICY_INTENTS = new Map([
+  [vacancyChangePolicy, 'CHANGE_VACANCY']
+]);
 
 /**
  * Policy order encodes precedence without coupling policies to one another.
  *
  * 1. Candidate data and vacancy assignment assimilate objective facts.
  * 2. Eligibility can terminate the process before any progression/scheduling.
- * 3. Generic chat and scheduling contribute ordinary turn behavior.
- * 4. Progression guards readiness and may clear premature scheduling.
- * 5. Attachment guidance overrides a generic CV request with format-specific
+ * 3. Vacancy changes are evaluated before generic conversational progression.
+ *    When they produce a decision fragment, the turn is exclusive and the
+ *    remaining policies cannot answer from the previous vacancy context.
+ * 4. Generic chat and scheduling contribute ordinary turn behavior.
+ * 5. Progression guards readiness and may clear premature scheduling.
+ * 6. Attachment guidance overrides a generic CV request with format-specific
  *    feedback for the current attachment.
- * 6. Consent and vacancy FAQ retain final specialized reply precedence.
+ * 7. Consent and vacancy FAQ retain final specialized reply precedence.
  */
 export const conversationPolicies = Object.freeze([
   candidateDataPolicy,
   vacancyAssignmentPolicy,
   eligibilityPolicy,
+  vacancyChangePolicy,
   chatPolicy,
   schedulingPolicy,
   progressionPolicy,
@@ -38,6 +46,21 @@ function isPlainObject(value) {
   return value !== null
     && typeof value === 'object'
     && !Array.isArray(value);
+}
+
+function hasDecisionFragment(fragment) {
+  return isPlainObject(fragment) && Object.keys(fragment).length > 0;
+}
+
+function shouldStopAfterExclusivePolicy(policy, input, fragment) {
+  const expectedIntent = EXCLUSIVE_POLICY_INTENTS.get(policy);
+  if (!expectedIntent || !hasDecisionFragment(fragment)) return false;
+
+  const actualIntent = String(input?.interpretation?.intent || '')
+    .trim()
+    .toUpperCase();
+
+  return actualIntent === expectedIntent;
 }
 
 /**
@@ -122,7 +145,8 @@ export function reduceConversationDecision(accumulated, fragment) {
  * It performs no persistence, transport, HTTP, filesystem or provider I/O.
  *
  * Terminal decisions stop further policy evaluation so later generic or
- * specialized replies cannot overwrite a completed/rejected turn.
+ * specialized replies cannot overwrite a completed/rejected turn. Exclusive
+ * intent policies may also stop the turn without closing the conversation.
  *
  * @param {import('../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<import('../contracts/ConversationDecisionSchema.js').ConversationDecision>}
@@ -138,7 +162,10 @@ export async function calculateConversationDecision(input) {
     const fragment = await policy(input);
     decision = reduceConversationDecision(decision, fragment);
 
-    if (decision?.transitions?.endConversation === true) {
+    if (
+      decision?.transitions?.endConversation === true
+      || shouldStopAfterExclusivePolicy(policy, input, fragment)
+    ) {
       break;
     }
   }
