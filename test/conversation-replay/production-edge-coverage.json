@@ -53,15 +53,15 @@
       "id": "assigned-candidate-requests-another-vacancy",
       "title": "Candidato con vacante asociada solicita otra vacante",
       "coverage": "authority_contract",
-      "contractTests": ["test/assignedVacancyChange.test.js"],
-      "authorities": ["resolveVacancyFirstGate", "VACANCY_CHANGE_OFFER_MODE"],
+      "contractTests": ["test/vacancyChangePolicy.test.js"],
+      "authorities": ["vacancyChangePolicy"],
       "observability": {
-        "source_by_field": "candidate_message",
-        "rejected_fields": ["trusted_current_vacancy_as_new_target"],
-        "vacancy_resolution": "ASSIGNED_VACANCY_CHANGE_NEEDS_TARGET",
+        "source_by_field": "current_turn_interpretation",
+        "rejected_fields": ["previous_role_as_new_target"],
+        "vacancy_resolution": "CHANGE_VACANCY_NEEDS_ROLE",
         "replyKind": "VACANCY_CHANGE_TARGET_PROMPT",
-        "reason": "ASSIGNED_VACANCY_CHANGE_NEEDS_TARGET",
-        "engine_loop_guard": "vacancy_first_gate_before_engine",
+        "reason": "role_required_without_inheritance",
+        "engine_loop_guard": "functional_core_policy",
         "respondedAt": "after_outbound_delivery"
       }
     },
