@@ -23,11 +23,31 @@ const VACANCY_QUESTION_INTENTS = new Set([
   'ASK_VACANCY_SCHEDULE'
 ]);
 
+const SIMPLE_GREETING_INTENTS = new Set([
+  'GREETING',
+  'HELLO'
+]);
+
+const EXPLICIT_APPLICATION_INTENTS = new Set([
+  'APPLY_INTENT'
+]);
+
 const CONSENT_REQUEST_TEXT =
   'Para continuar con tu postulación necesito que me indiques si autorizas a LoginPro a tratar tus datos personales, hoja de vida y documentos enviados por WhatsApp para gestionar tu postulación, validar información, contactarte y conservar la trazabilidad del proceso. Puedes solicitar la consulta, actualización, corrección o revocatoria de esta autorización. Indícame si autorizas o no autorizas el tratamiento de tus datos.';
 
 const CONSENT_REVOKED_REPLY =
   'Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
+
+const CONSENT_BUTTONS = Object.freeze([
+  Object.freeze({
+    id: 'data_consent_accept',
+    title: 'Sí autorizo'
+  }),
+  Object.freeze({
+    id: 'data_consent_reject',
+    title: 'No autorizo'
+  })
+]);
 
 function normalize(value = '') {
   return String(value || '')
@@ -46,7 +66,9 @@ function interpretationIntent(input = {}) {
 
 function candidateFacts(input = {}) {
   const facts = input?.candidate?.facts;
-  return facts && typeof facts === 'object' && !Array.isArray(facts) ? facts : {};
+  return facts && typeof facts === 'object' && !Array.isArray(facts)
+    ? facts
+    : {};
 }
 
 function isVacancyQuestion(input = {}) {
@@ -111,10 +133,34 @@ function isConsentPending(input = {}) {
   return true;
 }
 
+function hasResolvedVacancy(input = {}) {
+  const facts = candidateFacts(input);
+  return Boolean(facts.vacancyId || input?.vacancy?.id);
+}
+
+function isConsentPromptReady(input = {}) {
+  const intent = interpretationIntent(input);
+  if (!intent) return false;
+
+  if (EXPLICIT_APPLICATION_INTENTS.has(intent)) {
+    return true;
+  }
+
+  if (!hasResolvedVacancy(input)) {
+    return false;
+  }
+
+  return !SIMPLE_GREETING_INTENTS.has(intent);
+}
+
 /**
  * Pure consent policy. It declares state mutations but never persists them.
  * Vacancy questions remain available to vacancyPolicy even while consent is
  * pending; consent controls progression, not comprehension of the current turn.
+ *
+ * A PENDING status alone is not enough to prompt. The conversation must first
+ * have onboarding evidence: an explicitly expressed application intent or an
+ * already resolved vacancy plus a non-greeting turn.
  *
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
@@ -148,11 +194,13 @@ export async function consentPolicy(input) {
 
   if (!isConsentPending(input)) return {};
   if (isVacancyQuestion(input)) return {};
+  if (!isConsentPromptReady(input)) return {};
   if (input?.execution?.mayReply !== true) return {};
 
   return {
     reply: {
-      text: CONSENT_REQUEST_TEXT
+      text: CONSENT_REQUEST_TEXT,
+      buttons: CONSENT_BUTTONS
     }
   };
 }
