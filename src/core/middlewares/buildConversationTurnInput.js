@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { ConversationTurnInputSchema } from '../contracts/ConversationTurnInputSchema.js';
 import { mapLegacyIntentToCanonical } from '../engine/mappers/intentMapper.js';
@@ -104,6 +104,12 @@ function nullableString(value) {
   if (value === undefined || value === null) return null;
   const text = String(value);
   return text.length ? text : null;
+}
+
+function normalizeRawText(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'object') return '';
+  return String(value);
 }
 
 function buildCandidateFacts(candidate = {}) {
@@ -313,12 +319,27 @@ function looksLikeRuntimeBuildRequest(source = {}) {
 }
 
 export class ConversationTurnInputValidationError extends Error {
-  constructor(zodError) {
-    super('conversation_turn_input_invalid');
+  constructor(zodError, message = 'conversation_turn_input_invalid') {
+    super(message);
     this.name = 'ConversationTurnInputValidationError';
     this.cause = zodError;
     this.issues = zodError?.issues || [];
   }
+}
+
+function missingTurnEvidenceError() {
+  return new ConversationTurnInputValidationError(
+    {
+      issues: [
+        {
+          code: 'custom',
+          path: ['turn', 'id'],
+          message: 'missing_turn_evidence_id'
+        }
+      ]
+    },
+    'missing_turn_evidence_id'
+  );
 }
 
 /**
@@ -332,7 +353,17 @@ export async function buildValidatedConversationTurnInput(source = {}) {
   const candidate = asRecord(request.candidate);
   const pending = asRecord(request.pending);
   const execution = asRecord(request.execution);
-  const rawText = String(
+  const turnId = turn.id ?? rawMessage.id;
+
+  if (
+    turnId === undefined
+    || turnId === null
+    || (typeof turnId === 'string' && turnId.trim() === '')
+  ) {
+    throw missingTurnEvidenceError();
+  }
+
+  const rawText = normalizeRawText(
     turn.rawText
     ?? request.rawText
     ?? extractMetaRawText(rawMessage)
@@ -341,7 +372,7 @@ export async function buildValidatedConversationTurnInput(source = {}) {
 
   const input = {
     turn: {
-      id: turn.id ?? rawMessage.id ?? randomUUID(),
+      id: turnId,
       receivedAt: normalizeIsoTimestamp(
         turn.receivedAt ?? rawMessage.timestamp,
         new Date().toISOString()
