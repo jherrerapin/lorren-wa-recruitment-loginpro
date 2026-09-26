@@ -6,7 +6,7 @@ import { saveInboundMessage } from '../src/routes/webhook.js';
 function createPrismaMock({ duplicate = false } = {}) {
   const calls = {
     createMany: [],
-    findUnique: [],
+    findFirst: [],
     candidateUpdate: []
   };
   const prisma = {
@@ -15,9 +15,17 @@ function createPrismaMock({ duplicate = false } = {}) {
         calls.createMany.push(args);
         return { count: duplicate ? 0 : 1 };
       },
-      async findUnique(args) {
-        calls.findUnique.push(args);
-        return { id: 'message-inbound-1' };
+      async findFirst(args) {
+        calls.findFirst.push(args);
+        return {
+          id: 'message-inbound-1',
+          waMessageId: 'wamid.inbound-1',
+          messageType: MessageType.TEXT,
+          body: 'Hola',
+          rawPayload: null,
+          respondedAt: null,
+          createdAt: new Date('2026-09-26T12:00:00.000Z')
+        };
       }
     },
     candidate: {
@@ -70,15 +78,27 @@ test('inbox persiste solo campos Prisma válidos y conserva trazabilidad e ident
   assert.equal(calls.candidateUpdate.length, 1);
   assert.equal(calls.candidateUpdate[0].where.id, 'candidate-inbound-1');
   assert.ok(calls.candidateUpdate[0].data.lastInboundAt instanceof Date);
-  assert.deepEqual(calls.findUnique, [{
-    where: { waMessageId: 'wamid.inbound-1' },
-    select: { id: true }
+  assert.deepEqual(calls.findFirst, [{
+    where: {
+      candidateId: 'candidate-inbound-1',
+      direction: MessageDirection.INBOUND,
+      waMessageId: 'wamid.inbound-1'
+    },
+    select: {
+      id: true,
+      waMessageId: true,
+      messageType: true,
+      body: true,
+      rawPayload: true,
+      respondedAt: true,
+      createdAt: true
+    }
   }]);
 });
 
 test('inbox duplicado no actualiza candidato ni consulta identidad creada', async (t) => {
   const { prisma, calls } = createPrismaMock({ duplicate: true });
-  t.mock.method(console, 'log', () => {});
+  t.mock.method(console, 'info', () => {});
 
   const result = await saveInboundMessage(
     prisma,
@@ -92,5 +112,5 @@ test('inbox duplicado no actualiza candidato ni consulta identidad creada', asyn
   assert.deepEqual(result, { isNew: false, id: null });
   assert.equal(calls.createMany.length, 1);
   assert.equal(calls.candidateUpdate.length, 0);
-  assert.equal(calls.findUnique.length, 0);
+  assert.equal(calls.findFirst.length, 0);
 });
