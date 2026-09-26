@@ -11,18 +11,27 @@ test('saveInboundMessage es idempotente: mismo waMessageId solo inserta una vez'
   const rows = [];
   let seq = 1;
   const prisma = {
+    candidate: {
+      async update({ where, data }) {
+        return { id: where.id, ...data };
+      }
+    },
     message: {
       async createMany({ data, skipDuplicates }) {
         assert.equal(skipDuplicates, true);
         const item = data[0];
         const exists = rows.find((row) => row.waMessageId && row.waMessageId === item.waMessageId);
         if (exists) return { count: 0 };
-        rows.push({ id: seq++, ...item });
+        rows.push({ id: seq++, createdAt: new Date(), respondedAt: null, ...item });
         return { count: 1 };
       },
-      async findUnique({ where }) {
-        const found = rows.find((row) => row.waMessageId === where.waMessageId);
-        return found ? { id: found.id } : null;
+      async findFirst({ where }) {
+        const found = rows.find((row) => (
+          row.candidateId === where.candidateId
+          && row.direction === where.direction
+          && row.waMessageId === where.waMessageId
+        ));
+        return found || null;
       }
     }
   };
@@ -53,8 +62,8 @@ test('saveInboundMessage es idempotente: mismo waMessageId solo inserta una vez'
 
 test('webhook ignora duplicados sin reprocesar, sin responder y sin reabrir ventana multilinea', async () => {
   let duplicateLogs = 0;
-  const originalLog = console.log;
-  console.log = (...args) => {
+  const originalInfo = console.info;
+  console.info = (...args) => {
     if (args[0] === '[INBOUND_DUPLICATE_IGNORED]') duplicateLogs += 1;
   };
 
@@ -87,7 +96,7 @@ test('webhook ignora duplicados sin reprocesar, sin responder y sin reabrir vent
       async createMany() {
         return { count: 0 };
       },
-      async findUnique() {
+      async findFirst() {
         return null;
       },
       async create({ data }) {
@@ -135,17 +144,17 @@ test('webhook ignora duplicados sin reprocesar, sin responder y sin reabrir vent
     }
   };
 
-  let nextError = null;
-  const next = (error) => { nextError = error; };
+  try {
+    handler(req, res);
+    await new Promise((resolve) => setImmediate(resolve));
 
-  await handler(req, res, next);
-  console.log = originalLog;
-
-  assert.equal(nextError, null);
-  assert.equal(response.status, 200);
-  assert.equal(duplicateLogs, 1);
-  assert.equal(counters.scheduleWindowCalls, 0);
-  assert.equal(counters.outboundSaves, 0);
-  assert.equal(counters.candidateUpdates, 0);
-  assert.equal(counters.processQueries, 0);
+    assert.equal(response.status, 200);
+    assert.equal(duplicateLogs, 1);
+    assert.equal(counters.scheduleWindowCalls, 0);
+    assert.equal(counters.outboundSaves, 0);
+    assert.equal(counters.candidateUpdates, 0);
+    assert.equal(counters.processQueries, 0);
+  } finally {
+    console.info = originalInfo;
+  }
 });
