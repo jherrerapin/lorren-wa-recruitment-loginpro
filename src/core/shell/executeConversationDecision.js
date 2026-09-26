@@ -1,12 +1,17 @@
 import { ConversationStep } from '@prisma/client';
 import { ConversationDecisionSchema } from '../contracts/ConversationDecisionSchema.js';
+import { buildSlotSuggestionReply } from '../engine/presentation/schedulingFormatter.js';
 import { recordCandidateDataConsent } from '../../services/consentStateService.js';
 import {
   cancelActiveInterviewBookings,
   createScheduledInterviewBooking
 } from '../../services/interviewBookingStateService.js';
+import { listOfferableSlots } from '../../services/interviewScheduler.js';
 
 const CONSENT_FIELD = 'dataConsentStatus';
+const DEFAULT_SCHEDULING_TIMEZONE = 'America/Bogota';
+const DEFAULT_SLOT_SUGGESTION_LIMIT = 3;
+
 const ALLOWED_DIRECT_CANDIDATE_FIELDS = new Set([
   'fullName',
   'documentType',
@@ -41,6 +46,19 @@ function candidateIdFromInput(input = {}) {
 function vacancyIdFromInput(input = {}) {
   const value = input?.vacancy?.id ?? input?.candidate?.facts?.vacancyId ?? null;
   return value === null || value === undefined || value === '' ? null : String(value);
+}
+
+function optionalDate(value, label) {
+  if (value === null || value === undefined || value === '') return null;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(`${label}_invalid`);
+  return date;
+}
+
+function normalizeSuggestionLimit(value) {
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 1) return DEFAULT_SLOT_SUGGESTION_LIMIT;
+  return Math.min(numeric, 10);
 }
 
 function splitMutationFields(fieldsToPersist = {}) {
@@ -92,6 +110,17 @@ async function executeConsentMutation(tx, {
   });
 }
 
+function projectSlotSuggestion(entry, timezone) {
+  return {
+    slotId: entry?.slot?.id ? String(entry.slot.id) : null,
+    startsAt: entry?.date instanceof Date
+      ? entry.date.toISOString()
+      : new Date(entry?.date).toISOString(),
+    formattedDate: entry?.formattedDate || null,
+    timezone
+  };
+}
+
 async function executeSchedulingMutation(tx, {
   input,
   scheduling,
@@ -103,9 +132,48 @@ async function executeSchedulingMutation(tx, {
   const vacancyId = vacancyIdFromInput(input);
 
   if (scheduling.action === 'suggest_slots') {
+    if (!vacancyId) throw new Error('conversation_scheduling_vacancy_required');
+
+    const timezone = String(
+      schedulingContext.timezone || DEFAULT_SCHEDULING_TIMEZONE
+    ).trim() || DEFAULT_SCHEDULING_TIMEZONE;
+    const now = optionalDate(schedulingContext.now, 'conversation_scheduling_now') || new Date();
+    const lastInboundAt = optionalDate(
+      schedulingContext.lastInboundAt ?? input?.candidate?.facts?.lastInboundAt,
+      'conversation_scheduling_last_inbound_at'
+    );
+    const limit = normalizeSuggestionLimit(schedulingContext.maxSuggestions);
+
+    // Reuse the existing scheduling authority. The shell performs the query;
+    // presentation remains a pure transformation in schedulingFormatter.js.
+    const offerableSlots = await listOfferableSlots(
+      tx,
+      vacancyId,
+      lastInboundAt,
+      now
+    );
+    const suggestions = offerableSlots
+      .slice(0, limit)
+      .map((entry) => projectSlotSuggestion(entry, timezone));
+
+    const replyText = buildSlotSuggestionReply(suggestions, timezone);
+
+    // AWAITING_SLOT_SELECTION is not a persisted ConversationStep today.
+    // SCHEDULING is its canonical persisted equivalent until/unless Prisma adds
+    // a dedicated enum value in a separately reviewed migration.
+    await tx.candidate.update({
+      where: { id: candidateId },
+      data: {
+        currentStep: ConversationStep.SCHEDULING
+      }
+    });
+
     return {
       action: 'suggest_slots',
-      persisted: false
+      persisted: true,
+      awaitingSlotSelection: true,
+      suggestions,
+      replyText
     };
   }
 
@@ -150,13 +218,42 @@ async function executeSchedulingMutation(tx, {
   throw new Error(`conversation_scheduling_action_unsupported:${scheduling.action}`);
 }
 
+async function resolveExecutedDecision(normalizedDecision, executionResult) {
+  const replyText = executionResult?.scheduling?.replyText;
+  if (!replyText) return normalizedDecision;
+
+  // ConversationDecision is readonly after Zod parsing. Build a short-lived
+  // resolved copy rather than mutating the validated Functional Core output.
+  const candidate = {
+    ...normalizedDecision,
+    reply: {
+      text: replyText
+    }
+  };
+
+  const validation = await ConversationDecisionSchema.safeParseAsync(candidate);
+  if (!validation.success) {
+    const error = new Error('conversation_executor_resolved_decision_invalid');
+    error.name = 'ConversationDecisionValidationError';
+    error.cause = validation.error;
+    throw error;
+  }
+
+  return validation.data;
+}
+
 /**
  * Imperative-shell executor for a validated ConversationDecision.
  *
  * All state effects are committed in one Prisma transaction when the provided
  * client supports transactions. Domain-specific authorities remain canonical:
- * consent is delegated to consentStateService and interview bookings to
- * interviewBookingStateService.
+ * consent is delegated to consentStateService, availability to interviewScheduler
+ * and interview bookings to interviewBookingStateService.
+ *
+ * The returned `decision` is the effective outbound decision. For suggest_slots
+ * it contains the pure formatted availability reply and is the value the outbound
+ * adapter must send/persist; this executor does not create a second delivery
+ * authority.
  */
 export async function executeConversationDecision({
   prisma,
@@ -228,10 +325,20 @@ export async function executeConversationDecision({
     return result;
   };
 
-  if (typeof prisma.$transaction === 'function') {
-    return prisma.$transaction(execute);
-  }
-  return execute(prisma);
+  const executionResult = typeof prisma.$transaction === 'function'
+    ? await prisma.$transaction(execute)
+    : await execute(prisma);
+
+  const resolvedDecision = await resolveExecutedDecision(
+    normalizedDecision,
+    executionResult
+  );
+
+  return {
+    ...executionResult,
+    decision: resolvedDecision,
+    reply: resolvedDecision.reply
+  };
 }
 
 export default executeConversationDecision;
