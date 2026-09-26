@@ -1,30 +1,35 @@
 import { ConversationDecisionSchema } from '../contracts/ConversationDecisionSchema.js';
 import { candidateDataPolicy } from './policies/candidateDataPolicy.js';
 import { vacancyAssignmentPolicy } from './policies/vacancyAssignmentPolicy.js';
+import { eligibilityPolicy } from './policies/eligibilityPolicy.js';
 import { chatPolicy } from './policies/chatPolicy.js';
 import { schedulingPolicy } from './policies/schedulingPolicy.js';
 import { progressionPolicy } from './policies/progressionPolicy.js';
+import { attachmentPolicy } from './policies/attachmentPolicy.js';
 import { consentPolicy } from './policies/consentPolicy.js';
 import { vacancyPolicy } from './policies/vacancyPolicy.js';
+
+const DEFAULT_TERMINAL_STATUS = 'REGISTRADO';
 
 /**
  * Policy order encodes precedence without coupling policies to one another.
  *
- * 1. Candidate data is assimilated first.
- * 2. A vacancy already resolved by the shell/NLU can become candidate state.
- * 3. Generic chat contributes the conversational fallback.
- * 4. Scheduling may propose a declarative scheduling effect.
- * 5. Progression is the final readiness guard for that effect and may clear it
- *    when consent, required fields or CV evidence are incomplete.
- * 6. Consent and vacancy FAQ policies retain final reply precedence for their
- *    specialized domains without owning persistence or transport.
+ * 1. Candidate data and vacancy assignment assimilate objective facts.
+ * 2. Eligibility can terminate the process before any progression/scheduling.
+ * 3. Generic chat and scheduling contribute ordinary turn behavior.
+ * 4. Progression guards readiness and may clear premature scheduling.
+ * 5. Attachment guidance overrides a generic CV request with format-specific
+ *    feedback for the current attachment.
+ * 6. Consent and vacancy FAQ retain final specialized reply precedence.
  */
 export const conversationPolicies = Object.freeze([
   candidateDataPolicy,
   vacancyAssignmentPolicy,
+  eligibilityPolicy,
   chatPolicy,
   schedulingPolicy,
   progressionPolicy,
+  attachmentPolicy,
   consentPolicy,
   vacancyPolicy
 ]);
@@ -65,13 +70,36 @@ export function mergeDecisionObjects(current = {}, fragment = {}) {
 
 /**
  * Cross-domain invariants belong to the orchestrator, never to one policy.
- * A terminal transition invalidates every scheduling effect in the same turn.
+ *
+ * A terminal transition:
+ * - invalidates every scheduling effect in the same turn;
+ * - guarantees a persisted terminal status when no policy supplied one.
+ *
+ * Explicit policy status always wins, so a dedicated rejection policy can
+ * preserve a different status without being overwritten here.
  */
 export function enforceDecisionInvariants(decision = {}) {
   const normalized = { ...decision };
 
   if (normalized?.transitions?.endConversation === true) {
     delete normalized.scheduling;
+
+    const mutations = isPlainObject(normalized.mutations)
+      ? normalized.mutations
+      : {};
+    const currentFields = isPlainObject(mutations.fieldsToPersist)
+      ? mutations.fieldsToPersist
+      : {};
+    const fieldsToPersist = { ...currentFields };
+
+    if (!Object.prototype.hasOwnProperty.call(fieldsToPersist, 'status') || !fieldsToPersist.status) {
+      fieldsToPersist.status = DEFAULT_TERMINAL_STATUS;
+    }
+
+    normalized.mutations = {
+      ...mutations,
+      fieldsToPersist
+    };
   }
 
   return normalized;
@@ -93,6 +121,9 @@ export function reduceConversationDecision(accumulated, fragment) {
  * Pure asynchronous orchestrator for one validated ConversationTurnInput.
  * It performs no persistence, transport, HTTP, filesystem or provider I/O.
  *
+ * Terminal decisions stop further policy evaluation so later generic or
+ * specialized replies cannot overwrite a completed/rejected turn.
+ *
  * @param {import('../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<import('../contracts/ConversationDecisionSchema.js').ConversationDecision>}
  */
@@ -106,6 +137,10 @@ export async function calculateConversationDecision(input) {
 
     const fragment = await policy(input);
     decision = reduceConversationDecision(decision, fragment);
+
+    if (decision?.transitions?.endConversation === true) {
+      break;
+    }
   }
 
   const validation = await ConversationDecisionSchema.safeParseAsync(decision);
