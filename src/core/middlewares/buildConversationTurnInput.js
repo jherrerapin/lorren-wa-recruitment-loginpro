@@ -33,6 +33,29 @@ const CANDIDATE_FACT_KEYS = Object.freeze([
   'lastOutboundAt'
 ]);
 
+const INTERPRETATION_FIELD_KEYS = Object.freeze([
+  'fullName',
+  'documentType',
+  'documentNumber',
+  'age',
+  'gender',
+  'neighborhood',
+  'locality',
+  'medicalRestrictions',
+  'transportMode',
+  'experienceInfo',
+  'experienceTime',
+  'experienceSummary'
+]);
+
+const ATTACHMENT_TYPES = new Set([
+  'document',
+  'image',
+  'audio',
+  'video',
+  'sticker'
+]);
+
 /** @param {unknown} value */
 function asRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -74,6 +97,12 @@ function normalizeIsoTimestamp(value, fallback = null) {
   }
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toISOString();
+}
+
+function nullableString(value) {
+  if (value === undefined || value === null) return null;
+  const text = String(value);
+  return text.length ? text : null;
 }
 
 function buildCandidateFacts(candidate = {}) {
@@ -138,6 +167,25 @@ function buildHistory(history = []) {
   return { messages, lastBotQuestion };
 }
 
+function buildInterpretationFields(fields = {}) {
+  const source = asRecord(fields);
+  const normalized = {};
+
+  for (const key of INTERPRETATION_FIELD_KEYS) {
+    if (!hasOwn(source, key) || source[key] === undefined) continue;
+
+    if (key === 'age' && source[key] !== null) {
+      const numeric = Number(source[key]);
+      normalized[key] = Number.isInteger(numeric) ? numeric : source[key];
+      continue;
+    }
+
+    normalized[key] = source[key];
+  }
+
+  return normalized;
+}
+
 function buildInterpretation(interpretation = {}) {
   const source = asRecord(interpretation);
   const scheduling = asRecord(source.scheduling);
@@ -145,6 +193,7 @@ function buildInterpretation(interpretation = {}) {
   const slot = asRecord(scheduling.slot);
   return {
     intent: source.intent ?? null,
+    fields: buildInterpretationFields(source.fields),
     scheduling: {
       slot: Object.keys(slot).length
         ? {
@@ -157,6 +206,59 @@ function buildInterpretation(interpretation = {}) {
     consent: {
       decision: consent.decision ?? null
     }
+  };
+}
+
+function normalizeAttachmentType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  return ATTACHMENT_TYPES.has(type) ? type : 'unknown';
+}
+
+function normalizeAttachmentItem(item = {}) {
+  const source = asRecord(item);
+  return {
+    type: normalizeAttachmentType(source.type ?? source.mediaType),
+    mediaId: nullableString(source.mediaId ?? source.id),
+    fileName: nullableString(source.fileName ?? source.filename),
+    mimeType: nullableString(source.mimeType ?? source.mime_type),
+    caption: nullableString(source.caption),
+    isCv: source.isCv === true
+  };
+}
+
+function attachmentFromRawMessage(rawMessage = {}) {
+  const message = asRecord(rawMessage);
+  const type = normalizeAttachmentType(message.type);
+  if (!ATTACHMENT_TYPES.has(type)) return null;
+
+  const media = asRecord(message[type]);
+  return normalizeAttachmentItem({
+    ...media,
+    type,
+    mediaId: media.id ?? null
+  });
+}
+
+function buildAttachments(attachments = {}, rawMessage = {}) {
+  const source = Array.isArray(attachments)
+    ? { items: attachments }
+    : asRecord(attachments);
+
+  const explicitItems = Array.isArray(source.items)
+    ? source.items.map(normalizeAttachmentItem)
+    : [];
+
+  const rawAttachment = explicitItems.length
+    ? null
+    : attachmentFromRawMessage(rawMessage);
+
+  const items = explicitItems.length
+    ? explicitItems
+    : (rawAttachment ? [rawAttachment] : []);
+
+  return {
+    items,
+    hasCv: source.hasCv === true || items.some((item) => item.isCv === true)
   };
 }
 
@@ -195,8 +297,18 @@ function hashTurnReference(value) {
 }
 
 function looksLikeRuntimeBuildRequest(source = {}) {
-  return ['turn', 'message', 'rawMessage', 'candidate', 'vacancy', 'history', 'pending', 'interpretation', 'execution']
-    .some((key) => hasOwn(source, key));
+  return [
+    'turn',
+    'message',
+    'rawMessage',
+    'candidate',
+    'vacancy',
+    'history',
+    'pending',
+    'attachments',
+    'interpretation',
+    'execution'
+  ].some((key) => hasOwn(source, key));
 }
 
 export class ConversationTurnInputValidationError extends Error {
@@ -244,6 +356,7 @@ export async function buildValidatedConversationTurnInput(source = {}) {
       dryRun: execution.dryRun ?? false
     },
     vacancy: buildVacancySnapshot(request.vacancy),
+    attachments: buildAttachments(request.attachments, rawMessage),
     interpretation: buildInterpretation(request.interpretation)
   };
 
@@ -293,6 +406,7 @@ export function createConversationTurnInputShadowMiddleware(options = {}) {
         candidate: asRecord(body.candidate),
         history: asRecord(body.history),
         pending: asRecord(body.pending),
+        attachments: body.attachments ?? {},
         interpretation: asRecord(body.interpretation),
         execution: { mayReply: true, dryRun: true }
       });
