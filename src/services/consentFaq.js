@@ -9,11 +9,15 @@ function normalize(value = '') {
     .trim();
 }
 
+function referencesConsentSubject(normalized = '') {
+  return /\b(datos|dato personal|datos personales|privacidad|consentimiento|autorizacion|autorizar|tratamiento|revocar|revocatoria)\b/.test(normalized);
+}
+
 export function buildConsentQuestionReply(text = '') {
   const raw = String(text || '').trim();
   const normalized = normalize(raw);
   const asksQuestion = raw.includes('?') || /\b(que|como|para que|quien|pueden|puede|obligatorio|autorizar|autorizacion|datos|privacidad|revocar|eliminar|corregir)\b/.test(normalized);
-  if (!normalized || !asksQuestion) return '';
+  if (!normalized || !asksQuestion || !referencesConsentSubject(normalized)) return '';
 
   if (/\b(revocar|revocatoria|retirar|eliminar|borrar|corregir|actualizar|consultar)\b/.test(normalized)) {
     return 'Puedes solicitar la consulta, actualización, corrección o revocatoria de la autorización sobre tus datos.';
