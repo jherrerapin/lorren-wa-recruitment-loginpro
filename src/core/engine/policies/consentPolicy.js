@@ -1,3 +1,5 @@
+import { CONSENT_REQUEST_TEXT } from '../../contracts/consentDefinition.js';
+
 const CONSENT_ACCEPTANCE_INTENTS = new Set([
   'ACCEPT_DATA_CONSENT',
   'CONSENT_ACCEPTED',
@@ -31,9 +33,6 @@ const SIMPLE_GREETING_INTENTS = new Set([
 const EXPLICIT_APPLICATION_INTENTS = new Set([
   'APPLY_INTENT'
 ]);
-
-const CONSENT_REQUEST_TEXT =
-  'Para continuar con tu postulación necesito que me indiques si autorizas a LoginPro a tratar tus datos personales, hoja de vida y documentos enviados por WhatsApp para gestionar tu postulación, validar información, contactarte y conservar la trazabilidad del proceso. Puedes solicitar la consulta, actualización, corrección o revocatoria de esta autorización. Indícame si autorizas o no autorizas el tratamiento de tus datos.';
 
 const CONSENT_REVOKED_REPLY =
   'Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
