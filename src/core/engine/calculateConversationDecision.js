@@ -1,23 +1,32 @@
 import { ConversationDecisionSchema } from '../contracts/ConversationDecisionSchema.js';
 import { candidateDataPolicy } from './policies/candidateDataPolicy.js';
+import { vacancyAssignmentPolicy } from './policies/vacancyAssignmentPolicy.js';
 import { chatPolicy } from './policies/chatPolicy.js';
+import { schedulingPolicy } from './policies/schedulingPolicy.js';
+import { progressionPolicy } from './policies/progressionPolicy.js';
 import { consentPolicy } from './policies/consentPolicy.js';
 import { vacancyPolicy } from './policies/vacancyPolicy.js';
-import { schedulingPolicy } from './policies/schedulingPolicy.js';
 
 /**
  * Policy order encodes precedence without coupling policies to one another.
- * Candidate data is assimilated first so extracted facts survive regardless of
- * the conversational intent. The generic chat fallback runs next; domain-
- * specific consent and vacancy policies may replace its reply. Scheduling
- * contributes only declarative scheduling effects.
+ *
+ * 1. Candidate data is assimilated first.
+ * 2. A vacancy already resolved by the shell/NLU can become candidate state.
+ * 3. Generic chat contributes the conversational fallback.
+ * 4. Scheduling may propose a declarative scheduling effect.
+ * 5. Progression is the final readiness guard for that effect and may clear it
+ *    when consent, required fields or CV evidence are incomplete.
+ * 6. Consent and vacancy FAQ policies retain final reply precedence for their
+ *    specialized domains without owning persistence or transport.
  */
 export const conversationPolicies = Object.freeze([
   candidateDataPolicy,
+  vacancyAssignmentPolicy,
   chatPolicy,
+  schedulingPolicy,
+  progressionPolicy,
   consentPolicy,
-  vacancyPolicy,
-  schedulingPolicy
+  vacancyPolicy
 ]);
 
 function isPlainObject(value) {
