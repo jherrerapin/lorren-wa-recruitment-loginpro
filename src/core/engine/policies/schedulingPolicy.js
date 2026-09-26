@@ -35,16 +35,14 @@ function normalizeSlot(slot = null) {
   if (!slot || typeof slot !== 'object' || Array.isArray(slot)) return null;
 
   const startsAt = String(slot.startsAt || '').trim();
-  const endsAt = String(slot.endsAt || '').trim();
   const timezone = String(slot.timezone || '').trim();
+  const slotId = slot.slotId == null ? null : String(slot.slotId).trim() || null;
 
-  if (!validIsoDateTime(startsAt) || !validIsoDateTime(endsAt) || !timezone) {
+  if (!validIsoDateTime(startsAt) || !timezone) {
     return null;
   }
 
-  if (Date.parse(endsAt) <= Date.parse(startsAt)) return null;
-
-  return { startsAt, endsAt, timezone };
+  return { slotId, startsAt, timezone };
 }
 
 function getInterpretedSlot(input = {}) {
