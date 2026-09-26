@@ -1,5 +1,4 @@
 import { extractMessages } from './whatsapp.js';
-import { CAMPAIGN_VACANCY_CONFIRMATION_MODE, dataConsentGateMiddleware } from './dataConsentGate.js';
 
 function normalizeCampaignCode(value) {
   return String(value || '')
@@ -246,11 +245,10 @@ function buildAttributionUpdate(candidate = {}, matchedCampaign = null, campaign
   update.campaignId = matchedCampaign.id;
   update.campaignCodeRaw = campaignCodeRaw;
 
-  // La vacante solo se asigna en el primer vínculo del proceso, cuando la campaña
-  // activa ya tiene vacancyId configurado. Una vacante persistida nunca se pisa aquí.
+  // La asociación campaña -> vacante es dato objetivo de atribución. Este módulo
+  // no decide estados conversacionales ni activa compuertas de consentimiento.
   if (matchedCampaign.vacancyId && !candidate.vacancyId) {
     update.vacancyId = matchedCampaign.vacancyId;
-    update.botResumeMode = CAMPAIGN_VACANCY_CONFIRMATION_MODE;
   }
 
   return update;
@@ -300,7 +298,6 @@ export async function attributeCandidateCampaignFromMessage(prisma, candidateId,
       vacancyId: true,
       sourceType: true,
       campaignCodeRaw: true,
-      botResumeMode: true,
       metaCtwaClid: true,
       metaAdId: true,
       metaCampaignId: true,
@@ -430,17 +427,16 @@ async function runCampaignAttribution(prisma, req) {
 }
 
 export function campaignAttributionMiddleware(prisma) {
-  const consentGate = dataConsentGateMiddleware(prisma);
-  return async (req, res, next) => {
+  return async (req, _res, next) => {
     try {
-      // Primero se guarda la señal objetiva de Meta Ads. Luego se aplica el gate
-      // conversacional. Así el bot confirma la vacante de campaña antes de pedir
-      // autorización o datos personales.
+      // Attribution is observational/enrichment-only. Conversational decisions,
+      // including consent, belong exclusively to the conversation pipeline.
       await runCampaignAttribution(prisma, req);
-      return consentGate(req, res, next);
     } catch (error) {
+      // Fail open: attribution telemetry must never block the WhatsApp webhook.
       console.warn('[CAMPAIGN_ATTRIBUTION_ERROR]', error?.message || error);
-      return consentGate(req, res, next);
     }
+
+    return next();
   };
 }
