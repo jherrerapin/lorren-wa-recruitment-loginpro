@@ -88,7 +88,7 @@ export const VacancySchema = z.object({
   operationAddress: z.string().nullable().default(null),
   minAge: z.number().int().nullable().default(null),
   maxAge: z.number().int().nullable().default(null),
-  experienceRequired: z.enum(['YES', 'NO']).nullable().default(null),
+  experienceRequired: z.enum(['YES', 'NO', 'INDIFFERENT']).nullable().default(null),
   experienceTimeText: z.string().nullable().default(null),
   operation: VacancyOperationSchema.nullable().default(null)
 }).strict().readonly();
