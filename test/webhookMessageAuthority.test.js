@@ -80,9 +80,8 @@ test('shadowing está montado antes de los middlewares que consumen el turno', (
 test('shadowing permanece fail-open ante entrada inválida', async () => {
   const { logger, nextCalls, req } = await runConversationTurnShadow({
     turn: {
-      id: 'test-turn-id',
       receivedAt: '2026-09-22T19:00:00.000Z',
-      rawText: { unexpected: true }
+      rawText: 'hola'
     }
   });
 
