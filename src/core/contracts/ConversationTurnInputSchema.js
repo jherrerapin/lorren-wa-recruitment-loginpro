@@ -41,8 +41,8 @@ export const HistorySchema = z.object({
 
 /** Canonical scheduling slot understood by the functional core. */
 export const SchedulingSlotSchema = z.object({
+  slotId: z.string().trim().min(1).nullable().optional(),
   startsAt: z.string().datetime({ offset: true }),
-  endsAt: z.string().datetime({ offset: true }),
   timezone: z.string().trim().min(1)
 }).strict().readonly();
 
