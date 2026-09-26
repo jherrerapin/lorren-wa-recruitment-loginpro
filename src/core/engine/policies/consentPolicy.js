@@ -34,6 +34,8 @@ const EXPLICIT_APPLICATION_INTENTS = new Set([
   'APPLY_INTENT'
 ]);
 
+const CONSENT_GREETING_PREFIX = '¡Hola! Soy Lórren, tu asistente virtual. ';
+
 const CONSENT_REVOKED_REPLY =
   'Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
 
@@ -141,15 +143,15 @@ function isConsentPromptReady(input = {}) {
   const intent = interpretationIntent(input);
   if (!intent) return false;
 
+  if (SIMPLE_GREETING_INTENTS.has(intent)) {
+    return true;
+  }
+
   if (EXPLICIT_APPLICATION_INTENTS.has(intent)) {
     return true;
   }
 
-  if (!hasResolvedVacancy(input)) {
-    return false;
-  }
-
-  return !SIMPLE_GREETING_INTENTS.has(intent);
+  return hasResolvedVacancy(input);
 }
 
 /**
@@ -157,9 +159,9 @@ function isConsentPromptReady(input = {}) {
  * Vacancy questions remain available to vacancyPolicy even while consent is
  * pending; consent controls progression, not comprehension of the current turn.
  *
- * A PENDING status alone is not enough to prompt. The conversation must first
- * have onboarding evidence: an explicitly expressed application intent or an
- * already resolved vacancy plus a non-greeting turn.
+ * A PENDING greeting is enough to restore onboarding voice and present the
+ * legal consent request. Non-greeting turns require explicit application intent
+ * or an already resolved vacancy before the consent prompt is emitted.
  *
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
@@ -196,9 +198,14 @@ export async function consentPolicy(input) {
   if (!isConsentPromptReady(input)) return {};
   if (input?.execution?.mayReply !== true) return {};
 
+  const intent = interpretationIntent(input);
+  const replyText = SIMPLE_GREETING_INTENTS.has(intent)
+    ? `${CONSENT_GREETING_PREFIX}${CONSENT_REQUEST_TEXT}`
+    : CONSENT_REQUEST_TEXT;
+
   return {
     reply: {
-      text: CONSENT_REQUEST_TEXT,
+      text: replyText,
       buttons: CONSENT_BUTTONS
     }
   };
