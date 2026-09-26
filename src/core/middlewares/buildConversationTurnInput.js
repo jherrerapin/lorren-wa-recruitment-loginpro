@@ -204,8 +204,8 @@ function buildInterpretation(interpretation = {}, rawText = '') {
     scheduling: {
       slot: Object.keys(slot).length
         ? {
+            slotId: slot.slotId ?? null,
             startsAt: slot.startsAt,
-            endsAt: slot.endsAt,
             timezone: slot.timezone
           }
         : null
