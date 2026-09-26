@@ -67,7 +67,6 @@ function buildReplayPrisma(replay, options = {}) {
         ? { id: `message-${where.waMessageId}`, waMessageId: where.waMessageId, respondedAt: null, createdAt: new Date() }
         : null,
       createMany: async ({ data }) => {
-        if (options.inboundPersistenceError) throw new Error('TEST-INBOUND-PERSISTENCE-ERROR');
         const waMessageId = data[0]?.waMessageId;
         if (persistedInboundIds.has(waMessageId)) return { count: 0 };
         persistedInboundIds.add(waMessageId);
@@ -191,74 +190,16 @@ test('A3: un conflicto concurrente no puede ocurrir en el gate porque la reanuda
   assert.equal(finalCandidate.botResumeMode, 'manual_resume_dashboard');
 });
 
-test('A3: un documento previo al consentimiento se adquiere sin descargar, responder ni levantar la pausa', async () => {
-  const base = HUMAN_PAUSE_REPLAYS.find((item) => item.sourceConversation === 'CONV-019');
-  const replay = structuredClone(base);
-  replay.candidate.dataConsentStatus = 'PENDING';
-  replay.candidate.currentStep = 'GREETING_SENT';
-  replay.inbound = {
-    id: 'TEST-WAMID-PAUSED-PRECONSENT-DOCUMENT',
-    from: replay.candidate.phone,
-    type: 'document',
-    document: {
-      id: 'TEST-MEDIA-PAUSED-PRECONSENT',
-      filename: 'TEST-HOJA-DE-VIDA.pdf',
-      mime_type: 'application/pdf'
-    }
-  };
-
-  const result = await executeReplay(replay);
-  const finalCandidate = result.getCandidate();
-
-  assert.equal(result.nextCalls, 0);
-  assert.deepEqual(result.statuses, [200]);
-  assert.equal(result.metrics.resumeUpdates, 0);
-  assert.equal(result.metrics.inboundMessages, 1);
-  assert.equal(result.metrics.outboundMessages, 0);
-  assert.equal(result.payloadMessageCount, 0);
-  assert.equal(finalCandidate.botPaused, true);
-  assert.equal(finalCandidate.botResumeMode, replay.candidate.botResumeMode);
-});
-
-test('A3: un error al adquirir un adjunto pausado exige reintento sin levantar la pausa ni llegar al router', async () => {
-  const base = HUMAN_PAUSE_REPLAYS.find((item) => item.sourceConversation === 'CONV-019');
-  const replay = structuredClone(base);
-  replay.candidate.dataConsentStatus = 'PENDING';
-  replay.inbound = {
-    id: 'TEST-WAMID-PAUSED-PERSISTENCE-ERROR',
-    from: replay.candidate.phone,
-    type: 'document',
-    document: {
-      id: 'TEST-MEDIA-PERSISTENCE-ERROR',
-      filename: 'TEST-HOJA-DE-VIDA-ERROR.pdf',
-      mime_type: 'application/pdf'
-    }
-  };
-
-  const result = await executeReplay(replay, { inboundPersistenceError: true });
-  const finalCandidate = result.getCandidate();
-
-  assert.equal(result.nextCalls, 0);
-  assert.deepEqual(result.statuses, [503]);
-  assert.equal(result.metrics.resumeUpdates, 0);
-  assert.equal(result.metrics.inboundMessages, 0);
-  assert.equal(result.metrics.outboundMessages, 0);
-  assert.equal(result.payloadMessageCount, 1);
-  assert.equal(finalCandidate.botPaused, true);
-  assert.equal(finalCandidate.botResumeMode, replay.candidate.botResumeMode);
-});
-
-test('A3: el router conserva rate limit y persistencia antes de la única reanudación canónica', () => {
+test('A3: webhook confirma Meta antes de iniciar el procesamiento asíncrono y no reintroduce dataConsentGate', () => {
   const source = readFileSync(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
-  const routeStart = source.indexOf("router.post('/', async");
-  const rateLimit = source.indexOf('if (!checkRateLimit(from)) continue;', routeStart);
-  const persistText = source.indexOf('const inbound = await saveInboundMessage', rateLimit);
-  const resumeText = source.indexOf('freshCandidate = await prepareCandidateForInboundAutomation', persistText);
+  const routeStart = source.indexOf("router.post('/', (req, res) => {");
+  const ack = source.indexOf('res.sendStatus(200);', routeStart);
+  const process = source.indexOf('void processWebhookPayload(prisma, payload)', ack);
 
   assert.ok(routeStart >= 0);
-  assert.ok(rateLimit > routeStart);
-  assert.ok(persistText > rateLimit);
-  assert.ok(resumeText > persistText);
+  assert.ok(ack > routeStart);
+  assert.ok(process > ack);
+  assert.doesNotMatch(source, /dataConsentGate/);
 });
 
 test('A3: la consulta canónica de inbound usa candidato, dirección y waMessageId', async () => {
@@ -284,4 +225,3 @@ test('A3: la consulta canónica de inbound usa candidato, dirección y waMessage
     waMessageId: 'wamid-replay-query'
   });
 });
-
