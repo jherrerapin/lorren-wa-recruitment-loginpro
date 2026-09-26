@@ -16,6 +16,8 @@ import { listOfferableSlots } from '../../services/interviewScheduler.js';
 const CONSENT_FIELD = 'dataConsentStatus';
 const DEFAULT_SCHEDULING_TIMEZONE = 'America/Bogota';
 const DEFAULT_SLOT_SUGGESTION_LIMIT = 3;
+const BOOKING_CONFIRMED_REPLY =
+  '¡Tu entrevista ha sido agendada con éxito! En breve recibirás los detalles.';
 
 const ALLOWED_DIRECT_CANDIDATE_FIELDS = new Set([
   'fullName',
@@ -222,10 +224,18 @@ async function executeSchedulingMutation(tx, {
       replacementStatus: 'RESCHEDULED'
     });
 
+    await tx.candidate.update({
+      where: { id: candidateId },
+      data: {
+        currentStep: ConversationStep.SCHEDULED
+      }
+    });
+
     return {
       action: 'reserve_slot',
       persisted: true,
-      booking
+      booking,
+      replyText: BOOKING_CONFIRMED_REPLY
     };
   }
 
@@ -238,6 +248,7 @@ async function resolveExecutedDecision(normalizedDecision, executionResult) {
 
   // ConversationDecision is readonly after Zod parsing. Build a short-lived
   // resolved copy rather than mutating the validated Functional Core output.
+  // Both slot suggestions and successful reservations can supply replyText.
   const candidate = {
     ...normalizedDecision,
     reply: {
@@ -264,10 +275,9 @@ async function resolveExecutedDecision(normalizedDecision, executionResult) {
  * consent is delegated to consentStateService, availability to interviewScheduler
  * and interview bookings to interviewBookingStateService.
  *
- * The returned `decision` is the effective outbound decision. For suggest_slots
- * it contains the pure formatted availability reply and is the value the outbound
- * adapter must send/persist; this executor does not create a second delivery
- * authority.
+ * The returned `decision` is the effective outbound decision. Scheduling
+ * execution may supply a resolved reply for slot suggestions or a confirmed
+ * reservation; this executor does not create a second delivery authority.
  */
 export async function executeConversationDecision({
   prisma,
