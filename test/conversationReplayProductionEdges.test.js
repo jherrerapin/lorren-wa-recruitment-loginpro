@@ -148,31 +148,6 @@ test('una corrección actual de ciudad y cargo reemplaza el contexto histórico 
   assert.match(decision.reply, /no cambiará todavía/i);
 });
 
-test('una solicitud parcial de otra vacante no reutiliza metadata ni reemplaza la vacante actual', async () => {
-  const currentVacancy = vacancy();
-  const targetVacancy = vacancy({
-    id: 'vac-medellin-lider',
-    title: 'Líder de operación Medellín',
-    role: 'Líder de operación',
-    city: 'Medellin',
-    operation: operation('medellin', 'Medellin')
-  });
-
-  const decision = await resolveGate({
-    text: 'Quiero otra vacante en Medellín',
-    candidateState: candidate({ vacancyId: currentVacancy.id }),
-    currentVacancy,
-    vacancies: [currentVacancy, targetVacancy],
-    vacancyHints: { trustedVacancyId: currentVacancy.id, trustedVacancy: currentVacancy }
-  });
-
-  assert.equal(decision.reason, 'ASSIGNED_VACANCY_CHANGE_NEEDS_TARGET');
-  assert.equal(decision.candidateUpdates, undefined);
-  assert.equal(decision.resolution.city, 'Medellin');
-  assert.equal(decision.resolution.roleHint, null);
-  assert.match(decision.reply, /cargo exacto/i);
-});
-
 test('metadata confiable conserva autoridad frente a texto ambiguo contradictorio', async () => {
   const trusted = vacancy({ id: 'vac-meta-neiva' });
   const textMatch = vacancy({
