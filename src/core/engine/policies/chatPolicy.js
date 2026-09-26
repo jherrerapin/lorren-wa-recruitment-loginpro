@@ -64,6 +64,10 @@ function buildPendingFieldsReply(fields = []) {
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
 export async function chatPolicy(input) {
+  if (input?.candidate?.facts?.dataConsentStatus !== 'ACCEPTED') {
+    return {};
+  }
+
   const intent = getIntent(input);
 
   if (FINALIZATION_INTENTS.has(intent)) {
