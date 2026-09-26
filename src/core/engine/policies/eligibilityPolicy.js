@@ -16,6 +16,10 @@ function interpretedFields(input = {}) {
 }
 
 function finiteInteger(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
   const numeric = Number(value);
   return Number.isInteger(numeric) ? numeric : null;
 }
