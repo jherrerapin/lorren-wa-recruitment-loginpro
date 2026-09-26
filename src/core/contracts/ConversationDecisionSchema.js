@@ -1,8 +1,14 @@
 import { z } from 'zod';
 import { JsonValueSchema, SchedulingSlotSchema } from './ConversationTurnInputSchema.js';
 
+export const ConversationReplyButtonSchema = z.object({
+  id: z.string().trim().min(1),
+  title: z.string().trim().min(1)
+}).strict().readonly();
+
 export const ConversationReplySchema = z.object({
-  text: z.string().trim().min(1)
+  text: z.string().trim().min(1),
+  buttons: z.array(ConversationReplyButtonSchema).min(1).max(3).readonly().optional()
 }).strict().readonly();
 
 export const ConversationMutationsSchema = z.object({
