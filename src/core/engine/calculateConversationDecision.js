@@ -1,4 +1,5 @@
 import { ConversationDecisionSchema } from '../contracts/ConversationDecisionSchema.js';
+import { candidateDataPolicy } from './policies/candidateDataPolicy.js';
 import { chatPolicy } from './policies/chatPolicy.js';
 import { consentPolicy } from './policies/consentPolicy.js';
 import { vacancyPolicy } from './policies/vacancyPolicy.js';
@@ -6,11 +7,13 @@ import { schedulingPolicy } from './policies/schedulingPolicy.js';
 
 /**
  * Policy order encodes precedence without coupling policies to one another.
- * The generic chat fallback runs first; domain-specific consent and vacancy
- * policies may replace its reply. Scheduling contributes only declarative
- * scheduling effects.
+ * Candidate data is assimilated first so extracted facts survive regardless of
+ * the conversational intent. The generic chat fallback runs next; domain-
+ * specific consent and vacancy policies may replace its reply. Scheduling
+ * contributes only declarative scheduling effects.
  */
 export const conversationPolicies = Object.freeze([
+  candidateDataPolicy,
   chatPolicy,
   consentPolicy,
   vacancyPolicy,
