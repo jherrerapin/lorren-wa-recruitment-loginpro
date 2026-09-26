@@ -26,6 +26,9 @@ const VACANCY_QUESTION_INTENTS = new Set([
 const CONSENT_REQUEST_TEXT =
   'Para continuar con tu postulación necesito que me indiques si autorizas a LoginPro a tratar tus datos personales, hoja de vida y documentos enviados por WhatsApp para gestionar tu postulación, validar información, contactarte y conservar la trazabilidad del proceso. Puedes solicitar la consulta, actualización, corrección o revocatoria de esta autorización. Indícame si autorizas o no autorizas el tratamiento de tus datos.';
 
+const CONSENT_REVOKED_REPLY =
+  'Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
+
 function normalize(value = '') {
   return String(value || '')
     .trim()
@@ -119,6 +122,9 @@ function isConsentPending(input = {}) {
 export async function consentPolicy(input) {
   if (resolvesConsentRejection(input)) {
     return {
+      ...(input?.execution?.mayReply === true
+        ? { reply: { text: CONSENT_REVOKED_REPLY } }
+        : {}),
       mutations: {
         fieldsToPersist: {
           dataConsentStatus: 'REVOKED'
