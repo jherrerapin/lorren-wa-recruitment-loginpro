@@ -1,5 +1,10 @@
 import { ConversationStep } from '@prisma/client';
 import { ConversationDecisionSchema } from '../contracts/ConversationDecisionSchema.js';
+import {
+  CONSENT_REQUEST_TEXT,
+  CURRENT_CONSENT_VERSION,
+  DEFAULT_CONSENT_SOURCE
+} from '../contracts/consentDefinition.js';
 import { buildSlotSuggestionReply } from '../engine/presentation/schedulingFormatter.js';
 import { recordCandidateDataConsent } from '../../services/consentStateService.js';
 import {
@@ -89,9 +94,18 @@ async function executeConsentMutation(tx, {
     throw new Error(`conversation_consent_status_not_allowed:${status}`);
   }
 
-  const version = requireNonEmptyString(consentContext.version, 'consent_version');
-  const text = requireNonEmptyString(consentContext.text, 'consent_text');
-  const source = requireNonEmptyString(consentContext.source, 'consent_source');
+  const version = requireNonEmptyString(
+    consentContext.version || CURRENT_CONSENT_VERSION,
+    'consent_version'
+  );
+  const text = requireNonEmptyString(
+    consentContext.text || CONSENT_REQUEST_TEXT,
+    'consent_text'
+  );
+  const source = requireNonEmptyString(
+    consentContext.source || DEFAULT_CONSENT_SOURCE,
+    'consent_source'
+  );
 
   return recordCandidateDataConsent(tx, {
     candidateId,
@@ -116,7 +130,6 @@ function projectSlotSuggestion(entry, timezone) {
     startsAt: entry?.date instanceof Date
       ? entry.date.toISOString()
       : new Date(entry?.date).toISOString(),
-    formattedDate: entry?.formattedDate || null,
     timezone
   };
 }
@@ -193,7 +206,8 @@ async function executeSchedulingMutation(tx, {
       throw new Error('conversation_scheduling_starts_at_invalid');
     }
 
-    const explicitSlotId = schedulingContext.slotId
+    const explicitSlotId = scheduling.slot?.slotId
+      ?? schedulingContext.slotId
       ?? schedulingContext.slot?.id
       ?? null;
     const manualScheduling = explicitSlotId === null || explicitSlotId === undefined || explicitSlotId === '';
