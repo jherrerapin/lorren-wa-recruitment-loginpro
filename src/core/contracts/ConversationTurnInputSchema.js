@@ -39,10 +39,35 @@ export const HistorySchema = z.object({
   lastBotQuestion: z.string().nullable()
 }).strict().readonly();
 
-export const PendingActionSchema = z.object({
-  type: z.string().trim().min(1),
+/** Canonical scheduling slot understood by the functional core. */
+export const SchedulingSlotSchema = z.object({
+  startsAt: z.string().datetime({ offset: true }),
+  endsAt: z.string().datetime({ offset: true }),
+  timezone: z.string().trim().min(1)
+}).strict().readonly();
+
+export const SuggestedSlotsPendingPayloadSchema = z.object({
+  slots: z.array(SchedulingSlotSchema).min(1).readonly(),
+  timezone: z.string().trim().min(1).nullable().default(null)
+}).strict().readonly();
+
+export const SuggestedSlotsPendingActionSchema = z.object({
+  type: z.literal('suggested_slots'),
+  payload: SuggestedSlotsPendingPayloadSchema
+}).strict().readonly();
+
+export const GenericPendingActionSchema = z.object({
+  type: z.string().trim().min(1).refine(
+    (value) => value !== 'suggested_slots',
+    { message: 'suggested_slots_requires_structured_payload' }
+  ),
   payload: z.record(z.string(), JsonValueSchema)
 }).strict().readonly();
+
+export const PendingActionSchema = z.union([
+  SuggestedSlotsPendingActionSchema,
+  GenericPendingActionSchema
+]);
 
 export const PendingSchema = z.object({
   fields: z.array(z.string().trim().min(1)).readonly(),
@@ -52,13 +77,6 @@ export const PendingSchema = z.object({
 export const ExecutionSchema = z.object({
   mayReply: z.boolean(),
   dryRun: z.boolean()
-}).strict().readonly();
-
-/** Canonical scheduling slot understood by the functional core. */
-export const SchedulingSlotSchema = z.object({
-  startsAt: z.string().datetime({ offset: true }),
-  endsAt: z.string().datetime({ offset: true }),
-  timezone: z.string().trim().min(1)
 }).strict().readonly();
 
 export const VacancyCitySchema = z.object({
