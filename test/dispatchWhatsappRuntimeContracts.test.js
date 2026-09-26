@@ -162,9 +162,10 @@ test('Gracias solo se envía después de evidencia inbound real', () => {
   const webhook = readSource('src/services/dispatchWhatsappWebhookService.js');
   assert.match(assignment, /confirmationMessageId/);
   assert.match(assignment, /confirmationReceivedAt/);
-  assert.match(webhook, /claimDispatchAssignmentConfirmation\(\{/);
-  assert.match(webhook, /sendDispatchWhatsappTextMessage\(\{ scope, phone: target\.phone, text: AUTOMATIC_CONFIRMATION_REPLY/);
-  assert.ok(webhook.indexOf('claimDispatchAssignmentConfirmation({') < webhook.indexOf('sendDispatchWhatsappTextMessage({'));
+  assert.match(
+    webhook,
+    /const claim = await claimDispatchAssignmentConfirmation\(\{[\s\S]*?sendDispatchWhatsappTextMessage\(\{ scope, phone: target\.phone, text: AUTOMATIC_CONFIRMATION_REPLY/
+  );
   assert.doesNotMatch(webhook, /setInterval|reconciliation|getChats|getChatById|message_create/);
 });
 

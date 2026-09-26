@@ -84,6 +84,11 @@
           "reason": "Frontera de consentimiento y reanudación; delega consentimiento y mensajes en autoridades compartidas"
         },
         {
+          "path": "src/core/shell/executeConversationDecision.js",
+          "role": "boundary",
+          "reason": "Ejecutor transaccional del Núcleo Funcional: aplica mutaciones directas de Candidate y delega consentimiento y agenda en sus autoridades canónicas"
+        },
+        {
           "path": "src/services/metaAdsInsightsSync.js",
           "role": "integration",
           "reason": "Sincronización de datos Meta"
@@ -196,11 +201,6 @@
       "targetAuthority": "AttachmentAnalysisRepository",
       "risk": "high",
       "writers": [
-        {
-          "path": "src/routes/webhook.js",
-          "role": "legacy",
-          "reason": "Clasificación inicial dentro del webhook"
-        },
         {
           "path": "src/services/cvIntelligence.js",
           "role": "boundary",

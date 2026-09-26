@@ -63,7 +63,8 @@ test('inbox persiste solo campos Prisma válidos y conserva trazabilidad e ident
     timestamp: undefined,
     type: 'text',
     text: { body: 'Hola' },
-    document: undefined
+    document: undefined,
+    interactive: undefined
   });
   assert.equal(Object.hasOwn(persisted, 'phone'), false);
   assert.equal(calls.candidateUpdate.length, 1);
