@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { ConversationTurnInputSchema } from '../contracts/ConversationTurnInputSchema.js';
+import { mapLegacyIntentToCanonical } from '../engine/mappers/intentMapper.js';
 import { isRecruitmentWhatsappPayload } from '../../services/whatsapp.js';
 import { isSupervisorPhone } from '../../services/adminSupervisor.js';
 
@@ -186,13 +187,13 @@ function buildInterpretationFields(fields = {}) {
   return normalized;
 }
 
-function buildInterpretation(interpretation = {}) {
+function buildInterpretation(interpretation = {}, rawText = '') {
   const source = asRecord(interpretation);
   const scheduling = asRecord(source.scheduling);
   const consent = asRecord(source.consent);
   const slot = asRecord(scheduling.slot);
   return {
-    intent: source.intent ?? null,
+    intent: mapLegacyIntentToCanonical(source.intent ?? null, rawText),
     fields: buildInterpretationFields(source.fields),
     scheduling: {
       slot: Object.keys(slot).length
@@ -331,6 +332,12 @@ export async function buildValidatedConversationTurnInput(source = {}) {
   const candidate = asRecord(request.candidate);
   const pending = asRecord(request.pending);
   const execution = asRecord(request.execution);
+  const rawText = String(
+    turn.rawText
+    ?? request.rawText
+    ?? extractMetaRawText(rawMessage)
+    ?? ''
+  );
 
   const input = {
     turn: {
@@ -339,7 +346,7 @@ export async function buildValidatedConversationTurnInput(source = {}) {
         turn.receivedAt ?? rawMessage.timestamp,
         new Date().toISOString()
       ),
-      rawText: String(turn.rawText ?? request.rawText ?? extractMetaRawText(rawMessage) ?? '')
+      rawText
     },
     candidate: {
       id: candidate.id ?? null,
@@ -357,7 +364,7 @@ export async function buildValidatedConversationTurnInput(source = {}) {
     },
     vacancy: buildVacancySnapshot(request.vacancy),
     attachments: buildAttachments(request.attachments, rawMessage),
-    interpretation: buildInterpretation(request.interpretation)
+    interpretation: buildInterpretation(request.interpretation, rawText)
   };
 
   const validation = await ConversationTurnInputSchema.safeParseAsync(input);
