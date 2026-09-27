@@ -1,10 +1,14 @@
 // routes/locations.js — CRUD de Sucursales, Operaciones y asignación territorial de usuarios
 import express from 'express';
+import { randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import {
   canCreateRecruiterUsers,
   canManageUserModulePermissions,
   encodeUserAccessCities,
   encodeUserAccessSelection,
+  generateRecoveryCode,
+  normalizeAppUserEmail,
   normalizeUserAccessScope
 } from '../services/appUsers.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
@@ -28,6 +32,8 @@ function sessionAuth(req, res, next) {
   req.username = req.session?.username || null;
   req.userSource = req.session?.userSource || null;
   req.userAccessScope = req.session?.userAccessScope || 'ALL';
+  req.userAccessCity = req.session?.userAccessCity || null;
+  req.userAccessVacancyId = req.session?.userAccessVacancyId || null;
   if (!['dev', 'admin'].includes(role)) return res.redirect('/admin');
   return next();
 }
@@ -278,6 +284,18 @@ function usersRedirect(type, message, username = null) {
   return `/admin/users?${params.toString()}`;
 }
 
+function supervisorInheritedScope(req = {}) {
+  const accessScope = normalizeUserAccessScope(req.userAccessScope || req.session?.userAccessScope || 'ALL');
+  if (accessScope === 'ALL') {
+    return { accessScope: 'ALL', scopeCity: null, scopeVacancyId: null };
+  }
+  const scopeCity = req.userAccessCity || req.session?.userAccessCity || null;
+  const scopeVacancyId = accessScope === 'VACANCY'
+    ? req.userAccessVacancyId || req.session?.userAccessVacancyId || null
+    : null;
+  return { accessScope, scopeCity, scopeVacancyId };
+}
+
 function unifiedBranchCompatibilityData() {
   // Campos legacy: mientras existan físicamente, todas las sucursales pertenecen a
   // ambos módulos. Ya no constituyen una decisión ni una autoridad de negocio.
@@ -423,10 +441,104 @@ export function locationsRouter(prisma) {
   router.get('/users', async (req, res) => {
     if (req.userRole === 'dev') return res.redirect('/admin/users');
     if (!canManageOperationalPermissions(req)) return res.status(403).send('No tienes acceso para administrar permisos operativos.');
+    const { successMsg, errorMsg } = readFlash(req, res);
     return res.render('supervisor-users', {
       role: req.userRole,
-      canAccessDispatch: Boolean(req.session?.canAccessDispatch)
+      canAccessDispatch: Boolean(req.session?.canAccessDispatch),
+      successMsg,
+      errorMsg,
+      revealedRecoveryCode: normalize(req.query?.recoveryCode),
+      createdUserId: normalize(req.query?.createdUserId)
     });
+  });
+
+  router.post('/users/create', express.urlencoded({ extended: true }), async (req, res) => {
+    if (req.userRole === 'dev') return res.redirect('/admin/users');
+    if (!canManageOperationalPermissions(req)) return res.status(403).send('No tienes acceso para crear usuarios.');
+
+    const displayName = normalize(req.body.displayName);
+    const email = normalizeAppUserEmail(req.body.email);
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const recoveryPhone = normalize(req.body.recoveryPhone);
+
+    if (!displayName || displayName.length < 3) {
+      flash(res, 'error', 'Debes ingresar el nombre completo del usuario.');
+      return res.redirect('/admin/locations/users');
+    }
+    if (!email) {
+      flash(res, 'error', 'Debes ingresar un correo electrónico válido.');
+      return res.redirect('/admin/locations/users');
+    }
+    if (password.length < 6) {
+      flash(res, 'error', 'La contraseña inicial debe tener al menos 6 caracteres.');
+      return res.redirect('/admin/locations/users');
+    }
+
+    const existingEmail = await prisma.appUser.findUnique({
+      where: { email },
+      select: { id: true }
+    });
+    if (existingEmail) {
+      flash(res, 'error', 'Ese correo ya está asociado a otro usuario.');
+      return res.redirect('/admin/locations/users');
+    }
+
+    const username = `user-${randomUUID()}`;
+    const passwordHash = await bcrypt.hash(password, 10);
+    const recoveryCode = generateRecoveryCode();
+    const recoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
+    const identityMigratedAt = new Date();
+    const inheritedScope = supervisorInheritedScope(req);
+    let createdUser = null;
+
+    try {
+      await withOptionalTransaction(prisma, async (db) => {
+        createdUser = await db.appUser.create({
+          data: {
+            username,
+            passwordHash,
+            displayName,
+            email,
+            identityMigratedAt,
+            recoveryCodeHash,
+            role: 'ADMIN',
+            ...inheritedScope,
+            canAccessDispatch: false,
+            canAccessAttendance: false,
+            canAccessStatistics: false,
+            canAccessMetaAds: false,
+            canAccessCvAnalysis: false,
+            recoveryPhone,
+            recoveryEmail: email,
+            createdByUsername: req.username || req.session?.username || 'supervisor',
+            lastPasswordResetAt: identityMigratedAt,
+            isActive: true
+          }
+        });
+
+        await persistUnifiedOperationalAccess(db, req, createdUser.id, {
+          role: 'CONSULTA',
+          permissions: {},
+          delegablePermissions: [],
+          moduleAccess: { dispatch: false, attendance: false, time: false }
+        });
+      });
+    } catch (error) {
+      if (error?.code === 'P2002') {
+        flash(res, 'error', 'Ese correo ya está asociado a otro usuario.');
+      } else {
+        console.error('[supervisor-user-create]', error);
+        flash(res, 'error', 'No fue posible crear el usuario.');
+      }
+      return res.redirect('/admin/locations/users');
+    }
+
+    flash(res, 'success', `${displayName} fue creado como usuario Consulta. Ahora puedes asignarle módulos y funciones.`);
+    const params = new URLSearchParams({
+      recoveryCode,
+      createdUserId: createdUser.id
+    });
+    return res.redirect(`/admin/locations/users?${params.toString()}`);
   });
 
   router.get('/api/cities', async (req, res) => {
