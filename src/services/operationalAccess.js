@@ -295,17 +295,21 @@ export async function getOperationalAccessForUser(prisma, userId) {
   const event = await latestConfigEvent(prisma, user.id);
   const config = normalizedConfig(event?.toValue);
   if (!config) {
+    const implicitConfig = {
+      role: OPERATIONAL_ROLE.CONSULTA,
+      grants: [],
+      denials: [],
+      delegablePermissions: []
+    };
     return {
       userId: user.id,
       username: user.username,
       displayName: user.displayName,
       isActive: user.isActive,
-      configured: false,
-      role: null,
-      grants: [],
-      denials: [],
-      delegablePermissions: [],
-      effectivePermissions: []
+      configured: true,
+      implicit: true,
+      ...implicitConfig,
+      effectivePermissions: permissionsFromConfig(implicitConfig)
     };
   }
   return {
@@ -314,6 +318,7 @@ export async function getOperationalAccessForUser(prisma, userId) {
     displayName: user.displayName,
     isActive: user.isActive,
     configured: true,
+    implicit: false,
     ...config,
     effectivePermissions: permissionsFromConfig(config),
     changedAt: event?.createdAt || null
@@ -344,6 +349,18 @@ export async function resolveOperationalAccess(prisma, source = {}) {
     return { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], grants: [], denials: [], userId: user?.id || null };
   }
   const access = await getOperationalAccessForUser(prisma, user.id);
+  if (access?.implicit) {
+    return {
+      configured: false,
+      role: null,
+      effectivePermissions: [],
+      delegablePermissions: [],
+      grants: [],
+      denials: [],
+      userId: user.id,
+      username: user.username
+    };
+  }
   return access || { configured: false, role: null, effectivePermissions: [], delegablePermissions: [], grants: [], denials: [], userId: user.id };
 }
 
@@ -422,8 +439,7 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
     next = configFromPermissionStates(role, permissionStates, previous, CAPABILITY_KEYS);
   } else {
     if (actor.userId && actor.userId === target.id) throw new Error('operational_access_self_forbidden');
-    if (!previous) throw new Error('operational_role_dev_required');
-    if (previous.role === OPERATIONAL_ROLE.SUPERVISOR) throw new Error('operational_access_supervisor_target_forbidden');
+    if (previous?.role === OPERATIONAL_ROLE.SUPERVISOR) throw new Error('operational_access_supervisor_target_forbidden');
     if (Object.prototype.hasOwnProperty.call(input, 'role')) throw new Error('operational_role_dev_required');
     if (Object.prototype.hasOwnProperty.call(input, 'delegablePermissions')) throw new Error('operational_delegation_dev_required');
 
@@ -441,7 +457,13 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
       permissionStates = permissionStatesWithModuleAccess(permissionStates, moduleAccess);
     }
 
-    next = configFromPermissionStates(previous.role, permissionStates, previous, [...editableForUpdate]);
+    const baseConfig = previous || {
+      role: OPERATIONAL_ROLE.CONSULTA,
+      grants: [],
+      denials: [],
+      delegablePermissions: []
+    };
+    next = configFromPermissionStates(baseConfig.role, permissionStates, baseConfig, [...editableForUpdate]);
   }
 
   const now = options.now || new Date();
@@ -465,6 +487,7 @@ export async function setOperationalAccess(prisma, input = {}, options = {}) {
         authority: 'operationalAccess',
         roleAssignedByDev: actorIsDev,
         delegatedBySupervisor: actorIsSupervisor && !actorIsDev,
+        initializedBySupervisor: actorIsSupervisor && !actorIsDev && !previous,
         moduleAccessSynchronized: Boolean(moduleAccess),
         modulesDelegatedBySupervisor: Boolean(moduleAccess) && actorIsSupervisor && !actorIsDev
       },
