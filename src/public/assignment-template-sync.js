@@ -2,15 +2,14 @@
   const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
   const TIME_RE = /\b([01]?\d|2[0-3]):([0-5]\d)\b(?!\s*(?:AM|PM|am|pm))/g;
   const WHATSAPP_SEND_PATH = '/admin/operaciones/whatsapp/enviar';
-  const CONFIRMATION_REPLY_TEXT = '*Confirmado?*';
+  const CONFIRMATION_REPLY_TEXT = '*Responde con CONFIRMADO*';
   const ASSIGNMENT_MESSAGE_TYPE = 'DISPATCH_ASSIGNMENT_CONFIRMATION_REQUEST';
   const ASSIGNMENT_MESSAGE_TEMPLATE = [
     'Hola *{{nombre}}*,',
     '',
     'Mañana: *{{fecha}}*',
-    'Llegar a: *{{operacion}}  - {{direccion}}*',
+    'Llegar a: *{{operacion}}  - {{direccion}}* al servicio *{{servicio}}*',
     'Hora : *{{horaInicio}} por favor.*',
-    '',
     '',
     CONFIRMATION_REPLY_TEXT
   ].join('\n');
@@ -111,6 +110,12 @@
     root.querySelectorAll?.('.dispatch-reply-preview').forEach((preview) => preview.remove());
   }
 
+  function syncAssignmentMessagePreview(root = document) {
+    const preview = root.querySelector?.('#dispatchAssignmentMessagePreview');
+    if (!preview) return;
+    preview.textContent = ASSIGNMENT_MESSAGE_TEMPLATE;
+  }
+
   function addRequestCrudActions() {
     document.querySelectorAll('.request-card').forEach((card) => {
       const edit = card.querySelector('a[href*="/asignaciones/solicitudes/"][href$="/editar"]');
@@ -138,8 +143,9 @@
     return /hola\s+\*?\{\{\s*nombre\s*\}\}\*?,/i.test(text)
       && /\bma[nñ]ana\s*:\s*\*?\{\{\s*fecha\s*\}\}\*?/i.test(text)
       && /llegar\s+a\s*:\s*\*?\{\{\s*operacion\s*\}\}/i.test(text)
+      && /al\s+servicio\s*\*?\{\{\s*servicio\s*\}\}\*?/i.test(text)
       && /hora\s*:\s*\*?\{\{\s*horaInicio\s*\}\}\s+por\s+favor/i.test(text)
-      && /\*?confirmado\?\*?/i.test(text);
+      && /responde\s+con\s+confirmado/i.test(text);
   }
 
   function shouldApplyAssignmentTemplate(value) {
@@ -151,7 +157,8 @@
       || /hora de inicio\s*:\s*\*?\{\{\s*horaInicio\s*\}\}/i.test(text)
       || /por favor responde exactamente\s*:\s*confirmado/i.test(text)
       || /te confirmamos asignaci[oó]n para/i.test(text)
-      || /por favor confirma recibido/i.test(text);
+      || /por favor confirma recibido/i.test(text)
+      || /\*?confirmado\?\*?/i.test(text);
   }
 
   function applyCanonicalAssignmentTemplate(root = document) {
@@ -172,9 +179,10 @@
     const text = String(value || '');
     if (!text.trim()) return text;
     if (isCanonicalAssignmentTemplate(text)) return text;
-    if (/\*?confirmado\?\*?/i.test(text)) return text;
+    if (/responde\s+con\s+confirmado/i.test(text)) return text;
     if (/responde\s+exactamente\s*:\s*\*?confirmado\*?/i.test(text)) return text;
     if (/por favor confirma recibido\.?/i.test(text)) return text.replace(/por favor confirma recibido\.?/gi, CONFIRMATION_REPLY_TEXT);
+    if (/\*?confirmado\?\*?/i.test(text)) return text.replace(/\*?confirmado\?\*?/gi, CONFIRMATION_REPLY_TEXT);
     return `${text.trim()}\n\n${CONFIRMATION_REPLY_TEXT}`;
   }
 
@@ -282,6 +290,7 @@
   function runLightCleanup(root = document) {
     removeDuplicatedDateFilters();
     removeAssignmentReplyPreview(root);
+    syncAssignmentMessagePreview(root);
     addRequestCrudActions();
     applyCanonicalAssignmentTemplate(root);
     applyConfirmationInstruction(root);

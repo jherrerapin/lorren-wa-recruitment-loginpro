@@ -9,6 +9,7 @@ import {
 
 export const DISPATCH_WINDOW_CHECK_MESSAGE = 'Hola. Este es el canal oficial de Despacho de LoginPro. Para poder enviarte novedades de tu programación por este WhatsApp, confirma la recepción tocando el botón.';
 export const DISPATCH_WINDOW_CHECK_BUTTON = 'CONFIRMAR CANAL';
+const ASSIGNMENT_TEMPLATE_WITH_SERVICE = 'confirmacion_de_asignacion_con_servicio';
 
 function hourLabel(value) {
   const match = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
@@ -34,20 +35,25 @@ function parameterText(value, fallback = 'Por confirmar') {
   return (text || fallback).slice(0, 1024);
 }
 
-function assignmentTemplateValues(assignment) {
+function assignmentTemplateValues(assignment, { includeService = true } = {}) {
   const request = assignment.serviceRequest || {};
-  return [
+  const common = [
     parameterText(assignment.worker?.fullName, 'Auxiliar'),
     parameterText(formatServiceDate(request.serviceDate)),
     parameterText(request.operationPointName || request.serviceName || 'Operación LoginPro'),
-    parameterText(request.address || request.operationPoint?.address),
+    parameterText(request.address || request.operationPoint?.address)
+  ];
+  if (!includeService) return [...common, parameterText(hourLabel(request.startTime))];
+  return [
+    ...common,
+    parameterText(request.serviceName || request.service?.name, 'Servicio por confirmar'),
     parameterText(hourLabel(request.startTime))
   ];
 }
 
 export function buildDispatchAssignmentMessageBody(assignment) {
-  const [name, date, operation, address, startTime] = assignmentTemplateValues(assignment);
-  return `Hola *${name}*,\n\nMañana: *${date}*\nLlegar a: *${operation}  - ${address}*\nHora : *${startTime} por favor.*\n\n\n*Confirmado?*`;
+  const [name, date, operation, address, service, startTime] = assignmentTemplateValues(assignment);
+  return `Hola *${name}*,\n\nMañana: *${date}*\nLlegar a: *${operation}  - ${address}* al servicio *${service}*\nHora : *${startTime} por favor.*\n\n*Responde con CONFIRMADO*`;
 }
 
 export function buildDispatchAssignmentInteractivePayload({ assignment, phone }) {
@@ -179,6 +185,7 @@ export function buildDispatchProgrammingFormatMenuPayload({ phone, dateChoice = 
 export function buildDispatchAssignmentTemplatePayload({ config, assignment, phone }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
   if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  const includeService = config.assignmentTemplateName === ASSIGNMENT_TEMPLATE_WITH_SERVICE;
   return {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
@@ -188,7 +195,7 @@ export function buildDispatchAssignmentTemplatePayload({ config, assignment, pho
       name: config.assignmentTemplateName,
       language: { code: config.templateLanguage },
       components: [
-        { type: 'body', parameters: assignmentTemplateValues(assignment).map((text) => ({ type: 'text', text })) },
+        { type: 'body', parameters: assignmentTemplateValues(assignment, { includeService }).map((text) => ({ type: 'text', text })) },
         {
           type: 'button', sub_type: 'quick_reply', index: '0',
           parameters: [{ type: 'payload', payload: `dispatch_confirm:${assignment.id}` }]
@@ -335,8 +342,7 @@ export async function sendDispatchAttendanceFailureDecisionMessage({
   try {
     const response = await postGraph(
       config,
-      buildDispatchAttendanceFailureDecisionPayload({ phone, failureEventId, text }),
-      axiosClient
+      buildDispatchAttendanceFailureDecisionPayload({ phone, failureEventId, text }), axiosClient
     );
     const providerMessageId = providerMessageIdFromResponse(response);
     if (!providerMessageId) {

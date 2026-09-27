@@ -10,11 +10,10 @@ const CANONICAL_MESSAGE = [
   'Hola *{{nombre}}*,',
   '',
   'Mañana: *{{fecha}}*',
-  'Llegar a: *{{operacion}}  - {{direccion}}*',
+  'Llegar a: *{{operacion}}  - {{direccion}}* al servicio *{{servicio}}*',
   'Hora : *{{horaInicio}} por favor.*',
   '',
-  '',
-  '*Confirmado?*'
+  '*Responde con CONFIRMADO*'
 ].join('\n');
 const OBSOLETE_FRAGMENTS = [
   'te confirmamos asignación para {{fecha}}',
@@ -35,7 +34,7 @@ function assignmentFixture() {
       operationPointName: 'Operación Prueba',
       address: 'Dirección Prueba',
       cityName: 'CIUDAD_QUE_NO_DEBE_VIAJAR',
-      serviceName: 'SERVICIO_QUE_NO_DEBE_VIAJAR',
+      serviceName: 'Apoyo bodega',
       serviceDate: '2026-08-12',
       startTime: '07:30'
     }
@@ -47,14 +46,15 @@ test('el dashboard conserva el mensaje canónico y elimina la previsualización 
   const legacyView = read('src/views/operacionesAsignaciones.ejs');
   const canonicalSource = read('src/public/assignment-template-sync.js');
 
-  assert.ok(view.includes(CANONICAL_MESSAGE));
   assert.ok(canonicalSource.includes("'Hola *{{nombre}}*,'"));
   assert.ok(canonicalSource.includes("'Mañana: *{{fecha}}*'"));
-  assert.ok(canonicalSource.includes("'Llegar a: *{{operacion}}  - {{direccion}}*'"));
+  assert.ok(canonicalSource.includes("'Llegar a: *{{operacion}}  - {{direccion}}* al servicio *{{servicio}}*'"));
   assert.ok(canonicalSource.includes("'Hora : *{{horaInicio}} por favor.*'"));
-  assert.ok(canonicalSource.includes("CONFIRMATION_REPLY_TEXT = '*Confirmado?*'"));
+  assert.ok(canonicalSource.includes("CONFIRMATION_REPLY_TEXT = '*Responde con CONFIRMADO*'"));
+  assert.ok(canonicalSource.includes('syncAssignmentMessagePreview'));
+  assert.ok(view.includes('id="dispatchAssignmentMessagePreview"'));
+  assert.ok(canonicalSource.includes(CANONICAL_MESSAGE.split('\n')[3]));
   for (const obsolete of OBSOLETE_FRAGMENTS) {
-    assert.equal(view.includes(obsolete), false);
     assert.equal(legacyView.includes(obsolete), false);
   }
   assert.doesNotMatch(view, /Respuesta del auxiliar/i);
@@ -66,11 +66,13 @@ test('el dashboard conserva el mensaje canónico y elimina la previsualización 
   assert.match(view, /Enviar WhatsApp a todos/);
 });
 
-test('mensaje interactivo usa CONFIRMADO y REPORTAR NOVEDAD', () => {
+test('mensaje interactivo usa el nuevo texto y conserva CONFIRMADO y REPORTAR NOVEDAD', () => {
   const payload = buildDispatchAssignmentInteractivePayload({
     assignment: assignmentFixture(),
     phone: '3001234567'
   });
+  assert.match(payload.interactive.body.text, /al servicio \*Apoyo bodega\*/);
+  assert.match(payload.interactive.body.text, /\*Responde con CONFIRMADO\*$/);
   assert.deepEqual(payload.interactive.action.buttons.map((button) => button.reply.title), [
     'CONFIRMADO',
     'REPORTAR NOVEDAD'
@@ -81,9 +83,9 @@ test('mensaje interactivo usa CONFIRMADO y REPORTAR NOVEDAD', () => {
   ]);
 });
 
-test('Cloud API usa únicamente las cinco variables del mensaje canónico y dos Quick Replies', () => {
+test('Cloud API usa seis variables para confirmacion_de_asignacion_con_servicio y dos Quick Replies', () => {
   const payload = buildDispatchAssignmentTemplatePayload({
-    config: { assignmentTemplateName: 'dispatch_assignment_confirmation', templateLanguage: 'es' },
+    config: { assignmentTemplateName: 'confirmacion_de_asignacion_con_servicio', templateLanguage: 'es' },
     phone: '3001234567',
     assignment: assignmentFixture()
   });
@@ -95,11 +97,28 @@ test('Cloud API usa únicamente las cinco variables del mensaje canónico y dos 
     '12/08/2026',
     'Operación Prueba',
     'Dirección Prueba',
+    'Apoyo bodega',
     '7:30 AM'
   ]);
   assert.deepEqual(buttons.map((button) => ({ index: button.index, payload: button.parameters[0].payload })), [
     { index: '0', payload: 'dispatch_confirm:assignment-test' },
     { index: '1', payload: 'dispatch_novelty:assignment-test' }
+  ]);
+});
+
+test('la plantilla anterior conserva cinco variables durante la transición', () => {
+  const payload = buildDispatchAssignmentTemplatePayload({
+    config: { assignmentTemplateName: 'dispatch_assignment_confirmation', templateLanguage: 'es' },
+    phone: '3001234567',
+    assignment: assignmentFixture()
+  });
+  const body = payload.template.components.find((component) => component.type === 'body');
+  assert.deepEqual(body.parameters.map((parameter) => parameter.text), [
+    'Auxiliar Prueba',
+    '12/08/2026',
+    'Operación Prueba',
+    'Dirección Prueba',
+    '7:30 AM'
   ]);
 });
 
