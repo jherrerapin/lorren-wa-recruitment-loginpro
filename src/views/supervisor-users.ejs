@@ -17,6 +17,12 @@
       --navy: #1e2d3d;
       --teal: #0d7a6b;
       --teal-soft: #f0fdfa;
+      --success-bg: #ecfdf5;
+      --success-border: #a7f3d0;
+      --success-text: #166534;
+      --error-bg: #fef2f2;
+      --error-border: #fecaca;
+      --error-text: #b91c1c;
     }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
     .navbar { min-height: 52px; background: var(--navy); display: flex; align-items: center; gap: 18px; padding: 0 24px; }
@@ -29,6 +35,16 @@
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
     .card h2 { margin: 0 0 6px; font-size: 16px; color: var(--navy); }
     .hint { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .flash { border-radius: 10px; padding: 11px 13px; font-size: 13px; line-height: 1.45; }
+    .flash-success { background: var(--success-bg); border: 1px solid var(--success-border); color: var(--success-text); }
+    .flash-error { background: var(--error-bg); border: 1px solid var(--error-border); color: var(--error-text); }
+    .recovery-code { margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 800; letter-spacing: .08em; }
+    .create-user-form { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .field { display: grid; gap: 6px; min-width: 0; }
+    .field label { font-size: 12px; font-weight: 750; color: var(--navy); }
+    .field input { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 11px; font: inherit; color: var(--text); background: #fff; }
+    .field input:focus { outline: 2px solid rgba(13,122,107,.18); border-color: var(--teal); }
+    .create-user-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .supervisor-users-list { display: grid; gap: 10px; margin-top: 14px; }
     .supervisor-user { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
     .supervisor-user > summary { cursor: pointer; padding: 13px 14px; font-weight: 750; background: var(--surface-2); }
@@ -52,6 +68,8 @@
     .empty { padding: 22px 8px; text-align: center; color: var(--muted); }
     @media (max-width: 720px) {
       .page { padding: 18px 12px 40px; }
+      .create-user-form { grid-template-columns: 1fr; }
+      .create-user-actions { grid-column: auto; }
       .supervisor-module-functions { padding-left: 8px; }
     }
   </style>
@@ -68,8 +86,42 @@
   <main class="page">
     <div class="page-header">
       <h1>Usuarios</h1>
-      <p>Administra los módulos y las funciones operativas de los usuarios Consulta. DEV conserva exclusivamente la asignación y el cambio de roles.</p>
+      <p>Administra usuarios Consulta y sus permisos operativos. DEV conserva exclusivamente la asignación y el cambio del rol Supervisor.</p>
     </div>
+
+    <% if (successMsg) { %>
+      <div class="flash flash-success"><%= successMsg %><% if (revealedRecoveryCode) { %><div class="recovery-code">Código de recuperación: <%= revealedRecoveryCode %></div><% } %></div>
+    <% } %>
+    <% if (errorMsg) { %>
+      <div class="flash flash-error"><%= errorMsg %></div>
+    <% } %>
+
+    <section class="card" data-supervisor-user-create="true">
+      <h2>Crear usuario</h2>
+      <p class="hint">El nuevo usuario se crea como Consulta, hereda tu alcance territorial y empieza sin módulos operativos activos. Después puedes asignarle únicamente los módulos y funciones que correspondan.</p>
+      <form class="create-user-form" method="post" action="/admin/locations/users/create" autocomplete="off">
+        <div class="field">
+          <label for="supervisorCreateDisplayName">Nombre completo</label>
+          <input id="supervisorCreateDisplayName" name="displayName" type="text" minlength="3" maxlength="160" required autocomplete="name" />
+        </div>
+        <div class="field">
+          <label for="supervisorCreateEmail">Correo electrónico</label>
+          <input id="supervisorCreateEmail" name="email" type="email" maxlength="254" required autocomplete="email" />
+        </div>
+        <div class="field">
+          <label for="supervisorCreatePassword">Contraseña inicial</label>
+          <input id="supervisorCreatePassword" name="password" type="password" minlength="6" required autocomplete="new-password" />
+        </div>
+        <div class="field">
+          <label for="supervisorCreateRecoveryPhone">Teléfono de recuperación <span class="hint">(opcional)</span></label>
+          <input id="supervisorCreateRecoveryPhone" name="recoveryPhone" type="tel" maxlength="40" autocomplete="tel" />
+        </div>
+        <div class="create-user-actions">
+          <button class="btn btn-primary" type="submit">Crear usuario</button>
+          <span class="hint">El código de recuperación se mostrará una sola vez después de crear la cuenta.</span>
+        </div>
+      </form>
+    </section>
 
     <section class="card" data-supervisor-users-workspace="true">
       <h2>Permisos operativos del equipo</h2>
