@@ -83,7 +83,7 @@ test('mensaje interactivo usa el nuevo texto y conserva CONFIRMADO y REPORTAR NO
   ]);
 });
 
-test('Cloud API usa seis variables para confirmacion_de_asignacion_con_servicio y dos Quick Replies', () => {
+test('Cloud API usa seis variables y adapta temporalmente los payloads al orden actual de Meta', () => {
   const payload = buildDispatchAssignmentTemplatePayload({
     config: { assignmentTemplateName: 'confirmacion_de_asignacion_con_servicio', templateLanguage: 'es' },
     phone: '3001234567',
@@ -101,8 +101,8 @@ test('Cloud API usa seis variables para confirmacion_de_asignacion_con_servicio 
     '7:30 AM'
   ]);
   assert.deepEqual(buttons.map((button) => ({ index: button.index, payload: button.parameters[0].payload })), [
-    { index: '0', payload: 'dispatch_confirm:assignment-test' },
-    { index: '1', payload: 'dispatch_novelty:assignment-test' }
+    { index: '1', payload: 'dispatch_confirm:assignment-test' },
+    { index: '0', payload: 'dispatch_novelty:assignment-test' }
   ]);
 });
 
