@@ -110,6 +110,12 @@
     root.querySelectorAll?.('.dispatch-reply-preview').forEach((preview) => preview.remove());
   }
 
+  function syncAssignmentMessagePreview(root = document) {
+    const preview = root.querySelector?.('#dispatchAssignmentMessagePreview');
+    if (!preview) return;
+    preview.textContent = ASSIGNMENT_MESSAGE_TEMPLATE;
+  }
+
   function addRequestCrudActions() {
     document.querySelectorAll('.request-card').forEach((card) => {
       const edit = card.querySelector('a[href*="/asignaciones/solicitudes/"][href$="/editar"]');
@@ -284,6 +290,7 @@
   function runLightCleanup(root = document) {
     removeDuplicatedDateFilters();
     removeAssignmentReplyPreview(root);
+    syncAssignmentMessagePreview(root);
     addRequestCrudActions();
     applyCanonicalAssignmentTemplate(root);
     applyConfirmationInstruction(root);
