@@ -41,13 +41,14 @@ function assignmentTemplateValues(assignment) {
     parameterText(formatServiceDate(request.serviceDate)),
     parameterText(request.operationPointName || request.serviceName || 'Operación LoginPro'),
     parameterText(request.address || request.operationPoint?.address),
+    parameterText(request.serviceName || request.service?.name, 'Servicio por confirmar'),
     parameterText(hourLabel(request.startTime))
   ];
 }
 
 export function buildDispatchAssignmentMessageBody(assignment) {
-  const [name, date, operation, address, startTime] = assignmentTemplateValues(assignment);
-  return `Hola *${name}*,\n\nMañana: *${date}*\nLlegar a: *${operation}  - ${address}*\nHora : *${startTime} por favor.*\n\n\n*Confirmado?*`;
+  const [name, date, operation, address, service, startTime] = assignmentTemplateValues(assignment);
+  return `Hola *${name}*,\n\nMañana: *${date}*\nLlegar a: *${operation}  - ${address}* al servicio *${service}*\nHora : *${startTime} por favor.*\n\n*Responde con CONFIRMADO*`;
 }
 
 export function buildDispatchAssignmentInteractivePayload({ assignment, phone }) {
