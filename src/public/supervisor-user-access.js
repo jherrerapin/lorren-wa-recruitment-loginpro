@@ -18,6 +18,7 @@
     if (!response.ok || payload.ok !== true) {
       const error = new Error(payload.error || 'operational_access_failed');
       error.code = payload.error || 'operational_access_failed';
+      error.detail = payload.message || null;
       throw error;
     }
     return payload;
@@ -253,18 +254,166 @@
     });
   }
 
+  function scopeSummary(user, payload) {
+    const scope = user.territorialScope || {};
+    if (scope.accessScope === 'ALL') return 'Todas las sucursales';
+    const cities = Array.isArray(scope.cities) ? scope.cities : [];
+    if (scope.accessScope === 'VACANCY') {
+      return cities.length ? `Vacantes de ${cities.join(', ')}` : 'Alcance por vacantes';
+    }
+    return cities.length ? cities.join(', ') : 'Sin sucursales';
+  }
+
+  function branchScopeControl(user, payload, onSaved) {
+    const fieldset = document.createElement('fieldset');
+    fieldset.className = 'supervisor-module';
+    fieldset.dataset.supervisorTerritorialScope = 'true';
+
+    const header = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = 'Sucursales permitidas';
+    const description = document.createElement('small');
+    description.className = 'hint';
+    description.textContent = 'Este alcance es único para el usuario y aplica a todos los módulos que trabajen por sucursal.';
+    header.append(title, document.createElement('br'), description);
+    fieldset.append(header);
+
+    const scopeOptions = payload.scopeOptions || {};
+    const allowedCities = Array.isArray(scopeOptions.allowedCities) ? scopeOptions.allowedCities : [];
+    const actorScope = scopeOptions.actorScope || 'VACANCY';
+    const current = user.territorialScope || { accessScope: 'ALL', cities: [] };
+    const currentCities = new Set(Array.isArray(current.cities) ? current.cities : []);
+
+    if (actorScope === 'VACANCY') {
+      const note = document.createElement('div');
+      note.className = 'hint';
+      note.textContent = 'Tu propio perfil está limitado por vacantes. No puedes ampliar otro usuario a un alcance completo por sucursal.';
+      fieldset.append(note);
+      return fieldset;
+    }
+
+    const options = document.createElement('div');
+    options.className = 'supervisor-module-functions';
+    options.style.paddingLeft = '0';
+    options.style.marginTop = '8px';
+
+    let allInput = null;
+    if (scopeOptions.canAssignAll === true) {
+      const allLabel = document.createElement('label');
+      allLabel.className = 'supervisor-function';
+      allInput = document.createElement('input');
+      allInput.type = 'checkbox';
+      allInput.checked = current.accessScope === 'ALL';
+      allInput.dataset.supervisorAllBranches = 'true';
+      const allText = document.createElement('span');
+      const allStrong = document.createElement('strong');
+      allStrong.textContent = 'Todas las sucursales';
+      const allHint = document.createElement('small');
+      allHint.textContent = 'Incluye también las sucursales que se creen más adelante.';
+      allText.append(allStrong, allHint);
+      allLabel.append(allInput, allText);
+      options.append(allLabel);
+    }
+
+    for (const city of allowedCities) {
+      const label = document.createElement('label');
+      label.className = 'supervisor-function';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = city;
+      input.dataset.supervisorBranch = 'true';
+      input.checked = current.accessScope === 'ALL' || currentCities.has(city);
+      const text = document.createElement('span');
+      const strong = document.createElement('strong');
+      strong.textContent = city;
+      text.append(strong);
+      label.append(input, text);
+      options.append(label);
+    }
+
+    fieldset.append(options);
+
+    if (current.accessScope === 'VACANCY') {
+      const migrationHint = document.createElement('small');
+      migrationHint.className = 'hint';
+      migrationHint.textContent = 'Este usuario actualmente está limitado por vacantes. Al guardar sucursales, su alcance pasará a ser por sucursal.';
+      fieldset.append(migrationHint);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'supervisor-actions';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'btn';
+    save.textContent = 'Guardar sucursales';
+    const status = document.createElement('small');
+    status.className = 'hint';
+    actions.append(save, status);
+    fieldset.append(actions);
+
+    const branchInputs = [...fieldset.querySelectorAll('input[data-supervisor-branch]')];
+    const syncAll = () => {
+      const useAll = allInput?.checked === true;
+      branchInputs.forEach((input) => {
+        input.disabled = useAll;
+        if (useAll) input.checked = true;
+      });
+    };
+    allInput?.addEventListener('change', syncAll);
+    syncAll();
+
+    save.addEventListener('click', async () => {
+      const assignAll = allInput?.checked === true;
+      const selectedCities = branchInputs.filter((input) => input.checked).map((input) => input.value);
+      if (!assignAll && !selectedCities.length) {
+        status.className = 'hint status-error';
+        status.textContent = 'Selecciona al menos una sucursal.';
+        return;
+      }
+
+      save.disabled = true;
+      status.className = 'hint';
+      status.textContent = 'Guardando sucursales…';
+      try {
+        const result = await request(`${API_BASE}/${encodeURIComponent(user.userId)}/territorial-scope`, {
+          method: 'POST',
+          body: JSON.stringify({
+            accessScope: assignAll ? 'ALL' : 'CITY',
+            scopeCities: assignAll ? [] : selectedCities
+          })
+        });
+        user.territorialScope = result.territorialScope || user.territorialScope;
+        status.className = 'hint status-success';
+        status.textContent = 'Sucursales actualizadas.';
+        onSaved?.();
+      } catch (error) {
+        status.className = 'hint status-error';
+        status.textContent = error.detail || 'No fue posible guardar las sucursales.';
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    return fieldset;
+  }
+
   function userEditor(user, payload) {
     const details = document.createElement('details');
     details.className = 'supervisor-user';
 
     const summary = document.createElement('summary');
-    summary.textContent = `${user.displayName || user.username} · Consulta`;
+    const refreshSummary = () => {
+      summary.textContent = `${user.displayName || user.username} · Consulta · ${scopeSummary(user, payload)}`;
+    };
+    refreshSummary();
     details.append(summary);
 
     const body = document.createElement('div');
     body.className = 'supervisor-user-body';
     const moduleAccess = normalizeModuleAccess(user.moduleAccess || {});
     const roots = rootDefinitions(payload.capabilities, payload.editableModules);
+
+    body.append(branchScopeControl(user, payload, refreshSummary));
 
     for (const root of roots) {
       const functions = functionDefinitions(payload.capabilities, payload.editableCapabilities, root.moduleAccessKey);
