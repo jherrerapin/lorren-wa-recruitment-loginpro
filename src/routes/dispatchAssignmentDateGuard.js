@@ -78,6 +78,33 @@ export function addDateToAssignmentRedirect(target, dateKey) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+export function addCityFilterToAssignmentRedirect(target, sourceUrl) {
+  if (typeof target !== 'string' || !target.startsWith(ASSIGNMENT_PATH) || !sourceUrl) return target;
+
+  let source;
+  try {
+    source = new URL(sourceUrl, 'https://lorren.invalid');
+  } catch {
+    return target;
+  }
+  if (source.pathname !== ASSIGNMENT_PATH) return target;
+
+  const sourceQuery = {
+    cityFilter: source.searchParams.get('cityFilter'),
+    operationalCityIds: source.searchParams.getAll('operationalCityIds'),
+    operationalCityId: source.searchParams.get('operationalCityId')
+  };
+  if (!hasExplicitCitySelection(sourceQuery)) return target;
+
+  const cityIds = requestedOperationalCityIds(sourceQuery);
+  const url = new URL(target, 'https://lorren.invalid');
+  url.searchParams.set('cityFilter', '1');
+  url.searchParams.delete('operationalCityIds');
+  url.searchParams.delete('operationalCityId');
+  cityIds.forEach((cityId) => url.searchParams.append('operationalCityIds', cityId));
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 export async function loadAssignmentDateContext(prisma, selectedDate, requestedServiceRequestId = null, cityScope = null) {
   if (!selectedDate) return null;
 
@@ -279,12 +306,17 @@ async function installAssignmentRedirectDate(prisma, req, res, cityScope) {
   const dateKey = dispatchServiceDateKey(serviceRequest.serviceDate);
   if (!dateKey) return true;
 
+  const sourceUrl = normalizeString(req.get?.('referer'));
+  const decorateRedirect = (target) => addCityFilterToAssignmentRedirect(
+    addDateToAssignmentRedirect(target, dateKey),
+    sourceUrl
+  );
   const originalRedirect = res.redirect.bind(res);
   res.redirect = (statusOrUrl, maybeUrl) => {
     if (typeof statusOrUrl === 'number') {
-      return originalRedirect(statusOrUrl, addDateToAssignmentRedirect(maybeUrl, dateKey));
+      return originalRedirect(statusOrUrl, decorateRedirect(maybeUrl));
     }
-    return originalRedirect(addDateToAssignmentRedirect(statusOrUrl, dateKey));
+    return originalRedirect(decorateRedirect(statusOrUrl));
   };
   return true;
 }
