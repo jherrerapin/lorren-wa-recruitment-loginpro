@@ -66,6 +66,7 @@ test('scheduleReminderForCandidate encola seguimiento del proceso a dos horas', 
     reminderState: 'NONE',
     reminderScheduledFor: null,
     status: 'NUEVO',
+    dataConsentStatus: 'ACCEPTED',
     currentStep: 'COLLECTING_DATA',
     botPaused: false,
     lastInboundAt: new Date('2026-04-23T09:30:00.000Z')
@@ -77,7 +78,7 @@ test('scheduleReminderForCandidate encola seguimiento del proceso a dos horas', 
       findUnique: async () => candidate,
       update: async ({ data }) => { updates.push(data); return { ...candidate, ...data }; }
     },
-    jobQueue: {
+    jobQueueItem: {
       create: async ({ data }) => { jobs.push(data); return data; }
     }
   };
@@ -85,7 +86,7 @@ test('scheduleReminderForCandidate encola seguimiento del proceso a dos horas', 
   await scheduleReminderForCandidate(prisma, candidate.id, now);
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].type, 'candidate_process_reminder');
-  assert.equal(new Date(jobs[0].runAt).toISOString(), '2026-04-23T12:00:00.000Z');
+  assert.equal(new Date(jobs[0].scheduledAt).toISOString(), '2026-04-23T12:00:00.000Z');
   assert.equal(jobs[0].dedupeKey, 'candidate:cand-queue-1:process-reminder:2026-04-23T12:00:00.000Z');
   assert.equal(updates[0].reminderState, 'SCHEDULED');
   delete process.env.FF_POSTGRES_JOB_QUEUE;
@@ -136,6 +137,7 @@ test('runReminderDispatcher dirigido por candidateId procesa solo el candidato e
         id: 'cand-target',
         phone: '573111111111',
         status: 'NUEVO',
+        dataConsentStatus: 'ACCEPTED',
         currentStep: 'ASK_CV',
         reminderState: 'SCHEDULED',
         reminderScheduledFor: new Date('2026-04-23T20:00:00.000Z'),
@@ -145,6 +147,7 @@ test('runReminderDispatcher dirigido por candidateId procesa solo el candidato e
         id: 'cand-other',
         phone: '573222222222',
         status: 'NUEVO',
+        dataConsentStatus: 'ACCEPTED',
         currentStep: 'ASK_CV',
         reminderState: 'SCHEDULED',
         reminderScheduledFor: new Date('2026-04-23T20:00:00.000Z'),

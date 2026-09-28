@@ -7,7 +7,7 @@ import {
   normalizeCandidateFields,
   parseNaturalData
 } from '../src/services/candidateData.js';
-import { getCandidateReadiness } from '../src/services/readinessGuard.js';
+import { getCandidateReadiness } from '../src/services/candidateReadiness.js';
 
 test('normaliza C.C y cédula aisladas como tipo CC junto al número', () => {
   const ccParsed = parseNaturalData(`Mauricio Alejandro Cruz Barbosa
