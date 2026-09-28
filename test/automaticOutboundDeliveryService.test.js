@@ -237,10 +237,10 @@ test('el alcance fuerte se deriva del propósito persistido, no de un lock en me
   assert.match(scoped.key, /attachment_other_doc/);
 });
 
-test('webhook delega el transporte automático a la autoridad de delivery', () => {
-  const source = fs.readFileSync(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
+test('la envoltura imperativa delega el transporte automático a la autoridad de delivery', () => {
+  const source = fs.readFileSync(new URL('../src/core/shell/executeConversationDecision.js', import.meta.url), 'utf8');
   assert.match(source, /deliverAutomaticOutboundText/);
-  assert.match(source, /await\s+deliverAutomaticOutboundText\(prisma/);
+  assert.match(source, /await\s+deliverAutomaticOutboundText\(/);
 });
 
 test('delivery automático delega lastOutboundAt y no escribe Candidate directamente', () => {

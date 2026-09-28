@@ -10,7 +10,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate deploy",
     "test": "node --test",
-    "start:worker": "node src/workers/jobWorker.js"
+    "start:worker": "node src/workers/jobWorker.js",
+    "start:reminders": "node src/workers/cronReminders.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.866.0",

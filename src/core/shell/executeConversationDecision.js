@@ -1,4 +1,4 @@
-import { ConversationStep } from '@prisma/client';
+import { ConversationStep, MessageType } from '@prisma/client';
 import { ConversationDecisionSchema } from '../contracts/ConversationDecisionSchema.js';
 import {
   CONSENT_REQUEST_TEXT,
@@ -12,12 +12,39 @@ import {
   createScheduledInterviewBooking
 } from '../../services/interviewBookingStateService.js';
 import { listOfferableSlots } from '../../services/interviewScheduler.js';
+import { deliverAutomaticOutboundText } from '../../services/automaticOutboundDeliveryService.js';
 
 const CONSENT_FIELD = 'dataConsentStatus';
 const DEFAULT_SCHEDULING_TIMEZONE = 'America/Bogota';
 const DEFAULT_SLOT_SUGGESTION_LIMIT = 3;
 const BOOKING_CONFIRMED_REPLY =
   '¡Tu entrevista ha sido agendada con éxito! En breve recibirás los detalles.';
+
+export class ConversationDecisionExecutionError extends Error {
+  constructor(phase, cause) {
+    const message = cause instanceof Error ? cause.message : String(cause);
+    super(`Conversation decision ${phase} phase failed: ${message}`, { cause });
+    this.name = 'ConversationDecisionExecutionError';
+    this.phase = phase;
+  }
+}
+
+function asRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+function normalizeExecutionArguments(inputOrOptions, decision, dependencies) {
+  if (decision !== undefined || inputOrOptions?.turn) {
+    return {
+      ...asRecord(dependencies),
+      input: inputOrOptions,
+      decision
+    };
+  }
+  return asRecord(inputOrOptions);
+}
 
 const ALLOWED_DIRECT_CANDIDATE_FIELDS = new Set([
   'fullName',
@@ -267,6 +294,96 @@ async function resolveExecutedDecision(normalizedDecision, executionResult) {
   return validation.data;
 }
 
+function buildGenerationArguments(input, decision) {
+  const fieldsToPersist = asRecord(decision?.mutations?.fieldsToPersist);
+  const publicFieldsToPersist = Object.fromEntries(
+    Object.entries(fieldsToPersist).filter(([field]) => field !== 'gender')
+  );
+  const pendingFields = Array.isArray(input?.pending?.fields) ? input.pending.fields : [];
+  const remainingPendingFields = pendingFields.filter((field) => (
+    field !== 'gender'
+    && !Object.prototype.hasOwnProperty.call(fieldsToPersist, field)
+  ));
+
+  return {
+    parameters: Object.freeze({
+      fieldsToPersist: Object.freeze(publicFieldsToPersist),
+      nextStep: decision?.mutations?.nextStep ?? null,
+      pendingFields: Object.freeze([...remainingPendingFields]),
+      ...asRecord(decision?.reply?.parameters)
+    }),
+    context: Object.freeze({
+      turn: input?.turn,
+      candidate: input?.candidate,
+      history: input?.history,
+      pending: input?.pending
+    })
+  };
+}
+
+async function resolveOutboundText(input, decision, llmService) {
+  const reply = decision?.reply;
+  if (!reply) return { text: null, status: 'skipped' };
+  if (typeof reply.text === 'string' && reply.text.trim()) {
+    return { text: reply.text, status: 'provided' };
+  }
+  if (typeof reply.directive !== 'string' || !reply.directive.trim()) {
+    return { text: null, status: 'skipped' };
+  }
+  if (typeof llmService?.generateReply !== 'function') {
+    throw new Error('conversation_executor_llm_service_required');
+  }
+  const { parameters, context } = buildGenerationArguments(input, decision);
+  const text = await llmService.generateReply(reply.directive.trim(), parameters, context);
+  return {
+    text: requireNonEmptyString(text, 'generated_reply'),
+    status: 'generated'
+  };
+}
+
+async function deliverResolvedReply({
+  prisma,
+  input,
+  decision,
+  text,
+  whatsappClient,
+  deliveryAdapters = {}
+}) {
+  if (!text || typeof whatsappClient?.sendMessage !== 'function') return null;
+
+  const candidateId = candidateIdFromInput(input);
+  const phone = requireNonEmptyString(input?.candidate?.facts?.phone, 'candidate_phone');
+  const turnId = requireNonEmptyString(input?.turn?.id, 'turn_id');
+  const interactiveOptions = Array.isArray(decision?.reply?.interactiveOptions)
+    ? decision.reply.interactiveOptions
+    : [];
+  const intent = typeof input?.interpretation?.intent === 'string'
+    ? input.interpretation.intent.trim() || null
+    : null;
+  const schedulingAction = typeof decision?.scheduling?.action === 'string'
+    ? decision.scheduling.action.trim() || null
+    : null;
+
+  return deliverAutomaticOutboundText(prisma, {
+    candidateId,
+    to: phone,
+    body: text,
+    messageType: interactiveOptions.length ? MessageType.INTERACTIVE : MessageType.TEXT,
+    rawPayload: {
+      source: 'FUNCTIONAL_CORE',
+      turnId,
+      intent,
+      schedulingAction,
+      ...(decision?.reply?.directive ? { directive: decision.reply.directive } : {}),
+      ...(interactiveOptions.length ? { interactiveOptions } : {})
+    },
+    idempotencyKey: `conversation-turn:${candidateId}:${turnId}`
+  }, {
+    ...asRecord(deliveryAdapters),
+    sendText: (to, body) => whatsappClient.sendMessage(to, body, interactiveOptions)
+  });
+}
+
 /**
  * Imperative-shell executor for a validated ConversationDecision.
  *
@@ -279,13 +396,21 @@ async function resolveExecutedDecision(normalizedDecision, executionResult) {
  * execution may supply a resolved reply for slot suggestions or a confirmed
  * reservation; this executor does not create a second delivery authority.
  */
-export async function executeConversationDecision({
-  prisma,
-  input,
-  decision,
-  consentContext = {},
-  schedulingContext = {}
-} = {}) {
+export async function executeConversationDecision(
+  inputOrOptions = {},
+  decisionArgument,
+  dependencyArgument = {}
+) {
+  const {
+    prisma,
+    input,
+    decision,
+    consentContext = {},
+    schedulingContext = {},
+    llmService = null,
+    whatsappClient = null,
+    deliveryAdapters = {}
+  } = normalizeExecutionArguments(inputOrOptions, decisionArgument, dependencyArgument);
   if (!prisma?.candidate) throw new Error('conversation_executor_prisma_required');
 
   const validation = await ConversationDecisionSchema.safeParseAsync(decision);
@@ -298,9 +423,34 @@ export async function executeConversationDecision({
 
   const normalizedDecision = validation.data;
   const candidateId = candidateIdFromInput(input);
+  const execution = asRecord(input?.execution);
+  const dryRun = execution.dryRun === true;
+  const mayPersistCandidate = !dryRun && execution.mayPersistCandidate !== false;
+  const mayReply = execution.mayReply !== false;
+  const maySendOutbound = !dryRun && execution.maySendOutbound !== false;
   const { direct, consentStatus } = splitMutationFields(
     normalizedDecision.mutations.fieldsToPersist
   );
+  if (normalizedDecision.mutations.nextStep) {
+    direct.currentStep = normalizedDecision.mutations.nextStep;
+  }
+  if (normalizedDecision.mutations.nextStage) {
+    direct.status = normalizedDecision.mutations.nextStage;
+  }
+
+  if (dryRun) {
+    return {
+      candidate: null,
+      consent: null,
+      scheduling: null,
+      decision: normalizedDecision,
+      reply: normalizedDecision.reply,
+      dryRun: true,
+      persistence: { status: 'skipped' },
+      generation: { status: 'skipped' },
+      delivery: { status: 'skipped' }
+    };
+  }
 
   const execute = async (tx) => {
     const result = {
@@ -309,14 +459,34 @@ export async function executeConversationDecision({
       scheduling: null
     };
 
-    if (Object.keys(direct).length) {
+    if (typeof tx?.message?.createMany === 'function') {
+      await tx.message.createMany({
+        data: [{
+          candidateId,
+          waMessageId: requireNonEmptyString(input?.turn?.id, 'turn_id'),
+          direction: 'INBOUND',
+          messageType: input?.turn?.rawText === '[SYSTEM_EVENT]'
+            ? MessageType.UNKNOWN
+            : MessageType.TEXT,
+          body: input?.turn?.rawText ?? '',
+          rawPayload: {
+            source: 'FUNCTIONAL_CORE',
+            turnId: input?.turn?.id
+          },
+          createdAt: optionalDate(input?.turn?.receivedAt, 'turn_received_at') || new Date()
+        }],
+        skipDuplicates: true
+      });
+    }
+
+    if (mayPersistCandidate && Object.keys(direct).length) {
       result.candidate = await tx.candidate.update({
         where: { id: candidateId },
         data: direct
       });
     }
 
-    if (consentStatus) {
+    if (mayPersistCandidate && consentStatus) {
       result.consent = await executeConsentMutation(tx, {
         candidateId,
         status: consentStatus,
@@ -327,13 +497,15 @@ export async function executeConversationDecision({
       }
     }
 
-    result.scheduling = await executeSchedulingMutation(tx, {
-      input,
-      scheduling: normalizedDecision.scheduling,
-      schedulingContext
-    });
+    if (mayPersistCandidate) {
+      result.scheduling = await executeSchedulingMutation(tx, {
+        input,
+        scheduling: normalizedDecision.scheduling,
+        schedulingContext
+      });
+    }
 
-    if (normalizedDecision.transitions.endConversation) {
+    if (mayPersistCandidate && normalizedDecision.transitions.endConversation) {
       result.candidate = await tx.candidate.update({
         where: { id: candidateId },
         data: {
@@ -342,27 +514,66 @@ export async function executeConversationDecision({
           reminderState: 'SKIPPED'
         }
       });
-    } else if (!result.candidate) {
+    } else if (mayPersistCandidate && !result.candidate) {
       result.candidate = await tx.candidate.findUnique({ where: { id: candidateId } });
     }
 
     return result;
   };
 
-  const executionResult = typeof prisma.$transaction === 'function'
-    ? await prisma.$transaction(execute)
-    : await execute(prisma);
+  let executionResult;
+  try {
+    executionResult = typeof prisma.$transaction === 'function'
+      ? await prisma.$transaction(execute)
+      : await execute(prisma);
+  } catch (error) {
+    throw new ConversationDecisionExecutionError('persistence', error);
+  }
 
   const resolvedDecision = await resolveExecutedDecision(
     normalizedDecision,
     executionResult
   );
 
-  return {
+  const result = {
     ...executionResult,
     decision: resolvedDecision,
-    reply: resolvedDecision.reply
+    reply: resolvedDecision.reply,
+    dryRun: false,
+    persistence: { status: 'applied' },
+    generation: { status: 'skipped' },
+    delivery: { status: 'skipped' }
   };
+
+  if (!mayReply || !resolvedDecision.reply) return result;
+
+  let outbound;
+  try {
+    outbound = await resolveOutboundText(input, resolvedDecision, llmService);
+    result.generation = { status: outbound.status };
+  } catch (error) {
+    throw new ConversationDecisionExecutionError('generation', error);
+  }
+
+  if (!outbound.text || !maySendOutbound || !whatsappClient) return result;
+
+  try {
+    const delivery = await deliverResolvedReply({
+      prisma,
+      input,
+      decision: resolvedDecision,
+      text: outbound.text,
+      whatsappClient,
+      deliveryAdapters
+    });
+    result.delivery = {
+      status: delivery?.suppressed ? 'suppressed' : 'sent'
+    };
+  } catch (error) {
+    throw new ConversationDecisionExecutionError('delivery', error);
+  }
+
+  return result;
 }
 
 export default executeConversationDecision;
