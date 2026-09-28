@@ -4,24 +4,21 @@ import fs from 'node:fs';
 
 const source = fs.readFileSync('src/routes/admin.js', 'utf8');
 
-function between(content, start, end) {
+function routeBlock(content, start) {
   const startIndex = content.indexOf(start);
-  assert.notEqual(startIndex, -1, `No se encontró el marcador inicial: ${start}`);
-  const endIndex = content.indexOf(end, startIndex + start.length);
-  assert.notEqual(endIndex, -1, `No se encontró el marcador final: ${end}`);
-  return content.slice(startIndex, endIndex);
+  assert.notEqual(startIndex, -1, `No se encontró la ruta: ${start}`);
+  const nextRouteIndex = content.indexOf('\n  router.', startIndex + start.length);
+  return content.slice(startIndex, nextRouteIndex === -1 ? content.length : nextRouteIndex);
 }
 
-const pauseHandler = between(
+const pauseHandler = routeBlock(
   source,
-  "router.post('/candidates/:id/bot-pause'",
-  "router.post('/candidates/:id/bot-resume'"
+  "router.post('/candidates/:id/bot-pause'"
 );
 
-const resumeHandler = between(
+const resumeHandler = routeBlock(
   source,
-  "router.post('/candidates/:id/bot-resume'",
-  '// ── CV: descargar'
+  "router.post('/candidates/:id/bot-resume'"
 );
 
 test('admin importa los dos casos de uso de CandidateStateService', () => {
