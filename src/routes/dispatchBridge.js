@@ -1,6 +1,7 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { dispatchAttendanceAdminRouter } from './dispatchAttendanceAdmin.js';
+import { attendanceFilteredExportRouter } from './attendanceFilteredExport.js';
 import { dispatchAttendancePointConfigRouter } from './dispatchAttendancePointConfig.js';
 import { dispatchWorkerPortalActivationAdminRouter } from './dispatchWorkerPortalActivationAdmin.js';
 import { dispatchBridgeRouter as dispatchBridgeCoreRouter } from './dispatchBridgeCore.js';
@@ -21,6 +22,8 @@ const LEAFLET_1_9_4_SCRIPT_URL = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.j
 const LEAFLET_1_9_4_SCRIPT_INTEGRITY = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
 const ATTENDANCE_MAP_RELIABILITY_SCRIPT = '/public/attendance-map-reliability.js';
 const ATTENDANCE_ADMIN_RUNTIME_SCRIPT = '/public/attendance-admin-runtime.js';
+const ATTENDANCE_FILTERED_EXPORT_SCRIPT = '/public/attendance-filtered-export.js';
+const PAYROLL_TABLE_SCROLL_SCRIPT = '/public/payroll-table-scroll-sync.js';
 const NOMINATIM_BROWSER_SEARCH_URL = 'https://nominatim.openstreetmap.org/search';
 const ATTENDANCE_GEOCODING_PATH = '/admin/operaciones/asistencia/geocodificar';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';
@@ -160,12 +163,14 @@ function injectAttendanceMapReliability(html) {
   );
 }
 
+function injectScriptBeforeBody(html, scriptPath, { defer = true } = {}) {
+  if (html.includes(scriptPath) || !/<\/body>/i.test(html)) return html;
+  const deferAttribute = defer ? ' defer' : '';
+  return html.replace(/<\/body>/i, `  <script src="${scriptPath}"${deferAttribute}></script>\n</body>`);
+}
+
 function injectAttendanceAdminRuntime(html) {
-  if (html.includes(ATTENDANCE_ADMIN_RUNTIME_SCRIPT)) return html;
-  return html.replace(
-    /<\/body>/i,
-    `  <script src="${ATTENDANCE_ADMIN_RUNTIME_SCRIPT}"></script>\n</body>`
-  );
+  return injectScriptBeforeBody(html, ATTENDANCE_ADMIN_RUNTIME_SCRIPT, { defer: false });
 }
 
 function normalizeAttendanceGeocodingEndpoint(html) {
@@ -220,8 +225,14 @@ export function filterAttendanceFeatureHtml(html, { allowed = false } = {}) {
 
 export function filterAttendanceAdminHtml(html) {
   if (typeof html !== 'string') return html;
-  const reliableHtml = injectAttendanceMapReliability(normalizeLeafletScriptIntegrity(html));
-  return injectAttendanceAdminRuntime(reliableHtml);
+  let output = injectAttendanceMapReliability(normalizeLeafletScriptIntegrity(html));
+  output = injectAttendanceAdminRuntime(output);
+  return injectScriptBeforeBody(output, ATTENDANCE_FILTERED_EXPORT_SCRIPT);
+}
+
+function filterPayrollAdminHtml(html) {
+  if (typeof html !== 'string') return html;
+  return injectScriptBeforeBody(html, PAYROLL_TABLE_SCROLL_SCRIPT);
 }
 
 function installAttendanceRenderGate(req, res, next) {
@@ -236,7 +247,8 @@ function installAttendanceRenderGate(req, res, next) {
 
     const isPointConfigView = view === 'operacionesClienteOperaciones';
     const isAttendanceAdminView = view === 'operacionesAsistencia';
-    if (!isPointConfigView && !isAttendanceAdminView) {
+    const isPayrollAdminView = view === 'operacionesNomina';
+    if (!isPointConfigView && !isAttendanceAdminView && !isPayrollAdminView) {
       return originalRender(view, renderLocals, renderCallback);
     }
 
@@ -247,7 +259,9 @@ function installAttendanceRenderGate(req, res, next) {
       }
       const output = isPointConfigView
         ? filterAttendanceFeatureHtml(html, { allowed: Boolean(req.canAccessAttendanceFeature) })
-        : filterAttendanceAdminHtml(html);
+        : isAttendanceAdminView
+          ? filterAttendanceAdminHtml(html)
+          : filterPayrollAdminHtml(html);
       if (typeof renderCallback === 'function') return renderCallback(null, output);
       return res.send(output);
     });
@@ -350,6 +364,13 @@ export function dispatchBridgeRouter() {
         });
       }
     }
+  );
+
+  router.use(
+    '/asistencia/reportes',
+    requireOps,
+    requireAttendanceAccess,
+    attendanceFilteredExportRouter(prisma)
   );
 
   router.use(
