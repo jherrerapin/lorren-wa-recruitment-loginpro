@@ -2,7 +2,6 @@
 
 (() => {
   const STYLE_ID = 'lorren-searchable-multiselect-style';
-  const MIN_QUERY_LENGTH = 3;
 
   function fold(value) {
     return String(value || '')
@@ -23,6 +22,7 @@
       .lorren-search-multiselect-panel{display:grid;gap:4px;max-height:280px;overflow:auto;margin-top:4px;padding:6px;border:1px solid #d7dee8;border-radius:10px;background:#fff;box-shadow:0 12px 30px rgba(15,23,42,.12)}
       .lorren-search-multiselect-panel[hidden]{display:none!important}
       .lorren-search-multiselect-option{display:flex!important;align-items:flex-start;gap:8px;padding:8px;border-radius:8px;cursor:pointer;font-size:12px!important;font-weight:500!important}
+      .lorren-search-multiselect-option[hidden]{display:none!important}
       .lorren-search-multiselect-option:hover{background:#eef8f6}
       .lorren-search-multiselect-option input{width:16px!important;min-width:16px;height:16px;margin:1px 0 0;padding:0;flex:0 0 auto;accent-color:var(--teal,#0d7a6b)}
       .lorren-search-multiselect-option span{min-width:0;overflow-wrap:anywhere}
@@ -68,8 +68,7 @@
     isChecked,
     setChecked,
     onSelectionChange,
-    emptyLabel = 'No hay coincidencias.',
-    shortQueryLabel = `Escribe al menos ${MIN_QUERY_LENGTH} caracteres para buscar.`
+    emptyLabel = 'No hay coincidencias.'
   }) {
     if (!field || !input || input.dataset.lorrenSearchMultiSelect === 'true') return null;
     input.dataset.lorrenSearchMultiSelect = 'true';
@@ -139,16 +138,18 @@
 
     const renderResults = () => {
       const query = fold(input.value);
-      const selected = selectedOptions();
-      const matches = query.length >= MIN_QUERY_LENGTH
-        ? sourceOptions.filter((option) => fold(`${getLabel(option)} ${getMeta(option) || ''}`).includes(query))
-        : selected;
+      const matches = query
+        ? sourceOptions.filter((option) => (
+            isChecked(option)
+            || fold(`${getLabel(option)} ${getMeta(option) || ''}`).includes(query)
+          ))
+        : sourceOptions;
 
       panel.replaceChildren();
       if (!matches.length) {
         const help = document.createElement('div');
         help.className = 'lorren-search-multiselect-help';
-        help.textContent = query.length < MIN_QUERY_LENGTH ? shortQueryLabel : emptyLabel;
+        help.textContent = emptyLabel;
         panel.appendChild(help);
         panel.hidden = false;
         return;
@@ -262,12 +263,12 @@
     searchField.remove();
 
     const help = menu.querySelector('.worker-picker-help');
-    if (help) help.textContent = `Escribe al menos ${MIN_QUERY_LENGTH} caracteres y marca uno o varios auxiliares. Si no marcas ninguno, se analizan todos.`;
+    if (help) help.textContent = 'Escribe para filtrar la lista o desplázate para buscar y marcar uno o varios auxiliares. Si no marcas ninguno, se analizan todos.';
 
     const filterOptions = () => {
       const query = fold(searchInput.value);
       options.forEach((option) => {
-        option.label.hidden = !(option.input.checked || (query.length >= MIN_QUERY_LENGTH && fold(option.copy).includes(query)));
+        option.label.hidden = Boolean(query) && !option.input.checked && !fold(option.copy).includes(query);
       });
     };
 
