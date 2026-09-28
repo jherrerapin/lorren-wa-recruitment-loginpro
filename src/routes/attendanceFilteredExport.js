@@ -38,7 +38,6 @@ const PAYROLL_SUMMARY_COLUMNS = Object.freeze([
   ['TurnosNocturnos', 17],
   ['Domingos', 12],
   ['Festivos', 12],
-  ['Descansos', 32],
   ['TotalTrabajado', 16],
   ['HorasOrdinarias', 16],
   ['HorasExtraTotal', 16],
@@ -128,17 +127,6 @@ function markingOperations(markings = []) {
     .join(' / ');
 }
 
-function restSummary(restAssignments = []) {
-  return (Array.isArray(restAssignments) ? restAssignments : [])
-    .map((rest) => [rest?.restDate, rest?.reason].filter(Boolean).join(' · '))
-    .filter(Boolean)
-    .join(' | ');
-}
-
-function dailyRestSummary(restAssignments = [], dateKey) {
-  return restSummary((Array.isArray(restAssignments) ? restAssignments : []).filter((rest) => rest?.restDate === dateKey));
-}
-
 function workerSummaryValues(worker = {}) {
   const values = {
     DiasRemunerados: Number(worker.remuneratedDays || 0),
@@ -149,7 +137,6 @@ function workerSummaryValues(worker = {}) {
     TurnosNocturnos: Number(worker.nightShiftCount || 0),
     Domingos: Number(worker.sundayCount || 0),
     Festivos: Number(worker.holidayCount || 0),
-    Descansos: restSummary(worker.restAssignments),
     TotalTrabajado: Number(worker.totalHours || 0),
     HorasOrdinarias: Number(worker.ordinaryHours || 0),
     HorasExtraTotal: Number(worker.overtimeHours || 0)
@@ -188,7 +175,6 @@ function dailyExportRows(report, boardRows) {
         Salida: markingSummary(markings, 'departureLabel'),
         Domingos: day.isRestDay && !day.isHoliday ? 1 : 0,
         Festivos: day.isHoliday ? 1 : 0,
-        Descansos: dailyRestSummary(worker.restAssignments, day.dateKey),
         TotalTrabajado: Number(day.totalHours || 0),
         HorasOrdinarias: Number(day.ordinaryHours || 0),
         HorasExtraTotal: Number(day.overtimeHours || 0)
@@ -316,7 +302,7 @@ export function buildAttendanceFilteredWorkbook(report, boardRows) {
     const totalRow = sheet.getRow(rowNumber);
     const totals = workerSummaryValues(group.summary || {});
     headers.forEach((key, columnIndex) => {
-      if (key === 'Fecha') totalRow.getCell(columnIndex + 1).value = 'TOTAL';
+      if (key === 'Salida') totalRow.getCell(columnIndex + 1).value = 'TOTAL';
       else totalRow.getCell(columnIndex + 1).value = totals[key] ?? '';
     });
     styleTotalRow(totalRow);
