@@ -16,10 +16,6 @@ test('la búsqueda seleccionable muestra la lista completa y filtra desde el pri
   assert.match(multiselect, /lorren-search-multiselect-chip/);
 });
 
-test('las opciones ocultas no quedan visibles por conflicto de display important', () => {
-  assert.match(multiselect, /\.lorren-search-multiselect-option\[hidden\]\{display:none!important\}/);
-});
-
 test('Asistencia transforma su buscador existente en selección múltiple sin duplicar filtros backend', () => {
   assert.match(attendance, /input name="q"/);
   assert.match(multiselect, /installAttendanceMultiSelect/);
@@ -29,15 +25,26 @@ test('Asistencia transforma su buscador existente en selección múltiple sin du
   assert.match(multiselect, /input\.addEventListener\('focus', renderResults\)/);
 });
 
-test('Gestión de Tiempo integra buscador y lista de checks en un solo control', () => {
+test('Gestión de Tiempo reutiliza la misma autoridad visual y mantiene workerId canónico', () => {
   assert.match(payroll, /class="worker-picker"/);
   assert.match(payroll, /type="checkbox" name="workerId"/);
   assert.match(payroll, /input id="search" name="search"/);
   assert.match(multiselect, /installPayrollMultiSelect/);
-  assert.match(multiselect, /menu\.prepend\(searchInput\)/);
-  assert.match(multiselect, /searchField\.remove\(\)/);
-  assert.match(multiselect, /option\.label\.hidden = Boolean\(query\)/);
+  assert.match(multiselect, /canonicalHost\.className = 'lorren-search-multiselect-canonical'/);
+  assert.match(multiselect, /canonicalLabels\.forEach\(\(label\) => canonicalHost\.appendChild\(label\)\)/);
+  assert.match(multiselect, /searchableCheckboxMultiSelect\(\{[\s\S]*field: menu,[\s\S]*input: searchInput,[\s\S]*options,/);
+  assert.match(multiselect, /getValue: \(option\) => option\.input\.value/);
+  assert.match(multiselect, /getLabel: \(option\) => option\.name/);
+  assert.match(multiselect, /getMeta: \(option\) => option\.documentText/);
+  assert.match(multiselect, /option\.input\.checked = checked/);
   assert.match(multiselect, /Escribe para filtrar la lista o desplázate/);
+});
+
+test('Gestión de Tiempo busca por nombre o documento desde el primer carácter', () => {
+  assert.match(multiselect, /const separatorIndex = copy\.lastIndexOf\(' - '\)/);
+  assert.match(multiselect, /const name = separatorIndex > 0 \? copy\.slice\(0, separatorIndex\)\.trim\(\) : copy/);
+  assert.match(multiselect, /const documentText = separatorIndex > 0 \? copy\.slice\(separatorIndex \+ 3\)\.trim\(\) : ''/);
+  assert.match(multiselect, /fold\(`\$\{getLabel\(option\)\} \$\{getMeta\(option\) \|\| ''\}`\)\.includes\(query\)/);
 });
 
 test('el nuevo comportamiento se inyecta solo en Asistencia y Gestión de Tiempo', () => {

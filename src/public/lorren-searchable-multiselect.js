@@ -31,6 +31,7 @@
       .lorren-search-multiselect-selected{display:flex;gap:6px;flex-wrap:wrap;min-height:0}
       .lorren-search-multiselect-chip{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:4px 7px;border-radius:999px;background:#eef8f6;color:#0d5f54;font-size:10px;font-weight:800}
       .lorren-search-multiselect-chip button{border:0;background:transparent;color:inherit;padding:0;cursor:pointer;font:inherit;font-size:12px;line-height:1}
+      .lorren-search-multiselect-canonical{display:none!important}
       @media(max-width:700px){.lorren-search-multiselect-panel{max-height:240px}.lorren-search-multiselect-option{min-height:42px}}
     `;
     document.head.appendChild(style);
@@ -99,6 +100,7 @@
       checkbox.addEventListener('change', () => {
         setChecked(option, checkbox.checked);
         renderSelected();
+        renderResults();
         onSelectionChange?.();
       });
       const copy = document.createElement('span');
@@ -241,11 +243,15 @@
     const searchField = originalSearchInput?.closest('.field');
     if (!form || !picker || !menu || !originalSearchInput || !searchField) return;
 
-    const options = [...menu.querySelectorAll('.worker-check')].map((label) => ({
-      label,
-      input: label.querySelector('input[name="workerId"]'),
-      copy: label.querySelector('span')?.textContent?.replace(/\s+/g, ' ')?.trim() || ''
-    })).filter((option) => option.input);
+    const canonicalLabels = [...menu.querySelectorAll('.worker-check')];
+    const options = canonicalLabels.map((label) => {
+      const input = label.querySelector('input[name="workerId"]');
+      const copy = label.querySelector('span')?.textContent?.replace(/\s+/g, ' ')?.trim() || '';
+      const separatorIndex = copy.lastIndexOf(' - ');
+      const name = separatorIndex > 0 ? copy.slice(0, separatorIndex).trim() : copy;
+      const documentText = separatorIndex > 0 ? copy.slice(separatorIndex + 3).trim() : '';
+      return { label, input, name, documentText };
+    }).filter((option) => option.input && option.name);
     if (!options.length) return;
 
     const searchInput = cleanSearchInput(originalSearchInput);
@@ -258,27 +264,33 @@
     searchInput.removeAttribute('name');
     searchInput.value = '';
     searchInput.placeholder = 'Busca por nombre o documento';
-    searchInput.classList.add('lorren-search-multiselect-input');
+
+    const canonicalHost = document.createElement('div');
+    canonicalHost.className = 'lorren-search-multiselect-canonical';
+    canonicalHost.setAttribute('aria-hidden', 'true');
+    canonicalLabels.forEach((label) => canonicalHost.appendChild(label));
+    menu.appendChild(canonicalHost);
+
     menu.prepend(searchInput);
     searchField.remove();
 
     const help = menu.querySelector('.worker-picker-help');
     if (help) help.textContent = 'Escribe para filtrar la lista o desplázate para buscar y marcar uno o varios auxiliares. Si no marcas ninguno, se analizan todos.';
 
-    const filterOptions = () => {
-      const query = fold(searchInput.value);
-      options.forEach((option) => {
-        option.label.hidden = Boolean(query) && !option.input.checked && !fold(option.copy).includes(query);
-      });
-    };
-
-    searchInput.addEventListener('input', filterOptions);
-    options.forEach((option) => option.input.addEventListener('change', () => {
-      refreshSummary();
-      filterOptions();
-    }));
+    searchableCheckboxMultiSelect({
+      field: menu,
+      input: searchInput,
+      options,
+      getValue: (option) => option.input.value,
+      getLabel: (option) => option.name,
+      getMeta: (option) => option.documentText,
+      isChecked: (option) => option.input.checked,
+      setChecked: (option, checked) => {
+        option.input.checked = checked;
+      },
+      onSelectionChange: refreshSummary
+    });
     refreshSummary();
-    filterOptions();
   }
 
   function install() {
