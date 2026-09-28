@@ -2,6 +2,7 @@
 
 (() => {
   const STYLE_ID = 'lorren-searchable-multiselect-style';
+  const PAYROLL_SCROLL_SCRIPT = '/public/payroll-table-scroll-sync.js';
 
   function fold(value) {
     return String(value || '')
@@ -35,6 +36,15 @@
       @media(max-width:700px){.lorren-search-multiselect-panel{max-height:240px}.lorren-search-multiselect-option{min-height:42px}}
     `;
     document.head.appendChild(style);
+  }
+
+  function ensurePayrollScrollScript() {
+    if (!document.getElementById('payroll-filters')) return;
+    if (document.querySelector(`script[src="${PAYROLL_SCROLL_SCRIPT}"]`)) return;
+    const script = document.createElement('script');
+    script.src = PAYROLL_SCROLL_SCRIPT;
+    script.defer = true;
+    document.body.appendChild(script);
   }
 
   function cleanSearchInput(input) {
@@ -212,6 +222,18 @@
     });
     const options = [...byKey.values()];
 
+    const syncExportSelection = () => {
+      form.querySelectorAll('input[data-attendance-export-worker]').forEach((node) => node.remove());
+      options.filter((option) => option.checked).forEach((option) => {
+        const hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'workerKey';
+        hidden.value = option.value;
+        hidden.dataset.attendanceExportWorker = 'true';
+        form.appendChild(hidden);
+      });
+    };
+
     const applySelection = () => {
       const selectedKeys = new Set(options.filter((option) => option.checked).map((option) => option.key));
       cards.forEach((card) => {
@@ -220,7 +242,20 @@
       });
       const counter = document.querySelector('.attendance-list-tools strong');
       if (counter) counter.textContent = `${cards.filter((card) => !card.hidden).length} auxiliar(es)`;
+      syncExportSelection();
     };
+
+    const actions = form.querySelector('.filter-actions');
+    if (actions && !actions.querySelector('[data-attendance-export-filtered]')) {
+      const exportButton = document.createElement('button');
+      exportButton.type = 'submit';
+      exportButton.className = 'btn';
+      exportButton.textContent = 'Descargar detalle filtrado';
+      exportButton.formAction = '/admin/operaciones/asistencia/export-filtrado.xlsx';
+      exportButton.formMethod = 'get';
+      exportButton.dataset.attendanceExportFiltered = 'true';
+      actions.appendChild(exportButton);
+    }
 
     searchableCheckboxMultiSelect({
       field,
@@ -233,6 +268,7 @@
       setChecked: (option, checked) => { option.checked = checked; },
       onSelectionChange: applySelection
     });
+    syncExportSelection();
   }
 
   function installPayrollMultiSelect() {
@@ -297,6 +333,7 @@
     injectStyles();
     installAttendanceMultiSelect();
     installPayrollMultiSelect();
+    ensurePayrollScrollScript();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
