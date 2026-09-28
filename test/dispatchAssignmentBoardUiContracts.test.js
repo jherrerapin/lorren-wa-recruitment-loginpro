@@ -30,9 +30,10 @@ test('assignment board ui does not alter forbidden scopes', () => {
     .map((entry) => entry.name);
   assert.ok(!migrations.some((name) => /assignment_board_ui|dispatch_assignment_board_ui/i.test(name)));
 
-  const webhook = readSource('src/routes/webhook.js');
-  assert.doesNotMatch(webhook, /assignment-board-ui|operacionesAsignaciones ui/i);
-
-  const conversationEngine = readSource('src/services/conversationEngine.js');
-  assert.doesNotMatch(conversationEngine, /assignment-board-ui|operacionesAsignaciones ui/i);
+  const recruitmentRuntime = [
+    readSource('src/routes/webhookController.js'),
+    readSource('src/workers/jobWorker.js'),
+    readSource('src/core/engine/calculateConversationDecision.js')
+  ].join('\n');
+  assert.doesNotMatch(recruitmentRuntime, /assignment-board-ui|operacionesAsignaciones ui/i);
 });

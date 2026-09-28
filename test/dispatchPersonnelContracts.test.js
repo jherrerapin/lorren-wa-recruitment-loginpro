@@ -38,26 +38,30 @@ test('contratados se sincronizan a la sucursal de la operación sin escribir Dis
   assert.match(syncService, /dispatchWorkerCity\.upsert/);
   assert.doesNotMatch(syncService, /dispatchWorkerVacancy\.(?:upsert|create|createMany)/);
 
-  const webhookSource = readSource('src/routes/webhook.js');
-  assert.doesNotMatch(webhookSource, /upsertDispatchWorkerFromCandidate|\/sync-contratados|\/operaciones\/personal/);
-  const fsmSource = readSource('src/services/conversationEngine.js');
-  assert.doesNotMatch(fsmSource, /upsertDispatchWorkerFromCandidate|DispatchWorker/);
+  const recruitmentRuntime = [
+    readSource('src/routes/webhookController.js'),
+    readSource('src/workers/jobWorker.js'),
+    readSource('src/core/engine/calculateConversationDecision.js')
+  ].join('\n');
+  assert.doesNotMatch(recruitmentRuntime, /upsertDispatchWorkerFromCandidate|\/sync-contratados|\/operaciones\/personal|DispatchWorker/);
 });
 
-test('personal operativo consulta contratados y expone solo filtro de sucursal', () => {
+test('personal operativo consulta contratados y separa desactivados por sucursal', () => {
   const extrasSource = readSource('src/routes/dispatchOpsExtras.js');
   const personnelView = readSource('src/views/operacionesPersonal.ejs');
   const personalRoute = functionBlock(extrasSource, "router.get('/personal'", "router.get('/personal/importar-excel'");
 
-  assert.match(extrasSource, /function buildDispatchEligibilityFilter\(\)\s*{\s*return \{ operationalStatus: 'CONTRATADO' \};\s*}/);
-  assert.match(personalRoute, /const eligibilityFilter = buildDispatchEligibilityFilter\(\)/);
+  assert.match(extrasSource, /function buildDispatchEligibilityFilter\(status\)/);
+  assert.match(extrasSource, /return \{ operationalStatus: 'CONTRATADO' \};/);
+  assert.match(personalRoute, /const eligibilityFilter = buildDispatchEligibilityFilter\(requestedStatus\)/);
   assert.match(personalRoute, /\.\.\.eligibilityFilter/);
   assert.doesNotMatch(personnelView, /name="vacancyId"|Vacantes \/ perfiles/);
   assert.match(personnelView, /name="operationalCityId"/);
+  assert.match(personnelView, /name="status"/);
   assert.match(personnelView, />Sucursal<\/label>/);
   assert.match(personnelView, /<th>Sucursales<\/th>/);
-  assert.doesNotMatch(personnelView, /<th>Estado<\/th>/);
-  assert.match(personnelView, />Desactivar<\/button>/);
+  assert.match(personnelView, /<th>Estado<\/th>/);
+  assert.match(personnelView, /workerActive \? 'Desactivar' : 'Reactivar'/);
 });
 
 test('alta y edición de auxiliar solo solicitan sucursales', () => {
@@ -76,9 +80,9 @@ test('personal operativo conserva layout responsivo sin comprimir contenido', ()
   const personnelView = readSource('src/views/operacionesPersonal.ejs');
   assert.match(personnelView, /--content-max:1160px/);
   assert.match(personnelView, /\.page \{ width:min\(var\(--content-max\),calc\(100% - 40px\)\)/);
-  assert.match(personnelView, /\.filters-grid \{ display:grid; grid-template-columns:minmax\(260px,1fr\) auto/);
+  assert.match(personnelView, /\.filters-grid \{ display:grid; grid-template-columns:minmax\(240px,1fr\) minmax\(220px,\.8fr\) auto/);
   assert.match(personnelView, /\.table-wrap \{ max-width:100%; overflow-x:auto/);
-  assert.match(personnelView, /table \{ width:100%; border-collapse:collapse; min-width:930px/);
+  assert.match(personnelView, /table \{ width:100%; border-collapse:collapse; min-width:980px/);
   assert.match(personnelView, /@media\(max-width:900px\)/);
   assert.match(personnelView, /@media\(max-width:520px\)/);
 });

@@ -335,16 +335,15 @@ test('esquema y migración eliminan el alcance por vacante sin perder valores hi
 test('la UI crea campos globales y el check controla realmente el textarea de observación', () => {
   assert.match(uiSource, /Información complementaria/);
   assert.match(uiSource, /Nuevo campo complementario/);
-  assert.match(uiSource, /disponible para todas las vacantes/);
   assert.match(uiSource, /\/complementary-fields/);
   assert.match(uiSource, /body:\s*JSON\.stringify\(\{ label \}\)/);
-  assert.match(uiSource, /function buildDayManagementPanel\(candidateId, response, refresh\)/);
+  assert.match(uiSource, /function buildDayManagementPanel\(candidateId, response, refresh, \{ attendanceOnly = false \} = \{\}\)/);
   assert.match(uiSource, /await refresh\(\)/);
   assert.match(uiSource, /const syncObservationField/);
   assert.match(uiSource, /observationField\.hidden = !enabled/);
   assert.match(uiSource, /observationArea\.disabled = !enabled/);
   assert.match(uiSource, /syncObservationField\(\{ clear: true \}\)/);
-  assert.match(uiSource, /\.ic-field\[hidden\]\{display:none!important\}/);
+  assert.match(uiSource, /\.ic-field\[hidden\][^}]*display:none!important/);
   assert.match(uiSource, /observation:\s*observationCheckbox\.checked \? observationArea\.value : ''/);
   assert.doesNotMatch(uiSource, /(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
 });
@@ -371,6 +370,9 @@ test('server monta la autoridad antes del router administrativo y webhook perman
   assert.ok(managementMount >= 0);
   assert.ok(adminMount > managementMount);
 
-  const webhook = readFileSync(new URL('../src/routes/webhook.js', import.meta.url), 'utf8');
-  assert.doesNotMatch(webhook, /interviewOutreachManagement/);
+  const recruitmentRuntime = [
+    readFileSync(new URL('../src/routes/webhookController.js', import.meta.url), 'utf8'),
+    readFileSync(new URL('../src/workers/jobWorker.js', import.meta.url), 'utf8')
+  ].join('\n');
+  assert.doesNotMatch(recruitmentRuntime, /interviewOutreachManagement/);
 });
