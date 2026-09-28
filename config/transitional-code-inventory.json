@@ -73,8 +73,9 @@
       "purpose": "Permite migrar recordatorios desde temporizadores locales hacia una cola persistida en PostgreSQL.",
       "retirementCondition": "Hacer tenant-aware la cola, demostrar idempotencia y recuperación tras reinicio, migrar recordatorios y retirar el temporizador local.",
       "evidenceTests": [
-        "test/reminder.test.js",
-        "test/hardeningP0Delta.test.js"
+        "test/hardeningP0Delta.test.js",
+        "test/jobQueue.test.js",
+        "test/jobWorkerInboundMessage.test.js"
       ]
     },
     {
@@ -92,7 +93,6 @@
       "retirementCondition": "Retirar el flag cuando se elimine su exposición en FEATURE_FLAG_DEFAULTS y la autoridad de adjuntos permanezca cubierta por los replays funcionales.",
       "evidenceTests": [
         "test/hardeningP0Delta.test.js",
-        "test/p9CvOnlyPdfDocx.test.js",
         "test/aiFirstRecruitmentGuards.test.js"
       ]
     },
@@ -110,8 +110,7 @@
       "purpose": "Conserva el default histórico mientras el reenvío administrativo ya no se alterna desde la capa HTTP del candidato.",
       "retirementCondition": "Retirar el flag cuando se elimine su exposición en FEATURE_FLAG_DEFAULTS y la coordinación de medios tenga una única estrategia persistida.",
       "evidenceTests": [
-        "test/hardeningP0Delta.test.js",
-        "test/lorrenRegressionFixes.test.js"
+        "test/hardeningP0Delta.test.js"
       ]
     }
   ],
