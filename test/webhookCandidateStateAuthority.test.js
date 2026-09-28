@@ -4,18 +4,20 @@ import fs from 'node:fs';
 
 const source = fs.readFileSync('src/routes/webhook.js', 'utf8');
 
-function between(content, start, end) {
+function functionBlock(content, start) {
   const startIndex = content.indexOf(start);
-  assert.notEqual(startIndex, -1, `No se encontró el marcador inicial: ${start}`);
-  const endIndex = content.indexOf(end, startIndex + start.length);
-  assert.notEqual(endIndex, -1, `No se encontró el marcador final: ${end}`);
+  assert.notEqual(startIndex, -1, `No se encontró la función: ${start}`);
+  const searchFrom = startIndex + start.length;
+  const nextAsyncFunction = content.indexOf('\nasync function ', searchFrom);
+  const nextFunction = content.indexOf('\nfunction ', searchFrom);
+  const candidates = [nextAsyncFunction, nextFunction].filter((index) => index !== -1);
+  const endIndex = candidates.length ? Math.min(...candidates) : content.length;
   return content.slice(startIndex, endIndex);
 }
 
-const resumeFunction = between(
+const resumeFunction = functionBlock(
   source,
-  'async function prepareCandidateForInboundAutomation',
-  'function outboundRequestsResolvedVacancy'
+  'async function prepareCandidateForInboundAutomation'
 );
 
 test('webhook importa y delega la reanudación en CandidateStateService', () => {
@@ -37,19 +39,13 @@ test('prepareCandidateForInboundAutomation no escribe Candidate directamente', (
   assert.doesNotMatch(source, /buildInboundResumeUpdate/);
 });
 
-test('solo registra reanudación cuando la comparación condicional fue aplicada', () => {
+test('webhook devuelve el estado resuelto por la autoridad de reanudación', () => {
   const transitionIndex = resumeFunction.indexOf('resumeCandidateAutomationOnInbound');
-  const countGuardIndex = resumeFunction.indexOf('transition.count === 1');
-  const logIndex = resumeFunction.indexOf("console.info('[BOT_RESUMED_BY_INBOUND]'");
   const returnIndex = resumeFunction.lastIndexOf('return transition.candidate || candidate');
 
   assert.ok(transitionIndex >= 0);
-  assert.ok(countGuardIndex >= 0);
-  assert.ok(logIndex >= 0);
-  assert.ok(returnIndex >= 0);
-  assert.ok(countGuardIndex > transitionIndex, 'El log debe depender del resultado persistido.');
-  assert.ok(logIndex > countGuardIndex, 'No se debe informar reanudación antes de count === 1.');
-  assert.ok(returnIndex > logIndex, 'La función debe devolver el estado actual después de la comparación.');
+  assert.ok(returnIndex > transitionIndex);
+  assert.doesNotMatch(resumeFunction, /transition\.count\s*[=!]==?\s*1/);
 });
 
 test('preserva las decisiones puras de bloqueo y reanudación', () => {
