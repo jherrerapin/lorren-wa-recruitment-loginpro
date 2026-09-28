@@ -8,6 +8,22 @@ const HEADER_TEXT = 'FFFFFFFF';
 const SUBHEADER_FILL = 'FFE6F4F1';
 const BORDER = 'FFE1E4E8';
 
+const PAYROLL_CONCEPT_LABELS = Object.freeze({
+  HEDO: 'HEDO · Extra diurna ordinaria',
+  HENO: 'HENO · Extra nocturna ordinaria',
+  HEDD: 'HEDD · Extra diurna dominical',
+  HEND: 'HEND · Extra nocturna dominical',
+  HEDF: 'HEDF · Extra diurna festiva',
+  HENF: 'HENF · Extra nocturna festiva',
+  RNO: 'RNO · Recargo nocturno ordinario',
+  RDD: 'RDD · Recargo diurno dominical no compensado',
+  RND: 'RND · Recargo nocturno dominical no compensado',
+  RDF: 'RDF · Recargo diurno festivo',
+  RNF: 'RNF · Recargo nocturno festivo',
+  RDDC: 'RDDC · Recargo diurno dominical compensado',
+  RNDC: 'RNDC · Recargo nocturno dominical compensado'
+});
+
 function normalizeString(value, maxLength = 300) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
@@ -35,15 +51,18 @@ function uniqueText(values = []) {
   return [...new Set(values.map((value) => normalizeString(value, 500)).filter(Boolean))].join(' · ');
 }
 
-function selectedBoardRows(board, workerKeys = []) {
+function selectedBoardRows(board, workerKeys = [], visibleOnly = false) {
   const selected = new Set(normalizeStringList(workerKeys, 500));
   const rows = Array.isArray(board?.rows) ? board.rows : [];
+  if (visibleOnly && !selected.size) return [];
   return selected.size ? rows.filter((row) => selected.has(attendanceExportWorkerKey(row))) : rows;
 }
 
-function markingText(markings, field) {
+function markingText(markings, field, fallbackValues = []) {
   const values = markings.map((marking) => normalizeString(marking?.[field], 300)).filter(Boolean);
-  return values.length ? values.join(' | ') : 'Sin registro';
+  const fallback = fallbackValues.map((value) => normalizeString(value, 300)).filter(Boolean);
+  const resolved = values.length ? values : fallback;
+  return resolved.length ? [...new Set(resolved)].join(' | ') : 'Sin registro';
 }
 
 function correctionText(markings) {
@@ -91,10 +110,10 @@ export function buildAttendanceFilteredDailyRows(boardRows = [], payrollReport =
         Operacion: uniqueText(group.boardRows.map((row) => row.operationPointName)),
         EstadoAsistencia: uniqueText(group.boardRows.map((row) => row.statusLabel)),
         Horario: uniqueText(group.boardRows.map((row) => row.scheduleLabel)),
-        Entrada: markingText(markings, 'arrivalLabel'),
-        InicioAlmuerzo: markingText(markings, 'breakStartLabel'),
-        FinAlmuerzo: markingText(markings, 'breakEndLabel'),
-        Salida: markingText(markings, 'departureLabel'),
+        Entrada: markingText(markings, 'arrivalLabel', group.boardRows.map((row) => row.arrivalReportedLabel)),
+        InicioAlmuerzo: markingText(markings, 'breakStartLabel', group.boardRows.map((row) => row.breakStartLabel)),
+        FinAlmuerzo: markingText(markings, 'breakEndLabel', group.boardRows.map((row) => row.breakEndLabel)),
+        Salida: markingText(markings, 'departureLabel', group.boardRows.map((row) => row.departureReportedLabel)),
         Correcciones: correctionText(markings),
         TotalTrabajado: Number(day?.totalHours || 0),
         HorasOrdinarias: Number(day?.ordinaryHours || 0),
@@ -108,12 +127,16 @@ export function buildAttendanceFilteredDailyRows(boardRows = [], payrollReport =
 }
 
 function worksheetColumns() {
-  return [
-    ['Fecha', 13], ['Documento', 18], ['Auxiliar', 32], ['Ciudad', 18], ['Cliente', 24], ['Operacion', 28],
-    ['EstadoAsistencia', 22], ['Horario', 20], ['Entrada', 24], ['InicioAlmuerzo', 24], ['FinAlmuerzo', 24], ['Salida', 24],
-    ['Correcciones', 42], ['TotalTrabajado', 16], ['HorasOrdinarias', 16], ['HorasExtraTotal', 16], ['Domingo', 11], ['Festivo', 11],
-    ...PAYROLL_CONCEPT_CODES.map((code) => [code, 12])
-  ].map(([key, width]) => ({ key, header: key, width }));
+  const base = [
+    ['Fecha', 'Fecha', 13], ['Documento', 'Documento', 18], ['Auxiliar', 'Auxiliar', 32], ['Ciudad', 'Ciudad', 18],
+    ['Cliente', 'Cliente', 24], ['Operacion', 'Operación', 28], ['EstadoAsistencia', 'Estado de asistencia', 22], ['Horario', 'Horario', 20],
+    ['Entrada', 'Entrada', 24], ['InicioAlmuerzo', 'Inicio de almuerzo', 24], ['FinAlmuerzo', 'Fin de almuerzo', 24], ['Salida', 'Salida', 24],
+    ['Correcciones', 'Correcciones manuales', 42], ['TotalTrabajado', 'Total trabajado (h)', 18],
+    ['HorasOrdinarias', 'Horas ordinarias (h)', 18], ['HorasExtraTotal', 'Horas extra total (h)', 18],
+    ['Domingo', 'Domingo', 11], ['Festivo', 'Festivo', 11]
+  ];
+  const concepts = PAYROLL_CONCEPT_CODES.map((code) => [code, PAYROLL_CONCEPT_LABELS[code] || code, 24]);
+  return [...base, ...concepts].map(([key, header, width]) => ({ key, header, width }));
 }
 
 export function buildAttendanceFilteredWorkbook(rows = [], range = {}) {
@@ -162,6 +185,16 @@ export function buildAttendanceFilteredWorkbook(rows = [], range = {}) {
   return workbook;
 }
 
+async function resolvePayrollClientFilter(prisma, attendanceClient) {
+  const name = normalizeString(attendanceClient, 240);
+  if (!name || name === 'ALL' || typeof prisma?.dispatchClient?.findFirst !== 'function') return '';
+  const client = await prisma.dispatchClient.findFirst({
+    where: { name },
+    select: { id: true }
+  });
+  return client?.id || '';
+}
+
 export async function buildAttendanceFilteredExport(prisma, input = {}, options = {}) {
   const board = await loadAttendanceAdminBoard(prisma, {
     from: input.from,
@@ -170,11 +203,13 @@ export async function buildAttendanceFilteredExport(prisma, input = {}, options 
     client: input.client,
     q: input.q
   });
-  const boardRows = selectedBoardRows(board, input.workerKey);
+  const boardRows = selectedBoardRows(board, input.workerKey, String(input.visibleOnly || '').toLowerCase() === 'true');
+  const clientId = await resolvePayrollClientFilter(prisma, input.client);
   const payrollReport = await loadPayrollReport(prisma, {
     periodType: 'CUSTOM',
     from: board.range.from,
-    to: board.range.to
+    to: board.range.to,
+    ...(clientId ? { clientId } : {})
   }, {
     allowTestData: options.allowTestData === true
   });
