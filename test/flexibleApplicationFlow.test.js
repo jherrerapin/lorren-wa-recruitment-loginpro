@@ -2,7 +2,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DATA_CONSENT_VERSION,
-  CAMPAIGN_VACANCY_CONFIRMATION_MODE,
   buildVacancyQuestionReply,
   evaluateConsentBoundary,
   isConsentAcceptance,
@@ -394,7 +393,7 @@ function createCampaignAttributionPrisma({ candidate, campaigns }) {
   };
 }
 
-test('atribución CTWA inicial persiste el anuncio exacto y deja confirmación pendiente', async () => {
+test('atribución CTWA inicial persiste el anuncio exacto sin adquirir autoridad conversacional', async () => {
   const previous = {
     id: 'candidate-new-ctwa',
     campaignId: null,
@@ -432,7 +431,7 @@ test('atribución CTWA inicial persiste el anuncio exacto y deja confirmación p
   assert.equal(updates[0].data.campaignId, target.id);
   assert.equal(updates[0].data.vacancyId, target.vacancyId);
   assert.equal(updates[0].data.metaAdId, target.code);
-  assert.equal(updates[0].data.botResumeMode, CAMPAIGN_VACANCY_CONFIRMATION_MODE);
+  assert.equal(Object.hasOwn(updates[0].data, 'botResumeMode'), false);
 });
 
 test('un candidato con vacante persistida no es reatribuido antes de confirmar otro anuncio', async () => {
