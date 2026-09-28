@@ -1,5 +1,5 @@
 import { createMetaAdsClient } from './metaAdsClient.js';
-import { CAMPAIGN_VACANCY_CONFIRMATION_MODE } from './dataConsentGate.js';
+import { CAMPAIGN_VACANCY_CONFIRMATION_MODE } from '../core/contracts/DataConsentContract.js';
 
 const INSIGHT_FIELDS = [
   'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name',

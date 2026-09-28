@@ -8,7 +8,7 @@ import {
   buildConsentPendingMode,
   buildDataConsentPromptReply,
   parseConsentPendingMode
-} from '../services/dataConsentGate.js';
+} from '../core/contracts/DataConsentContract.js';
 import { claimCandidateDataConsentPromptPendingState } from '../services/consentStateService.js';
 import { sendReplyButtonsMessage } from '../services/whatsapp.js';
 import { getWhatsappWindowState } from '../services/reminderPolicy.js';

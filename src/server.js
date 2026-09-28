@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import { PrismaClient } from '@prisma/client';
-import { conversationTurnInputShadow, webhookRouter } from './routes/webhook.js';
+import { createWebhookController } from './routes/webhookController.js';
 import { adminRouter } from './routes/admin.js';
 import { adminCandidateGlobalExportRouter } from './routes/adminCandidateGlobalExport.js';
 import { interviewOutreachManagementRouter } from './routes/interviewOutreachManagement.js';
@@ -25,12 +25,6 @@ import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftReq
 import { lorenV2Router } from './routes/lorenV2.js';
 import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
 import { adminHtmlBridgeMiddleware, dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
-import { campaignAttributionMiddleware } from './services/campaignAttribution.js';
-import { referralAttributionMiddleware } from './services/referralAttribution.js';
-import { interviewCoordinationHandoffMiddleware } from './services/botAutomationPolicy.js';
-import { completeCandidateNoInterestTransition } from './services/candidateStateService.js';
-import { cancelActiveInterviewBookings } from './services/interviewBookingStateService.js';
-import { deliverAutomaticOutboundText } from './services/automaticOutboundDeliveryService.js';
 import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
@@ -427,6 +421,25 @@ app.use((req, res, next) => {
 app.use(morgan('combined'));
 app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
 app.use('/webhook/dispatch', dispatchWhatsappWebhookRouter(prisma));
+
+const webhookJsonParser = express.json({
+  limit: '2mb',
+  verify(req, _res, buffer) {
+    req.rawBody = Buffer.from(buffer);
+  }
+});
+
+app.get('/webhook', (req, res) => {
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+  if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+app.post('/webhook', webhookJsonParser, createWebhookController({ prisma }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -622,15 +635,6 @@ app.post('/logout', destroySession);
 app.get('/logout', destroySession);
 
 app.use(wrapAsyncRouter(dispatchMultiShiftRequestsRouter()));
-app.use('/webhook', conversationTurnInputShadow);
-app.use('/webhook', campaignAttributionMiddleware(prisma));
-app.use('/webhook', referralAttributionMiddleware(prisma));
-app.use('/webhook', interviewCoordinationHandoffMiddleware(prisma, {
-  completeCandidateNoInterestTransition,
-  cancelActiveInterviewBookings,
-  deliverAutomaticOutboundText
-}));
-app.use('/webhook', webhookRouter(prisma));
 app.use('/admin/bot-knowledge', botKnowledgeCrudRouter(prisma));
 app.use('/operaciones', wrapAsyncRouter(publicDispatchClientRouter()));
 app.use('/operaciones', dispatchErrorHandler('/admin/operaciones'));

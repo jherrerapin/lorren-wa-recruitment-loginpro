@@ -1,4 +1,4 @@
-import { buildMissingFieldReply, getCandidateReadiness } from './readinessGuard.js';
+import { buildMissingFieldReply, getCandidateReadiness } from './candidateReadiness.js';
 import { formatInterviewDate } from './interviewScheduler.js';
 import { buildInterviewDocumentsSentence, sanitizeRequiredDocumentsForBot } from './naturalReply.js';
 import { classifyOutboundActor, inferOutboundActorFromSource, isManualOutboundSource } from './manualSourcePolicy.js';
