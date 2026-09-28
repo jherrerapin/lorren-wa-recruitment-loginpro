@@ -15,6 +15,28 @@ function conceptHours(values = {}) {
   };
 }
 
+function sampleDaily(dateKey, overrides = {}) {
+  return {
+    dateKey,
+    clientNames: ['Cliente Uno'],
+    operationNames: ['Punto Norte'],
+    totalHours: 8,
+    ordinaryHours: 7,
+    overtimeHours: 1,
+    conceptHours: conceptHours({ HENO: 0.5, RNO: 1.5 }),
+    markings: [{
+      clientName: 'Cliente Uno',
+      operationName: 'Punto Norte',
+      arrivalLabel: `${dateKey} 7:00 a. m.`,
+      breakStartLabel: `${dateKey} 12:00 p. m.`,
+      breakEndLabel: `${dateKey} 1:00 p. m.`,
+      departureLabel: `${dateKey} 4:00 p. m.`,
+      corrections: []
+    }],
+    ...overrides
+  };
+}
+
 test('Gestión de Tiempo instala una barra horizontal superior sincronizada sin reemplazar la inferior', () => {
   assert.match(multiselect, /PAYROLL_SCROLL_SCRIPT = '\/public\/payroll-table-scroll-sync\.js'/);
   assert.match(multiselect, /ensurePayrollScrollScript\(\)/);
@@ -34,31 +56,53 @@ test('Asistencia expone descarga del detalle filtrado y conserva la selección m
   assert.match(bridge, /attendanceFilteredExportRouter\(prisma\)/);
 });
 
-test('el Excel filtrado conserva marcaciones y conceptos calculados por día', () => {
+test('el Excel filtrado agrupa por auxiliar y no repite identidad en cada día', () => {
+  const report = {
+    period: { from: '2026-09-28', to: '2026-09-29' },
+    rows: [
+      {
+        fullName: 'Auxiliar Prueba',
+        documentType: 'CC',
+        documentNumber: '1.003.806.523',
+        daily: [sampleDaily('2026-09-28'), sampleDaily('2026-09-29')]
+      },
+      {
+        fullName: 'Segundo Auxiliar',
+        documentType: 'CC',
+        documentNumber: '8507957',
+        daily: [sampleDaily('2026-09-28', { conceptHours: conceptHours({ HEDO: 1 }) })]
+      }
+    ]
+  };
+  const boardRows = [
+    { workerName: 'Auxiliar Prueba', documentNumber: '1003806523', serviceDateIso: '2026-09-28', statusLabel: 'Marcación validada', cityName: 'Bogotá' },
+    { workerName: 'Auxiliar Prueba', documentNumber: '1003806523', serviceDateIso: '2026-09-29', statusLabel: 'Marcación validada', cityName: 'Bogotá' },
+    { workerName: 'Segundo Auxiliar', documentNumber: '8507957', serviceDateIso: '2026-09-28', statusLabel: 'Marcación validada', cityName: 'Neiva' }
+  ];
+
+  const workbook = buildAttendanceFilteredWorkbook(report, boardRows);
+  const sheet = workbook.getWorksheet('Detalle diario');
+
+  assert.match(String(sheet.getCell('A4').value), /Auxiliar Prueba · CC 1\.003\.806\.523/);
+  assert.equal(sheet.getCell('A5').value, 'Fecha');
+  assert.equal(sheet.getCell('A6').value, '2026-09-28');
+  assert.equal(sheet.getCell('A7').value, '2026-09-29');
+  assert.equal(sheet.getRow(6).values.includes('Auxiliar Prueba'), false);
+  assert.equal(sheet.getRow(7).values.includes('1.003.806.523'), false);
+
+  assert.match(String(sheet.getCell('A9').value), /Segundo Auxiliar · CC 8507957/);
+  assert.equal(sheet.getCell('A10').value, 'Fecha');
+  assert.equal(sheet.getCell('A11').value, '2026-09-28');
+});
+
+test('el bloque diario conserva marcaciones, horas extra y conceptos calculados', () => {
   const report = {
     period: { from: '2026-09-28', to: '2026-09-28' },
     rows: [{
       fullName: 'Auxiliar Prueba',
       documentType: 'CC',
       documentNumber: '1.003.806.523',
-      daily: [{
-        dateKey: '2026-09-28',
-        clientNames: ['Cliente Uno'],
-        operationNames: ['Punto Norte'],
-        totalHours: 8,
-        ordinaryHours: 7,
-        overtimeHours: 1,
-        conceptHours: conceptHours({ HENO: 0.5, RNO: 1.5 }),
-        markings: [{
-          clientName: 'Cliente Uno',
-          operationName: 'Punto Norte',
-          arrivalLabel: '28 sept 2026, 7:00 a. m.',
-          breakStartLabel: '28 sept 2026, 12:00 p. m.',
-          breakEndLabel: '28 sept 2026, 1:00 p. m.',
-          departureLabel: '28 sept 2026, 4:00 p. m.',
-          corrections: []
-        }]
-      }]
+      daily: [sampleDaily('2026-09-28')]
     }]
   };
   const boardRows = [{
@@ -71,12 +115,11 @@ test('el Excel filtrado conserva marcaciones y conceptos calculados por día', (
 
   const workbook = buildAttendanceFilteredWorkbook(report, boardRows);
   const sheet = workbook.getWorksheet('Detalle diario');
-  const headers = sheet.getRow(4).values;
-  const data = sheet.getRow(5).values;
+  const headers = sheet.getRow(5).values;
+  const data = sheet.getRow(6).values;
   const headerIndex = (text) => headers.findIndex((value) => String(value || '').startsWith(text));
 
   assert.equal(data[headerIndex('Fecha')], '2026-09-28');
-  assert.equal(data[headerIndex('Documento')], '1.003.806.523');
   assert.match(String(data[headerIndex('Entrada')]), /7:00/);
   assert.equal(data[headerIndex('Horas extra total')], 1);
   assert.equal(data[headerIndex('HENO')], 0.5);
