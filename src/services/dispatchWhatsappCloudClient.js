@@ -186,9 +186,6 @@ export function buildDispatchAssignmentTemplatePayload({ config, assignment, pho
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
   if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para enviar WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
   const includeService = config.assignmentTemplateName === ASSIGNMENT_TEMPLATE_WITH_SERVICE;
-  const temporaryReversedButtons = config.assignmentTemplateName === ASSIGNMENT_TEMPLATE_WITH_SERVICE;
-  const confirmIndex = temporaryReversedButtons ? '1' : '0';
-  const noveltyIndex = temporaryReversedButtons ? '0' : '1';
   return {
     messaging_product: 'whatsapp',
     recipient_type: 'individual',
@@ -200,11 +197,11 @@ export function buildDispatchAssignmentTemplatePayload({ config, assignment, pho
       components: [
         { type: 'body', parameters: assignmentTemplateValues(assignment, { includeService }).map((text) => ({ type: 'text', text })) },
         {
-          type: 'button', sub_type: 'quick_reply', index: confirmIndex,
+          type: 'button', sub_type: 'quick_reply', index: '0',
           parameters: [{ type: 'payload', payload: `dispatch_confirm:${assignment.id}` }]
         },
         {
-          type: 'button', sub_type: 'quick_reply', index: noveltyIndex,
+          type: 'button', sub_type: 'quick_reply', index: '1',
           parameters: [{ type: 'payload', payload: `dispatch_novelty:${assignment.id}` }]
         }
       ]
