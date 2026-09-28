@@ -198,6 +198,11 @@
     };
   }
 
+  function attendanceRequestedWorkerKeys() {
+    const params = new URLSearchParams(window.location.search);
+    return new Set(params.getAll('workerKey').map((value) => fold(value)).filter(Boolean));
+  }
+
   function installAttendanceMultiSelect() {
     const form = document.querySelector('.filter-card form[method="get"]');
     const originalInput = form?.querySelector('input[name="q"]');
@@ -221,15 +226,21 @@
       if (!byKey.has(option.key)) byKey.set(option.key, option);
     });
     const options = [...byKey.values()];
+    const requestedWorkerKeys = attendanceRequestedWorkerKeys();
+    if (requestedWorkerKeys.size) {
+      options.forEach((option) => {
+        option.checked = requestedWorkerKeys.has(fold(option.value));
+      });
+    }
 
-    const syncExportSelection = () => {
-      form.querySelectorAll('input[data-attendance-export-worker]').forEach((node) => node.remove());
+    const syncWorkerSelection = () => {
+      form.querySelectorAll('input[data-attendance-worker-filter]').forEach((node) => node.remove());
       options.filter((option) => option.checked).forEach((option) => {
         const hidden = document.createElement('input');
         hidden.type = 'hidden';
         hidden.name = 'workerKey';
         hidden.value = option.value;
-        hidden.dataset.attendanceExportWorker = 'true';
+        hidden.dataset.attendanceWorkerFilter = 'true';
         form.appendChild(hidden);
       });
     };
@@ -242,7 +253,7 @@
       });
       const counter = document.querySelector('.attendance-list-tools strong');
       if (counter) counter.textContent = `${cards.filter((card) => !card.hidden).length} auxiliar(es)`;
-      syncExportSelection();
+      syncWorkerSelection();
     };
 
     const actions = form.querySelector('.filter-actions');
@@ -268,7 +279,7 @@
       setChecked: (option, checked) => { option.checked = checked; },
       onSelectionChange: applySelection
     });
-    syncExportSelection();
+    applySelection();
   }
 
   function installPayrollMultiSelect() {
