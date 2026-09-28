@@ -1,6 +1,7 @@
 import express from 'express';
 import ExcelJS from 'exceljs';
 import { loadAttendanceAdminBoard } from '../modules/dispatch-attendance/application/adminAttendance.js';
+import { applyAttendanceCityFilter } from '../modules/dispatch-attendance/application/attendanceBoardCityFilter.js';
 import { loadPayrollReport } from '../modules/dispatch-payroll/application/payrollReport.js';
 import { PAYROLL_CONCEPT_CODES } from '../modules/dispatch-payroll/domain/payrollConceptEngine.js';
 
@@ -329,7 +330,8 @@ export function attendanceFilteredExportRouter(prisma) {
 
   router.get('/export-filtrado.xlsx', async (req, res) => {
     try {
-      const board = await loadAttendanceAdminBoard(prisma, req.query || {});
+      const baseBoard = await loadAttendanceAdminBoard(prisma, req.query || {});
+      const board = applyAttendanceCityFilter(baseBoard, req.query?.city);
       const selected = new Set(normalizeList(req.query?.workerKey).map(selectedWorkerKey).filter(Boolean));
       const filteredRows = selected.size
         ? (board.rows || []).filter((row) => selected.has(identityKey(row)))
