@@ -17,6 +17,7 @@ const migration = fs.readFileSync(
   'utf8'
 );
 const publicRoutes = fs.readFileSync(new URL('../src/routes/publicDispatchClient.js', import.meta.url), 'utf8');
+const coreRoutes = fs.readFileSync(new URL('../src/routes/dispatchBridgeCore.js', import.meta.url), 'utf8');
 const middleware = fs.readFileSync(new URL('../src/services/dispatchAuditMiddleware.js', import.meta.url), 'utf8');
 
 const cities = [
@@ -85,9 +86,8 @@ test('selección de sucursales deduplica IDs y mantiene una ciudad de compatibil
 });
 
 test('edición restringida preserva sucursales que el actor no puede ver ni retirar', async () => {
-  const prisma = prismaForCities();
   const result = await resolveDispatchClientBranchSelection(
-    prisma,
+    prismaForCities(),
     {
       userRole: 'admin',
       userAccessScope: 'CITY',
@@ -125,8 +125,10 @@ test('la persistencia y la UI usan branchCityIds/cityIds como autoridad multisel
   assert.match(view, /type="checkbox" name="cityIds"/);
   assert.doesNotMatch(view, /name="cityName"/);
   assert.doesNotMatch(view, /Sucursal principal/);
-  assert.match(publicRoutes, /resolveDispatchClientBranchSelection/);
-  assert.match(publicRoutes, /branchCityIds: branches\.branchCityIds/);
+  for (const routeSource of [publicRoutes, coreRoutes]) {
+    assert.match(routeSource, /resolveDispatchClientBranchSelection/);
+    assert.match(routeSource, /branchCityIds: branches\.branchCityIds/);
+  }
 });
 
 test('el middleware territorial autoriza clientes por cualquier sucursal asignada', () => {
