@@ -84,7 +84,7 @@ test('mensaje interactivo usa el nuevo texto y conserva CONFIRMADO y REPORTAR NO
   ]);
 });
 
-test('plantilla de ventana cerrada vuelve a confirmacion_de_asignacion con cinco variables y orden canónico', () => {
+test('plantilla de ventana cerrada usa confirmacion_de_asignacion con seis variables y orden canónico', () => {
   const payload = buildDispatchAssignmentTemplatePayload({
     config: { assignmentTemplateName: 'confirmacion_de_asignacion', templateLanguage: 'es' },
     phone: '3001234567',
@@ -94,27 +94,6 @@ test('plantilla de ventana cerrada vuelve a confirmacion_de_asignacion con cinco
   const body = payload.template.components.find((component) => component.type === 'body');
   const buttons = payload.template.components.filter((component) => component.type === 'button');
   assert.equal(payload.template.name, 'confirmacion_de_asignacion');
-  assert.deepEqual(body.parameters.map((parameter) => parameter.text), [
-    'Auxiliar Prueba',
-    '12/08/2026',
-    'Operación Prueba',
-    'Dirección Prueba',
-    '7:30 AM'
-  ]);
-  assert.deepEqual(buttons.map((button) => ({ index: button.index, payload: button.parameters[0].payload })), [
-    { index: '0', payload: 'dispatch_confirm:assignment-test' },
-    { index: '1', payload: 'dispatch_novelty:assignment-test' }
-  ]);
-});
-
-test('la variante con servicio conserva sus seis variables pero ya no invierte los botones', () => {
-  const payload = buildDispatchAssignmentTemplatePayload({
-    config: { assignmentTemplateName: 'confirmacion_de_asignacion_con_servicio', templateLanguage: 'es' },
-    phone: '3001234567',
-    assignment: assignmentFixture()
-  });
-  const body = payload.template.components.find((component) => component.type === 'body');
-  const buttons = payload.template.components.filter((component) => component.type === 'button');
   assert.deepEqual(body.parameters.map((parameter) => parameter.text), [
     'Auxiliar Prueba',
     '12/08/2026',
