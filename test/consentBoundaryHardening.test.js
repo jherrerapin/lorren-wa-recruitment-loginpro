@@ -42,40 +42,40 @@ test('interés o nombre de un cargo no se confunden con datos personales en MENU
   );
 });
 
-test('los datos personales explícitos continúan protegidos antes del consentimiento', () => {
+test('los datos personales explícitos pueden persistirse antes del consentimiento sin habilitar progresión', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: 'PENDING', currentStep: 'MENU', botResumeMode: null },
     { type: 'text', text: { body: 'Mi nombre es Laura Pérez y mi cédula es 1020304050' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
-test('un nombre completo enviado solo queda protegido antes del consentimiento', () => {
+test('un nombre completo enviado solo puede persistirse antes del consentimiento sin habilitar progresión', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: 'PENDING', currentStep: 'GREETING_SENT', botResumeMode: null, vacancyId: 'vacancy-1' },
     { type: 'text', text: { body: 'Laura Pérez' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
-test('la presentación natural con soy nombre queda protegida antes del consentimiento', () => {
+test('la presentación natural con nombre puede persistirse antes del consentimiento sin habilitar progresión', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: 'PENDING', currentStep: 'MENU', botResumeMode: null },
     { type: 'text', text: { body: 'Soy Laura Pérez, quiero aplicar a auxiliar de bodega' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
-test('una declaración explícita de género queda protegida antes del consentimiento', () => {
+test('una declaración explícita de género puede persistirse antes del consentimiento sin habilitar progresión', () => {
   const decision = evaluateConsentBoundary(
     { dataConsentStatus: 'PENDING', currentStep: 'MENU', botResumeMode: null },
     { type: 'text', text: { body: 'Soy mujer, quiero aplicar a auxiliar de bodega' } }
   );
 
-  assert.deepEqual(decision, { block: true, reason: 'profile_data_before_consent' });
+  assert.deepEqual(decision, { block: false, reason: 'content_persists_independently_of_consent' });
 });
 
 test('una inferencia gramatical de género no convierte el interés en datos de perfil', () => {
