@@ -40,25 +40,29 @@ function normalizeList(value, maxLength = 300) {
   return [...new Set(source.map((item) => normalizeString(item, maxLength)).filter(Boolean))];
 }
 
+function normalizedDocument(value) {
+  return (normalizeString(value, 120) || '').replace(/[^0-9A-Za-z]/g, '').toLocaleLowerCase('es-CO');
+}
+
+function normalizedName(value) {
+  return (normalizeString(value, 220) || '').toLocaleLowerCase('es-CO').replace(/\s+/g, ' ');
+}
+
 function identityKey({ workerName, fullName, documentNumber } = {}) {
-  const document = normalizeString(documentNumber, 120);
-  if (document) return `doc:${document.replace(/\s+/g, '').toLocaleLowerCase('es-CO')}`;
-  const name = normalizeString(workerName || fullName, 220) || '';
-  return `name:${name.toLocaleLowerCase('es-CO').replace(/\s+/g, ' ')}`;
+  const document = normalizedDocument(documentNumber);
+  return document ? `doc:${document}` : `name:${normalizedName(workerName || fullName)}`;
 }
 
 function selectedWorkerKey(value) {
   const normalized = normalizeString(value, 350);
   if (!normalized) return null;
   const separator = normalized.indexOf('|');
-  if (separator < 0) return `name:${normalized.toLocaleLowerCase('es-CO').replace(/\s+/g, ' ')}`;
+  if (separator < 0) return `name:${normalizedName(normalized)}`;
   const name = normalized.slice(0, separator).trim();
   const documentText = normalized.slice(separator + 1).trim();
-  const documentMatch = documentText.match(/(?:^|\s)([0-9][0-9.\-\s]{3,})$/);
-  const document = documentMatch?.[1]?.replace(/[^0-9A-Za-z]/g, '') || '';
-  return document
-    ? `doc:${document.toLocaleLowerCase('es-CO')}`
-    : `name:${name.toLocaleLowerCase('es-CO').replace(/\s+/g, ' ')}`;
+  const withoutType = documentText.replace(/^(?:CC|PPT)\s+/i, '');
+  const document = normalizedDocument(withoutType);
+  return document ? `doc:${document}` : `name:${normalizedName(name)}`;
 }
 
 function dateKeysForBoardRows(rows = []) {
