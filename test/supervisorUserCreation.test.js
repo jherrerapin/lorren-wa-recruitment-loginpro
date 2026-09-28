@@ -44,12 +44,30 @@ function createPrisma() {
   ]);
   const events = [];
   const created = [];
+  const vacancies = [
+    { id: 'VAC-BOG-1', title: 'Auxiliar Bogotá', role: 'Auxiliar', city: 'Bogotá' },
+    { id: 'VAC-BOG-2', title: 'Líder Bogotá', role: 'Líder', city: 'Bogotá' },
+    { id: 'VAC-MED-1', title: 'Auxiliar Medellín', role: 'Auxiliar', city: 'Medellín' }
+  ];
   let sequence = 0;
 
   const prisma = {
     users,
     events,
     created,
+    city: {
+      findMany: async () => [
+        { id: 'CITY-BOG', name: 'Bogotá' },
+        { id: 'CITY-MED', name: 'Medellín' }
+      ]
+    },
+    vacancy: {
+      findMany: async ({ where } = {}) => {
+        const ids = where?.id?.in;
+        const selected = Array.isArray(ids) ? vacancies.filter((vacancy) => ids.includes(vacancy.id)) : vacancies;
+        return selected.map((vacancy) => ({ ...vacancy }));
+      }
+    },
     appUser: {
       findUnique: async ({ where }) => {
         if (where?.id) return users.get(where.id) || null;
@@ -130,7 +148,7 @@ async function postCreate(prisma, session, body) {
   }
 }
 
-test('Supervisor crea únicamente un usuario Consulta dentro de su mismo alcance y sin módulos activos', async () => {
+test('Supervisor conserva compatibilidad: si no selecciona alcance ni permisos, hereda su alcance y crea Consulta sin módulos', async () => {
   const prisma = createPrisma();
   const response = await postCreate(prisma, supervisorSession(), {
     displayName: 'Usuario Nuevo',
@@ -175,26 +193,87 @@ test('Supervisor crea únicamente un usuario Consulta dentro de su mismo alcance
   assert.equal(initialization.metadata.roleAssignedByDev, false);
 });
 
-test('Supervisor con alcance VACANCY no puede crear una cuenta con alcance superior al propio', async () => {
+test('Supervisor puede crear Consulta con alcance más estrecho y módulos/funciones configurados desde el inicio', async () => {
   const prisma = createPrisma();
-  const response = await postCreate(prisma, supervisorSession({
-    userAccessScope: 'VACANCY',
-    userAccessCity: '{"cities":["Bogotá"],"vacancyIds":["VAC-1"]}',
-    userAccessVacancyId: 'VAC-1'
-  }), {
-    displayName: 'Usuario Vacante',
-    email: 'vacante@example.test',
+  const operationalAccessConfig = JSON.stringify({
+    role: 'SUPERVISOR',
+    moduleAccess: { dispatch: true, attendance: false, time: true },
+    permissions: {
+      [OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE]: true,
+      [OPERATIONAL_CAPABILITY.TIME_EXPORT]: true
+    },
+    delegablePermissions: [OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS]
+  });
+
+  const response = await postCreate(prisma, supervisorSession(), {
+    displayName: 'Usuario Configurado',
+    email: 'configurado@example.test',
     password: 'TEST-123456',
-    accessScope: 'ALL',
-    scopeCity: 'Medellín'
+    accessScope: 'VACANCY',
+    scopeCities: 'Bogotá',
+    scopeVacancyIds: 'VAC-BOG-2',
+    operationalAccessConfig
   });
 
   assert.equal(response.status, 302);
   assert.equal(prisma.created.length, 1);
   const created = prisma.created[0];
   assert.equal(created.accessScope, 'VACANCY');
-  assert.equal(created.scopeCity, '{"cities":["Bogotá"],"vacancyIds":["VAC-1"]}');
-  assert.equal(created.scopeVacancyId, 'VAC-1');
+  assert.equal(created.scopeCity, '{"cities":["Bogotá"],"vacancyIds":["VAC-BOG-2"]}');
+  assert.equal(created.scopeVacancyId, 'VAC-BOG-2');
+  assert.equal(created.canAccessDispatch, true);
+  assert.equal(created.canAccessAttendance, false);
+
+  const operational = await getOperationalAccessForUser(prisma, created.id);
+  assert.equal(operational.role, 'CONSULTA');
+  assert.equal(operational.effectivePermissions.includes(OPERATIONAL_CAPABILITY.DISPATCH_VIEW), true);
+  assert.equal(operational.effectivePermissions.includes(OPERATIONAL_CAPABILITY.DISPATCH_REQUEST_MANAGE), true);
+  assert.equal(operational.effectivePermissions.includes(OPERATIONAL_CAPABILITY.TIME_VIEW), true);
+  assert.equal(operational.effectivePermissions.includes(OPERATIONAL_CAPABILITY.TIME_EXPORT), true);
+  assert.equal(operational.effectivePermissions.includes(OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS), false);
+
+  const initialization = prisma.events.find((event) => (
+    event.entityType === OPERATIONAL_ACCESS_ENTITY_TYPE
+    && event.entityId === created.id
+  ));
+  assert.equal(initialization.toValue.role, 'CONSULTA');
+  assert.equal(initialization.metadata.roleAssignedByDev, false);
+  assert.equal(initialization.metadata.initializedBySupervisor, true);
+
+  const payroll = prisma.events.find((event) => event.entityType === 'APP_USER_PAYROLL_ACCESS' && event.entityId === created.id);
+  assert.ok(payroll);
+  assert.equal(payroll.action, 'PAYROLL_ACCESS_ENABLED');
+});
+
+test('Supervisor no puede crear un usuario fuera de su alcance territorial', async () => {
+  const prisma = createPrisma();
+  const response = await postCreate(prisma, supervisorSession(), {
+    displayName: 'Usuario Fuera Alcance',
+    email: 'fuera@example.test',
+    password: 'TEST-123456',
+    accessScope: 'CITY',
+    scopeCities: 'Medellín'
+  });
+
+  assert.equal(response.status, 302);
+  assert.equal(prisma.created.length, 0);
+});
+
+test('Supervisor con alcance VACANCY no puede elevar el usuario nuevo a ALL', async () => {
+  const prisma = createPrisma();
+  const response = await postCreate(prisma, supervisorSession({
+    userAccessScope: 'VACANCY',
+    userAccessCity: '{"cities":["Bogotá"],"vacancyIds":["VAC-BOG-1"]}',
+    userAccessVacancyId: 'VAC-BOG-1'
+  }), {
+    displayName: 'Usuario Vacante',
+    email: 'vacante@example.test',
+    password: 'TEST-123456',
+    accessScope: 'ALL'
+  });
+
+  assert.equal(response.status, 302);
+  assert.equal(prisma.created.length, 0);
 });
 
 test('un ADMIN que no es Supervisor no puede crear usuarios por la ruta del Supervisor', async () => {

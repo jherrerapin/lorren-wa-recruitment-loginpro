@@ -40,10 +40,22 @@
     .flash-error { background: var(--error-bg); border: 1px solid var(--error-border); color: var(--error-text); }
     .recovery-code { margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 800; letter-spacing: .08em; }
     .create-user-form { margin-top: 14px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .create-section { grid-column: 1 / -1; border: 1px solid var(--border); border-radius: 10px; padding: 14px; display: grid; gap: 12px; background: #fcfdff; }
+    .create-section-title { margin: 0; font-size: 12px; font-weight: 800; color: #334155; text-transform: uppercase; letter-spacing: .06em; }
+    .create-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
     .field { display: grid; gap: 6px; min-width: 0; }
-    .field label { font-size: 12px; font-weight: 750; color: var(--navy); }
-    .field input { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 11px; font: inherit; color: var(--text); background: #fff; }
-    .field input:focus { outline: 2px solid rgba(13,122,107,.18); border-color: var(--teal); }
+    .field.full { grid-column: 1 / -1; }
+    .field label, .field > span:first-child { font-size: 12px; font-weight: 750; color: var(--navy); }
+    .field input, .field select { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 11px; font: inherit; color: var(--text); background: #fff; }
+    .field input:focus, .field select:focus { outline: 2px solid rgba(13,122,107,.18); border-color: var(--teal); }
+    .scope-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 9px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; max-height: 230px; overflow: auto; }
+    .scope-option { display: flex !important; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 7px; cursor: pointer; font-size: 13px !important; font-weight: 500 !important; }
+    .scope-option:hover { background: var(--teal-soft); }
+    .scope-option input { width: 16px !important; min-width: 16px; height: 16px; margin: 1px 0 0; padding: 0; accent-color: var(--teal); }
+    .scope-vacancy-list { display: grid; gap: 8px; }
+    .scope-vacancy-group { border: 1px solid #e2e8f0; border-radius: 9px; padding: 9px; background: #fff; }
+    .scope-vacancy-group strong { display: block; margin-bottom: 5px; color: var(--navy); font-size: 12px; }
+    .create-permissions { display: grid; gap: 10px; }
     .create-user-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
     .supervisor-users-list { display: grid; gap: 10px; margin-top: 14px; }
     .supervisor-user { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #fff; }
@@ -66,9 +78,10 @@
     .status-success { color: #166534; }
     .status-error { color: #b91c1c; }
     .empty { padding: 22px 8px; text-align: center; color: var(--muted); }
+    [hidden] { display: none !important; }
     @media (max-width: 720px) {
       .page { padding: 18px 12px 40px; }
-      .create-user-form { grid-template-columns: 1fr; }
+      .create-user-form, .create-grid, .scope-options { grid-template-columns: 1fr; }
       .create-user-actions { grid-column: auto; }
       .supervisor-module-functions { padding-left: 8px; }
     }
@@ -86,7 +99,7 @@
   <main class="page">
     <div class="page-header">
       <h1>Usuarios</h1>
-      <p>Administra usuarios Consulta y sus permisos operativos. DEV conserva exclusivamente la asignación y el cambio del rol Supervisor.</p>
+      <p>Administra usuarios Consulta, su alcance territorial y sus permisos operativos. DEV conserva exclusivamente la asignación y el cambio del rol Supervisor.</p>
     </div>
 
     <% if (successMsg) { %>
@@ -96,26 +109,92 @@
       <div class="flash flash-error"><%= errorMsg %></div>
     <% } %>
 
+    <%
+      const scopeOptions = creationScopeOptions || { actorScope: 'VACANCY', canCreateAll: false, allowedCities: [], allowedVacancies: [] };
+      const allowedCities = scopeOptions.allowedCities || [];
+      const allowedVacancies = scopeOptions.allowedVacancies || [];
+      const defaultScope = scopeOptions.canCreateAll ? 'ALL' : (scopeOptions.actorScope === 'CITY' ? 'CITY' : 'VACANCY');
+      const preselectActorScope = !scopeOptions.canCreateAll;
+    %>
+
     <section class="card" data-supervisor-user-create="true">
       <h2>Crear usuario</h2>
-      <p class="hint">El nuevo usuario se crea como Consulta, hereda tu alcance territorial y empieza sin módulos operativos activos. Después puedes asignarle únicamente los módulos y funciones que correspondan.</p>
-      <form class="create-user-form" method="post" action="/admin/locations/users/create" autocomplete="off">
-        <div class="field">
-          <label for="supervisorCreateDisplayName">Nombre completo</label>
-          <input id="supervisorCreateDisplayName" name="displayName" type="text" minlength="3" maxlength="160" required autocomplete="name" />
-        </div>
-        <div class="field">
-          <label for="supervisorCreateEmail">Correo electrónico</label>
-          <input id="supervisorCreateEmail" name="email" type="email" maxlength="254" required autocomplete="email" />
-        </div>
-        <div class="field">
-          <label for="supervisorCreatePassword">Contraseña inicial</label>
-          <input id="supervisorCreatePassword" name="password" type="password" minlength="6" required autocomplete="new-password" />
-        </div>
-        <div class="field">
-          <label for="supervisorCreateRecoveryPhone">Teléfono de recuperación <span class="hint">(opcional)</span></label>
-          <input id="supervisorCreateRecoveryPhone" name="recoveryPhone" type="tel" maxlength="40" autocomplete="tel" />
-        </div>
+      <p class="hint">Crea el usuario Consulta y deja definidos desde el inicio su alcance, módulos y funciones. Nunca podrás asignar el rol Supervisor desde esta pantalla.</p>
+      <form class="create-user-form" method="post" action="/admin/locations/users/create" autocomplete="off" data-supervisor-create-form="true">
+        <section class="create-section">
+          <h3 class="create-section-title">Identidad</h3>
+          <div class="create-grid">
+            <div class="field">
+              <label for="supervisorCreateDisplayName">Nombre completo</label>
+              <input id="supervisorCreateDisplayName" name="displayName" type="text" minlength="3" maxlength="160" required autocomplete="name" />
+            </div>
+            <div class="field">
+              <label for="supervisorCreateEmail">Correo electrónico</label>
+              <input id="supervisorCreateEmail" name="email" type="email" maxlength="254" required autocomplete="email" />
+            </div>
+            <div class="field">
+              <label for="supervisorCreatePassword">Contraseña inicial</label>
+              <input id="supervisorCreatePassword" name="password" type="password" minlength="6" required autocomplete="new-password" />
+            </div>
+            <div class="field">
+              <label for="supervisorCreateRecoveryPhone">Teléfono de recuperación <span class="hint">(opcional)</span></label>
+              <input id="supervisorCreateRecoveryPhone" name="recoveryPhone" type="tel" maxlength="40" autocomplete="tel" />
+            </div>
+          </div>
+        </section>
+
+        <section class="create-section">
+          <h3 class="create-section-title">Alcance</h3>
+          <div class="create-grid">
+            <div class="field full">
+              <label for="supervisorCreateAccessScope">Alcance del usuario</label>
+              <select id="supervisorCreateAccessScope" name="accessScope" data-supervisor-create-scope="true">
+                <% if (scopeOptions.canCreateAll) { %><option value="ALL" <%= defaultScope === 'ALL' ? 'selected' : '' %>>Todas las sucursales y vacantes</option><% } %>
+                <% if (scopeOptions.actorScope !== 'VACANCY' && allowedCities.length) { %><option value="CITY" <%= defaultScope === 'CITY' ? 'selected' : '' %>>Sucursales seleccionadas</option><% } %>
+                <% if (allowedVacancies.length) { %><option value="VACANCY" <%= defaultScope === 'VACANCY' ? 'selected' : '' %>>Vacantes seleccionadas</option><% } %>
+              </select>
+              <span class="hint">Solo puedes conceder un alcance igual o menor al que tú ya tienes.</span>
+            </div>
+
+            <div class="field full" data-supervisor-create-cities="true">
+              <span>Sucursales</span>
+              <div class="scope-options">
+                <% for (const city of allowedCities) { %>
+                  <label class="scope-option"><input type="checkbox" name="scopeCities" value="<%= city %>" <%= preselectActorScope ? 'checked' : '' %> data-supervisor-create-city="true" /><span><%= city %></span></label>
+                <% } %>
+                <% if (!allowedCities.length) { %><div class="hint">No hay sucursales disponibles dentro de tu alcance.</div><% } %>
+              </div>
+              <span class="hint">Con alcance por sucursal, el usuario verá las vacantes de las sucursales marcadas. Con alcance por vacantes, estas sucursales filtran la lista siguiente.</span>
+            </div>
+
+            <div class="field full" data-supervisor-create-vacancies="true">
+              <span>Vacantes permitidas</span>
+              <div class="scope-vacancy-list">
+                <% for (const city of allowedCities) {
+                  const cityVacancies = allowedVacancies.filter((vacancy) => vacancy.city === city);
+                %>
+                  <div class="scope-vacancy-group" data-supervisor-vacancy-city="<%= city %>">
+                    <strong><%= city %></strong>
+                    <% if (!cityVacancies.length) { %><div class="hint">Esta sucursal no tiene vacantes disponibles.</div><% } else { %>
+                      <% for (const vacancy of cityVacancies) { %>
+                        <label class="scope-option"><input type="checkbox" name="scopeVacancyIds" value="<%= vacancy.id %>" <%= scopeOptions.actorScope === 'VACANCY' ? 'checked' : '' %> /><span><%= vacancy.title || vacancy.role %></span></label>
+                      <% } %>
+                    <% } %>
+                  </div>
+                <% } %>
+              </div>
+              <span class="hint">Cuando eliges vacantes específicas, debes marcar al menos una.</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="create-section">
+          <h3 class="create-section-title">Módulos y funciones</h3>
+          <p class="hint">El rol queda fijo en Consulta. Habilita únicamente los módulos que necesita y, dentro de cada uno, sus funciones.</p>
+          <div class="create-permissions" data-supervisor-create-permissions="true"><div class="hint">Cargando permisos disponibles…</div></div>
+          <input type="hidden" name="operationalAccessConfig" data-supervisor-create-operational-config="true" value="" />
+        </section>
+
         <div class="create-user-actions">
           <button class="btn btn-primary" type="submit">Crear usuario</button>
           <span class="hint">El código de recuperación se mostrará una sola vez después de crear la cuenta.</span>

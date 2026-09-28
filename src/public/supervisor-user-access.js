@@ -179,6 +179,80 @@
     return 'No fue posible guardar los permisos operativos.';
   }
 
+  function syncCreateScope(form) {
+    const select = form.querySelector('[data-supervisor-create-scope]');
+    const citySection = form.querySelector('[data-supervisor-create-cities]');
+    const vacancySection = form.querySelector('[data-supervisor-create-vacancies]');
+    if (!select || !citySection || !vacancySection) return;
+
+    const scope = select.value;
+    const showCities = scope === 'CITY' || scope === 'VACANCY';
+    const showVacancies = scope === 'VACANCY';
+    citySection.hidden = !showCities;
+    vacancySection.hidden = !showVacancies;
+
+    const cityInputs = [...citySection.querySelectorAll('input[data-supervisor-create-city]')];
+    cityInputs.forEach((input) => { input.disabled = !showCities; });
+
+    const selectedCities = new Set(cityInputs.filter((input) => input.checked).map((input) => input.value));
+    vacancySection.querySelectorAll('[data-supervisor-vacancy-city]').forEach((group) => {
+      const visible = showVacancies && selectedCities.has(group.dataset.supervisorVacancyCity);
+      group.hidden = !visible;
+      group.querySelectorAll('input[name="scopeVacancyIds"]').forEach((input) => {
+        input.disabled = !visible;
+      });
+    });
+  }
+
+  function initializeCreateForm(payload) {
+    const form = document.querySelector('[data-supervisor-create-form]');
+    if (!form) return;
+
+    const scopeSelect = form.querySelector('[data-supervisor-create-scope]');
+    scopeSelect?.addEventListener('change', () => syncCreateScope(form));
+    form.querySelectorAll('input[data-supervisor-create-city]').forEach((input) => {
+      input.addEventListener('change', () => syncCreateScope(form));
+    });
+    syncCreateScope(form);
+
+    const host = form.querySelector('[data-supervisor-create-permissions]');
+    const hidden = form.querySelector('[data-supervisor-create-operational-config]');
+    if (!host || !hidden) return;
+
+    host.replaceChildren();
+    const roots = rootDefinitions(payload.capabilities, payload.editableModules);
+    const emptyModules = { dispatch: false, attendance: false, time: false };
+    for (const root of roots) {
+      const functions = functionDefinitions(payload.capabilities, payload.editableCapabilities, root.moduleAccessKey);
+      const control = moduleControl({
+        root,
+        functions,
+        moduleAccess: emptyModules,
+        effectivePermissions: []
+      });
+      control.rootInput.addEventListener('change', () => enforceModuleDependency(host, control.rootInput));
+      host.append(control.fieldset);
+    }
+
+    if (!roots.length) {
+      const empty = document.createElement('div');
+      empty.className = 'hint';
+      empty.textContent = 'No hay módulos operativos configurables para tu perfil.';
+      host.append(empty);
+    }
+
+    form.addEventListener('submit', () => {
+      const moduleAccess = readModuleAccess(host, emptyModules);
+      const permissions = readPermissions(host, payload.editableCapabilities);
+      hidden.value = JSON.stringify({
+        role: 'CONSULTA',
+        moduleAccess,
+        permissions,
+        delegablePermissions: []
+      });
+    });
+  }
+
   function userEditor(user, payload) {
     const details = document.createElement('details');
     details.className = 'supervisor-user';
@@ -250,6 +324,7 @@
     if (!host) return;
     try {
       const payload = await request(`${API_BASE}/operational-access`, { method: 'GET' });
+      initializeCreateForm(payload);
       host.replaceChildren();
       const users = payload.users || [];
       if (!users.length) {
@@ -266,6 +341,11 @@
       error.className = 'empty status-error';
       error.textContent = 'No fue posible cargar los permisos de usuarios.';
       host.append(error);
+      const createPermissions = document.querySelector('[data-supervisor-create-permissions]');
+      if (createPermissions) {
+        createPermissions.textContent = 'No fue posible cargar los módulos y funciones disponibles.';
+        createPermissions.classList.add('status-error');
+      }
     }
   }
 

@@ -296,6 +296,118 @@ function supervisorInheritedScope(req = {}) {
   return { accessScope, scopeCity, scopeVacancyId };
 }
 
+function parseScopeMetadata(value) {
+  const raw = normalize(value);
+  if (!raw) return { cities: [], vacancyIds: [] };
+  if (raw.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return {
+          cities: normalizeMany(parsed.cities),
+          vacancyIds: normalizeMany(parsed.vacancyIds)
+        };
+      }
+    } catch (_error) {
+      return { cities: [raw], vacancyIds: [] };
+    }
+  }
+  if (raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return { cities: normalizeMany(parsed), vacancyIds: [] };
+    } catch (_error) {
+      return { cities: [raw], vacancyIds: [] };
+    }
+  }
+  return { cities: [raw], vacancyIds: [] };
+}
+
+async function supervisorCreationScopeOptions(prisma, req = {}) {
+  const inherited = supervisorInheritedScope(req);
+  const metadata = parseScopeMetadata(inherited.scopeCity);
+  const inheritedVacancyIds = normalizeMany([...(metadata.vacancyIds || []), inherited.scopeVacancyId]);
+  const allCities = typeof prisma?.city?.findMany === 'function'
+    ? (await loadUnifiedCityOptions(prisma)).map((city) => city.name)
+    : [];
+  const allVacancies = typeof prisma?.vacancy?.findMany === 'function'
+    ? await prisma.vacancy.findMany({
+      orderBy: [{ city: 'asc' }, { title: 'asc' }],
+      select: { id: true, title: true, role: true, city: true }
+    })
+    : [];
+
+  if (inherited.accessScope === 'ALL') {
+    return {
+      actorScope: 'ALL',
+      canCreateAll: true,
+      allowedCities: allCities,
+      allowedVacancies: allVacancies
+    };
+  }
+
+  if (inherited.accessScope === 'CITY') {
+    const actorCities = metadata.cities;
+    return {
+      actorScope: 'CITY',
+      canCreateAll: false,
+      allowedCities: allCities.length ? allCities.filter((city) => actorCities.includes(city)) : actorCities,
+      allowedVacancies: allVacancies.filter((vacancy) => actorCities.includes(vacancy.city))
+    };
+  }
+
+  const allowedVacancyIdSet = new Set(inheritedVacancyIds);
+  const allowedVacancies = allVacancies.filter((vacancy) => allowedVacancyIdSet.has(vacancy.id));
+  const allowedCities = normalizeMany([
+    ...metadata.cities,
+    ...allowedVacancies.map((vacancy) => vacancy.city)
+  ]).sort((a, b) => a.localeCompare(b, 'es'));
+  return {
+    actorScope: 'VACANCY',
+    canCreateAll: false,
+    allowedCities,
+    allowedVacancies
+  };
+}
+
+async function resolveSupervisorRequestedScope(prisma, req, body = {}) {
+  if (!normalize(body.accessScope)) {
+    return {
+      ...supervisorInheritedScope(req),
+      selectedCities: [],
+      selectedVacancyIds: []
+    };
+  }
+
+  const options = await supervisorCreationScopeOptions(prisma, req);
+  const resolved = await resolveRecruiterAccessUpdate(prisma, body);
+  if (resolved.error) return resolved;
+  if (options.actorScope === 'ALL') return resolved;
+  if (resolved.accessScope === 'ALL') {
+    return { error: 'No puedes crear un usuario con un alcance mayor al tuyo.' };
+  }
+
+  const allowedCities = new Set(options.allowedCities || []);
+  const allowedVacancyIds = new Set((options.allowedVacancies || []).map((vacancy) => vacancy.id));
+  if (options.actorScope === 'CITY') {
+    if (resolved.accessScope === 'CITY' && resolved.selectedCities.some((city) => !allowedCities.has(city))) {
+      return { error: 'Solo puedes asignar sucursales que estén dentro de tu propio alcance.' };
+    }
+    if (resolved.accessScope === 'VACANCY' && resolved.selectedVacancyIds.some((id) => !allowedVacancyIds.has(id))) {
+      return { error: 'Solo puedes asignar vacantes que estén dentro de tu propio alcance.' };
+    }
+    return resolved;
+  }
+
+  if (resolved.accessScope !== 'VACANCY') {
+    return { error: 'Tu perfil solo puede crear usuarios con alcance por vacantes.' };
+  }
+  if (resolved.selectedVacancyIds.some((id) => !allowedVacancyIds.has(id))) {
+    return { error: 'Solo puedes asignar vacantes que estén dentro de tu propio alcance.' };
+  }
+  return resolved;
+}
+
 function unifiedBranchCompatibilityData() {
   // Campos legacy: mientras existan físicamente, todas las sucursales pertenecen a
   // ambos módulos. Ya no constituyen una decisión ni una autoridad de negocio.
@@ -442,13 +554,15 @@ export function locationsRouter(prisma) {
     if (req.userRole === 'dev') return res.redirect('/admin/users');
     if (!canManageOperationalPermissions(req)) return res.status(403).send('No tienes acceso para administrar permisos operativos.');
     const { successMsg, errorMsg } = readFlash(req, res);
+    const creationScopeOptions = await supervisorCreationScopeOptions(prisma, req);
     return res.render('supervisor-users', {
       role: req.userRole,
       canAccessDispatch: Boolean(req.session?.canAccessDispatch),
       successMsg,
       errorMsg,
       revealedRecoveryCode: normalize(req.query?.recoveryCode),
-      createdUserId: normalize(req.query?.createdUserId)
+      createdUserId: normalize(req.query?.createdUserId),
+      creationScopeOptions
     });
   });
 
@@ -483,12 +597,38 @@ export function locationsRouter(prisma) {
       return res.redirect('/admin/locations/users');
     }
 
+    const scopeResolution = await resolveSupervisorRequestedScope(prisma, req, req.body);
+    if (scopeResolution.error) {
+      flash(res, 'error', scopeResolution.error);
+      return res.redirect('/admin/locations/users');
+    }
+
+    let operationalConfig = {
+      role: 'CONSULTA',
+      permissions: {},
+      delegablePermissions: [],
+      moduleAccess: { dispatch: false, attendance: false, time: false }
+    };
+    if (normalize(req.body.operationalAccessConfig)) {
+      try {
+        const parsed = parseOperationalAccessConfig(req.body.operationalAccessConfig);
+        operationalConfig = {
+          role: 'CONSULTA',
+          permissions: parsed.permissions || {},
+          delegablePermissions: [],
+          moduleAccess: parsed.moduleAccess
+        };
+      } catch (_error) {
+        flash(res, 'error', 'La configuración de módulos y funciones no es válida.');
+        return res.redirect('/admin/locations/users');
+      }
+    }
+
     const username = `user-${randomUUID()}`;
     const passwordHash = await bcrypt.hash(password, 10);
     const recoveryCode = generateRecoveryCode();
     const recoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
     const identityMigratedAt = new Date();
-    const inheritedScope = supervisorInheritedScope(req);
     let createdUser = null;
 
     try {
@@ -502,9 +642,11 @@ export function locationsRouter(prisma) {
             identityMigratedAt,
             recoveryCodeHash,
             role: 'ADMIN',
-            ...inheritedScope,
-            canAccessDispatch: false,
-            canAccessAttendance: false,
+            accessScope: scopeResolution.accessScope,
+            scopeCity: scopeResolution.scopeCity,
+            scopeVacancyId: scopeResolution.scopeVacancyId,
+            canAccessDispatch: operationalConfig.moduleAccess.dispatch,
+            canAccessAttendance: operationalConfig.moduleAccess.attendance,
             canAccessStatistics: false,
             canAccessMetaAds: false,
             canAccessCvAnalysis: false,
@@ -516,12 +658,7 @@ export function locationsRouter(prisma) {
           }
         });
 
-        await persistUnifiedOperationalAccess(db, req, createdUser.id, {
-          role: 'CONSULTA',
-          permissions: {},
-          delegablePermissions: [],
-          moduleAccess: { dispatch: false, attendance: false, time: false }
-        });
+        await persistUnifiedOperationalAccess(db, req, createdUser.id, operationalConfig, { updateModuleFlags: false });
       });
     } catch (error) {
       if (error?.code === 'P2002') {
@@ -533,7 +670,7 @@ export function locationsRouter(prisma) {
       return res.redirect('/admin/locations/users');
     }
 
-    flash(res, 'success', `${displayName} fue creado como usuario Consulta. Ahora puedes asignarle módulos y funciones.`);
+    flash(res, 'success', `${displayName} fue creado como usuario Consulta con el alcance y los permisos seleccionados.`);
     const params = new URLSearchParams({
       recoveryCode,
       createdUserId: createdUser.id
