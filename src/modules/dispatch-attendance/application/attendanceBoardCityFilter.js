@@ -14,8 +14,7 @@ export function attendanceCitiesForRows(rows = []) {
 export function applyAttendanceCityFilter(board = {}, requestedCity) {
   const sourceRows = Array.isArray(board?.rows) ? board.rows : [];
   const cities = attendanceCitiesForRows(sourceRows);
-  const requested = normalizeString(requestedCity) || 'ALL';
-  const city = requested === 'ALL' || cities.includes(requested) ? requested : 'ALL';
+  const city = normalizeString(requestedCity) || 'ALL';
   const rows = city === 'ALL'
     ? sourceRows
     : sourceRows.filter((row) => row?.cityName === city);
