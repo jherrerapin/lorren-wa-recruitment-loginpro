@@ -121,22 +121,27 @@ test('el Excel filtrado agrupa por auxiliar y no repite identidad en cada día',
 
   const workbook = buildAttendanceFilteredWorkbook(report, boardRows);
   const sheet = workbook.getWorksheet('Detalle diario');
+  const firstHeaders = sheet.getRow(5).values;
+  const salidaIndex = firstHeaders.findIndex((value) => String(value || '') === 'Salida');
 
   assert.match(String(sheet.getCell('A4').value), /Auxiliar Prueba · CC 1\.003\.806\.523/);
   assert.equal(sheet.getCell('A5').value, 'Fecha');
   assert.equal(sheet.getCell('A6').value, '2026-09-28');
   assert.equal(sheet.getCell('A7').value, '2026-09-29');
-  assert.equal(sheet.getCell('A8').value, 'TOTAL');
+  assert.equal(sheet.getRow(8).values[salidaIndex], 'TOTAL');
+  assert.notEqual(sheet.getCell('A8').value, 'TOTAL');
   assert.equal(sheet.getRow(6).values.includes('Auxiliar Prueba'), false);
   assert.equal(sheet.getRow(7).values.includes('1.003.806.523'), false);
 
   assert.match(String(sheet.getCell('A10').value), /Segundo Auxiliar · CC 8507957/);
   assert.equal(sheet.getCell('A11').value, 'Fecha');
   assert.equal(sheet.getCell('A12').value, '2026-09-28');
-  assert.equal(sheet.getCell('A13').value, 'TOTAL');
+  const secondHeaders = sheet.getRow(11).values;
+  const secondSalidaIndex = secondHeaders.findIndex((value) => String(value || '') === 'Salida');
+  assert.equal(sheet.getRow(13).values[secondSalidaIndex], 'TOTAL');
 });
 
-test('el Excel elimina estado/correcciones y alinea columnas resumen con Gestión de Tiempo', () => {
+test('el Excel elimina estado, correcciones y descansos, y conserva columnas resumen de Gestión de Tiempo', () => {
   const report = { period: { from: '2026-09-28', to: '2026-09-29' }, rows: [sampleWorker()] };
   const boardRows = [
     { workerName: 'Auxiliar Prueba', documentNumber: '1003806523', serviceDateIso: '2026-09-28', cityName: 'Bogotá' },
@@ -149,16 +154,17 @@ test('el Excel elimina estado/correcciones y alinea columnas resumen con Gestió
 
   assert.equal(headers.some((value) => value.includes('Estado asistencia')), false);
   assert.equal(headers.some((value) => value.includes('Correcciones')), false);
+  assert.equal(headers.some((value) => value.includes('Descansos')), false);
   for (const expected of [
     'Días remunerados', 'Días no remunerados', 'Permisos remunerados', 'Incapacidades',
-    'Turnos diurnos', 'Turnos nocturnos', 'Domingos', 'Festivos', 'Descansos',
+    'Turnos diurnos', 'Turnos nocturnos', 'Domingos', 'Festivos',
     'Total trabajado', 'Horas ordinarias', 'Horas extra total', 'HEDO', 'HENO', 'RNO', 'RNDC'
   ]) {
     assert.equal(headers.some((value) => value.startsWith(expected)), true, `falta columna ${expected}`);
   }
 });
 
-test('la fila TOTAL de cada auxiliar usa los acumulados canónicos de Gestión de Tiempo', () => {
+test('la fila de cierre de cada auxiliar usa acumulados canónicos y ubica TOTAL bajo Salida', () => {
   const report = { period: { from: '2026-09-28', to: '2026-09-29' }, rows: [sampleWorker()] };
   const boardRows = [
     { workerName: 'Auxiliar Prueba', documentNumber: '1003806523', serviceDateIso: '2026-09-28', cityName: 'Bogotá' },
@@ -171,6 +177,7 @@ test('la fila TOTAL de cada auxiliar usa los acumulados canónicos de Gestión d
   const total = sheet.getRow(8).values;
   const headerIndex = (text) => headers.findIndex((value) => String(value || '').startsWith(text));
 
+  assert.equal(total[headerIndex('Salida')], 'TOTAL');
   assert.equal(total[headerIndex('Días remunerados')], 2);
   assert.equal(total[headerIndex('Días no remunerados')], 1);
   assert.equal(total[headerIndex('Permisos remunerados')], 1);
@@ -182,7 +189,6 @@ test('la fila TOTAL de cada auxiliar usa los acumulados canónicos de Gestión d
   assert.equal(total[headerIndex('Horas extra total')], 2);
   assert.equal(total[headerIndex('HENO')], 1);
   assert.equal(total[headerIndex('RNO')], 3);
-  assert.match(String(total[headerIndex('Descansos')]), /2026-09-29/);
 });
 
 test('el bloque diario conserva marcaciones, horas extra y conceptos calculados', () => {
