@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { canManageUserModulePermissions } from './appUsers.js';
 import {
+  clientMatchesOperationalCityScope,
   filterOperationalClientsByCityScope,
+  operationalCityIdsAllowed,
   operationalCityScopeAllowsName,
   resolveUserCityScope
 } from './cityOptions.js';
@@ -565,14 +567,21 @@ async function enforceClientCityScope(prisma, req, res, scope) {
     && !path.startsWith('/operaciones/admin-clientes')
     && !path.startsWith('/operaciones/admin-delete/clientes')) return true;
 
-  if (isWrite && normalizeString(req.body?.cityName) && !operationalCityAllowed(scope, req.body.cityName)) {
+  const operationPath = isOperationPointPath(path);
+  if (isWrite && operationPath && normalizeString(req.body?.cityName) && !operationalCityAllowed(scope, req.body.cityName)) {
     res.status(403).send('No tienes permiso para gestionar clientes u operaciones en esta ciudad.');
     return false;
   }
 
+  const requestedBranchIds = normalizeStringList(req.body?.cityIds);
+  if (scope.restricted && requestedBranchIds.length && !operationalCityIdsAllowed(scope, requestedBranchIds)) {
+    res.status(403).send('No tienes permiso para gestionar clientes en una de las sucursales seleccionadas.');
+    return false;
+  }
+
   const isClientCreate = method === 'POST' && (path === CLIENTS_PATH || path === '/operaciones/admin-clientes');
-  if (isClientCreate && scope.restricted && !normalizeString(req.body?.cityName)) {
-    res.status(403).send('Debes seleccionar una ciudad dentro de tu alcance.');
+  if (isClientCreate && scope.restricted && !requestedBranchIds.length) {
+    res.status(403).send('Debes seleccionar al menos una sucursal dentro de tu alcance.');
     return false;
   }
 
@@ -583,11 +592,12 @@ async function enforceClientCityScope(prisma, req, res, scope) {
     select: {
       id: true,
       cityName: true,
+      branchCityIds: true,
       operationPoints: { select: { id: true, cityName: true } }
     }
   });
 
-  if (isOperationPointPath(path)) {
+  if (operationPath) {
     const operationPointId = operationPointIdFromPath(path);
     if (operationPointId) {
       const operationPoint = client?.operationPoints?.find((point) => point.id === operationPointId) || null;
@@ -600,14 +610,14 @@ async function enforceClientCityScope(prisma, req, res, scope) {
 
     if (isWrite && normalizeString(req.body?.cityName)) return true;
     const hasVisiblePoint = (client?.operationPoints || []).some((point) => operationalCityAllowed(scope, point.cityName || client?.cityName));
-    if (client && !operationalCityAllowed(scope, client.cityName) && !hasVisiblePoint) {
+    if (client && !clientMatchesOperationalCityScope(client, scope, { selected: false }) && !hasVisiblePoint) {
       res.status(403).send('No tienes permiso para gestionar operaciones de este cliente.');
       return false;
     }
     return true;
   }
 
-  if (client && !operationalCityAllowed(scope, client.cityName)) {
+  if (client && !clientMatchesOperationalCityScope(client, scope, { selected: false })) {
     res.status(403).send('No tienes permiso para gestionar este cliente.');
     return false;
   }
@@ -811,7 +821,8 @@ function injectPayrollUsersScript(html, req) {
   const operationalActorRole = isDev ? 'dev' : canSupervise ? 'supervisor' : 'none';
   return html.replace(
     /<\/body>/i,
-    `  <script src="${PAYROLL_USERS_SCRIPT}" data-can-manage-test-workspace="${canManageTestWorkspace ? 'true' : 'false'}" data-operational-actor-role="${operationalActorRole}" data-can-supervise-operational-permissions="${canSupervise ? 'true' : 'false'}"></script>\n</body>`
+    `  <script src="${PAYROLL_USERS_SCRIPT}" data-can-manage-test-workspace="${canManageTestWorkspace ? 'true' : 'false'}" data-operational-actor-role="${operationalActorRole}" data-can-supervise-operational-permissions="${canSupervise ? 'true' : 'false'}"></script>\
+</body>`
   );
 }
 
@@ -828,7 +839,8 @@ function injectProgrammingContactsScript(html, req) {
   const path = String(req.originalUrl || '').split('?')[0];
   if (path !== '/admin/operaciones' || html.includes(PROGRAMMING_CONTACTS_SCRIPT)) return html;
   const isDev = (req.session?.userRole || req.userRole) === 'dev';
-  return html.replace(/<\/body>/i, `  <script src="${PROGRAMMING_CONTACTS_SCRIPT}" data-dev="${isDev ? 'true' : 'false'}"></script>\n</body>`);
+  return html.replace(/<\/body>/i, `  <script src="${PROGRAMMING_CONTACTS_SCRIPT}" data-dev="${isDev ? 'true' : 'false'}"></script>\
+</body>`);
 }
 
 function installAdminHtmlBridge(req, res) {
