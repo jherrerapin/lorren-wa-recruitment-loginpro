@@ -2,6 +2,7 @@
 
 (() => {
   const STYLE_ID = 'lorren-searchable-multiselect-style';
+  const PAYROLL_SCROLL_SCRIPT = '/public/payroll-table-scroll-sync.js';
 
   function fold(value) {
     return String(value || '')
@@ -35,6 +36,15 @@
       @media(max-width:700px){.lorren-search-multiselect-panel{max-height:240px}.lorren-search-multiselect-option{min-height:42px}}
     `;
     document.head.appendChild(style);
+  }
+
+  function ensurePayrollScrollScript() {
+    if (!document.getElementById('payroll-filters')) return;
+    if (document.querySelector(`script[src="${PAYROLL_SCROLL_SCRIPT}"]`)) return;
+    const script = document.createElement('script');
+    script.src = PAYROLL_SCROLL_SCRIPT;
+    script.defer = true;
+    document.body.appendChild(script);
   }
 
   function cleanSearchInput(input) {
@@ -323,6 +333,7 @@
     injectStyles();
     installAttendanceMultiSelect();
     installPayrollMultiSelect();
+    ensurePayrollScrollScript();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });
