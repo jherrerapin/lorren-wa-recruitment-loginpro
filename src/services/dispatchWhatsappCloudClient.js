@@ -9,7 +9,7 @@ import {
 
 export const DISPATCH_WINDOW_CHECK_MESSAGE = 'Hola. Este es el canal oficial de Despacho de LoginPro. Para poder enviarte novedades de tu programación por este WhatsApp, confirma la recepción tocando el botón.';
 export const DISPATCH_WINDOW_CHECK_BUTTON = 'CONFIRMAR CANAL';
-const ASSIGNMENT_TEMPLATE_WITH_SERVICE = 'confirmacion_de_asignacion_con_servicio';
+const ASSIGNMENT_TEMPLATE_WITH_SERVICE = 'confirmacion_de_asignacion';
 
 function hourLabel(value) {
   const match = String(value || '').trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
@@ -211,7 +211,7 @@ export function buildDispatchAssignmentTemplatePayload({ config, assignment, pho
 
 export function buildDispatchWindowCheckTemplatePayload({ config, assignmentId, phone }) {
   const normalizedPhone = normalizeDispatchWhatsappPhone(phone);
-  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para verificar la ventana de WhatsApp.', 400, 'dispatch_whatsapp_phone_invalid');
+  if (!normalizedPhone) throw buildDispatchWhatsappError('Debes indicar un número válido para verificar la ventana de WhatsApp.', 400, 'dispatch_window_check_assignment_missing');
   const safeAssignmentId = String(assignmentId || '').trim();
   if (!safeAssignmentId) throw buildDispatchWhatsappError('No se pudo identificar la asignación para verificar la ventana.', 400, 'dispatch_window_check_assignment_missing');
   return {
