@@ -5,6 +5,7 @@ import {
   buildDispatchAssignmentInteractivePayload,
   buildDispatchAssignmentTemplatePayload
 } from '../src/services/dispatchWhatsappCloudClient.js';
+import { getDispatchWhatsappCloudConfig } from '../src/services/dispatchWhatsappCloudConfig.js';
 
 const CANONICAL_MESSAGE = [
   'Hola *{{nombre}}*,',
@@ -83,15 +84,16 @@ test('mensaje interactivo usa el nuevo texto y conserva CONFIRMADO y REPORTAR NO
   ]);
 });
 
-test('Cloud API usa seis variables y adapta temporalmente los payloads al orden actual de Meta', () => {
+test('plantilla de ventana cerrada usa confirmacion_de_asignacion con seis variables y orden canónico', () => {
   const payload = buildDispatchAssignmentTemplatePayload({
-    config: { assignmentTemplateName: 'confirmacion_de_asignacion_con_servicio', templateLanguage: 'es' },
+    config: { assignmentTemplateName: 'confirmacion_de_asignacion', templateLanguage: 'es' },
     phone: '3001234567',
     assignment: assignmentFixture()
   });
 
   const body = payload.template.components.find((component) => component.type === 'body');
   const buttons = payload.template.components.filter((component) => component.type === 'button');
+  assert.equal(payload.template.name, 'confirmacion_de_asignacion');
   assert.deepEqual(body.parameters.map((parameter) => parameter.text), [
     'Auxiliar Prueba',
     '12/08/2026',
@@ -101,25 +103,20 @@ test('Cloud API usa seis variables y adapta temporalmente los payloads al orden 
     '7:30 AM'
   ]);
   assert.deepEqual(buttons.map((button) => ({ index: button.index, payload: button.parameters[0].payload })), [
-    { index: '1', payload: 'dispatch_confirm:assignment-test' },
-    { index: '0', payload: 'dispatch_novelty:assignment-test' }
+    { index: '0', payload: 'dispatch_confirm:assignment-test' },
+    { index: '1', payload: 'dispatch_novelty:assignment-test' }
   ]);
 });
 
-test('la plantilla anterior conserva cinco variables durante la transición', () => {
-  const payload = buildDispatchAssignmentTemplatePayload({
-    config: { assignmentTemplateName: 'dispatch_assignment_confirmation', templateLanguage: 'es' },
-    phone: '3001234567',
-    assignment: assignmentFixture()
-  });
-  const body = payload.template.components.find((component) => component.type === 'body');
-  assert.deepEqual(body.parameters.map((parameter) => parameter.text), [
-    'Auxiliar Prueba',
-    '12/08/2026',
-    'Operación Prueba',
-    'Dirección Prueba',
-    '7:30 AM'
-  ]);
+test('configuración operativa migra automáticamente el nombre temporal al nombre restaurado', () => {
+  const previous = process.env.DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME;
+  process.env.DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME = 'confirmacion_de_asignacion_con_servicio';
+  try {
+    assert.equal(getDispatchWhatsappCloudConfig('operational').assignmentTemplateName, 'confirmacion_de_asignacion');
+  } finally {
+    if (previous === undefined) delete process.env.DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME;
+    else process.env.DISPATCH_META_ASSIGNMENT_TEMPLATE_NAME = previous;
+  }
 });
 
 test('reportar novedad registra evidencia e incidente sin cambiar el estado de la asignación', async () => {
