@@ -36,6 +36,18 @@
     document.head.appendChild(style);
   }
 
+  function cleanSearchInput(input) {
+    const clean = input.cloneNode(true);
+    clean.removeAttribute('aria-controls');
+    clean.removeAttribute('aria-expanded');
+    clean.removeAttribute('aria-activedescendant');
+    clean.removeAttribute('role');
+    clean.removeAttribute('aria-autocomplete');
+    delete clean.dataset.lorrenLiveSearch;
+    input.replaceWith(clean);
+    return clean;
+  }
+
   function createChipHost(field) {
     let host = field.querySelector('[data-lorren-search-selected]');
     if (host) return host;
@@ -175,13 +187,14 @@
 
   function installAttendanceMultiSelect() {
     const form = document.querySelector('.filter-card form[method="get"]');
-    const input = form?.querySelector('input[name="q"]');
-    const field = input?.closest('.field');
-    if (!form || !input || !field || field.dataset.attendanceSearchMultiselect === 'true') return;
+    const originalInput = form?.querySelector('input[name="q"]');
+    const field = originalInput?.closest('.field');
+    if (!form || !originalInput || !field || field.dataset.attendanceSearchMultiselect === 'true') return;
 
     const cards = [...document.querySelectorAll('[data-attendance-card]')];
     if (!cards.length) return;
 
+    const input = cleanSearchInput(originalInput);
     const label = field.querySelector('label');
     if (label) label.textContent = 'Auxiliares';
     input.placeholder = 'Busca por nombre, documento, punto o sucursal';
@@ -223,9 +236,9 @@
     const form = document.getElementById('payroll-filters');
     const picker = form?.querySelector('.worker-picker');
     const menu = picker?.querySelector('.worker-picker-menu');
-    const searchInput = form?.querySelector('input[name="search"]');
-    const searchField = searchInput?.closest('.field');
-    if (!form || !picker || !menu || !searchInput || !searchField) return;
+    const originalSearchInput = form?.querySelector('input[name="search"]');
+    const searchField = originalSearchInput?.closest('.field');
+    if (!form || !picker || !menu || !originalSearchInput || !searchField) return;
 
     const options = [...menu.querySelectorAll('.worker-check')].map((label) => ({
       label,
@@ -234,6 +247,7 @@
     })).filter((option) => option.input);
     if (!options.length) return;
 
+    const searchInput = cleanSearchInput(originalSearchInput);
     const summary = picker.querySelector('summary');
     const refreshSummary = () => {
       const count = options.filter((option) => option.input.checked).length;
