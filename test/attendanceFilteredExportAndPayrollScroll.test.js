@@ -56,6 +56,15 @@ test('Asistencia expone descarga del detalle filtrado y conserva la selección m
   assert.match(bridge, /attendanceFilteredExportRouter\(prisma\)/);
 });
 
+test('Asistencia restaura los auxiliares seleccionados después de aplicar filtros del formulario', () => {
+  assert.match(multiselect, /function attendanceRequestedWorkerKeys\(\)/);
+  assert.match(multiselect, /new URLSearchParams\(window\.location\.search\)/);
+  assert.match(multiselect, /params\.getAll\('workerKey'\)/);
+  assert.match(multiselect, /option\.checked = requestedWorkerKeys\.has\(fold\(option\.value\)\)/);
+  assert.match(multiselect, /hidden\.dataset\.attendanceWorkerFilter = 'true'/);
+  assert.match(multiselect, /applySelection\(\);/);
+});
+
 test('el Excel filtrado agrupa por auxiliar y no repite identidad en cada día', () => {
   const report = {
     period: { from: '2026-09-28', to: '2026-09-29' },
