@@ -63,13 +63,27 @@ export function workerMatchesOperationalCityScope(worker, scope, { selected = fa
   return operationalCityScopeAllowsName(scope, worker?.residenceCity, { selected });
 }
 
+export function clientMatchesOperationalCityScope(client, scope, { selected = false } = {}) {
+  if (!scope?.restricted && (!selected || scope?.selectionExplicit !== true)) return true;
+  const branchCityIds = normalizeStringList(client?.branchCityIds);
+  if (branchCityIds.length) {
+    const visibleIds = new Set(selected ? scope?.selectedCityIds : scope?.allowedCityIds);
+    return branchCityIds.some((cityId) => visibleIds.has(cityId));
+  }
+
+  if (operationalCityScopeAllowsName(scope, client?.cityName, { selected })) return true;
+  return (client?.operationPoints || []).some((point) => (
+    operationalCityScopeAllowsName(scope, point?.cityName || client?.cityName, { selected })
+  ));
+}
+
 export function filterOperationalClientsByCityScope(clients, scope, { selected = false } = {}) {
   if (!Array.isArray(clients) || (!scope?.restricted && (!selected || scope?.selectionExplicit !== true))) return clients;
   return clients.flatMap((client) => {
     const operationPoints = (client.operationPoints || []).filter((point) => (
       operationalCityScopeAllowsName(scope, point.cityName || client.cityName, { selected })
     ));
-    if (!operationalCityScopeAllowsName(scope, client.cityName, { selected }) && !operationPoints.length) return [];
+    if (!clientMatchesOperationalCityScope(client, scope, { selected }) && !operationPoints.length) return [];
     return [{ ...client, operationPoints }];
   });
 }

@@ -7,6 +7,10 @@ import {
   operationalCityScopeAllowsName,
   resolveUserCityScope
 } from '../services/cityOptions.js';
+import {
+  dispatchClientBranchErrorStatus,
+  resolveDispatchClientBranchSelection
+} from '../services/dispatchClientBranches.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 import { findDispatchWorkerByDocumentIdentity } from '../services/dispatchWorkerExcelImport.js';
@@ -121,7 +125,6 @@ function buildClientData(body, { canManageTestClient = false } = {}) {
   return {
     name: normalizeString(body.name),
     nit: normalizeString(body.nit),
-    cityName: normalizeString(body.cityName),
     contactName: normalizeString(body.contactName),
     contactPhone: normalizeString(body.contactPhone),
     contactEmail: normalizeString(body.contactEmail),
@@ -298,30 +301,67 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-clientes', requireOps, async (req, res) => {
-    const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
-    if (!data.name) return res.status(400).send('Nombre requerido');
-    const serviceNames = buildInitialClientServiceNames(req.body);
-    const createdByUsername = req.session?.username || req.username || null;
-    await prisma.dispatchClient.create({
-      data: {
-        ...data,
-        publicToken: randomBytes(24).toString('hex'),
-        createdByUsername,
-        ...(serviceNames.length ? {
-          services: {
-            create: serviceNames.map((name) => ({ name, createdByUsername }))
-          }
-        } : {})
-      }
-    });
-    return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente creado.'));
+    try {
+      const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
+      if (!data.name) return res.status(400).send('Nombre requerido');
+      const branches = await resolveDispatchClientBranchSelection(
+        prisma,
+        req,
+        normalizeStringList(req.body.cityIds)
+      );
+      const serviceNames = buildInitialClientServiceNames(req.body);
+      const createdByUsername = req.session?.username || req.username || null;
+      await prisma.dispatchClient.create({
+        data: {
+          ...data,
+          branchCityIds: branches.branchCityIds,
+          cityName: branches.cityName,
+          publicToken: randomBytes(24).toString('hex'),
+          createdByUsername,
+          ...(serviceNames.length ? {
+            services: {
+              create: serviceNames.map((name) => ({ name, createdByUsername }))
+            }
+          } : {})
+        }
+      });
+      return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente creado.'));
+    } catch (error) {
+      const status = dispatchClientBranchErrorStatus(error);
+      if (status === 500) console.error(error);
+      return res.status(status).send(error?.message || 'No fue posible crear el cliente.');
+    }
   });
 
   router.post('/admin-clientes/:clientId/editar', requireOps, async (req, res) => {
-    const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
-    if (!data.name) return res.status(400).send('Nombre requerido');
-    await prisma.dispatchClient.update({ where: { id: req.params.clientId }, data });
-    return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente actualizado.'));
+    try {
+      const existing = await prisma.dispatchClient.findUnique({
+        where: { id: req.params.clientId },
+        select: { id: true, cityName: true, branchCityIds: true }
+      });
+      if (!existing) return res.status(404).send('Cliente no encontrado');
+      const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
+      if (!data.name) return res.status(400).send('Nombre requerido');
+      const branches = await resolveDispatchClientBranchSelection(
+        prisma,
+        req,
+        normalizeStringList(req.body.cityIds),
+        { existingClient: existing }
+      );
+      await prisma.dispatchClient.update({
+        where: { id: existing.id },
+        data: {
+          ...data,
+          branchCityIds: branches.branchCityIds,
+          cityName: branches.cityName
+        }
+      });
+      return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente actualizado.'));
+    } catch (error) {
+      const status = dispatchClientBranchErrorStatus(error);
+      if (status === 500) console.error(error);
+      return res.status(status).send(error?.message || 'No fue posible actualizar el cliente.');
+    }
   });
 
   router.post('/admin-delete/clientes/:clientId', requireOps, async (req, res) => {
