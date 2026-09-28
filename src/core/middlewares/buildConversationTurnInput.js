@@ -1,141 +1,45 @@
-import { createHash } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 import { ConversationTurnInputSchema } from '../contracts/ConversationTurnInputSchema.js';
-import { mapLegacyIntentToCanonical } from '../engine/mappers/intentMapper.js';
-import { isRecruitmentWhatsappPayload } from '../../services/whatsapp.js';
-import { isSupervisorPhone } from '../../services/adminSupervisor.js';
+import { getCandidateReadiness } from '../../services/candidateReadiness.js';
+import { getResidenceFieldConfig } from '../../services/candidateData.js';
+import { detectGenderFromEvidence } from '../../services/genderEvidencePolicy.js';
+import { resolveCampaignForReferral } from '../../services/campaignAttribution.js';
 
-const CANDIDATE_FACT_KEYS = Object.freeze([
-  'phone',
-  'vacancyId',
-  'currentStep',
-  'status',
-  'stage',
-  'fullName',
-  'documentType',
-  'documentNumber',
-  'age',
-  'gender',
-  'locality',
-  'neighborhood',
-  'transportMode',
-  'medicalRestrictions',
-  'experienceInfo',
-  'experienceTime',
-  'experienceSummary',
-  'cvStorageKey',
-  'cvOriginalName',
-  'dataConsentStatus',
-  'dataConsentVersion',
-  'botPaused',
-  'botResumeMode',
-  'reminderState',
-  'lastInboundAt',
-  'lastOutboundAt'
-]);
-
-const INTERPRETATION_FIELD_KEYS = Object.freeze([
-  'fullName',
-  'documentType',
-  'documentNumber',
-  'age',
-  'gender',
-  'neighborhood',
-  'locality',
-  'medicalRestrictions',
-  'transportMode',
-  'experienceInfo',
-  'experienceTime',
-  'experienceSummary'
-]);
-
-const ATTACHMENT_TYPES = new Set([
-  'document',
-  'image',
-  'audio',
-  'video',
-  'sticker'
-]);
-
-/** @param {unknown} value */
-function asRecord(value) {
-  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
-}
-
-/** @param {Record<string, unknown>} record @param {string} key */
-function hasOwn(record, key) {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-function toJsonValue(value) {
-  if (value === null) return null;
-  if (value instanceof Date) return value.toISOString();
-  if (['string', 'number', 'boolean'].includes(typeof value)) return value;
-  if (Array.isArray(value)) {
-    return value
-      .map(toJsonValue)
-      .filter((item) => item !== undefined);
-  }
-  if (value && typeof value === 'object') {
-    const output = {};
-    for (const [key, nested] of Object.entries(value)) {
-      const normalized = toJsonValue(nested);
-      if (normalized !== undefined) output[key] = normalized;
+async function resolveInboundVacancy(message, prisma) {
+  const referral = asRecord(message.referral);
+  if (!Object.values(referral).some((value) => typeof value === 'string' && value.trim())) {
+    const resolvedVacancy = asRecord(message.resolvedVacancy);
+    if (typeof resolvedVacancy.id === 'string' && resolvedVacancy.id.trim()) {
+      return { vacancy: resolvedVacancy, attribution: { source: 'ORGANIC' } };
     }
-    return output;
+    return { vacancy: null, attribution: { source: 'ORGANIC' } };
   }
-  return undefined;
-}
-
-function normalizeIsoTimestamp(value, fallback = null) {
-  if (value === undefined || value === null || value === '') return fallback;
-  if (value instanceof Date) return value.toISOString();
-  if ((typeof value === 'string' && /^\d{10,13}$/.test(value)) || typeof value === 'number') {
-    const numericValue = Number(value);
-    const milliseconds = numericValue < 1_000_000_000_000 ? numericValue * 1000 : numericValue;
-    const date = new Date(milliseconds);
-    if (!Number.isNaN(date.getTime())) return date.toISOString();
+  const campaigns = await prisma.campaign.findMany({
+    where: { isActive: true }, include: { vacancy: true }
+  });
+  const resolution = resolveCampaignForReferral(campaigns, { referral });
+  let vacancy = resolution.campaign?.vacancy ?? null;
+  // An objective ad identity must never fall back to a coincidental headline.
+  if (!vacancy && !referral.ad_id && !referral.source_id
+    && typeof referral.headline === 'string' && referral.headline.trim()
+    && resolution.reason === 'no_campaign_match') {
+    const matches = await prisma.vacancy.findMany({
+      where: { title: { equals: referral.headline.trim(), mode: 'insensitive' } },
+      take: 2
+    });
+    if (matches.length === 1) vacancy = matches[0];
   }
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toISOString();
+  return { vacancy, attribution: { source: 'META_ADS' } };
 }
 
-function nullableString(value) {
-  if (value === undefined || value === null) return null;
-  const text = String(value);
-  return text.length ? text : null;
-}
-
-function normalizeRawText(value) {
-  if (value === undefined || value === null) return '';
-  if (typeof value === 'object') return '';
-  return String(value);
-}
-
-function buildCandidateFacts(candidate = {}) {
-  const facts = {};
-  for (const key of CANDIDATE_FACT_KEYS) {
-    if (!hasOwn(candidate, key)) continue;
-    const value = toJsonValue(candidate[key]);
-    if (value !== undefined) facts[key] = value;
-  }
-  return facts;
-}
-
-function normalizeExperienceRequirement(value) {
-  const normalized = String(value ?? '').trim().toUpperCase();
-  return ['YES', 'NO', 'INDIFFERENT'].includes(normalized) ? normalized : null;
-}
-
-function buildVacancySnapshot(vacancy = null) {
+function vacancySnapshot(vacancy) {
   if (!vacancy) return null;
-  const operation = asRecord(vacancy.operation);
-  const city = asRecord(operation.city);
   return {
     id: vacancy.id ?? null,
     title: vacancy.title ?? null,
     role: vacancy.role ?? null,
     city: vacancy.city ?? null,
+    isActive: vacancy.isActive ?? null,
+    acceptingApplications: vacancy.acceptingApplications ?? null,
     schedulingEnabled: vacancy.schedulingEnabled ?? null,
     interviewSchedulingEnabled: vacancy.interviewSchedulingEnabled ?? null,
     requirements: vacancy.requirements ?? null,
@@ -145,332 +49,376 @@ function buildVacancySnapshot(vacancy = null) {
     operationAddress: vacancy.operationAddress ?? null,
     minAge: vacancy.minAge ?? null,
     maxAge: vacancy.maxAge ?? null,
-    experienceRequired: normalizeExperienceRequirement(vacancy.experienceRequired),
+    experienceRequired: ['YES', 'NO', 'INDIFFERENT'].includes(
+      String(vacancy.experienceRequired || '').toUpperCase()
+    ) ? String(vacancy.experienceRequired).toUpperCase() : null,
     experienceTimeText: vacancy.experienceTimeText ?? null,
-    operation: Object.keys(operation).length
+    experienceTime: vacancy.experienceTime ?? vacancy.experienceTimeText ?? null,
+    locationType: getResidenceFieldConfig(vacancy).field === 'locality' ? 'localidad' : 'barrio',
+    operation: vacancy.operation
       ? {
-          name: operation.name ?? null,
-          city: Object.keys(city).length ? { name: city.name ?? null } : null
+          name: vacancy.operation.name ?? null,
+          city: vacancy.operation.city ? { name: vacancy.operation.city.name ?? null } : null
         }
       : null
   };
 }
 
-function buildHistory(history = []) {
-  const rows = Array.isArray(history) ? history : (Array.isArray(history?.messages) ? history.messages : []);
-  const messages = rows.map((message) => {
-    const row = asRecord(message);
-    const role = row.role
-      || (String(row.direction || '').toUpperCase() === 'OUTBOUND' ? 'assistant' : 'user');
-    return {
-      role,
-      text: String(row.text ?? row.body ?? ''),
-      occurredAt: normalizeIsoTimestamp(row.occurredAt ?? row.createdAt, new Date().toISOString())
-    };
-  });
-  const lastBotQuestion = !Array.isArray(history)
-    ? (history?.lastBotQuestion ?? null)
-    : [...messages].reverse().find((message) => message.role === 'assistant' && message.text.includes('?'))?.text ?? null;
-  return { messages, lastBotQuestion };
+function normalizedMessageType(value) {
+  if (['document', 'image', 'audio'].includes(value)) return value;
+  if (value === 'text' || value === 'interactive' || value === 'button') return 'text';
+  return 'unknown';
 }
 
-function buildInterpretationFields(fields = {}) {
-  const source = asRecord(fields);
-  const normalized = {};
+function currentAttachments(message) {
+  const type = normalizedMessageType(message.type);
+  if (!['document', 'image', 'audio'].includes(type)) return [];
 
-  for (const key of INTERPRETATION_FIELD_KEYS) {
-    if (!hasOwn(source, key) || source[key] === undefined) continue;
+  const media = asRecord(message.media);
+  if (typeof media.mediaId !== 'string' || !media.mediaId.trim()) return [];
+  if (typeof media.mimeType !== 'string' || !media.mimeType.trim()) return [];
 
-    if (key === 'age' && source[key] !== null) {
-      const numeric = Number(source[key]);
-      normalized[key] = Number.isInteger(numeric) ? numeric : source[key];
-      continue;
-    }
+  const allowedStatuses = new Set(['received', 'downloading', 'downloaded', 'processed', 'failed']);
+  const status = allowedStatuses.has(media.status) ? media.status : 'received';
 
-    normalized[key] = source[key];
-  }
-
-  return normalized;
-}
-
-function buildInterpretation(interpretation = {}, rawText = '') {
-  const source = asRecord(interpretation);
-  const scheduling = asRecord(source.scheduling);
-  const consent = asRecord(source.consent);
-  const slot = asRecord(scheduling.slot);
-  return {
-    intent: mapLegacyIntentToCanonical(source.intent ?? null, rawText),
-    fields: buildInterpretationFields(source.fields),
-    scheduling: {
-      slot: Object.keys(slot).length
-        ? {
-            slotId: slot.slotId ?? null,
-            startsAt: slot.startsAt,
-            timezone: slot.timezone
-          }
-        : null
-    },
-    consent: {
-      decision: consent.decision ?? null
-    }
-  };
-}
-
-function normalizeAttachmentType(value) {
-  const type = String(value || '').trim().toLowerCase();
-  return ATTACHMENT_TYPES.has(type) ? type : 'unknown';
-}
-
-function normalizeAttachmentItem(item = {}) {
-  const source = asRecord(item);
-  return {
-    type: normalizeAttachmentType(source.type ?? source.mediaType),
-    mediaId: nullableString(source.mediaId ?? source.id),
-    fileName: nullableString(source.fileName ?? source.filename),
-    mimeType: nullableString(source.mimeType ?? source.mime_type),
-    caption: nullableString(source.caption),
-    isCv: source.isCv === true
-  };
-}
-
-function attachmentFromRawMessage(rawMessage = {}) {
-  const message = asRecord(rawMessage);
-  const type = normalizeAttachmentType(message.type);
-  if (!ATTACHMENT_TYPES.has(type)) return null;
-
-  const media = asRecord(message[type]);
-  return normalizeAttachmentItem({
-    ...media,
+  return [{
+    providerId: media.mediaId.trim(),
     type,
-    mediaId: media.id ?? null
-  });
+    fileName: typeof media.fileName === 'string' && media.fileName.trim()
+      ? media.fileName.trim()
+      : null,
+    mimeType: media.mimeType.trim(),
+    extractedText: typeof media.extractedText === 'string' ? media.extractedText : null,
+    status
+  }];
 }
 
-function buildAttachments(attachments = {}, rawMessage = {}) {
-  const source = Array.isArray(attachments)
-    ? { items: attachments }
-    : asRecord(attachments);
+function attachmentItems(attachments) {
+  return attachments.map((attachment) => ({
+    type: attachment.type,
+    mediaId: attachment.providerId,
+    providerId: attachment.providerId,
+    fileName: attachment.fileName,
+    mimeType: attachment.mimeType,
+    caption: null,
+    isCv: attachment.type === 'document',
+    extractedText: attachment.extractedText,
+    status: attachment.status
+  }));
+}
 
-  const explicitItems = Array.isArray(source.items)
-    ? source.items.map(normalizeAttachmentItem)
-    : [];
+function turnBringsProcessedCv(attachments) {
+  return attachments.some((attachment) => (
+    attachment.type === 'document'
+      && attachment.status === 'processed'
+      && typeof attachment.extractedText === 'string'
+      && attachment.extractedText.trim().length > 0
+  ));
+}
 
-  const rawAttachment = explicitItems.length
-    ? null
-    : attachmentFromRawMessage(rawMessage);
+/** @param {unknown} value */
+function asRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
 
-  const items = explicitItems.length
-    ? explicitItems
-    : (rawAttachment ? [rawAttachment] : []);
+const CANDIDATE_FACT_FIELDS = Object.freeze([
+  'phone',
+  'vacancyId',
+  'dataConsentStatus',
+  'fullName',
+  'documentType',
+  'documentNumber',
+  'age',
+  'gender',
+  'neighborhood',
+  'locality',
+  'experienceInfo',
+  'experienceTime',
+  'experienceSummary',
+  'medicalRestrictions',
+  'transportMode',
+  'status',
+  'currentStep',
+  'cvOriginalName',
+  'cvMimeType',
+  'cvStorageKey',
+  'inactivityReminderSent',
+  'botPaused',
+  'botResumeMode',
+  'stage',
+  'reminderState',
+  'reminderScheduledFor',
+  'lastInboundAt',
+  'lastOutboundAt'
+]);
 
-  return {
-    items,
-    hasCv: source.hasCv === true || items.some((item) => item.isCv === true)
+function requireString(value, name) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${name} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function requirePrisma(dependencies) {
+  const prisma = dependencies?.prisma;
+  if (typeof prisma?.candidate?.findUnique !== 'function'
+    || typeof prisma?.candidate?.create !== 'function'
+    || typeof prisma?.message?.findMany !== 'function') {
+    throw new TypeError('dependencies.prisma must expose candidate.findUnique, candidate.create and message.findMany');
+  }
+  return prisma;
+}
+
+function isoDate(value, fallback = null) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
+}
+
+function interpretedGender(interpretation) {
+  for (const source of [
+    interpretation?.providedFields,
+    interpretation?.detectedFields,
+    interpretation?.extractedFields
+  ]) {
+    const value = asRecord(source).gender;
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function buildCandidateFacts(candidate, interpretation) {
+  const facts = Object.fromEntries(CANDIDATE_FACT_FIELDS
+    .filter((field) => candidate[field] !== undefined)
+    .map((field) => [field, candidate[field] instanceof Date
+      ? candidate[field].toISOString()
+      : candidate[field]]));
+  const vacancy = candidate.vacancy;
+
+  if (candidate.experienceTime !== undefined) {
+    facts.candidateExperienceTime = candidate.experienceTime;
+  }
+
+  facts.consentGranted = candidate.dataConsentStatus === 'ACCEPTED';
+  const detectedGender = interpretedGender(interpretation);
+  if ((!facts.gender || facts.gender === 'UNKNOWN') && detectedGender) {
+    facts.gender = detectedGender;
+  }
+
+  if (vacancy) {
+    facts.vacancyActive = vacancy.isActive;
+    facts.vacancyAcceptingApplications = vacancy.acceptingApplications;
+    facts.acceptingApplications = vacancy.acceptingApplications;
+    facts.vacancyRole = vacancy.role || vacancy.title;
+    facts.vacancyCity = vacancy.city;
+    facts.minAge = vacancy.minAge;
+    facts.maxAge = vacancy.maxAge;
+    facts.experienceRequired = vacancy.experienceRequired;
+    facts.experienceTime = vacancy.experienceTime ?? vacancy.experienceTimeText;
+    facts.schedulingEnabled = vacancy.schedulingEnabled;
+    facts.locationType = getResidenceFieldConfig(vacancy).field === 'locality'
+      ? 'localidad'
+      : 'barrio';
+  }
+
+  return Object.fromEntries(Object.entries(facts).filter(([, value]) => value !== undefined));
+}
+
+function mapHistory(messages) {
+  return [...messages].reverse().map((message) => ({
+    role: message.direction === 'INBOUND' ? 'user' : 'assistant',
+    text: typeof message.body === 'string' ? message.body : '',
+    occurredAt: isoDate(message.createdAt, new Date(0).toISOString())
+  }));
+}
+
+export function deriveCandidatePendingFields(candidate) {
+  if (candidate.dataConsentStatus !== 'ACCEPTED') return ['dataConsent'];
+
+  const readiness = getCandidateReadiness(candidate, candidate.vacancy || null);
+  const fields = [];
+  if (!candidate.vacancyId) fields.push('vacancyId');
+  fields.push(...(readiness.missingFields || []));
+  if (!readiness.hasValidCv) fields.push('cv');
+  return [...new Set(fields)].filter((field) => field !== 'gender');
+}
+
+function mapInterpretation(inboundMessage, lastBotQuestion = null) {
+  if (inboundMessage.isSystemAction === true) {
+    return {
+      intent: requireString(inboundMessage.intent, 'inboundMessage.intent'),
+      fields: {},
+      scheduling: { slot: null },
+      consent: { decision: null }
+    };
+  }
+
+  const source = asRecord(inboundMessage.interpretation);
+  const interpretation = {
+    intent: typeof source.intent === 'string' && source.intent.trim() ? source.intent.trim() : null,
+    fields: {},
+    scheduling: { slot: null },
+    consent: { decision: null }
   };
-}
-
-function findFirstMetaMessage(body) {
-  const entry = asRecord(Array.isArray(body.entry) ? body.entry[0] : undefined);
-  const change = asRecord(Array.isArray(entry.changes) ? entry.changes[0] : undefined);
-  const value = asRecord(change.value);
-  const messages = Array.isArray(value.messages) ? value.messages : [];
-  return asRecord(messages[0]);
-}
-
-function extractMetaRawText(message) {
-  const type = message.type;
-  if (type === 'text') return asRecord(message.text).body ?? '';
-  if (type === 'button') {
-    const button = asRecord(message.button);
-    return button.text ?? button.payload ?? '';
+  for (const key of ['providedFields', 'detectedFields', 'extractedFields']) {
+    if (Object.keys(asRecord(source[key])).length) interpretation[key] = source[key];
   }
-  if (type === 'interactive') {
-    const interactive = asRecord(message.interactive);
-    return asRecord(interactive.button_reply).title
-      ?? asRecord(interactive.list_reply).title
-      ?? '';
-  }
-  if (type === 'image') return asRecord(message.image).caption ?? '';
-  if (type === 'document') {
-    const document = asRecord(message.document);
-    return document.caption ?? document.filename ?? '';
-  }
-  return '';
-}
 
-function hashTurnReference(value) {
-  const digest = createHash('sha256').update(String(value || '')).digest('hex').slice(0, 10);
-  return `turn-${digest}`;
-}
-
-function looksLikeRuntimeBuildRequest(source = {}) {
-  return [
-    'turn',
-    'message',
-    'rawMessage',
-    'candidate',
-    'vacancy',
-    'history',
-    'pending',
-    'attachments',
-    'interpretation',
-    'execution'
-  ].some((key) => hasOwn(source, key));
-}
-
-export class ConversationTurnInputValidationError extends Error {
-  constructor(zodError, message = 'conversation_turn_input_invalid') {
-    super(message);
-    this.name = 'ConversationTurnInputValidationError';
-    this.cause = zodError;
-    this.issues = zodError?.issues || [];
-  }
-}
-
-function missingTurnEvidenceError() {
-  return new ConversationTurnInputValidationError(
-    {
-      issues: [
-        {
-          code: 'custom',
-          path: ['turn', 'id'],
-          message: 'missing_turn_evidence_id'
-        }
-      ]
-    },
-    'missing_turn_evidence_id'
+  const candidateFieldNames = new Set([
+    'fullName', 'documentType', 'documentNumber', 'age', 'gender', 'neighborhood',
+    'locality', 'medicalRestrictions', 'transportMode', 'experienceInfo',
+    'experienceTime', 'experienceSummary'
+  ]);
+  const mergedFields = {
+    ...asRecord(source.extractedFields),
+    ...asRecord(source.detectedFields),
+    ...asRecord(source.providedFields),
+    ...asRecord(source.fields)
+  };
+  interpretation.fields = Object.fromEntries(
+    Object.entries(mergedFields).filter(([field]) => candidateFieldNames.has(field))
   );
-}
-
-/**
- * Runtime builder for the Functional Core. All database/provider objects are
- * reduced to the strict, read-only ConversationTurnInput boundary here.
- */
-export async function buildValidatedConversationTurnInput(source = {}) {
-  const request = asRecord(source);
-  const turn = asRecord(request.turn);
-  const rawMessage = asRecord(request.rawMessage ?? request.message);
-  const candidate = asRecord(request.candidate);
-  const pending = asRecord(request.pending);
-  const execution = asRecord(request.execution);
-  const turnId = turn.id ?? rawMessage.id;
-
-  if (
-    turnId === undefined
-    || turnId === null
-    || (typeof turnId === 'string' && turnId.trim() === '')
-  ) {
-    throw missingTurnEvidenceError();
+  const sourceScheduling = asRecord(source.scheduling);
+  const sourceSlot = asRecord(sourceScheduling.slot);
+  if (Object.keys(sourceSlot).length) {
+    interpretation.scheduling = {
+      slot: {
+        slotId: sourceSlot.slotId ?? null,
+        startsAt: sourceSlot.startsAt,
+        timezone: sourceSlot.timezone
+      }
+    };
+  }
+  const consentDecision = asRecord(source.consent).decision;
+  if (['ACCEPTED', 'REJECTED', 'REVOKED', 'PENDING'].includes(consentDecision)) {
+    interpretation.consent = { decision: consentDecision };
   }
 
-  const rawText = normalizeRawText(
-    turn.rawText
-    ?? request.rawText
-    ?? extractMetaRawText(rawMessage)
-    ?? ''
-  );
+  const alreadyDetected = ['providedFields', 'detectedFields', 'extractedFields']
+    .some((key) => typeof asRecord(interpretation[key]).gender === 'string');
+  const localGender = alreadyDetected
+    ? null
+    : detectGenderFromEvidence(inboundMessage.text, {
+      fullName: inboundMessage.fullName
+        || asRecord(source.providedFields).fullName
+        || asRecord(source.detectedFields).fullName
+        || asRecord(source.extractedFields).fullName
+    });
+  if (localGender) {
+    interpretation.detectedFields = {
+      ...asRecord(interpretation.detectedFields),
+      gender: localGender
+    };
+  }
+  return interpretation;
+}
 
-  const input = {
+async function loadOrCreateCandidate(prisma, phone) {
+  const query = { where: { phone }, include: { vacancy: true } };
+  const existing = await prisma.candidate.findUnique(query);
+  if (existing) return existing;
+
+  try {
+    return await prisma.candidate.create({
+      data: { phone },
+      include: { vacancy: true }
+    });
+  } catch (error) {
+    if (error?.code !== 'P2002') throw error;
+    const concurrentlyCreated = await prisma.candidate.findUnique(query);
+    if (concurrentlyCreated) return concurrentlyCreated;
+    throw error;
+  }
+}
+
+export class ConversationTurnInputBuildError extends Error {
+  constructor(issues) {
+    super('Conversation turn input mapping failed strict validation');
+    this.name = 'ConversationTurnInputBuildError';
+    this.issues = issues.map((issue) => ({
+      code: issue.code,
+      path: issue.path,
+      message: issue.message
+    }));
+  }
+}
+
+/** Build one production-ready core input from one normalized Meta message. */
+export async function buildConversationTurnInput(inboundMessage, dependencies = {}) {
+  const message = asRecord(inboundMessage);
+  const prisma = requirePrisma(dependencies);
+  const phone = requireString(message.from, 'inboundMessage.from');
+  const messageId = requireString(message.messageId, 'inboundMessage.messageId');
+  const candidate = await loadOrCreateCandidate(prisma, phone);
+  const inboundContext = await resolveInboundVacancy(message, prisma);
+  const effectiveCandidate = !candidate.vacancyId && inboundContext.vacancy
+    ? { ...candidate, vacancy: inboundContext.vacancy, vacancyId: inboundContext.vacancy.id }
+    : candidate;
+  if (typeof candidate?.id !== 'string' || !candidate.id.trim()) {
+    throw new ConversationTurnInputBuildError([{
+      code: 'custom',
+      path: ['candidate', 'id'],
+      message: 'candidate.id must be loaded before entering the functional core'
+    }]);
+  }
+  const recentMessages = await prisma.message.findMany({
+    where: { candidateId: candidate.id },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: {
+      direction: true,
+      body: true,
+      createdAt: true
+    }
+  });
+  const historyMessages = mapHistory(recentMessages);
+  const lastBotQuestion = [...historyMessages]
+    .reverse()
+    .find((item) => item.role === 'assistant' && item.text.includes('?'))?.text ?? null;
+  const interpretation = mapInterpretation(message, lastBotQuestion);
+  const attachments = currentAttachments(message);
+  const pendingFields = deriveCandidatePendingFields(effectiveCandidate)
+    .filter((field) => field !== 'cv' || !turnBringsProcessedCv(attachments));
+
+  const mappedInput = {
+    vacancy: vacancySnapshot(inboundContext.vacancy),
+    attribution: inboundContext.attribution,
     turn: {
-      id: turnId,
-      receivedAt: normalizeIsoTimestamp(
-        turn.receivedAt ?? rawMessage.timestamp,
-        new Date().toISOString()
-      ),
-      rawText
+      id: messageId,
+      receivedAt: isoDate(message.timestamp, new Date().toISOString()),
+      rawText: message.isSystemAction === true
+        ? '[SYSTEM_EVENT]'
+        : (typeof message.text === 'string' ? message.text : ''),
+      messageType: normalizedMessageType(message.type)
     },
     candidate: {
-      id: candidate.id ?? null,
-      facts: request.candidateFacts ?? buildCandidateFacts(candidate),
-      updatedAt: normalizeIsoTimestamp(candidate.updatedAt, null)
+      id: candidate.id,
+      facts: buildCandidateFacts(effectiveCandidate, interpretation),
+      updatedAt: isoDate(candidate.updatedAt)
     },
-    history: buildHistory(request.history ?? []),
+    history: {
+      messages: historyMessages,
+      lastBotQuestion
+    },
     pending: {
-      fields: Array.isArray(pending.fields) ? pending.fields : [],
-      actions: Array.isArray(pending.actions) ? pending.actions : []
+      fields: pendingFields,
+      actions: []
     },
     execution: {
-      mayReply: execution.mayReply ?? true,
-      dryRun: execution.dryRun ?? false
+      mayReply: true,
+      mayPersistCandidate: true,
+      maySendOutbound: true
     },
-    vacancy: buildVacancySnapshot(request.vacancy),
-    attachments: buildAttachments(request.attachments, rawMessage),
-    interpretation: buildInterpretation(request.interpretation, rawText)
+    attachments: {
+      current: attachments,
+      items: attachmentItems(attachments),
+      hasCv: attachments.some((attachment) => attachment.type === 'document')
+    },
+    ...(interpretation ? { interpretation } : {})
   };
 
-  const validation = await ConversationTurnInputSchema.safeParseAsync(input);
-  if (!validation.success) {
-    throw new ConversationTurnInputValidationError(validation.error);
-  }
-  return validation.data;
-}
-
-/**
- * Transitional compatibility export.
- * - With runtime data, returns Promise<ConversationTurnInput>.
- * - With no runtime data (or only logger), returns the fail-open Express shadow
- *   middleware expected by the current server until webhook cutover is complete.
- */
-export function buildConversationTurnInput(sourceOrOptions = {}) {
-  const source = asRecord(sourceOrOptions);
-  if (looksLikeRuntimeBuildRequest(source)) {
-    return buildValidatedConversationTurnInput(source);
-  }
-  return createConversationTurnInputShadowMiddleware(source);
-}
-
-export function createConversationTurnInputShadowMiddleware(options = {}) {
-  const logger = options.logger ?? console;
-
-  return async function conversationTurnInputShadow(req, _res, next) {
-    const startedAt = performance.now();
-    try {
-      if (req.method && req.method !== 'POST') return;
-      const body = asRecord(req.body);
-      const metaMessage = findFirstMetaMessage(body);
-      const hasMetaEnvelope = body.object === 'whatsapp_business_account' || hasOwn(body, 'entry');
-
-      if (hasMetaEnvelope) {
-        if (!Array.isArray(body.entry)
-          || Object.keys(metaMessage).length === 0
-          || !isRecruitmentWhatsappPayload(body)
-          || isSupervisorPhone(metaMessage.from)) return;
-      }
-
-      req.conversationTurnInput = await buildValidatedConversationTurnInput({
-        turn: asRecord(body.turn),
-        rawMessage: Object.keys(metaMessage).length ? metaMessage : asRecord(body.message),
-        rawText: body.rawText ?? body.text ?? body.content,
-        candidate: asRecord(body.candidate),
-        history: asRecord(body.history),
-        pending: asRecord(body.pending),
-        attachments: body.attachments ?? {},
-        interpretation: asRecord(body.interpretation),
-        execution: { mayReply: true, dryRun: true }
-      });
-
-      logger.debug?.({
-        event: 'conversation_turn_input.shadow_valid',
-        turnRef: hashTurnReference(req.conversationTurnInput.turn.id),
-        latencyMs: Number((performance.now() - startedAt).toFixed(3))
-      }, 'Conversation input shadow validation succeeded');
-    } catch (error) {
-      try {
-        logger.error?.({
-          event: error?.name === 'ConversationTurnInputValidationError'
-            ? 'conversation_turn_input.shadow_invalid'
-            : 'conversation_turn_input.shadow_error',
-          latencyMs: Number((performance.now() - startedAt).toFixed(3)),
-          issues: error?.issues?.map((issue) => ({ code: issue.code, path: issue.path })) || undefined,
-          error: error instanceof Error ? { name: error.name, message: error.message } : String(error)
-        }, 'Conversation input shadow processing failed');
-      } catch {
-        // Shadow telemetry must never interrupt the legacy request path.
-      }
-    } finally {
-      next();
-    }
-  };
+  const parsed = await ConversationTurnInputSchema.safeParseAsync(mappedInput);
+  if (!parsed.success) throw new ConversationTurnInputBuildError(parsed.error.issues);
+  return parsed.data;
 }
 
 export default buildConversationTurnInput;
