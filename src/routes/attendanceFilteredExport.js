@@ -151,9 +151,73 @@ function dailyExportRows(report, boardRows) {
   }
 
   return output.sort((left, right) => (
-    String(left.Fecha).localeCompare(String(right.Fecha), 'es')
-    || String(left.Auxiliar).localeCompare(String(right.Auxiliar), 'es')
+    String(left.Auxiliar).localeCompare(String(right.Auxiliar), 'es')
+    || String(left.Documento).localeCompare(String(right.Documento), 'es')
+    || String(left.Fecha).localeCompare(String(right.Fecha), 'es')
   ));
+}
+
+function groupDailyRowsByWorker(rows = []) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${normalizedDocument(row.Documento)}|${normalizedName(row.Auxiliar)}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        name: row.Auxiliar || 'Auxiliar',
+        documentType: row.TipoDocumento || '',
+        documentNumber: row.Documento || '',
+        rows: []
+      });
+    }
+    groups.get(key).rows.push(row);
+  }
+  return [...groups.values()];
+}
+
+const DAILY_COLUMNS = Object.freeze([
+  ['Fecha', 13],
+  ['EstadoAsistencia', 24],
+  ['Sucursal', 18],
+  ['Cliente', 24],
+  ['Operacion', 28],
+  ['MarcacionesOperacion', 34],
+  ['Entrada', 24],
+  ['InicioAlmuerzo', 24],
+  ['FinAlmuerzo', 24],
+  ['Salida', 24],
+  ['Correcciones', 42],
+  ['HorasTotales', 14],
+  ['HorasOrdinarias', 16],
+  ['HorasExtraTotal', 16],
+  ...PAYROLL_CONCEPT_CODES.map((code) => [code, 14])
+]);
+
+function dailyHeaderLabel(key) {
+  const labels = {
+    EstadoAsistencia: 'Estado asistencia',
+    Operacion: 'Operación',
+    MarcacionesOperacion: 'Operación de marcación',
+    InicioAlmuerzo: 'Inicio almuerzo',
+    FinAlmuerzo: 'Fin almuerzo',
+    HorasTotales: 'Horas totales',
+    HorasOrdinarias: 'Horas ordinarias',
+    HorasExtraTotal: 'Horas extra total'
+  };
+  return CONCEPT_LABELS[key] ? `${key} · ${CONCEPT_LABELS[key]}` : labels[key] || key;
+}
+
+function styleWorkerHeader(row) {
+  row.font = { bold: true, size: 12, color: { argb: EXPORT_COLORS.navy } };
+  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXPORT_COLORS.tealSoft } };
+  row.alignment = { vertical: 'middle', horizontal: 'left' };
+  row.height = 24;
+}
+
+function styleDailyHeader(row) {
+  row.font = { bold: true, color: { argb: EXPORT_COLORS.white } };
+  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXPORT_COLORS.teal } };
+  row.alignment = { vertical: 'middle', wrapText: true };
+  row.height = 34;
 }
 
 export function buildAttendanceFilteredWorkbook(report, boardRows) {
@@ -164,63 +228,54 @@ export function buildAttendanceFilteredWorkbook(report, boardRows) {
   workbook.created = new Date();
 
   const rows = dailyExportRows(report, boardRows);
+  const groups = groupDailyRowsByWorker(rows);
   const sheet = workbook.addWorksheet('Detalle diario');
-  const fixedColumns = [
-    ['Fecha', 13], ['Documento', 18], ['TipoDocumento', 14], ['Auxiliar', 30],
-    ['EstadoAsistencia', 24], ['Sucursal', 18], ['Cliente', 24], ['Operacion', 28],
-    ['MarcacionesOperacion', 34], ['Entrada', 24], ['InicioAlmuerzo', 24], ['FinAlmuerzo', 24],
-    ['Salida', 24], ['Correcciones', 42], ['HorasTotales', 14], ['HorasOrdinarias', 16], ['HorasExtraTotal', 16]
-  ];
-  const conceptColumns = PAYROLL_CONCEPT_CODES.map((code) => [code, 14]);
-  sheet.columns = [...fixedColumns, ...conceptColumns].map(([key, width]) => ({ key, width }));
+  sheet.columns = DAILY_COLUMNS.map(([key, width]) => ({ key, width }));
 
-  const lastColumn = sheet.getColumn(sheet.columns.length).letter;
+  const headers = DAILY_COLUMNS.map(([key]) => key);
+  const lastColumn = sheet.getColumn(headers.length).letter;
   sheet.mergeCells(`A1:${lastColumn}1`);
   sheet.mergeCells(`A2:${lastColumn}2`);
   sheet.getCell('A1').value = 'Asistencia filtrada · detalle diario';
   sheet.getCell('A1').font = { bold: true, size: 16, color: { argb: EXPORT_COLORS.white } };
   sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXPORT_COLORS.navy } };
-  sheet.getCell('A2').value = `Periodo ${report?.period?.from || ''} a ${report?.period?.to || ''} · ${rows.length} fila(s)`;
+  sheet.getCell('A2').value = `Periodo ${report?.period?.from || ''} a ${report?.period?.to || ''} · ${groups.length} auxiliar(es) · ${rows.length} día(s)`;
   sheet.getCell('A2').font = { bold: true, color: { argb: EXPORT_COLORS.teal } };
   sheet.getCell('A2').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXPORT_COLORS.tealSoft } };
 
-  const headers = fixedColumns.map(([key]) => key).concat(PAYROLL_CONCEPT_CODES);
-  const headerLabels = {
-    TipoDocumento: 'Tipo documento',
-    EstadoAsistencia: 'Estado asistencia',
-    Operacion: 'Operación',
-    MarcacionesOperacion: 'Operación de marcación',
-    InicioAlmuerzo: 'Inicio almuerzo',
-    FinAlmuerzo: 'Fin almuerzo',
-    HorasTotales: 'Horas totales',
-    HorasOrdinarias: 'Horas ordinarias',
-    HorasExtraTotal: 'Horas extra total'
-  };
-  const headerRow = sheet.getRow(4);
-  headers.forEach((key, index) => {
-    const codeLabel = CONCEPT_LABELS[key] ? `${key} · ${CONCEPT_LABELS[key]}` : null;
-    headerRow.getCell(index + 1).value = codeLabel || headerLabels[key] || key;
-  });
-  headerRow.font = { bold: true, color: { argb: EXPORT_COLORS.white } };
-  headerRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXPORT_COLORS.teal } };
-  headerRow.alignment = { vertical: 'middle', wrapText: true };
-  headerRow.height = 34;
+  let rowNumber = 4;
+  groups.forEach((group, groupIndex) => {
+    const workerRow = sheet.getRow(rowNumber);
+    sheet.mergeCells(`A${rowNumber}:${lastColumn}${rowNumber}`);
+    workerRow.getCell(1).value = `${group.name} · ${[group.documentType, group.documentNumber].filter(Boolean).join(' ') || 'Sin documento'}`;
+    styleWorkerHeader(workerRow);
+    rowNumber += 1;
 
-  rows.forEach((source, rowIndex) => {
-    const excelRow = sheet.getRow(rowIndex + 5);
-    headers.forEach((key, columnIndex) => {
-      excelRow.getCell(columnIndex + 1).value = source[key] ?? '';
+    const headerRow = sheet.getRow(rowNumber);
+    headers.forEach((key, index) => {
+      headerRow.getCell(index + 1).value = dailyHeaderLabel(key);
     });
-    if (rowIndex % 2 === 1) {
-      excelRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXPORT_COLORS.stripe } };
-    }
-    excelRow.alignment = { vertical: 'top', wrapText: true };
+    styleDailyHeader(headerRow);
+    rowNumber += 1;
+
+    group.rows.forEach((source, dayIndex) => {
+      const excelRow = sheet.getRow(rowNumber);
+      headers.forEach((key, columnIndex) => {
+        excelRow.getCell(columnIndex + 1).value = source[key] ?? '';
+      });
+      if (dayIndex % 2 === 1) {
+        excelRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXPORT_COLORS.stripe } };
+      }
+      excelRow.alignment = { vertical: 'top', wrapText: true };
+      rowNumber += 1;
+    });
+
+    if (groupIndex < groups.length - 1) rowNumber += 1;
   });
 
-  sheet.views = [{ state: 'frozen', ySplit: 4, xSplit: 4 }];
-  sheet.autoFilter = { from: 'A4', to: `${lastColumn}4` };
-  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber < 4) return;
+  sheet.views = [{ state: 'frozen', ySplit: 2 }];
+  sheet.eachRow({ includeEmpty: false }, (row, currentRowNumber) => {
+    if (currentRowNumber < 4) return;
     row.eachCell({ includeEmpty: true }, (cell) => {
       cell.border = {
         bottom: { style: 'thin', color: { argb: EXPORT_COLORS.border } }
