@@ -29,6 +29,35 @@ const CONCEPT_LABELS = Object.freeze({
   RNDC: 'Recargo nocturno dominical compensado'
 });
 
+const PAYROLL_SUMMARY_COLUMNS = Object.freeze([
+  ['DiasRemunerados', 17],
+  ['DiasNoRemunerados', 19],
+  ['PermisosRemunerados', 20],
+  ['Incapacidades', 15],
+  ['TurnosDiurnos', 15],
+  ['TurnosNocturnos', 17],
+  ['Domingos', 12],
+  ['Festivos', 12],
+  ['Descansos', 32],
+  ['TotalTrabajado', 16],
+  ['HorasOrdinarias', 16],
+  ['HorasExtraTotal', 16],
+  ...PAYROLL_CONCEPT_CODES.map((code) => [code, 14])
+]);
+
+const DAILY_COLUMNS = Object.freeze([
+  ['Fecha', 13],
+  ['Sucursal', 18],
+  ['Cliente', 24],
+  ['Operacion', 28],
+  ['MarcacionesOperacion', 34],
+  ['Entrada', 24],
+  ['InicioAlmuerzo', 24],
+  ['FinAlmuerzo', 24],
+  ['Salida', 24],
+  ...PAYROLL_SUMMARY_COLUMNS
+]);
+
 function normalizeString(value, maxLength = 300) {
   if (typeof value !== 'string') return null;
   const text = value.trim();
@@ -99,15 +128,34 @@ function markingOperations(markings = []) {
     .join(' / ');
 }
 
-function correctionSummary(markings = []) {
-  return (Array.isArray(markings) ? markings : [])
-    .flatMap((marking) => Array.isArray(marking?.corrections) ? marking.corrections : [])
-    .map((correction) => {
-      const change = [correction?.previousLabel, correction?.newLabel].filter(Boolean).join(' → ');
-      return [correction?.markTypeLabel, change, correction?.reason].filter(Boolean).join(': ');
-    })
+function restSummary(restAssignments = []) {
+  return (Array.isArray(restAssignments) ? restAssignments : [])
+    .map((rest) => [rest?.restDate, rest?.reason].filter(Boolean).join(' · '))
     .filter(Boolean)
     .join(' | ');
+}
+
+function dailyRestSummary(restAssignments = [], dateKey) {
+  return restSummary((Array.isArray(restAssignments) ? restAssignments : []).filter((rest) => rest?.restDate === dateKey));
+}
+
+function workerSummaryValues(worker = {}) {
+  const values = {
+    DiasRemunerados: Number(worker.remuneratedDays || 0),
+    DiasNoRemunerados: Number(worker.unremuneratedDays || 0),
+    PermisosRemunerados: Number(worker.paidPermissionDays || 0),
+    Incapacidades: Number(worker.incapacityDays || 0),
+    TurnosDiurnos: Number(worker.dayShiftCount || 0),
+    TurnosNocturnos: Number(worker.nightShiftCount || 0),
+    Domingos: Number(worker.sundayCount || 0),
+    Festivos: Number(worker.holidayCount || 0),
+    Descansos: restSummary(worker.restAssignments),
+    TotalTrabajado: Number(worker.totalHours || 0),
+    HorasOrdinarias: Number(worker.ordinaryHours || 0),
+    HorasExtraTotal: Number(worker.overtimeHours || 0)
+  };
+  for (const code of PAYROLL_CONCEPT_CODES) values[code] = Number(worker.conceptHours?.[code] || 0);
+  return values;
 }
 
 function dailyExportRows(report, boardRows) {
@@ -123,7 +171,6 @@ function dailyExportRows(report, boardRows) {
     for (const day of worker.daily || []) {
       if (!workerDates.has(day.dateKey)) continue;
       const attendanceRows = boardContext.get(`${identity}|${day.dateKey}`) || [];
-      const statusLabels = [...new Set(attendanceRows.map((row) => row.statusLabel).filter(Boolean))];
       const cityNames = [...new Set(attendanceRows.map((row) => row.cityName).filter(Boolean))];
       const markings = day.markings || [];
       const row = {
@@ -131,7 +178,6 @@ function dailyExportRows(report, boardRows) {
         Documento: worker.documentNumber || '',
         TipoDocumento: worker.documentType || '',
         Auxiliar: worker.fullName || '',
-        EstadoAsistencia: statusLabels.join(' / '),
         Sucursal: cityNames.join(' / '),
         Cliente: (day.clientNames || []).join(', '),
         Operacion: (day.operationNames || []).join(', '),
@@ -140,8 +186,10 @@ function dailyExportRows(report, boardRows) {
         InicioAlmuerzo: markingSummary(markings, 'breakStartLabel'),
         FinAlmuerzo: markingSummary(markings, 'breakEndLabel'),
         Salida: markingSummary(markings, 'departureLabel'),
-        Correcciones: correctionSummary(markings),
-        HorasTotales: Number(day.totalHours || 0),
+        Domingos: day.isRestDay && !day.isHoliday ? 1 : 0,
+        Festivos: day.isHoliday ? 1 : 0,
+        Descansos: dailyRestSummary(worker.restAssignments, day.dateKey),
+        TotalTrabajado: Number(day.totalHours || 0),
         HorasOrdinarias: Number(day.ordinaryHours || 0),
         HorasExtraTotal: Number(day.overtimeHours || 0)
       };
@@ -157,15 +205,17 @@ function dailyExportRows(report, boardRows) {
   ));
 }
 
-function groupDailyRowsByWorker(rows = []) {
+function groupDailyRowsByWorker(rows = [], reportRows = []) {
+  const reportByIdentity = new Map((Array.isArray(reportRows) ? reportRows : []).map((worker) => [identityKey(worker), worker]));
   const groups = new Map();
   for (const row of rows) {
-    const key = `${normalizedDocument(row.Documento)}|${normalizedName(row.Auxiliar)}`;
+    const key = identityKey({ fullName: row.Auxiliar, documentNumber: row.Documento });
     if (!groups.has(key)) {
       groups.set(key, {
         name: row.Auxiliar || 'Auxiliar',
         documentType: row.TipoDocumento || '',
         documentNumber: row.Documento || '',
+        summary: reportByIdentity.get(key) || null,
         rows: []
       });
     }
@@ -174,32 +224,19 @@ function groupDailyRowsByWorker(rows = []) {
   return [...groups.values()];
 }
 
-const DAILY_COLUMNS = Object.freeze([
-  ['Fecha', 13],
-  ['EstadoAsistencia', 24],
-  ['Sucursal', 18],
-  ['Cliente', 24],
-  ['Operacion', 28],
-  ['MarcacionesOperacion', 34],
-  ['Entrada', 24],
-  ['InicioAlmuerzo', 24],
-  ['FinAlmuerzo', 24],
-  ['Salida', 24],
-  ['Correcciones', 42],
-  ['HorasTotales', 14],
-  ['HorasOrdinarias', 16],
-  ['HorasExtraTotal', 16],
-  ...PAYROLL_CONCEPT_CODES.map((code) => [code, 14])
-]);
-
 function dailyHeaderLabel(key) {
   const labels = {
-    EstadoAsistencia: 'Estado asistencia',
     Operacion: 'Operación',
     MarcacionesOperacion: 'Operación de marcación',
     InicioAlmuerzo: 'Inicio almuerzo',
     FinAlmuerzo: 'Fin almuerzo',
-    HorasTotales: 'Horas totales',
+    DiasRemunerados: 'Días remunerados',
+    DiasNoRemunerados: 'Días no remunerados',
+    PermisosRemunerados: 'Permisos remunerados',
+    Incapacidades: 'Incapacidades',
+    TurnosDiurnos: 'Turnos diurnos',
+    TurnosNocturnos: 'Turnos nocturnos',
+    TotalTrabajado: 'Total trabajado',
     HorasOrdinarias: 'Horas ordinarias',
     HorasExtraTotal: 'Horas extra total'
   };
@@ -220,6 +257,12 @@ function styleDailyHeader(row) {
   row.height = 34;
 }
 
+function styleTotalRow(row) {
+  row.font = { bold: true, color: { argb: EXPORT_COLORS.navy } };
+  row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: EXPORT_COLORS.tealSoft } };
+  row.alignment = { vertical: 'top', wrapText: true };
+}
+
 export function buildAttendanceFilteredWorkbook(report, boardRows) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Lórren · LoginPro';
@@ -228,7 +271,7 @@ export function buildAttendanceFilteredWorkbook(report, boardRows) {
   workbook.created = new Date();
 
   const rows = dailyExportRows(report, boardRows);
-  const groups = groupDailyRowsByWorker(rows);
+  const groups = groupDailyRowsByWorker(rows, report?.rows || []);
   const sheet = workbook.addWorksheet('Detalle diario');
   sheet.columns = DAILY_COLUMNS.map(([key, width]) => ({ key, width }));
 
@@ -269,6 +312,15 @@ export function buildAttendanceFilteredWorkbook(report, boardRows) {
       excelRow.alignment = { vertical: 'top', wrapText: true };
       rowNumber += 1;
     });
+
+    const totalRow = sheet.getRow(rowNumber);
+    const totals = workerSummaryValues(group.summary || {});
+    headers.forEach((key, columnIndex) => {
+      if (key === 'Fecha') totalRow.getCell(columnIndex + 1).value = 'TOTAL';
+      else totalRow.getCell(columnIndex + 1).value = totals[key] ?? '';
+    });
+    styleTotalRow(totalRow);
+    rowNumber += 1;
 
     if (groupIndex < groups.length - 1) rowNumber += 1;
   });
