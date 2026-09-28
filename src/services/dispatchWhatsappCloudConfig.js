@@ -2,6 +2,8 @@ const DEFAULT_GRAPH_VERSION = 'v23.0';
 const DEFAULT_TIMEOUT_MS = 15000;
 const DEFAULT_DUPLICATE_WINDOW_MS = 120000;
 const DEFAULT_TEMPLATE_LANGUAGE = 'es';
+const DEFAULT_ASSIGNMENT_TEMPLATE_NAME = 'confirmacion_de_asignacion';
+const DEPRECATED_ASSIGNMENT_TEMPLATE_NAME = 'confirmacion_de_asignacion_con_servicio';
 const DEFAULT_PROGRAMMING_TEMPLATE_NAME = 'dispatch_programming_document';
 
 export const ACTIVE_LINK_STATUSES = ['PENDING', 'SENT', 'DELIVERED', 'READ', 'DELIVERY_UNKNOWN', 'NOVELTY_REPORTED', 'CONFIRMED_REPLY_PENDING'];
@@ -78,6 +80,13 @@ function positiveNumber(value, fallback, minimum = 0) {
   return Number.isFinite(parsed) ? Math.max(minimum, parsed) : fallback;
 }
 
+function assignmentTemplateName(scope, prefix) {
+  const configured = envValue(envName(prefix, 'ASSIGNMENT_TEMPLATE_NAME'));
+  if (scope !== 'operational') return configured;
+  if (!configured || configured === DEPRECATED_ASSIGNMENT_TEMPLATE_NAME) return DEFAULT_ASSIGNMENT_TEMPLATE_NAME;
+  return configured;
+}
+
 export function getDispatchWhatsappCloudConfig(scope = 'operational') {
   const definition = dispatchWhatsappScopeDefinition(scope);
   const prefix = definition.envPrefix;
@@ -94,7 +103,7 @@ export function getDispatchWhatsappCloudConfig(scope = 'operational') {
     phoneNumberId: envValue(envName(prefix, 'PHONE_NUMBER_ID')),
     verifyToken: envValue(envName(prefix, 'VERIFY_TOKEN')),
     appSecret: envValue(envName(prefix, 'APP_SECRET')),
-    assignmentTemplateName: envValue(envName(prefix, 'ASSIGNMENT_TEMPLATE_NAME')),
+    assignmentTemplateName: assignmentTemplateName(scope, prefix),
     windowCheckTemplateName: envValue(envName(prefix, 'WINDOW_CHECK_TEMPLATE_NAME')),
     programmingTemplateName: envValue(envName(prefix, 'PROGRAMMING_TEMPLATE_NAME'))
       || (scope === 'operational' ? DEFAULT_PROGRAMMING_TEMPLATE_NAME : ''),
