@@ -10,6 +10,9 @@ const VACANCY_QUESTION_INTENTS = new Set([
   'ASK_VACANCY_LOCATION',
   'ASK_VACANCY_SCHEDULE'
 ]);
+const AWAITING_POOL_CONSENT = 'AWAITING_POOL_CONSENT';
+const POOL_DECLINED_REPLY =
+  'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
 
 function normalize(value = '') {
   return String(value || '')
@@ -20,6 +23,37 @@ function normalize(value = '') {
     .replace(/[^a-z0-9\s]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function poolDecision(input = {}) {
+  const intent = String(input?.interpretation?.intent || '').trim().toUpperCase();
+  if (['ACCEPTED', 'AGREED', 'YES', 'OPT_IN'].includes(intent)) return 'ACCEPTED';
+  if (['REJECTED', 'DECLINED', 'NO', 'OPT_OUT'].includes(intent)) return 'REJECTED';
+  const text = normalize(input?.turn?.rawText);
+  if (/^(no|no gracias|nop|negativo|paso|mejor no|prefiero no)\b/.test(text)) return 'REJECTED';
+  if (/^(si|si de acuerdo|de acuerdo|acepto|claro|listo|quiero)\b/.test(text)) return 'ACCEPTED';
+  return null;
+}
+
+function isAwaitingPoolConsent(input = {}) {
+  if (String(input?.candidate?.facts?.currentStep || '').trim().toUpperCase() === AWAITING_POOL_CONSENT) {
+    return true;
+  }
+  return (input?.pending?.fields || []).some((field) => (
+    ['AWAITING_POOL_CONSENT', 'POOLCONSENT', 'OPTINGENERALPOOL']
+      .includes(String(field || '').trim().toUpperCase())
+  ));
+}
+
+function buildPoolOffer(input = {}) {
+  const role = String(input?.vacancy?.role || input?.vacancy?.title
+    || input?.candidate?.facts?.vacancyRole || '').trim();
+  const city = String(vacancyCity(input?.vacancy)
+    || input?.candidate?.facts?.vacancyCity || '').trim();
+  const label = role
+    ? `la vacante de ${role}${city ? ` en ${city}` : ''}`
+    : city ? `la vacante en ${city}` : 'esta vacante';
+  return `En este momento ${label} no se encuentra activa, pero si deseas podemos dejar tu postulación para futuras aperturas. ¿Estás de acuerdo?`;
 }
 
 function cleanConfiguredFragment(value = '') {
@@ -188,6 +222,48 @@ export function buildVacancyPolicyReply(vacancy = {}, rawText = '') {
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
 export async function vacancyPolicy(input) {
+  const intent = String(input?.interpretation?.intent || '').trim().toUpperCase();
+  if (['INACTIVITY_REMINDER', 'INTERVIEW_REMINDER'].includes(intent)) return {};
+
+  if (!input?.vacancy && !input?.candidate?.facts?.vacancyId) {
+    return {
+      reply: { directive: 'ASK_WHICH_FLYER_SEEN' },
+      transitions: { keepCurrentStep: true }
+    };
+  }
+
+  if (isAwaitingPoolConsent(input)) {
+    const decision = poolDecision(input);
+    if (decision === 'ACCEPTED') {
+      return { mutations: { fieldsToPersist: { optInGeneralPool: true } } };
+    }
+    if (decision === 'REJECTED') {
+      return {
+        reply: { text: POOL_DECLINED_REPLY },
+        transitions: { endConversation: true }
+      };
+    }
+    return {};
+  }
+
+  const vacancyActive = input?.vacancy?.isActive ?? input?.candidate?.facts?.vacancyActive;
+  const accepting = input?.vacancy?.acceptingApplications
+    ?? input?.candidate?.facts?.vacancyAcceptingApplications
+    ?? input?.candidate?.facts?.acceptingApplications;
+  if (vacancyActive === false || accepting === false) {
+    return {
+      reply: {
+        text: buildPoolOffer(input),
+        interactiveOptions: [
+          { id: 'pool_consent:accept', label: 'Sí, de acuerdo' },
+          { id: 'pool_consent:reject', label: 'No, gracias' }
+        ]
+      },
+      mutations: { nextStep: AWAITING_POOL_CONSENT },
+      transitions: { keepCurrentStep: false }
+    };
+  }
+
   if (!isVacancyQuestionIntent(input?.interpretation)) return {};
   if (!input?.vacancy) return {};
   if (input?.execution?.mayReply !== true) return {};

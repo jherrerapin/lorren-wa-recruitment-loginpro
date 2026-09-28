@@ -1,3 +1,4 @@
+import { ConversationTurnInputSchema } from '../contracts/ConversationTurnInputSchema.js';
 import { ConversationDecisionSchema } from '../contracts/ConversationDecisionSchema.js';
 import { candidateDataPolicy } from './policies/candidateDataPolicy.js';
 import { vacancyAssignmentPolicy } from './policies/vacancyAssignmentPolicy.js';
@@ -135,9 +136,29 @@ export function reduceConversationDecision(accumulated, fragment) {
     throw new TypeError('Conversation policy must return a decision fragment object.');
   }
 
-  return enforceDecisionInvariants(
-    mergeDecisionObjects(accumulated, fragment)
-  );
+  const merged = mergeDecisionObjects(accumulated, fragment);
+  const previousTransitions = isPlainObject(accumulated?.transitions)
+    ? accumulated.transitions
+    : {};
+  const mergedTransitions = isPlainObject(merged?.transitions)
+    ? merged.transitions
+    : {};
+  merged.transitions = {
+    ...mergedTransitions,
+    handoffToHuman: previousTransitions.handoffToHuman === true
+      || mergedTransitions.handoffToHuman === true,
+    endConversation: previousTransitions.endConversation === true
+      || mergedTransitions.endConversation === true
+  };
+
+  return enforceDecisionInvariants(merged);
+}
+
+export function reduceConversationDecisions(partialDecisions) {
+  if (!Array.isArray(partialDecisions)) {
+    throw new TypeError('partialDecisions must be an array');
+  }
+  return partialDecisions.reduce(reduceConversationDecision, {});
 }
 
 /**
@@ -152,6 +173,9 @@ export function reduceConversationDecision(accumulated, fragment) {
  * @returns {Promise<import('../contracts/ConversationDecisionSchema.js').ConversationDecision>}
  */
 export async function calculateConversationDecision(input) {
+  const parsedInput = await ConversationTurnInputSchema.safeParseAsync(input);
+  if (!parsedInput.success) throw parsedInput.error;
+  const validatedInput = parsedInput.data;
   let decision = {};
 
   for (const policy of conversationPolicies) {
@@ -159,12 +183,12 @@ export async function calculateConversationDecision(input) {
       throw new TypeError('Conversation policy must be a function.');
     }
 
-    const fragment = await policy(input);
+    const fragment = await policy(validatedInput);
     decision = reduceConversationDecision(decision, fragment);
 
     if (
       decision?.transitions?.endConversation === true
-      || shouldStopAfterExclusivePolicy(policy, input, fragment)
+      || shouldStopAfterExclusivePolicy(policy, validatedInput, fragment)
     ) {
       break;
     }

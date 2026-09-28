@@ -17,6 +17,12 @@ const ACKNOWLEDGEMENT_INTENTS = new Set([
   'SOFT_CONFIRMATION'
 ]);
 
+const SYSTEM_REMINDER_INTENTS = new Set(['INACTIVITY_REMINDER', 'INTERVIEW_REMINDER']);
+
+export function isSystemReminderIntent(input = {}) {
+  return SYSTEM_REMINDER_INTENTS.has(getIntent(input));
+}
+
 const FIELD_LABELS = Object.freeze({
   fullName: 'nombre completo',
   documentType: 'tipo de documento',
@@ -36,7 +42,9 @@ function getIntent(input = {}) {
 
 function getPendingFields(input = {}) {
   return Array.isArray(input?.pending?.fields)
-    ? input.pending.fields.filter((field) => typeof field === 'string' && field.trim())
+    ? input.pending.fields
+      .filter((field) => typeof field === 'string' && field.trim())
+      .filter((field) => !['dataConsent', 'gender'].includes(field.trim()))
     : [];
 }
 
@@ -64,11 +72,24 @@ function buildPendingFieldsReply(fields = []) {
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
 export async function chatPolicy(input) {
+  const intent = getIntent(input);
+
+  if (isSystemReminderIntent(input)) {
+    return {
+      reply: {
+        directive: 'SEND_REMINDER',
+        parameters: { reminderType: intent }
+      }
+    };
+  }
+
   if (input?.candidate?.facts?.dataConsentStatus !== 'ACCEPTED') {
     return {};
   }
 
-  const intent = getIntent(input);
+  const reminderMutation = input?.candidate?.facts?.inactivityReminderSent === true
+    ? { mutations: { fieldsToPersist: { inactivityReminderSent: false } } }
+    : {};
 
   if (FINALIZATION_INTENTS.has(intent)) {
     return {
@@ -82,15 +103,22 @@ export async function chatPolicy(input) {
 
   const pendingFields = getPendingFields(input);
   if (pendingFields.length) {
-    const text = buildPendingFieldsReply(pendingFields);
-    return text ? { reply: { text } } : {};
+    return {
+      ...reminderMutation,
+      reply: {
+        directive: 'ASK_MISSING_FIELDS',
+        parameters: { missingFields: pendingFields }
+      },
+      transitions: { keepCurrentStep: true }
+    };
   }
 
   if (GREETING_INTENTS.has(intent)) {
     return {
       reply: {
         text: 'Hola. Cuéntame cómo puedo ayudarte con tu proceso de selección.'
-      }
+      },
+      ...reminderMutation
     };
   }
 
@@ -98,11 +126,12 @@ export async function chatPolicy(input) {
     return {
       reply: {
         text: 'Con gusto. Si necesitas revisar algo más de tu proceso, cuéntame.'
-      }
+      },
+      ...reminderMutation
     };
   }
 
-  return {};
+  return reminderMutation;
 }
 
 export default chatPolicy;

@@ -6,18 +6,47 @@ export const ConversationReplyButtonSchema = z.object({
   title: z.string().trim().min(1)
 }).strict().readonly();
 
-export const ConversationReplySchema = z.object({
-  text: z.string().trim().min(1),
-  buttons: z.array(ConversationReplyButtonSchema).min(1).max(3).readonly().optional()
+export const ReplyOptionSchema = z.object({
+  id: z.string().trim().min(1),
+  label: z.string().trim().min(1)
 }).strict().readonly();
+
+export const ConversationReplySchema = z.object({
+  text: z.string().trim().min(1).optional(),
+  directive: z.string().trim().min(1).optional(),
+  parameters: z.record(z.string().trim().min(1), JsonValueSchema).readonly().optional(),
+  buttons: z.array(ConversationReplyButtonSchema).min(1).max(3).readonly().optional(),
+  interactiveOptions: z.array(ReplyOptionSchema).max(3).readonly().optional()
+}).strict().readonly().superRefine((reply, context) => {
+  if (!reply.text && !reply.directive) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'reply must include text or directive'
+    });
+  }
+});
+
+export const ReplySchema = ConversationReplySchema;
 
 export const ConversationMutationsSchema = z.object({
-  fieldsToPersist: z.record(z.string().trim().min(1), JsonValueSchema).default({})
+  fieldsToPersist: z.record(z.string().trim().min(1), JsonValueSchema).default({}),
+  nextStep: z.string().trim().min(1).nullable().default(null),
+  nextStage: z.string().trim().min(1).nullable().default(null)
 }).strict().readonly();
 
+export const MutationsSchema = ConversationMutationsSchema;
+
 export const ConversationTransitionsSchema = z.object({
+  keepCurrentStep: z.boolean().default(true),
+  handoffToHuman: z.boolean().default(false),
   endConversation: z.boolean().default(false)
 }).strict().readonly();
+
+export const TransitionsSchema = ConversationTransitionsSchema;
+
+const NoSchedulingSchema = z.object({
+  action: z.literal('none')
+}).strict();
 
 const SuggestSlotsSchedulingSchema = z.object({
   action: z.literal('suggest_slots')
@@ -33,10 +62,13 @@ const CancelBookingSchedulingSchema = z.object({
 }).strict();
 
 export const ConversationSchedulingSchema = z.discriminatedUnion('action', [
+  NoSchedulingSchema,
   SuggestSlotsSchedulingSchema,
   ReserveSlotSchedulingSchema,
   CancelBookingSchedulingSchema
 ]).readonly();
+
+export const SchedulingSchema = ConversationSchedulingSchema;
 
 /**
  * Canonical output of the functional conversation core.

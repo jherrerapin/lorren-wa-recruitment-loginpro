@@ -18,7 +18,8 @@ export const JsonValueSchema = z.lazy(() =>
 export const TurnSchema = z.object({
   id: z.string().trim().min(1),
   receivedAt: z.string().datetime({ offset: true }),
-  rawText: z.string()
+  rawText: z.string(),
+  messageType: z.enum(['text', 'document', 'image', 'audio', 'unknown']).default('text')
 }).strict().readonly();
 
 /** Consolidated candidate facts already known by the caller. */
@@ -76,7 +77,9 @@ export const PendingSchema = z.object({
 
 export const ExecutionSchema = z.object({
   mayReply: z.boolean(),
-  dryRun: z.boolean()
+  mayPersistCandidate: z.boolean().optional(),
+  maySendOutbound: z.boolean().optional(),
+  dryRun: z.boolean().optional()
 }).strict().readonly();
 
 export const VacancyCitySchema = z.object({
@@ -108,6 +111,10 @@ export const VacancySchema = z.object({
   maxAge: z.number().int().nullable().default(null),
   experienceRequired: z.enum(['YES', 'NO', 'INDIFFERENT']).nullable().default(null),
   experienceTimeText: z.string().nullable().default(null),
+  experienceTime: z.string().nullable().default(null),
+  isActive: z.boolean().nullable().default(null),
+  acceptingApplications: z.boolean().nullable().default(null),
+  locationType: z.string().nullable().default(null),
   operation: VacancyOperationSchema.nullable().default(null)
 }).strict().readonly();
 
@@ -122,12 +129,27 @@ export const AttachmentItemSchema = z.object({
   fileName: z.string().nullable().default(null),
   mimeType: z.string().trim().min(1).nullable().default(null),
   caption: z.string().nullable().default(null),
-  isCv: z.boolean().default(false)
+  isCv: z.boolean().default(false),
+  providerId: z.string().trim().min(1).nullable().default(null),
+  extractedText: z.string().nullish(),
+  status: z.enum(['received', 'downloading', 'downloaded', 'processed', 'failed'])
+    .default('received')
+}).strict().readonly();
+
+export const AttachmentSchema = z.object({
+  providerId: z.string().trim().min(1),
+  type: z.enum(['document', 'image', 'audio']),
+  fileName: z.string().trim().min(1).nullable(),
+  mimeType: z.string().trim().min(1),
+  extractedText: z.string().nullish(),
+  status: z.enum(['received', 'downloading', 'downloaded', 'processed', 'failed'])
+    .default('received')
 }).strict().readonly();
 
 export const AttachmentsSchema = z.object({
   items: z.array(AttachmentItemSchema).readonly().default([]),
-  hasCv: z.boolean().default(false)
+  hasCv: z.boolean().default(false),
+  current: z.array(AttachmentSchema).readonly().default([])
 }).strict().readonly();
 
 export const InterpretationSchedulingSchema = z.object({
@@ -166,7 +188,14 @@ export const InterpretationSchema = z.object({
   intent: z.string().trim().min(1).nullable().default(null),
   fields: InterpretationCandidateFieldsSchema.default({}),
   scheduling: InterpretationSchedulingSchema.default({ slot: null }),
-  consent: InterpretationConsentSchema.default({ decision: null })
+  consent: InterpretationConsentSchema.default({ decision: null }),
+  providedFields: z.record(z.string(), z.unknown()).readonly().optional(),
+  detectedFields: z.record(z.string(), z.unknown()).readonly().optional(),
+  extractedFields: z.record(z.string(), z.unknown()).readonly().optional()
+}).strict().readonly();
+
+export const AttributionSchema = z.object({
+  source: z.enum(['META_ADS', 'ORGANIC'])
 }).strict().readonly();
 
 /**
@@ -186,14 +215,16 @@ export const ConversationTurnInputSchema = z.object({
   vacancy: VacancySchema.nullable().default(null),
   attachments: AttachmentsSchema.default({
     items: [],
-    hasCv: false
+    hasCv: false,
+    current: []
   }),
   interpretation: InterpretationSchema.default({
     intent: null,
     fields: {},
     scheduling: { slot: null },
     consent: { decision: null }
-  })
+  }),
+  attribution: AttributionSchema.optional()
 }).strict().readonly();
 
 /** @typedef {z.infer<typeof ConversationTurnInputSchema>} ConversationTurnInput */
