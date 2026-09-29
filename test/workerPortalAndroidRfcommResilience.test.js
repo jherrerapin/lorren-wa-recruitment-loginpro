@@ -33,6 +33,10 @@ test('líder descubre por BLE filtrado por SERVICE_UUID y conecta challenge-proo
   assert.match(manager, /createInsecureRfcommSocketToServiceRecord\(SERVICE_UUID\)/);
   assert.match(manager, /payload\.put\("type", "challenge"\)/);
   assert.match(manager, /PROOF_VERIFIED/);
+  assert.match(manager, /String address = safeAddress\(device\)/);
+  assert.doesNotMatch(manager, /startDiscovery\(\)|fetchUuidsWithSdp\(\)/);
+  assert.doesNotMatch(manager, /ACTION_DISCOVERY_STARTED|ACTION_DISCOVERY_FINISHED|BluetoothDevice\.ACTION_FOUND|BluetoothDevice\.ACTION_UUID/);
+  assert.doesNotMatch(manager, /SDP_REQUESTED|CLASSIC_DISCOVERY_START|CLASSIC_DISCOVERY_RETRY/);
 });
 
 test('frontend conserva dos reintentos completos y fallback manual', async () => {

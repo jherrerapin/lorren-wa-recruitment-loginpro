@@ -14,16 +14,12 @@ import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
-import android.os.Parcelable;
 import android.util.Base64;
 
 import org.json.JSONArray;
@@ -68,16 +64,12 @@ final class NearbyPresenceManager {
     private static final String SERVICE_NAME = "LORREN_CREW_PRESENCE";
     private static final ParcelUuid SERVICE_PARCEL_UUID = new ParcelUuid(SERVICE_UUID);
 
-    // Bluetooth Classic inquiry suele consumir ~12 s. La ventana nativa deja
-    // margen real para inquiry + SDP + RFCOMM y termina antes si llegan las proofs.
+    // BLE descubre auxiliares de forma inmediata por UUID; RFCOMM conserva
+    // el intercambio challenge/proof y la ventana termina al completar proofs.
     private static final long MIN_SCAN_MS = 35_000L;
     private static final long MAX_SCAN_MS = 45_000L;
-    private static final long INQUIRY_CHECKPOINT_MS = 15_000L;
     private static final long CONNECTION_GRACE_MS = 1_500L;
     private static final long RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L;
-    private static final long DISCOVERY_RESTART_DELAY_MS = 1_500L;
-    private static final int MAX_DISCOVERY_BURSTS = 3;
-    private static final int MAX_DISCOVERED_DEVICES = 24;
     private static final int MAX_MESSAGE_BYTES = 16_384;
 
     // 8029 apareció en la implementación histórica basada en Google Nearby y
@@ -116,17 +108,11 @@ final class NearbyPresenceManager {
     private int expectedProofCount = 0;
     private long leaderTimeoutMs = MIN_SCAN_MS;
     private final Map<String, JSONObject> proofsByKey = new LinkedHashMap<>();
-    private final Map<String, BluetoothDevice> discoveredDevices = new LinkedHashMap<>();
-    private final Set<String> sdpRequestedAddresses = new LinkedHashSet<>();
     private final Set<String> leaderConnectionAddresses = new LinkedHashSet<>();
     private final Map<String, BluetoothSocket> leaderSockets = new LinkedHashMap<>();
     private final Map<String, Runnable> leaderSocketTimeouts = new LinkedHashMap<>();
-    private boolean leaderReceiverRegistered = false;
-    private Runnable leaderInquiryCheckpoint;
     private Runnable leaderTimeout;
     private Runnable leaderCompleteTimeout;
-    private Runnable leaderDiscoveryRestart;
-    private int leaderDiscoveryBurst = 0;
     private BluetoothLeScanner leaderBleScanner;
     private ScanCallback leaderBleScanCallback;
 
@@ -458,7 +444,6 @@ final class NearbyPresenceManager {
         }
         role = Role.LEADER;
         activity.setPresenceKeepScreenOn(true);
-        leaderDiscoveryBurst = 0;
         attemptId = nextAttemptId;
         scanServiceRequestId = serviceRequestId;
         challenge = nextChallenge;
@@ -466,8 +451,6 @@ final class NearbyPresenceManager {
         expectedProofCount = nextExpectedProofCount;
         leaderTimeoutMs = timeoutMs;
         proofsByKey.clear();
-        discoveredDevices.clear();
-        sdpRequestedAddresses.clear();
         leaderConnectionAddresses.clear();
 
         emitDiagnostic("ENC", "SCAN_REQUESTED");
@@ -518,11 +501,14 @@ final class NearbyPresenceManager {
                 @Override
                 public void onScanResult(int callbackType, ScanResult result) {
                     BluetoothDevice device = result == null ? null : result.getDevice();
+                    if (device == null) return;
+                    String address = safeAddress(device);
+                    if (address.isEmpty()) return;
                     synchronized (NearbyPresenceManager.this) {
                         if (role != Role.LEADER || leaderBleScanCallback != this) return;
                         emitDiagnostic("ENC", "BLE_SERVICE_FOUND");
                     }
-                    if (device != null) connectLeaderToAuxiliary(device);
+                    connectLeaderToAuxiliary(device);
                 }
 
                 @Override
@@ -555,148 +541,12 @@ final class NearbyPresenceManager {
         }
     }
 
-    private final BroadcastReceiver leaderDiscoveryReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (intent == null) return;
-            String action = intent.getAction();
-            if (BluetoothAdapter.ACTION_DISCOVERY_STARTED.equals(action)) {
-                synchronized (NearbyPresenceManager.this) {
-                    if (role != Role.LEADER) return;
-                    emitDiagnostic("ENC", "CLASSIC_DISCOVERY_READY");
-                }
-                return;
-            }
-            if (BluetoothDevice.ACTION_FOUND.equals(action)) {
-                BluetoothDevice device = parcelableDevice(intent);
-                rememberDiscoveredDevice(device);
-                return;
-            }
-            if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
-                String completedAttemptId;
-                boolean retryDiscovery;
-                synchronized (NearbyPresenceManager.this) {
-                    if (role != Role.LEADER) return;
-                    cancelLeaderInquiryCheckpoint();
-                    emitDiagnostic("ENC", "CLASSIC_INQUIRY_FINISHED");
-                    completedAttemptId = attemptId;
-                    retryDiscovery = proofsByKey.size() < expectedProofCount
-                        && leaderDiscoveryBurst < MAX_DISCOVERY_BURSTS;
-                }
-                requestSdpForDiscoveredDevices();
-                if (retryDiscovery) scheduleLeaderDiscoveryRestart(completedAttemptId);
-                return;
-            }
-            if (BluetoothDevice.ACTION_UUID.equals(action)) {
-                BluetoothDevice device = parcelableDevice(intent);
-                if (device != null && intentContainsServiceUuid(intent, device)) {
-                    connectLeaderToAuxiliary(device);
-                }
-            }
-        }
-    };
-
-    private synchronized boolean startLeaderDiscoveryBurst(String currentAttemptId) {
-        if (role != Role.LEADER || !attemptId.equals(currentAttemptId)) return false;
-        if (leaderDiscoveryBurst >= MAX_DISCOVERY_BURSTS || bluetoothAdapter == null) return false;
-        try {
-            ensureNearbyTransportPermissions();
-            if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
-            sdpRequestedAddresses.clear();
-            leaderDiscoveryBurst += 1;
-            emitDiagnostic("ENC", "CLASSIC_DISCOVERY_START");
-            if (!bluetoothAdapter.startDiscovery()) {
-                leaderDiscoveryBurst -= 1;
-                return false;
-            }
-            scheduleLeaderInquiryCheckpoint(currentAttemptId);
-            return true;
-        } catch (SecurityException error) {
-            failLeaderPermissions("leader_discovery", error);
-            return false;
-        } catch (RuntimeException error) {
-            failLeaderBluetooth("leader_discovery", error);
-            return false;
-        }
-    }
-
-    private synchronized void scheduleLeaderDiscoveryRestart(String completedAttemptId) {
-        cancelLeaderDiscoveryRestart();
-        leaderDiscoveryRestart = () -> {
-            synchronized (NearbyPresenceManager.this) {
-                if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
-                if (expectedProofCount > 0 && proofsByKey.size() >= expectedProofCount) return;
-                if (leaderDiscoveryBurst >= MAX_DISCOVERY_BURSTS) return;
-                if (!leaderConnectionAddresses.isEmpty()) {
-                    scheduleLeaderDiscoveryRestart(completedAttemptId);
-                    return;
-                }
-                emitDiagnostic("ENC", "CLASSIC_DISCOVERY_RETRY");
-                if (!startLeaderDiscoveryBurst(completedAttemptId)) {
-                    failLeaderBluetooth("leader_discovery", null);
-                }
-            }
-        };
-        handler.postDelayed(leaderDiscoveryRestart, DISCOVERY_RESTART_DELAY_MS);
-    }
-
-    private synchronized void cancelLeaderDiscoveryRestart() {
-        if (leaderDiscoveryRestart != null) handler.removeCallbacks(leaderDiscoveryRestart);
-        leaderDiscoveryRestart = null;
-    }
-
-    private synchronized void rememberDiscoveredDevice(BluetoothDevice device) {
-        if (role != Role.LEADER || device == null || discoveredDevices.size() >= MAX_DISCOVERED_DEVICES) return;
-        String address = safeAddress(device);
-        if (address.isEmpty() || discoveredDevices.containsKey(address)) return;
-        discoveredDevices.put(address, device);
-        emitDiagnostic("ENC", "CLASSIC_DEVICE_FOUND");
-    }
-
-    private void requestSdpForDiscoveredDevices() {
-        List<BluetoothDevice> devices;
-        synchronized (this) {
-            if (role != Role.LEADER) return;
-            devices = new ArrayList<>(discoveredDevices.values());
-        }
-        for (BluetoothDevice device : devices) {
-            String address = safeAddress(device);
-            if (address.isEmpty()) continue;
-            if (deviceHasServiceUuid(device)) {
-                connectLeaderToAuxiliary(device);
-                continue;
-            }
-            synchronized (this) {
-                if (role != Role.LEADER || !sdpRequestedAddresses.add(address)) continue;
-            }
-            try {
-                ensureNearbyTransportPermissions();
-                emitDiagnostic("ENC", "SDP_REQUESTED");
-                if (!device.fetchUuidsWithSdp()) {
-                    synchronized (this) {
-                        sdpRequestedAddresses.remove(address);
-                    }
-                }
-            } catch (SecurityException error) {
-                synchronized (this) {
-                    sdpRequestedAddresses.remove(address);
-                    if (role == Role.LEADER) failLeaderPermissions("leader_sdp", error);
-                }
-                return;
-            } catch (RuntimeException error) {
-                synchronized (this) {
-                    sdpRequestedAddresses.remove(address);
-                }
-            }
-        }
-    }
-
     private void connectLeaderToAuxiliary(BluetoothDevice device) {
         String address = safeAddress(device);
         if (address.isEmpty()) return;
         synchronized (this) {
             if (role != Role.LEADER || !leaderConnectionAddresses.add(address)) return;
-            emitDiagnostic("ENC", "SDP_MATCHED");
+            emitDiagnostic("ENC", "BLE_SERVICE_MATCHED");
             emitDiagnostic("ENC", "ENDPOINT_FOUND");
             int pendingCount = leaderConnectionAddresses.size();
             emit("endpoint_found", event -> event.put("pendingCount", pendingCount));
@@ -858,33 +708,6 @@ final class NearbyPresenceManager {
         handler.postDelayed(timeout, RFCOMM_EXCHANGE_TIMEOUT_MS);
     }
 
-    private synchronized void scheduleLeaderInquiryCheckpoint(String completedAttemptId) {
-        cancelLeaderInquiryCheckpoint();
-        leaderInquiryCheckpoint = () -> {
-            synchronized (NearbyPresenceManager.this) {
-                if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
-                emitDiagnostic("ENC", "CLASSIC_INQUIRY_CHECKPOINT");
-                try {
-                    ensureNearbyTransportPermissions();
-                    if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
-                        bluetoothAdapter.cancelDiscovery();
-                    }
-                } catch (SecurityException error) {
-                    failLeaderPermissions("leader_discovery", error);
-                    return;
-                } catch (RuntimeException ignored) {
-                }
-            }
-            requestSdpForDiscoveredDevices();
-        };
-        handler.postDelayed(leaderInquiryCheckpoint, INQUIRY_CHECKPOINT_MS);
-    }
-
-    private synchronized void cancelLeaderInquiryCheckpoint() {
-        if (leaderInquiryCheckpoint != null) handler.removeCallbacks(leaderInquiryCheckpoint);
-        leaderInquiryCheckpoint = null;
-    }
-
     private synchronized void scheduleLeaderTimeout(String completedAttemptId, long timeoutMs) {
         cancelLeaderTimeouts();
         leaderTimeout = () -> {
@@ -1007,10 +830,7 @@ final class NearbyPresenceManager {
         challengeSentAt = 0L;
         expectedProofCount = 0;
         leaderTimeoutMs = MIN_SCAN_MS;
-        leaderDiscoveryBurst = 0;
         proofsByKey.clear();
-        discoveredDevices.clear();
-        sdpRequestedAddresses.clear();
         leaderConnectionAddresses.clear();
         role = Role.IDLE;
         activity.setPresenceKeepScreenOn(false);
@@ -1044,19 +864,7 @@ final class NearbyPresenceManager {
         auxiliaryExchangeTimeout = null;
     }
 
-    private synchronized void registerLeaderReceiver() {
-        if (leaderReceiverRegistered) return;
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
-        filter.addAction(BluetoothDevice.ACTION_FOUND);
-        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
-        filter.addAction(BluetoothDevice.ACTION_UUID);
-        appContext.registerReceiver(leaderDiscoveryReceiver, filter);
-        leaderReceiverRegistered = true;
-    }
-
     private synchronized void stopLeaderDiscovery() {
-        cancelLeaderInquiryCheckpoint();
         BluetoothLeScanner scanner = leaderBleScanner;
         ScanCallback callback = leaderBleScanCallback;
         leaderBleScanner = null;
@@ -1068,20 +876,6 @@ final class NearbyPresenceManager {
             } catch (RuntimeException ignored) {
             }
         }
-        if (bluetoothAdapter != null) {
-            try {
-                if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
-            } catch (SecurityException ignored) {
-            } catch (RuntimeException ignored) {
-            }
-        }
-        if (leaderReceiverRegistered) {
-            try {
-                appContext.unregisterReceiver(leaderDiscoveryReceiver);
-            } catch (RuntimeException ignored) {
-            }
-        }
-        leaderReceiverRegistered = false;
     }
 
     private synchronized void closeLeaderSockets() {
@@ -1104,8 +898,6 @@ final class NearbyPresenceManager {
     }
 
     private synchronized void cancelLeaderTimeouts() {
-        cancelLeaderDiscoveryRestart();
-        cancelLeaderInquiryCheckpoint();
         if (leaderTimeout != null) handler.removeCallbacks(leaderTimeout);
         if (leaderCompleteTimeout != null) handler.removeCallbacks(leaderCompleteTimeout);
         leaderTimeout = null;
@@ -1183,45 +975,6 @@ final class NearbyPresenceManager {
         byte[] bytes = new byte[length];
         input.readFully(bytes);
         return new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-    }
-
-    private static boolean deviceHasServiceUuid(BluetoothDevice device) {
-        if (device == null) return false;
-        try {
-            ParcelUuid[] uuids = device.getUuids();
-            if (uuids == null) return false;
-            for (ParcelUuid uuid : uuids) {
-                if (SERVICE_PARCEL_UUID.equals(uuid)) return true;
-            }
-        } catch (SecurityException ignored) {
-        }
-        return false;
-    }
-
-    private static boolean intentContainsServiceUuid(Intent intent, BluetoothDevice device) {
-        try {
-            Parcelable[] raw = intent.getParcelableArrayExtra(BluetoothDevice.EXTRA_UUID);
-            if (raw != null) {
-                for (Parcelable value : raw) {
-                    if (value instanceof ParcelUuid && SERVICE_PARCEL_UUID.equals(value)) return true;
-                }
-            }
-        } catch (RuntimeException ignored) {
-        }
-        return deviceHasServiceUuid(device);
-    }
-
-    @SuppressWarnings("deprecation")
-    private static BluetoothDevice parcelableDevice(Intent intent) {
-        if (intent == null) return null;
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                return intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice.class);
-            }
-            return intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-        } catch (RuntimeException ignored) {
-            return null;
-        }
     }
 
     private static String safeAddress(BluetoothDevice device) {
