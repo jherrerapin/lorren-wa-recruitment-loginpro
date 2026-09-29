@@ -14,3 +14,11 @@ Se implementó la bandera `bluetoothFallbackActive` en `native-presence.js` para
 - `PresenceBridge.java` ya no usa un umbral máximo de 50 m para considerar usable una ubicación; solo exige ubicación no nula, `accuracy` presente, finita y mayor o igual a cero.
 - `native-presence.js` conserva el `accuracyMeters` real y, si supera 50 m, registra `LOCATION_LOW_ACCURACY_ACCEPTED` sin abortar la sincronización.
 - No se modifica el protocolo Nearby/Bluetooth ni la estructura del payload enviado al servidor.
+
+## 2026-09-29 — Cierre backend GPS y toolchain Android
+
+### Fallo Detectado
+El backend conservaba la política de dominio restrictiva (`attendance_location_accuracy_insufficient`) que rechazaba marcaciones asíncronas con GPS degradado, invalidando la actualización de la APK. Paralelamente, el toolchain de Android presentaba una discrepancia de versiones, exigiendo Gradle 9.5.0 frente al 9.3.0 configurado.
+
+### Corrección Aplicada
+Se purgó el rechazo por baja precisión en las políticas de asistencia del backend (`attendanceValidationPolicy.js` y `attendanceGeofenceResolver.js`) y se alinearon las pruebas unitarias para garantizar la aceptación de estas coordenadas degradadas. Se actualizó el archivo `gradle-wrapper.properties` a la versión 9.5.0, estabilizando el pipeline de CI/CD para la aplicación móvil.
