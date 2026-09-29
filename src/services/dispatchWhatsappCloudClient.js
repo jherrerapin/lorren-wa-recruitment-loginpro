@@ -112,13 +112,21 @@ export function buildDispatchReportMenuPayload({ phone, name }) {
     to: normalizedPhone,
     type: 'interactive',
     interactive: {
-      type: 'button',
-      body: { text: `Hola ${displayName}. ¿Cómo te puedo ayudar hoy?` },
+      type: 'list',
+      body: { text: `Hola ${displayName}. Selecciona la programación que deseas recibir. El resumen operativo se enviará automáticamente.` },
       action: {
-        buttons: [
-          { type: 'reply', reply: { id: 'dispatch_report:programming_today', title: 'Programación' } },
-          { type: 'reply', reply: { id: 'dispatch_report:summary', title: 'Resumen del día' } }
-        ]
+        button: 'Ver opciones',
+        sections: [{
+          title: 'Programación diaria',
+          rows: [
+            { id: 'dispatch_report:programming_today_pdf', title: 'Hoy · PDF', description: 'PDF + resumen operativo de hoy' },
+            { id: 'dispatch_report:programming_today_excel', title: 'Hoy · Excel', description: 'Excel + resumen operativo de hoy' },
+            { id: 'dispatch_report:programming_today_both', title: 'Hoy · Ambos', description: 'PDF + Excel + resumen de hoy' },
+            { id: 'dispatch_report:programming_tomorrow_pdf', title: 'Mañana · PDF', description: 'PDF + resumen operativo de mañana' },
+            { id: 'dispatch_report:programming_tomorrow_excel', title: 'Mañana · Excel', description: 'Excel + resumen operativo de mañana' },
+            { id: 'dispatch_report:programming_tomorrow_both', title: 'Mañana · Ambos', description: 'PDF + Excel + resumen de mañana' }
+          ]
+        }]
       }
     }
   };
