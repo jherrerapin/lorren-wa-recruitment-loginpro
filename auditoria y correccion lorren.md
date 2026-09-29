@@ -3,13 +3,13 @@
 ## 2026-09-29 — APK asistencia: desbloqueos operativos en terreno
 
 ### Fallo Detectado
-La aplicación se bloqueaba si el Bluetooth completaba el escaneo pero no encontraba dispositivos (0 pruebas recolectadas) o si la ubicación del dispositivo reportaba una precisión superior a 50 metros (arrojando `LOCATION_ACCURACY_INSUFFICIENT`).
+Bloqueo operativo en terreno por dos motivos: el escaneo Bluetooth concluía sin encontrar auxiliares (0 pruebas) dejando la interfaz sin opciones de contingencia, y la validación estricta del GPS bloqueaba la sincronización al superar los 50 metros de precisión (`LOCATION_ACCURACY_INSUFFICIENT`).
 
 ### Corrección Aplicada
-Se ajustó la lógica en `native-presence.js` para activar el fallback de marcación manual cuando `expectedProofCount > 0 && proofCount === 0`. Además, se modificaron los filtros de precisión de GPS en `PresenceBridge.java` (`locationUsable`) y en `native-presence.js` (`nativeLocationFromBundle`) para aceptar y registrar ubicaciones independientemente de su nivel de precisión, priorizando la fluidez operativa sobre la exactitud estricta del GPS.
+Se implementó la bandera `bluetoothFallbackActive` en `native-presence.js` para forzar la UI a mostrar la "Marcación Manual" ante un escaneo vacío. Se relajaron las validaciones de geolocalización en `PresenceBridge.java` (`locationUsable`) y en el JS (`nativeLocationFromBundle`) para aceptar y propagar cualquier coordenada válida sin importar su margen de error, sustituyendo el bloqueo por un registro de advertencia en el diagnóstico.
 
 ### Detalle técnico
-- `native-presence.js` activa `bluetoothFallbackActive` cuando `SCAN_COMPLETE` termina esperando auxiliares pero no recibe ninguna prueba.
+- `native-presence.js` activa `bluetoothFallbackActive` cuando `SCAN_COMPLETE` termina esperando auxiliares pero no recibe ninguna prueba (`expectedProofCount > 0 && proofCount === 0`).
 - Durante ese fallback, cada auxiliar pendiente muestra únicamente `Marcación Manual`, que invoca `markMemberManually(member)`; `Reportar sin teléfono` permanece oculto.
 - `PresenceBridge.java` ya no usa un umbral máximo de 50 m para considerar usable una ubicación; solo exige ubicación no nula, `accuracy` presente, finita y mayor o igual a cero.
 - `native-presence.js` conserva el `accuracyMeters` real y, si supera 50 m, registra `LOCATION_LOW_ACCURACY_ACCEPTED` sin abortar la sincronización.
