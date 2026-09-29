@@ -4,7 +4,8 @@ const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions'
 const DEFAULT_REPLY_MODEL = 'gpt-4o-mini';
 const FALLBACK_REPLY = 'En este momento estoy procesando tu solicitud, dame un momento por favor.';
 const DIRECTIVE_FALLBACKS = Object.freeze({
-  ASK_WHICH_FLYER_SEEN: 'Hola, soy Lórren, del equipo de selección de LoginPro. Gracias por comunicarte. Para brindarte la información correcta, ¿me confirmas qué cargo viste en el anuncio?'
+  ASK_WHICH_FLYER_SEEN: 'Hola, soy Lórren, del equipo de selección de LoginPro. Gracias por comunicarte. Para brindarte la información correcta, ¿me confirmas qué cargo viste en el anuncio?',
+  CLARIFY_VACANCY_SELECTION: 'Encontré más de una convocatoria que podría coincidir. ¿Me confirmas algún detalle adicional del anuncio, como el turno, la zona o el nombre exacto del cargo?'
 });
 const SYSTEM_PROMPT = `Eres Lórren, una asistente de reclutamiento. Redacta un mensaje único, conversacional y directo cumpliendo estrictamente con la directiva indicada. No inventes datos ni hagas preguntas que no estén en la directiva. Nunca preguntes el género, sexo o identidad de género del candidato, ni menciones que ese dato falta. Si aparece gender entre los parámetros, ignóralo al redactar.
 

@@ -137,3 +137,45 @@ test('un recordatorio de sistema no puede ser reemplazado por consentimiento o v
   assert.deepEqual(decision.mutations.fieldsToPersist, {});
   assert.equal(decision.mutations.nextStep, null);
 });
+
+test('una respuesta idéntica a la última pregunta escala el bucle en vez de repetirse', async () => {
+  const repeated = 'En este momento la vacante de Auxiliar de bodega en Bogotá no se encuentra activa, pero si deseas podemos dejar tu postulación para futuras aperturas. ¿Estás de acuerdo?';
+  const decision = await calculateConversationDecision(validInput({
+    turn: {
+      id: 'turn-loop-1',
+      receivedAt: '2026-09-23T12:00:00.000Z',
+      rawText: 'Quiero información'
+    },
+    candidate: {
+      id: 'candidate-loop-1',
+      facts: {
+        dataConsentStatus: 'ACCEPTED',
+        vacancyId: 'vacancy-loop-1',
+        vacancyActive: false,
+        vacancyAcceptingApplications: false
+      },
+      updatedAt: null
+    },
+    history: {
+      messages: [{
+        role: 'assistant',
+        text: repeated,
+        occurredAt: '2026-09-23T11:59:00.000Z'
+      }],
+      lastBotQuestion: repeated
+    },
+    pending: { fields: [], actions: [] },
+    vacancy: {
+      id: 'vacancy-loop-1',
+      title: 'Auxiliar de bodega',
+      role: 'Auxiliar de bodega',
+      city: 'Bogotá',
+      isActive: false,
+      acceptingApplications: false
+    }
+  }));
+
+  assert.equal(decision.transitions.handoffToHuman, true);
+  assert.notEqual(decision.reply.text, repeated);
+  assert.match(decision.reply.text, /evitar repetirte/i);
+});

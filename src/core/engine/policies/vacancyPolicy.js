@@ -13,6 +13,10 @@ const VACANCY_QUESTION_INTENTS = new Set([
 const AWAITING_POOL_CONSENT = 'AWAITING_POOL_CONSENT';
 const POOL_DECLINED_REPLY =
   'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
+const POOL_OPTIONS = Object.freeze([
+  Object.freeze({ id: 'pool_consent:accept', label: 'Sí, de acuerdo' }),
+  Object.freeze({ id: 'pool_consent:reject', label: 'No, gracias' })
+]);
 
 function normalize(value = '') {
   return String(value || '')
@@ -243,10 +247,31 @@ export function vacancyPolicy(input) {
         transitions: { endConversation: true }
       };
     }
+    if (['ACKNOWLEDGEMENT', 'SOFT_CONFIRMATION', 'THANKS'].includes(intent)) {
+      return {
+        reply: {
+          text: 'Para continuar necesito que me confirmes si deseas que guardemos tu postulación para futuras aperturas. ¿Estás de acuerdo?',
+          interactiveOptions: POOL_OPTIONS
+        },
+        transitions: { keepCurrentStep: true }
+      };
+    }
     return {};
   }
 
   if (input?.vacancy === null && !input?.candidate?.facts?.vacancyId) {
+    const detected = input?.interpretation?.detectedFields || {};
+    const roleHint = typeof detected.roleHint === 'string' ? detected.roleHint.trim() : '';
+    const cityHint = typeof detected.cityHint === 'string' ? detected.cityHint.trim() : '';
+    if (roleHint && cityHint) {
+      return {
+        reply: {
+          directive: 'CLARIFY_VACANCY_SELECTION',
+          parameters: { roleHint, cityHint }
+        },
+        transitions: { keepCurrentStep: true }
+      };
+    }
     return {
       reply: { directive: 'ASK_WHICH_FLYER_SEEN' },
       transitions: { keepCurrentStep: true }
@@ -261,10 +286,7 @@ export function vacancyPolicy(input) {
     return {
       reply: {
         text: buildPoolOffer(input),
-        interactiveOptions: [
-          { id: 'pool_consent:accept', label: 'Sí, de acuerdo' },
-          { id: 'pool_consent:reject', label: 'No, gracias' }
-        ]
+        interactiveOptions: POOL_OPTIONS
       },
       mutations: { nextStep: AWAITING_POOL_CONSENT },
       transitions: { keepCurrentStep: false }

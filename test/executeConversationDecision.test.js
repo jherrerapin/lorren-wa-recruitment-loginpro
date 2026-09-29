@@ -126,6 +126,22 @@ test('los textos estrictos se entregan sin llamar al LLM', async () => {
   assert.deepEqual(result.generation, { status: 'provided' });
 });
 
+test('sanea una alucinación del LLM antes de la entrega durable', async () => {
+  const calls = [];
+  const deps = dependencies(calls);
+  deps.llmService.generateReply = async (...args) => {
+    calls.push(['generate', ...args]);
+    return 'La vacante tiene contrato directo y pagos quincenales.';
+  };
+
+  await executeConversationDecision(input(), decision(), deps);
+
+  const deliveredText = calls.find(([phase]) => phase === 'deliver')?.[2];
+  assert.ok(deliveredText);
+  assert.doesNotMatch(deliveredText, /contrato directo|pagos quincenales/i);
+  assert.match(deliveredText, /no puedo confirmar información que no esté registrada/i);
+});
+
 test('dryRun no ejecuta ningún efecto secundario', async () => {
   const calls = [];
   const result = await executeConversationDecision(

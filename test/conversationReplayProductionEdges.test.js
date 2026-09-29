@@ -9,7 +9,6 @@ import {
   VacancyFirstGateAction
 } from '../src/services/vacancyFirstGate.js';
 import { buildProfessionalVacancyPresentation } from '../src/services/vacancyPublicInfo.js';
-import { appendUniqueReplySegment } from '../src/services/replyComposition.js';
 import { markConversationMessagesResponded } from '../src/services/conversationMessageRepository.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 import { createInMemoryReplayAdapters } from './conversation-replay/inMemoryAdapters.js';
@@ -173,13 +172,6 @@ test('metadata confiable conserva autoridad frente a texto ambiguo contradictori
   assert.equal(decision.resolution.fallback, false);
   assert.match(decision.reply, /Auxiliar de cargue y descargue Neiva/i);
   assert.match(decision.reply, /te interesa continuar/i);
-});
-
-test('el compositor no duplica un seguimiento que la respuesta generada ya contiene', () => {
-  const generated = 'Estoy validando tus datos. Envíame tu HV como archivo PDF para cerrar el registro.';
-  const deterministicFollowUp = 'Para continuar necesito que adjuntes tu hoja de vida como archivo PDF, DOC o DOCX.';
-
-  assert.equal(appendUniqueReplySegment(generated, deterministicFollowUp), generated);
 });
 
 test('la entrega exige outbox persistido y respondedAt se actualiza mediante su repositorio explícito', async () => {

@@ -13,6 +13,7 @@ import {
 } from '../../services/interviewBookingStateService.js';
 import { listOfferableSlots } from '../../services/interviewScheduler.js';
 import { deliverAutomaticOutboundText } from '../../services/automaticOutboundDeliveryService.js';
+import { sanitizeOutboundReply } from '../../services/outboundReplyPolicy.js';
 
 const CONSENT_FIELD = 'dataConsentStatus';
 const DEFAULT_SCHEDULING_TIMEZONE = 'America/Bogota';
@@ -564,12 +565,26 @@ export async function executeConversationDecision(
 
   if (!outbound.text || !maySendOutbound || !whatsappClient) return result;
 
+  const safetyCheck = sanitizeOutboundReply({
+    reply: outbound.text,
+    vacancy: input?.vacancy ?? null,
+    candidate: {
+      id: input?.candidate?.id ?? null,
+      ...asRecord(input?.candidate?.facts)
+    },
+    currentStep: normalizedDecision.mutations.nextStep
+      ?? input?.candidate?.facts?.currentStep
+      ?? null,
+    source: 'functional_core'
+  });
+  const textToSend = safetyCheck.reply;
+
   try {
     const delivery = await deliverResolvedReply({
       prisma,
       input,
       decision: resolvedDecision,
-      text: outbound.text,
+      text: textToSend,
       whatsappClient,
       deliveryAuthority: automaticOutboundDelivery,
       deliveryAdapters

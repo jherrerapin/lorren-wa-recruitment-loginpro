@@ -4,7 +4,7 @@ import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
 import { buildSafeContextualFallbackText } from '../src/services/contextualReply.js';
 import { looksLikeCvFilenameText } from '../src/services/cvFlow.js';
 import { sanitizeRequiredDocumentsForBot, generateInterviewOffer, generateBookingConfirmation, preserveConfiguredInterviewDocuments } from '../src/services/naturalReply.js';
-import { CV_UNSAFE_FALLBACK_REPLY, sanitizeOutboundReply } from '../src/services/replySafety.js';
+import { CV_UNSAFE_FALLBACK_REPLY, sanitizeOutboundReply } from '../src/services/outboundReplyPolicy.js';
 import { buildVacancyStateForModel } from '../src/services/conversationEngine.js';
 
 function assertNoForbiddenHvTerms(reply) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DATA_CONSENT_VERSION } from '../src/services/dataConsentGate.js';
+import { DATA_CONSENT_VERSION } from '../src/core/contracts/DataConsentContract.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 import { replayFixtureInterpretation } from './conversation-replay/interpretationReplay.js';
 

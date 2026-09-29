@@ -99,6 +99,53 @@ test('mantiene vacancyId nulo cuando todavía no existe una ciudad', async () =>
   assert.deepEqual(result.detectedFields, { roleHint: 'bodega' });
 });
 
+test('rechaza una asignación cuando rol y ciudad empatan en más de una vacante', async () => {
+  const ambiguousVacancies = [
+    { id: 'vac-bodega-am', role: 'Auxiliar de bodega', title: 'Auxiliar de bodega mañana', city: 'Bogotá' },
+    { id: 'vac-bodega-pm', role: 'Auxiliar de bodega', title: 'Auxiliar de bodega tarde', city: 'Bogotá' }
+  ];
+  const result = await extractCandidateData(
+    'Vi el anuncio de auxiliar de bodega en Bogotá',
+    ['vacancyId'],
+    { activeVacancies: ambiguousVacancies, candidateCity: 'Bogotá', candidateSummary: {} },
+    completion({
+      intent: 'apply_intent',
+      vacancyId: 'vac-bodega-am',
+      roleHint: 'auxiliar de bodega',
+      cityHint: 'Bogotá',
+      fields: {},
+      fieldEvidence: {},
+      turnType: 'PROVIDE_DATA'
+    })
+  );
+
+  assert.equal(result.extractedFields, undefined);
+  assert.deepEqual(result.detectedFields, {
+    roleHint: 'auxiliar de bodega',
+    cityHint: 'Bogotá'
+  });
+});
+
+test('un id de vacante inactiva no desplaza la coincidencia activa disponible', async () => {
+  const result = await extractCandidateData(
+    'Auxiliar de bodega en Ibagué',
+    ['vacancyId'],
+    { activeVacancies: [vacancies[0]], candidateCity: 'Ibagué', candidateSummary: {} },
+    completion({
+      intent: 'apply_intent',
+      vacancyId: 'vac-inactiva-especifica',
+      roleHint: 'bodega',
+      cityHint: 'Ibagué',
+      fields: {},
+      fieldEvidence: {},
+      turnType: 'PROVIDE_DATA'
+    })
+  );
+
+  assert.equal(result.extractedFields, undefined);
+  assert.deepEqual(result.detectedFields, { roleHint: 'bodega', cityHint: 'Ibagué' });
+});
+
 test('no invoca NLU cuando no hay texto o campos pendientes', async () => {
   let calls = 0;
   const dependencies = {

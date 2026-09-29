@@ -28,6 +28,26 @@ test('tráfico orgánico pide identificar el volante mediante una directiva pura
   });
 });
 
+test('rol y ciudad ambiguos fuerzan desambiguación sin asignar una vacante', () => {
+  const decision = vacancyPolicy({
+    ...input({}, 'Auxiliar de bodega en Bogotá', {
+      interpretation: {
+        intent: 'APPLY_INTENT',
+        detectedFields: { roleHint: 'auxiliar de bodega', cityHint: 'Bogotá' }
+      }
+    }),
+    vacancy: null
+  });
+
+  assert.deepEqual(decision, {
+    reply: {
+      directive: 'CLARIFY_VACANCY_SELECTION',
+      parameters: { roleHint: 'auxiliar de bodega', cityHint: 'Bogotá' }
+    },
+    transitions: { keepCurrentStep: true }
+  });
+});
+
 test('ofrece guardar una postulación con el rol y la ciudad de la vacante inactiva', () => {
   const decision = vacancyPolicy(input({
     vacancyActive: false,
@@ -100,6 +120,25 @@ test('no inventa una decisión ante una respuesta ambigua', () => {
   assert.deepEqual(vacancyPolicy(input({
     currentStep: 'AWAITING_POOL_CONSENT'
   }, '¿Qué datos guardarían?')), {});
+});
+
+test('un acuse pasivo no autoriza el banco de talento y reitera la decisión pendiente', () => {
+  const decision = vacancyPolicy(input({
+    currentStep: 'AWAITING_POOL_CONSENT',
+    vacancyRole: 'Auxiliar de bodega',
+    vacancyCity: 'Bogotá'
+  }, 'Ah bueno', {
+    interpretation: { intent: 'ACKNOWLEDGEMENT' }
+  }));
+
+  assert.equal(decision.mutations, undefined);
+  assert.equal(decision.transitions.endConversation, undefined);
+  assert.equal(decision.transitions.keepCurrentStep, true);
+  assert.match(decision.reply.text, /confirmes si deseas.*futuras aperturas/i);
+  assert.deepEqual(decision.reply.interactiveOptions, [
+    { id: 'pool_consent:accept', label: 'Sí, de acuerdo' },
+    { id: 'pool_consent:reject', label: 'No, gracias' }
+  ]);
 });
 
 test('no inventa cierre cuando la envoltura todavía no cargó los booleanos', () => {

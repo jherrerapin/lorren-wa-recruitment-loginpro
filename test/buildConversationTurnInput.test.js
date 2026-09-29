@@ -186,6 +186,37 @@ test('carga candidato, vacante e historial reales en el contrato estricto', asyn
   });
 });
 
+test('conserva hechos e historial previos junto con la extracción del turno actual', async () => {
+  const candidate = baseCandidate({
+    dataConsentStatus: 'ACCEPTED',
+    fullName: 'Ana Pérez',
+    locality: 'Fontibón'
+  });
+  const input = await buildConversationTurnInput(inbound({
+    text: 'Mi documento es 1000123456',
+    interpretation: {
+      intent: 'PROVIDE_CANDIDATE_DATA',
+      providedFields: { documentNumber: '1000123456' }
+    }
+  }), dependencies({
+    candidate,
+    messages: [
+      { direction: 'OUTBOUND', body: '¿Cuál es tu número de documento?', createdAt: new Date('2026-09-23T11:58:00.000Z') },
+      { direction: 'INBOUND', body: 'Vivo en Fontibón', createdAt: new Date('2026-09-23T11:57:00.000Z') }
+    ]
+  }));
+
+  assert.equal(input.candidate.facts.fullName, 'Ana Pérez');
+  assert.equal(input.candidate.facts.locality, 'Fontibón');
+  assert.equal(input.history.lastBotQuestion, '¿Cuál es tu número de documento?');
+  assert.deepEqual(input.history.messages.map(({ text }) => text), [
+    'Vivo en Fontibón',
+    '¿Cuál es tu número de documento?'
+  ]);
+  assert.equal(input.interpretation.providedFields.documentNumber, '1000123456');
+  assert.ok(input.pending.fields.includes('documentNumber'));
+});
+
 test('usa el género interpretado cuando todavía no está consolidado en el candidato', async () => {
   const input = await buildConversationTurnInput(inbound({
     interpretation: {

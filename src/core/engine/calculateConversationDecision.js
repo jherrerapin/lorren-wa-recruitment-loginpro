@@ -161,6 +161,27 @@ export function reduceConversationDecisions(partialDecisions) {
   return partialDecisions.reduce(reduceConversationDecision, {});
 }
 
+function normalizeReplyText(value = '') {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-CO');
+}
+
+export function preventRepeatedReply(input, decision) {
+  const replyText = normalizeReplyText(decision?.reply?.text);
+  const lastBotQuestion = normalizeReplyText(input?.history?.lastBotQuestion);
+  if (!replyText || !lastBotQuestion || replyText !== lastBotQuestion) return decision;
+
+  return {
+    ...decision,
+    reply: {
+      text: 'Para evitar repetirte la misma respuesta, dejaré este punto en revisión con el equipo de selección.'
+    },
+    transitions: {
+      ...(isPlainObject(decision.transitions) ? decision.transitions : {}),
+      handoffToHuman: true
+    }
+  };
+}
+
 /**
  * Pure asynchronous orchestrator for one validated ConversationTurnInput.
  * It performs no persistence, transport, HTTP, filesystem or provider I/O.
@@ -193,6 +214,8 @@ export async function calculateConversationDecision(input) {
       break;
     }
   }
+
+  decision = preventRepeatedReply(validatedInput, decision);
 
   const validation = await ConversationDecisionSchema.safeParseAsync(decision);
 

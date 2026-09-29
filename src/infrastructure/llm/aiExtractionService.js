@@ -134,12 +134,26 @@ Formato exacto esperado:
 }`;
 }
 
-function validatedVacancyId(parsedVacancyId, cityHint, candidateCity, activeVacancies) {
+function vacancyMatchesRoleHint(vacancy, roleHint) {
+  const hintTokens = normalizeComparable(roleHint)
+    .split(' ')
+    .filter((token) => token.length >= 4);
+  if (!hintTokens.length) return false;
+  const vacancyText = normalizeComparable(`${vacancy.role} ${vacancy.title}`);
+  return hintTokens.some((token) => vacancyText.includes(token));
+}
+
+function validatedVacancyId(parsedVacancyId, roleHint, cityHint, candidateCity, activeVacancies) {
   if (typeof parsedVacancyId !== 'string' || !parsedVacancyId.trim()) return null;
   const selected = activeVacancies.find((vacancy) => vacancy.id === parsedVacancyId.trim());
   if (!selected) return null;
   const effectiveCity = normalizeComparable(cityHint || candidateCity);
   if (!effectiveCity || effectiveCity !== normalizeComparable(selected.city)) return null;
+  const matchingVacancies = activeVacancies.filter((vacancy) => (
+    normalizeComparable(vacancy.city) === effectiveCity
+      && vacancyMatchesRoleHint(vacancy, roleHint)
+  ));
+  if (matchingVacancies.length !== 1 || matchingVacancies[0].id !== selected.id) return null;
   return selected.id;
 }
 
@@ -202,6 +216,7 @@ export async function extractCandidateData(text, pendingFields, context = {}, de
     );
     const vacancyId = validatedVacancyId(
       parsed.vacancyId,
+      parsed.roleHint,
       parsed.cityHint,
       candidateCity,
       activeVacancies
