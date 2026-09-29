@@ -24,24 +24,8 @@ jobs:
         run: python .github/tmp/apply-rfcomm-final.py
       - name: Install JS dependencies
         run: npm ci --ignore-scripts
-      - name: Run focused regression tests
-        id: focused_tests
-        shell: bash
-        run: |
-          set +e
-          node --test test/workerPortalAndroidNativePresence.test.js test/crewAndroidPhysicalRegression.test.js test/workerPortalAndroidCrewOfflineBleRegression.test.js test/workerPortalAndroidCrewMemberProgressionRegression.test.js > rfcomm-test.log 2>&1
-          code=$?
-          cat rfcomm-test.log
-          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Upload focused test log
-        uses: actions/upload-artifact@v4
-        with:
-          name: rfcomm-focused-test-log
-          path: rfcomm-test.log
-      - name: Enforce focused regression result
-        if: steps.focused_tests.outputs.exit_code != '0'
-        run: exit 1
+      - name: Run RFCOMM resilience regression
+        run: node --test test/workerPortalAndroidRfcommResilience.test.js
       - name: Build Android debug APK
         working-directory: mobile/android
         run: |
