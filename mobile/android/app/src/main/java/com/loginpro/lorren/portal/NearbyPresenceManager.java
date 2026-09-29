@@ -65,6 +65,10 @@ final class NearbyPresenceManager {
     private static final long INQUIRY_CHECKPOINT_MS = 15_000L;
     private static final long CONNECTION_GRACE_MS = 1_500L;
     private static final long RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L;
+    private static final long DISCOVERY_RESTART_DELAY_MS = 1_500L;
+    private static final long DISCOVERABILITY_REFRESH_MS = 240_000L;
+    private static final long DISCOVERABILITY_RETRY_MS = 15_000L;
+    private static final int MAX_DISCOVERY_BURSTS = 3;
     private static final int MAX_DISCOVERED_DEVICES = 24;
     private static final int MAX_MESSAGE_BYTES = 16_384;
 
@@ -93,6 +97,7 @@ final class NearbyPresenceManager {
     private Thread auxiliaryAcceptThread;
     private Thread auxiliaryExchangeThread;
     private Runnable auxiliaryExchangeTimeout;
+    private Runnable auxiliaryDiscoverabilityRefresh;
 
     // ENC: discovery Classic + SDP + conexiones RFCOMM de una marcación.
     private String attemptId = "";
@@ -111,6 +116,8 @@ final class NearbyPresenceManager {
     private Runnable leaderInquiryCheckpoint;
     private Runnable leaderTimeout;
     private Runnable leaderCompleteTimeout;
+    private Runnable leaderDiscoveryRestart;
+    private int leaderDiscoveryBurst = 0;
 
     NearbyPresenceManager(MainActivity activity, EventSink eventSink, CredentialProvider credentialProvider) {
         this.activity = activity;
@@ -134,6 +141,7 @@ final class NearbyPresenceManager {
             throw new IllegalStateException("advertising_unsupported");
         }
         role = Role.READY;
+        activity.setPresenceKeepScreenOn(true);
         readyServiceRequestId = normalizedService;
         emitDiagnostic("AUX", "READY_REQUESTED");
         startAuxiliaryServer();
@@ -160,6 +168,7 @@ final class NearbyPresenceManager {
         }
         emitDiagnostic("AUX", "DISCOVERABLE_CONFIRMED");
         if (auxiliaryServerSocket != null) {
+            scheduleAuxiliaryDiscoverabilityRefresh(DISCOVERABILITY_REFRESH_MS);
             emitReady();
             return;
         }
@@ -182,8 +191,35 @@ final class NearbyPresenceManager {
             return;
         }
         emitDiagnostic("AUX", "RFCOMM_SERVER_READY");
+        scheduleAuxiliaryDiscoverabilityRefresh(DISCOVERABILITY_REFRESH_MS);
         emitReady();
         startAuxiliaryAcceptLoop(auxiliaryServerSocket);
+    }
+
+    private synchronized void scheduleAuxiliaryDiscoverabilityRefresh(long delayMs) {
+        cancelAuxiliaryDiscoverabilityRefresh();
+        auxiliaryDiscoverabilityRefresh = () -> {
+            synchronized (NearbyPresenceManager.this) {
+                if (role != Role.READY || auxiliaryServerSocket == null) return;
+                emitDiagnostic("AUX", "DISCOVERABLE_REFRESH_REQUESTED");
+            }
+            boolean requested = activity.refreshNearbyDiscoverableWindow();
+            synchronized (NearbyPresenceManager.this) {
+                if (role == Role.READY && auxiliaryServerSocket != null) {
+                    scheduleAuxiliaryDiscoverabilityRefresh(
+                        requested ? DISCOVERABILITY_REFRESH_MS : DISCOVERABILITY_RETRY_MS
+                    );
+                }
+            }
+        };
+        handler.postDelayed(auxiliaryDiscoverabilityRefresh, delayMs);
+    }
+
+    private synchronized void cancelAuxiliaryDiscoverabilityRefresh() {
+        if (auxiliaryDiscoverabilityRefresh != null) {
+            handler.removeCallbacks(auxiliaryDiscoverabilityRefresh);
+        }
+        auxiliaryDiscoverabilityRefresh = null;
     }
 
     private synchronized void emitReady() {
@@ -347,6 +383,7 @@ final class NearbyPresenceManager {
     private synchronized void failReady(String code) {
         stopReadyRuntime();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         readyServiceRequestId = "";
         emitError(code);
     }
@@ -354,6 +391,7 @@ final class NearbyPresenceManager {
     private synchronized void failReadyPermissions(String operation, Throwable error) {
         stopReadyRuntime();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         readyServiceRequestId = "";
         emitPermissionsRequired("AUX", operation, error);
     }
@@ -361,6 +399,7 @@ final class NearbyPresenceManager {
     private synchronized void failReadyBluetooth(String operation, Throwable error) {
         stopReadyRuntime();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         readyServiceRequestId = "";
         emitBluetoothUnavailable("AUX", operation, error);
     }
@@ -387,6 +426,8 @@ final class NearbyPresenceManager {
             throw new IllegalStateException("advertising_unsupported");
         }
         role = Role.LEADER;
+        activity.setPresenceKeepScreenOn(true);
+        leaderDiscoveryBurst = 0;
         attemptId = nextAttemptId;
         scanServiceRequestId = serviceRequestId;
         challenge = nextChallenge;
@@ -422,15 +463,13 @@ final class NearbyPresenceManager {
                 }
             }
 
-            emitDiagnostic("ENC", "CLASSIC_DISCOVERY_START");
-            if (!bluetoothAdapter.startDiscovery()) {
-                failLeaderBluetooth("leader_discovery", null);
-                return;
-            }
             challengeSentAt = System.currentTimeMillis();
             emitLeaderScanStarted();
             scheduleLeaderTimeout(nextAttemptId, timeoutMs);
-            scheduleLeaderInquiryCheckpoint(nextAttemptId);
+            if (!startLeaderDiscoveryBurst(nextAttemptId)) {
+                failLeaderBluetooth("leader_discovery", null);
+                return;
+            }
         } catch (SecurityException error) {
             failLeaderPermissions("leader_discovery", error);
         } catch (RuntimeException error) {
@@ -456,12 +495,18 @@ final class NearbyPresenceManager {
                 return;
             }
             if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
+                String completedAttemptId;
+                boolean retryDiscovery;
                 synchronized (NearbyPresenceManager.this) {
                     if (role != Role.LEADER) return;
                     cancelLeaderInquiryCheckpoint();
                     emitDiagnostic("ENC", "CLASSIC_INQUIRY_FINISHED");
+                    completedAttemptId = attemptId;
+                    retryDiscovery = proofsByKey.size() < expectedProofCount
+                        && leaderDiscoveryBurst < MAX_DISCOVERY_BURSTS;
                 }
                 requestSdpForDiscoveredDevices();
+                if (retryDiscovery) scheduleLeaderDiscoveryRestart(completedAttemptId);
                 return;
             }
             if (BluetoothDevice.ACTION_UUID.equals(action)) {
@@ -472,6 +517,55 @@ final class NearbyPresenceManager {
             }
         }
     };
+
+    private synchronized boolean startLeaderDiscoveryBurst(String currentAttemptId) {
+        if (role != Role.LEADER || !attemptId.equals(currentAttemptId)) return false;
+        if (leaderDiscoveryBurst >= MAX_DISCOVERY_BURSTS || bluetoothAdapter == null) return false;
+        try {
+            ensureNearbyTransportPermissions();
+            if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
+            sdpRequestedAddresses.clear();
+            leaderDiscoveryBurst += 1;
+            emitDiagnostic("ENC", "CLASSIC_DISCOVERY_START");
+            if (!bluetoothAdapter.startDiscovery()) {
+                leaderDiscoveryBurst -= 1;
+                return false;
+            }
+            scheduleLeaderInquiryCheckpoint(currentAttemptId);
+            return true;
+        } catch (SecurityException error) {
+            failLeaderPermissions("leader_discovery", error);
+            return false;
+        } catch (RuntimeException error) {
+            failLeaderBluetooth("leader_discovery", error);
+            return false;
+        }
+    }
+
+    private synchronized void scheduleLeaderDiscoveryRestart(String completedAttemptId) {
+        cancelLeaderDiscoveryRestart();
+        leaderDiscoveryRestart = () -> {
+            synchronized (NearbyPresenceManager.this) {
+                if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
+                if (expectedProofCount > 0 && proofsByKey.size() >= expectedProofCount) return;
+                if (leaderDiscoveryBurst >= MAX_DISCOVERY_BURSTS) return;
+                if (!leaderConnectionAddresses.isEmpty()) {
+                    scheduleLeaderDiscoveryRestart(completedAttemptId);
+                    return;
+                }
+                emitDiagnostic("ENC", "CLASSIC_DISCOVERY_RETRY");
+                if (!startLeaderDiscoveryBurst(completedAttemptId)) {
+                    failLeaderBluetooth("leader_discovery", null);
+                }
+            }
+        };
+        handler.postDelayed(leaderDiscoveryRestart, DISCOVERY_RESTART_DELAY_MS);
+    }
+
+    private synchronized void cancelLeaderDiscoveryRestart() {
+        if (leaderDiscoveryRestart != null) handler.removeCallbacks(leaderDiscoveryRestart);
+        leaderDiscoveryRestart = null;
+    }
 
     private synchronized void rememberDiscoveredDevice(BluetoothDevice device) {
         if (role != Role.LEADER || device == null || discoveredDevices.size() >= MAX_DISCOVERED_DEVICES) return;
@@ -746,6 +840,7 @@ final class NearbyPresenceManager {
         stopLeaderDiscovery();
         closeLeaderSockets();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         emitError(code);
     }
 
@@ -755,6 +850,7 @@ final class NearbyPresenceManager {
         stopLeaderDiscovery();
         closeLeaderSockets();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         emitPermissionsRequired("ENC", operation, error);
     }
 
@@ -764,6 +860,7 @@ final class NearbyPresenceManager {
         stopLeaderDiscovery();
         closeLeaderSockets();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         emitBluetoothUnavailable("ENC", operation, error);
     }
 
@@ -784,6 +881,7 @@ final class NearbyPresenceManager {
             event.put("expectedProofCount", expectedProofCount);
         });
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
     }
 
     synchronized void stopReady() {
@@ -819,6 +917,7 @@ final class NearbyPresenceManager {
 
     private synchronized void stopAllInternal(boolean notify) {
         cancelAuxiliaryExchangeTimeout();
+        cancelAuxiliaryDiscoverabilityRefresh();
         cancelLeaderTimeouts();
         stopReadyRuntime();
         stopLeaderDiscovery();
@@ -831,15 +930,18 @@ final class NearbyPresenceManager {
         challengeSentAt = 0L;
         expectedProofCount = 0;
         leaderTimeoutMs = MIN_SCAN_MS;
+        leaderDiscoveryBurst = 0;
         proofsByKey.clear();
         discoveredDevices.clear();
         sdpRequestedAddresses.clear();
         leaderConnectionAddresses.clear();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         if (notify) emit("stopped", event -> {});
     }
 
     private synchronized void stopReadyRuntime() {
+        cancelAuxiliaryDiscoverabilityRefresh();
         closeAuxiliarySocket();
         BluetoothServerSocket server = auxiliaryServerSocket;
         auxiliaryServerSocket = null;
@@ -914,6 +1016,7 @@ final class NearbyPresenceManager {
     }
 
     private synchronized void cancelLeaderTimeouts() {
+        cancelLeaderDiscoveryRestart();
         cancelLeaderInquiryCheckpoint();
         if (leaderTimeout != null) handler.removeCallbacks(leaderTimeout);
         if (leaderCompleteTimeout != null) handler.removeCallbacks(leaderCompleteTimeout);

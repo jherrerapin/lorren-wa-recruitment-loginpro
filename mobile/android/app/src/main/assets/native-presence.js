@@ -12,6 +12,7 @@
   const PANEL_ID = 'lorren-native-presence-panel';
   const DEFAULT_SCAN_MS = 15_000;
   const AUTO_RETRY_DELAY_MS = 1_500;
+  const MAX_SCAN_RETRIES = 2;
   const AUXILIARY_REARM_DELAY_MS = 250;
   const DIAGNOSTIC_LIMIT = 20;
   const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
@@ -106,7 +107,7 @@
   let retryMarkType = '';
   let hasCompletedLeaderScan = false;
   let scanTransientFailureCount = 0;
-  let autoRetryRemaining = 1;
+  let scanRetries = 0;
   let autoRetryTimer = null;
   let auxiliaryRearmTimer = null;
   let provisioningPromise = null;
@@ -984,7 +985,7 @@
     retryNotDetectedCount = 0;
     retryMarkType = '';
     hasCompletedLeaderScan = false;
-    autoRetryRemaining = 1;
+    scanRetries = 0;
     scanVerifiedCount = 0;
     scanPendingCount = 0;
   }
@@ -1201,7 +1202,7 @@
     if (normalizedMark !== 'ARRIVAL') phoneExceptionSet(context.serviceRequestId).clear();
     if (!automaticRetry) {
       resetDiagnosticLog('APP', 'LEADER_SCAN_REQUESTED');
-      autoRetryRemaining = 1;
+      scanRetries = 0;
       retryNotDetectedCount = 0;
       hasCompletedLeaderScan = false;
     } else {
@@ -1371,8 +1372,28 @@
       return;
     }
     const proofCount = proofBundle.proofs.length;
-    const noAuxiliaryDetected = completion.expectedProofCount > 0 && proofCount === 0;
-    if (noAuxiliaryDetected) {
+    const incompleteScan = completion.expectedProofCount > 0 && proofCount < completion.expectedProofCount;
+    if (incompleteScan && proofCount === 0) {
+      if (scanRetries < MAX_SCAN_RETRIES) {
+        scanRetries += 1;
+        pendingCompletedScan = null;
+        activeAttempt = null;
+        recordDiagnostic('APP', 'BLUETOOTH_SCAN_RETRY', {
+          attempt: scanRetries,
+          expected: completion.expectedProofCount,
+          found: proofCount
+        });
+        setStatus(
+          `No se detectaron auxiliares. Reintentando automáticamente (${scanRetries}/${MAX_SCAN_RETRIES})…`,
+          'warning'
+        );
+        autoRetryTimer = window.setTimeout(() => {
+          autoRetryTimer = null;
+          startLeaderScan(completionMarkType, true);
+        }, AUTO_RETRY_DELAY_MS);
+        return;
+      }
+
       const pendingCount = completion.expectedProofCount;
       activeAttempt = null;
       pendingCompletedScan = null;
@@ -1381,14 +1402,14 @@
       hasCompletedLeaderScan = true;
       bluetoothFallbackActive = true;
       recordDiagnostic('APP', 'BLUETOOTH_MANUAL_FALLBACK', {
-        reason: 'scan_complete_without_auxiliaries',
+        reason: 'scan_retries_exhausted',
         markType: completionMarkType,
         expectedProofCount: completion.expectedProofCount,
         proofCount
       });
       renderPanel();
       setStatus(
-        `No se detectó ningún auxiliar por Bluetooth. Usa “Marcación Manual” para registrar la ${markInfo(completionMarkType).noun}.`,
+        'No se detectó la totalidad de la cuadrilla tras varios intentos. Usa “Marcación Manual” para los auxiliares pendientes.',
         'warning'
       );
       markRetryAvailable(completionMarkType);
@@ -1404,10 +1425,15 @@
         hasCompletedLeaderScan = incomplete;
         retryMarkType = incomplete ? completionMarkType : '';
         renderPanel();
-        if (incomplete && autoRetryRemaining > 0) {
-          autoRetryRemaining -= 1;
+        if (incomplete && scanRetries < MAX_SCAN_RETRIES) {
+          scanRetries += 1;
+          recordDiagnostic('APP', 'BLUETOOTH_SCAN_RETRY', {
+            attempt: scanRetries,
+            expected: completion.expectedProofCount,
+            found: queuedProofCount
+          });
           setStatus(
-            `Faltan respuestas para la ${markInfo(completionMarkType).noun}. Lórren reintentará automáticamente una vez.`,
+            `Faltan respuestas para la ${markInfo(completionMarkType).noun}. Reintentando automáticamente (${scanRetries}/${MAX_SCAN_RETRIES})…`,
             'warning'
           );
           autoRetryTimer = window.setTimeout(() => {
@@ -1415,6 +1441,17 @@
             startLeaderScan(completionMarkType, true);
           }, AUTO_RETRY_DELAY_MS);
           return;
+        }
+        if (incomplete) {
+          bluetoothFallbackActive = true;
+          recordDiagnostic('APP', 'BLUETOOTH_MANUAL_FALLBACK', {
+            reason: 'scan_retries_exhausted',
+            markType: completionMarkType,
+            expectedProofCount: completion.expectedProofCount,
+            proofCount: queuedProofCount
+          });
+        } else {
+          scanRetries = 0;
         }
         setStatus(
           navigator.onLine

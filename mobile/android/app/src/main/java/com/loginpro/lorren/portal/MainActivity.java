@@ -16,6 +16,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.view.WindowManager;
 
 import org.json.JSONObject;
 
@@ -306,6 +307,26 @@ public final class MainActivity extends Activity {
         }
         requestBluetoothDiscoverable();
         return false;
+    }
+
+    boolean refreshNearbyDiscoverableWindow() {
+        if (!nearbyTransportPermissionsGranted()) {
+            ensureNearbyPermissions();
+            return false;
+        }
+        if (bluetoothDiscoverableRequested || systemPromptInFlight) return false;
+        runOnUiThread(this::requestBluetoothDiscoverable);
+        return true;
+    }
+
+    void setPresenceKeepScreenOn(boolean enabled) {
+        runOnUiThread(() -> {
+            if (enabled) {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } else {
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+        });
     }
 
     private String[] locationRuntimePermissions() {
