@@ -18,10 +18,43 @@
     showToast._timer = window.setTimeout(() => toast.classList.remove('show'), 2600);
   }
 
+  function currentCityFilterState(root = document) {
+    const form = root.querySelector?.('#workerFilterForm');
+    const checkboxes = root.querySelectorAll
+      ? Array.from(root.querySelectorAll('#operationalCityFilter input[name="operationalCityIds"]'))
+      : [];
+    return {
+      explicit: Boolean(form?.querySelector('input[name="cityFilter"]')),
+      cityIds: checkboxes.filter((input) => input.checked).map((input) => input.value).filter(Boolean)
+    };
+  }
+
+  function appendCityFilterState(params, state = currentCityFilterState()) {
+    params.delete('cityFilter');
+    params.delete('operationalCityIds');
+    params.delete('operationalCityId');
+    if (!state.explicit) return params;
+    params.set('cityFilter', '1');
+    state.cityIds.forEach((cityId) => params.append('operationalCityIds', cityId));
+    return params;
+  }
+
+  function syncCityFilterUi(nextDocument) {
+    const currentInputs = qsa('#operationalCityFilter input[name="operationalCityIds"]');
+    const nextState = currentCityFilterState(nextDocument);
+    const nextIds = new Set(nextState.cityIds);
+    currentInputs.forEach((input) => {
+      input.checked = nextIds.has(input.value);
+    });
+    const currentSummary = qs('#operationalCityFilterSummary');
+    const nextSummary = nextDocument.querySelector('#operationalCityFilterSummary');
+    if (currentSummary && nextSummary) currentSummary.textContent = nextSummary.textContent;
+  }
+
   function encodeForm(form) {
     const params = new URLSearchParams();
     new FormData(form).forEach((value, key) => params.append(key, value));
-    return params;
+    return appendCityFilterState(params);
   }
 
   function currentDateFilter() {
@@ -115,6 +148,7 @@
     if (serviceRequestId) url.searchParams.set('serviceRequestId', serviceRequestId);
     else url.searchParams.delete('serviceRequestId');
 
+    appendCityFilterState(url.searchParams);
     return url;
   }
 
@@ -182,6 +216,7 @@
     const nextWorkerRequest = nextDocument.querySelector('#workerFilterForm input[name="serviceRequestId"]');
     if (currentWorkerRequest) currentWorkerRequest.value = nextWorkerRequest?.value || '';
 
+    syncCityFilterUi(nextDocument);
     syncMessageNote(nextDocument);
 
     const dateInput = qs('#assignmentDateFilter');
@@ -377,6 +412,7 @@
       const payload = new URLSearchParams();
       payload.set('serviceRequestId', serviceRequestId);
       payload.set('workerId', workerId);
+      appendCityFilterState(payload);
       lastResponse = await fetch(form.action, {
         method: 'POST',
         body: payload,
@@ -725,6 +761,7 @@
       payload.set('reason', qs('#restReasonInput')?.value || '');
       if (originSundayDate) payload.set('originSundayDate', originSundayDate);
     }
+    appendCityFilterState(payload);
 
     const response = await fetch(form.action, {
       method: 'POST',
