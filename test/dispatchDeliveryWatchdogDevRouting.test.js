@@ -4,13 +4,13 @@ import { runDispatchDeliveryWatchdog } from '../src/services/dispatchWhatsappAdm
 
 const NOW = new Date('2026-09-29T12:00:00.000Z');
 
-function deliveryLink({ id, providerMessageId, phone, workerName }) {
+function deliveryLink({ id, providerMessageId, phone, workerName, status = 'FAILED' }) {
   return {
     id,
     assignmentId: `assignment-${id}`,
     phone,
     providerMessageId,
-    status: 'SENT',
+    status,
     createdAt: new Date('2026-09-29T11:30:00.000Z'),
     assignment: {
       id: `assignment-${id}`,
@@ -21,40 +21,58 @@ function deliveryLink({ id, providerMessageId, phone, workerName }) {
   };
 }
 
-function watchdogPrisma({ audited = true } = {}) {
-  const auditedLink = deliveryLink({
-    id: 'audited',
-    providerMessageId: 'wamid-audited',
+function watchdogPrisma({ includeFailed = true, includeSent = true, includeOrphan = true } = {}) {
+  const failedLink = deliveryLink({
+    id: 'failed',
+    providerMessageId: 'wamid-failed',
     phone: '573001112233',
-    workerName: 'Auxiliar Auditado'
+    workerName: 'Auxiliar Fallo Confirmado'
+  });
+  const sentLink = deliveryLink({
+    id: 'sent',
+    providerMessageId: 'wamid-sent',
+    phone: '573004445566',
+    workerName: 'Auxiliar Solo Enviado',
+    status: 'SENT'
   });
   const orphanLink = deliveryLink({
     id: 'orphan',
     providerMessageId: 'wamid-orphan',
-    phone: '573004445566',
+    phone: '573007778899',
     workerName: 'Auxiliar Sin Auditoría'
   });
-  const links = audited ? [auditedLink, orphanLink] : [orphanLink];
-  const messageAudit = {
-    id: 'audit-message-1',
-    metadata: {
-      providerMessageId: 'wamid-audited',
-      providerStatus: 'ACCEPTED',
-      deliveryWatchdogStatus: null
-    }
-  };
+  const links = [
+    ...(includeFailed ? [failedLink] : []),
+    ...(includeSent ? [sentLink] : []),
+    ...(includeOrphan ? [orphanLink] : [])
+  ];
+  const messageAudits = new Map([
+    ['dispatch-wa:outbound:wamid-failed', {
+      id: 'audit-failed',
+      metadata: {
+        providerMessageId: 'wamid-failed',
+        providerStatus: 'FAILED',
+        providerDiagnostic: 'code=131026 title=Message undeliverable'
+      }
+    }],
+    ['dispatch-wa:outbound:wamid-sent', {
+      id: 'audit-sent',
+      metadata: {
+        providerMessageId: 'wamid-sent',
+        providerStatus: 'SENT',
+        providerDiagnostic: null
+      }
+    }]
+  ]);
   const notifications = [];
   const userQueries = [];
 
   const prismaClient = {
     dispatchWhatsappConfirmation: {
-      findMany: async () => links,
-      updateMany: async ({ where, data }) => {
-        const link = links.find((item) => item.id === where.id);
-        if (!link || !['PENDING', 'SENT'].includes(link.status)) return { count: 0 };
-        link.status = data.status;
-        return { count: 1 };
-      }
+      findMany: async ({ where = {} } = {}) => links.filter((link) => {
+        if (where.status === 'FAILED' && link.status !== 'FAILED') return false;
+        return true;
+      })
     },
     appUser: {
       findMany: async (query) => {
@@ -65,7 +83,7 @@ function watchdogPrisma({ audited = true } = {}) {
             username: 'dev-prueba',
             role: 'DEV',
             isActive: true,
-            dispatchAlertPhone: '3007778899'
+            dispatchAlertPhone: '3001112233'
           }
         ];
       }
@@ -73,17 +91,12 @@ function watchdogPrisma({ audited = true } = {}) {
     devAuditEvent: {
       findFirst: async ({ where = {} }) => {
         if (where.entityType === 'DISPATCH_WHATSAPP_MESSAGE') {
-          return where.entityId === 'dispatch-wa:outbound:wamid-audited' && audited ? messageAudit : null;
+          return messageAudits.get(where.entityId) || null;
         }
         if (where.entityType === 'DISPATCH_WHATSAPP_NOTIFICATION') {
           return notifications.filter((row) => row.entityId === where.entityId && row.action === where.action).at(-1) || null;
         }
         return null;
-      },
-      update: async ({ where, data }) => {
-        assert.equal(where.id, messageAudit.id);
-        messageAudit.metadata = data.metadata;
-        return messageAudit;
       },
       create: async ({ data }) => {
         const row = { id: `notification-${notifications.length + 1}`, ...data, createdAt: data.createdAt || NOW };
@@ -93,11 +106,11 @@ function watchdogPrisma({ audited = true } = {}) {
     }
   };
 
-  return { prismaClient, links, messageAudit, notifications, userQueries };
+  return { prismaClient, links, notifications, userQueries };
 }
 
-test('watchdog exige evidencia outbound real y envía la alerta de entrega incierta solo a DEV', async () => {
-  const state = watchdogPrisma({ audited: true });
+test('watchdog alerta a DEV solo por FAILED confirmado por Meta y exige auditoría outbound real', async () => {
+  const state = watchdogPrisma();
   const sent = [];
 
   const result = await runDispatchDeliveryWatchdog(state.prismaClient, {
@@ -109,15 +122,14 @@ test('watchdog exige evidencia outbound real y envía la alerta de entrega incie
   });
 
   assert.equal(result.checked, 2);
-  assert.equal(result.markedUnknown, 1);
+  assert.equal(result.confirmedFailures, 1);
   assert.equal(result.skippedWithoutAudit, 1);
   assert.equal(result.alertsSent, 1);
-  assert.equal(state.links[0].status, 'DELIVERY_UNKNOWN');
-  assert.equal(state.links[1].status, 'SENT');
-  assert.equal(state.messageAudit.metadata.deliveryWatchdogStatus, 'DELIVERY_UNKNOWN');
   assert.equal(sent.length, 1);
-  assert.equal(sent[0].phone, '573007778899');
-  assert.match(sent[0].text, /Auxiliar Auditado/);
+  assert.equal(sent[0].phone, '573001112233');
+  assert.match(sent[0].text, /Fallo de entrega confirmado por Meta/i);
+  assert.match(sent[0].text, /Auxiliar Fallo Confirmado/);
+  assert.doesNotMatch(sent[0].text, /Auxiliar Solo Enviado/);
   assert.doesNotMatch(sent[0].text, /Auxiliar Sin Auditoría/);
   assert.equal(state.userQueries.length, 1);
   assert.deepEqual(state.userQueries[0].where, {
@@ -127,8 +139,8 @@ test('watchdog exige evidencia outbound real y envía la alerta de entrega incie
   });
 });
 
-test('watchdog no inventa alerta cuando existe vínculo de confirmación pero falta la auditoría del mensaje', async () => {
-  const state = watchdogPrisma({ audited: false });
+test('watchdog no convierte SENT sin DELIVERED en fallo ni genera reenvío o alerta por silencio', async () => {
+  const state = watchdogPrisma({ includeFailed: false, includeSent: true, includeOrphan: false });
   const sent = [];
 
   const result = await runDispatchDeliveryWatchdog(state.prismaClient, {
@@ -139,9 +151,8 @@ test('watchdog no inventa alerta cuando existe vínculo de confirmación pero fa
     }
   });
 
-  assert.equal(result.checked, 1);
-  assert.equal(result.markedUnknown, 0);
-  assert.equal(result.skippedWithoutAudit, 1);
+  assert.equal(result.checked, 0);
+  assert.equal(result.confirmedFailures, 0);
   assert.equal(result.alertsSent, 0);
   assert.equal(state.links[0].status, 'SENT');
   assert.equal(sent.length, 0);
