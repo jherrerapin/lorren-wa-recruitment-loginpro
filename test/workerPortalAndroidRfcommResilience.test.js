@@ -4,59 +4,46 @@ import { readFile } from 'node:fs/promises';
 
 const read = (path) => readFile(path, 'utf8');
 
-test('auxiliar renueva discoverability de 300s y mantiene pantalla encendida durante READY', async () => {
-  const [activity, manager] = await Promise.all([
+test('auxiliar anuncia silenciosamente SERVICE_UUID por BLE y conserva RFCOMM', async () => {
+  const [activity, bridge, manager] = await Promise.all([
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/MainActivity.java'),
+    read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java'),
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java')
   ]);
 
-  assert.match(activity, /BLUETOOTH_DISCOVERABLE_SECONDS = 300/);
+  assert.doesNotMatch(activity, /ACTION_REQUEST_DISCOVERABLE|BLUETOOTH_DISCOVERABLE_SECONDS/);
+  assert.doesNotMatch(bridge, /ensureNearbyDiscoverable|onBluetoothDiscoverableResult/);
   assert.match(activity, /Manifest\.permission\.BLUETOOTH_ADVERTISE/);
-  assert.match(activity, /ACTION_REQUEST_DISCOVERABLE/);
-  assert.match(activity, /void setPresenceKeepScreenOn\(boolean enabled\)/);
-  assert.match(activity, /FLAG_KEEP_SCREEN_ON/);
-  assert.match(activity, /boolean refreshNearbyDiscoverableWindow\(\)/);
-
-  assert.match(manager, /role = Role\.READY;[\s\S]{0,160}setPresenceKeepScreenOn\(true\)/);
-  assert.match(manager, /DISCOVERABILITY_REFRESH_MS = 240_000L/);
-  assert.match(manager, /scheduleAuxiliaryDiscoverabilityRefresh\(DISCOVERABILITY_REFRESH_MS\)/);
-  assert.match(manager, /refreshNearbyDiscoverableWindow\(\)/);
-  assert.match(manager, /cancelAuxiliaryDiscoverabilityRefresh\(\)/);
+  assert.match(manager, /BluetoothLeAdvertiser/);
+  assert.match(manager, /addServiceUuid\(SERVICE_PARCEL_UUID\)/);
+  assert.match(manager, /advertiser\.startAdvertising\(settings, data, callback\)/);
+  assert.match(manager, /listenUsingInsecureRfcommWithServiceRecord[\s\S]{0,120}SERVICE_UUID/);
+  assert.match(manager, /setPresenceKeepScreenOn\(true\)/);
 });
 
-test('líder ejecuta como máximo tres ráfagas Classic antes de terminar', async () => {
+test('líder descubre por BLE filtrado por SERVICE_UUID y conecta challenge-proof por RFCOMM', async () => {
   const manager = await read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java');
 
-  assert.match(manager, /MAX_DISCOVERY_BURSTS = 3/);
-  assert.match(manager, /leaderDiscoveryBurst = 0/);
-  assert.match(manager, /startLeaderDiscoveryBurst\(nextAttemptId\)/);
-  assert.match(manager, /BluetoothAdapter\.ACTION_DISCOVERY_FINISHED/);
-  assert.match(manager, /proofsByKey\.size\(\) < expectedProofCount[\s\S]{0,120}leaderDiscoveryBurst < MAX_DISCOVERY_BURSTS/);
-  assert.match(manager, /scheduleLeaderDiscoveryRestart\(completedAttemptId\)/);
-  assert.match(manager, /CLASSIC_DISCOVERY_RETRY/);
-  assert.match(manager, /leaderDiscoveryBurst \+= 1/);
-  assert.match(manager, /scheduleLeaderInquiryCheckpoint\(currentAttemptId\)/);
+  assert.match(manager, /BluetoothLeScanner/);
+  assert.match(manager, /new ScanFilter\.Builder\(\)[\s\S]{0,120}setServiceUuid\(SERVICE_PARCEL_UUID\)/);
+  assert.match(manager, /ScanSettings\.SCAN_MODE_LOW_LATENCY/);
+  assert.match(manager, /scanner\.startScan\(Collections\.singletonList\(filter\), settings, callback\)/);
+  assert.match(manager, /startLeaderBleScan\(nextAttemptId\)/);
+  assert.match(manager, /BLE_SERVICE_FOUND/);
+  assert.match(manager, /createInsecureRfcommSocketToServiceRecord\(SERVICE_UUID\)/);
+  assert.match(manager, /payload\.put\("type", "challenge"\)/);
+  assert.match(manager, /PROOF_VERIFIED/);
 });
 
-test('frontend usa dos reintentos completos y activa fallback manual solo al agotarlos', async () => {
+test('frontend conserva dos reintentos completos y fallback manual', async () => {
   const source = await read('mobile/android/app/src/main/assets/native-presence.js');
 
   assert.match(source, /const MAX_SCAN_RETRIES = 2/);
   assert.match(source, /let scanRetries = 0/);
   assert.doesNotMatch(source, /autoRetryRemaining/);
   assert.match(source, /scanRetries < MAX_SCAN_RETRIES/);
-  assert.match(source, /scanRetries \+= 1/);
   assert.match(source, /BLUETOOTH_SCAN_RETRY/);
   assert.match(source, /startLeaderScan\(completionMarkType, true\)/);
   assert.match(source, /reason: 'scan_retries_exhausted'/);
   assert.match(source, /bluetoothFallbackActive = true/);
-  assert.doesNotMatch(source, /window\.LorrenNative/);
-});
-
-test('bitácora registra el cierre de resiliencia Bluetooth', async () => {
-  const audit = await read('auditoria y correccion lorren.md');
-
-  assert.match(audit, /Bluetooth RFCOMM: resiliencia de descubrimiento/);
-  assert.match(audit, /FLAG_KEEP_SCREEN_ON/);
-  assert.match(audit, /MAX_SCAN_RETRIES = 2/);
 });

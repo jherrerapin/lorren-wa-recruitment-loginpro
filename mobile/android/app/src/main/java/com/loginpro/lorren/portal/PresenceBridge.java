@@ -51,7 +51,6 @@ final class PresenceBridge {
     private LocationListener pendingLocationListener;
     private Runnable pendingLocationTimeout;
     private JSONObject leaderLocationProof;
-    private String pendingReadyServiceRequestId = "";
 
     PresenceBridge(MainActivity activity) {
         this.activity = activity;
@@ -110,57 +109,15 @@ final class PresenceBridge {
         String readinessError = activity.ensureNearbyRadioReady();
         if (readinessError != null) return jsonError(readinessError);
         try {
-            String normalizedServiceRequestId = requiredToken(serviceRequestId, "serviceRequestId");
-            synchronized (this) {
-                pendingReadyServiceRequestId = normalizedServiceRequestId;
-            }
-            if (!activity.ensureNearbyDiscoverable()) return jsonOk();
-            synchronized (this) {
-                pendingReadyServiceRequestId = "";
-            }
-            manager.startReady(normalizedServiceRequestId);
+            manager.startReady(requiredToken(serviceRequestId, "serviceRequestId"));
             return jsonOk();
         } catch (Exception error) {
-            synchronized (this) {
-                pendingReadyServiceRequestId = "";
-            }
             return jsonError(handleBluetoothStartFailure("auxiliary_ready", error));
-        }
-    }
-
-    void onBluetoothDiscoverableResult(boolean granted) {
-        String serviceRequestId;
-        synchronized (this) {
-            serviceRequestId = pendingReadyServiceRequestId;
-            pendingReadyServiceRequestId = "";
-        }
-        if (serviceRequestId.isEmpty()) return;
-        if (!granted) {
-            emitBluetoothUnavailable("auxiliary_discovery", null);
-            return;
-        }
-        if (!hasUsablePresenceCredential()) {
-            emitPresenceError("native_presence_credential_required");
-            return;
-        }
-        if (!activity.ensureNearbyPermissions()) return;
-        String readinessError = activity.ensureNearbyRadioReady();
-        if (readinessError != null) {
-            emitPresenceError(readinessError);
-            return;
-        }
-        try {
-            manager.startReady(serviceRequestId);
-        } catch (Exception error) {
-            handleBluetoothStartFailure("auxiliary_ready", error);
         }
     }
 
     @JavascriptInterface
     public String stopReady() {
-        synchronized (this) {
-            pendingReadyServiceRequestId = "";
-        }
         manager.stopReady();
         return jsonOk();
     }
@@ -254,9 +211,6 @@ final class PresenceBridge {
     }
 
     void shutdown() {
-        synchronized (this) {
-            pendingReadyServiceRequestId = "";
-        }
         cancelPendingLocation();
         manager.shutdown();
     }
