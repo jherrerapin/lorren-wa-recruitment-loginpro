@@ -30,7 +30,6 @@ final class PresenceBridge {
     private static final String NATIVE_ATTENDANCE_LOCATION_CONTEXT = "lorren-native-attendance-location-v1";
     private static final long MAX_LAST_LOCATION_AGE_MS = 30_000L;
     private static final long LOCATION_TIMEOUT_MS = 15_000L;
-    private static final float TARGET_LOCATION_ACCURACY_METERS = 50f;
 
     // Google Nearby Connections define 8029 como MISSING_PERMISSION_NEARBY_WIFI_DEVICES.
     private static final int MISSING_PERMISSION_NEARBY_WIFI_DEVICES_STATUS = 8029;
@@ -285,7 +284,7 @@ final class PresenceBridge {
         }
 
         Location recent = allowRecent ? freshestLastKnownLocation() : null;
-        if (locationAccuracyAcceptable(recent)) {
+        if (locationUsable(recent)) {
             sink.onLocation(new Location(recent));
             return;
         }
@@ -310,7 +309,7 @@ final class PresenceBridge {
                     if (isBetterLocation(location, bestLocation[0])) {
                         bestLocation[0] = new Location(location);
                     }
-                    if (locationAccuracyAcceptable(bestLocation[0])) {
+                    if (locationUsable(bestLocation[0])) {
                         selected = new Location(bestLocation[0]);
                     }
                 }
@@ -421,10 +420,12 @@ final class PresenceBridge {
         return new String[0];
     }
 
-    private static boolean locationAccuracyAcceptable(Location location) {
-        return location != null
-            && location.hasAccuracy()
-            && location.getAccuracy() <= TARGET_LOCATION_ACCURACY_METERS;
+    private static boolean locationUsable(Location location) {
+        if (location == null || !location.hasAccuracy()) return false;
+        float accuracyMeters = location.getAccuracy();
+        return !Float.isNaN(accuracyMeters)
+            && !Float.isInfinite(accuracyMeters)
+            && accuracyMeters >= 0f;
     }
 
     private static boolean isBetterLocation(Location candidate, Location current) {
