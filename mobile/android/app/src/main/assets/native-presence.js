@@ -747,6 +747,7 @@
 
       if (
         memberMarkType === 'ARRIVAL'
+        && !bluetoothFallbackActive
         && (hasCompletedLeaderScan || normalizedMark !== 'ARRIVAL')
         && !member.isLeader
         && status === 'PENDING'
@@ -1301,6 +1302,13 @@
       || !Number.isFinite(accuracyMeters) || accuracyMeters < 0 || accuracyMeters > 100_000
       || !Number.isFinite(capturedAtMs) || capturedAtMs <= 0
     ) throw new Error('native_location_unavailable');
+    if (accuracyMeters > 50) {
+      recordDiagnostic('APP', 'LOCATION_LOW_ACCURACY_ACCEPTED', {
+        accuracyMeters,
+        latitude,
+        longitude
+      });
+    }
     return {
       latitude,
       longitude,
@@ -1371,10 +1379,17 @@
       retryNotDetectedCount = pendingCount;
       retryMarkType = completionMarkType;
       hasCompletedLeaderScan = true;
+      bluetoothFallbackActive = true;
+      recordDiagnostic('APP', 'BLUETOOTH_MANUAL_FALLBACK', {
+        reason: 'scan_complete_without_auxiliaries',
+        markType: completionMarkType,
+        expectedProofCount: completion.expectedProofCount,
+        proofCount
+      });
       renderPanel();
       setStatus(
-        `No se detectó ningún auxiliar. La ${markInfo(completionMarkType).noun} no se guardó; vuelve a intentarlo cuando sus teléfonos estén disponibles.`,
-        'error'
+        `No se detectó ningún auxiliar por Bluetooth. Usa “Marcación Manual” para registrar la ${markInfo(completionMarkType).noun}.`,
+        'warning'
       );
       markRetryAvailable(completionMarkType);
       return;
