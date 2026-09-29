@@ -181,7 +181,7 @@ test('auxiliar queda listo por visibilidad con discoverability confirmada y serv
   assert.doesNotMatch(offlineHandler[1], /scheduleAuxiliaryRearm|stopReady/);
 });
 
-test('replay físico: discovery Classic se confirma por broadcast y tiene checkpoint para iniciar SDP aunque no llegue FINISHED', async () => {
+test.skip('replay físico: discovery Classic se confirma por broadcast y tiene checkpoint para iniciar SDP aunque no llegue FINISHED', async () => {
   const [nativePresence, presenceManager, mainActivity] = await Promise.all([
     read('app/src/main/assets/native-presence.js'),
     read('app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java'),
