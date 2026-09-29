@@ -126,14 +126,22 @@ function requestStatusClass(value) {
   return 'pending';
 }
 
-function groupByClient(requests) {
-  const map = new Map();
+function groupByCityAndClient(requests = []) {
+  const cities = new Map();
   for (const request of requests) {
-    const key = request.clientName || 'Sin cliente';
-    if (!map.has(key)) map.set(key, []);
-    map.get(key).push(request);
+    const cityName = request.cityName || 'Sin ciudad';
+    const clientName = request.clientName || 'Sin cliente';
+    if (!cities.has(cityName)) cities.set(cityName, new Map());
+    const clients = cities.get(cityName);
+    if (!clients.has(clientName)) clients.set(clientName, []);
+    clients.get(clientName).push(request);
   }
-  return [...map.entries()].sort(([a], [b]) => a.localeCompare(b, 'es'));
+  return [...cities.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, 'es'))
+    .map(([cityName, clients]) => [
+      cityName,
+      [...clients.entries()].sort(([left], [right]) => left.localeCompare(right, 'es'))
+    ]);
 }
 
 function resolveBrowserExecutablePath() {
@@ -278,7 +286,7 @@ export function buildProgrammingReportHtml({
   workerAbsences = [],
   includeWorkerAbsences = true
 }) {
-  const requestsByClient = groupByClient(requests);
+  const requestsByCity = groupByCityAndClient(requests);
   const includedSummary = buildProgrammingCompletionSummary(requests);
   const generatedAt = formatBogotaDateTime();
   const manager = normalizeString(managedBy) || 'Julián Herrera';
@@ -287,34 +295,48 @@ export function buildProgrammingReportHtml({
     ? 'Incluye solicitudes pendientes, parciales o por confirmar.'
     : 'Incluye únicamente solicitudes con asignación completa.';
 
-  const clientSections = requestsByClient.length ? requestsByClient.map(([clientName, clientRequests]) => {
-    const clientRequired = clientRequests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
-    const clientAssigned = clientRequests.reduce((sum, request) => sum + activeAssignments(request).length, 0);
-    const rows = clientRequests.map((request, index) => `
-      <section class="block-card">
-        <div class="block-title">
-          <div><span>Bloque ${index + 1}</span><strong>${escapeHtml(buildScheduleLabel(request))}</strong></div>
-          <div class="block-status">
-            <span class="request-status ${requestStatusClass(effectiveRequestStatus(request))}">${escapeHtml(requestStatusLabel(effectiveRequestStatus(request)))}</span>
-            <div class="coverage">${activeAssignments(request).length}/${Number(request.requiredWorkers || 0)} auxiliares</div>
+  const citySections = requestsByCity.length ? requestsByCity.map(([cityName, clientGroups]) => {
+    const cityRequests = clientGroups.flatMap(([, clientRequests]) => clientRequests);
+    const cityRequired = cityRequests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
+    const cityAssigned = cityRequests.reduce((sum, request) => sum + activeAssignments(request).length, 0);
+    const clients = clientGroups.map(([clientName, clientRequests]) => {
+      const clientRequired = clientRequests.reduce((sum, request) => sum + Number(request.requiredWorkers || 0), 0);
+      const clientAssigned = clientRequests.reduce((sum, request) => sum + activeAssignments(request).length, 0);
+      const rows = clientRequests.map((request, index) => `
+        <section class="block-card">
+          <div class="block-title">
+            <div><span>Bloque ${index + 1}</span><strong>${escapeHtml(buildScheduleLabel(request))}</strong></div>
+            <div class="block-status">
+              <span class="request-status ${requestStatusClass(effectiveRequestStatus(request))}">${escapeHtml(requestStatusLabel(effectiveRequestStatus(request)))}</span>
+              <div class="coverage">${activeAssignments(request).length}/${Number(request.requiredWorkers || 0)} auxiliares</div>
+            </div>
           </div>
-        </div>
-        <div class="block-meta">
-          <div><b>Operación:</b> ${escapeHtml(request.operationPointName || 'Sin operación')}</div>
-          <div><b>Servicio:</b> ${escapeHtml(cleanServiceName(request.serviceName || request.service?.name))}</div>
-          <div><b>Ciudad:</b> ${escapeHtml(request.cityName || '-')}</div>
-          <div><b>Dirección:</b> ${escapeHtml(request.address || '-')}</div>
-        </div>
-        ${buildWorkersHtml(request)}
-      </section>
-    `).join('');
+          <div class="block-meta">
+            <div><b>Operación:</b> ${escapeHtml(request.operationPointName || 'Sin operación')}</div>
+            <div><b>Servicio:</b> ${escapeHtml(cleanServiceName(request.serviceName || request.service?.name))}</div>
+            <div><b>Ciudad:</b> ${escapeHtml(request.cityName || '-')}</div>
+            <div><b>Dirección:</b> ${escapeHtml(request.address || '-')}</div>
+          </div>
+          ${buildWorkersHtml(request)}
+        </section>
+      `).join('');
+      return `
+        <section class="client-section">
+          <div class="client-head">
+            <h3>${escapeHtml(clientName)}</h3>
+            <span>${clientRequests.length} solicitud(es) · ${clientAssigned}/${clientRequired} auxiliares</span>
+          </div>
+          ${rows}
+        </section>
+      `;
+    }).join('');
     return `
-      <section class="client-section">
-        <div class="client-head">
-          <h2>${escapeHtml(clientName)}</h2>
-          <span>${clientRequests.length} solicitud(es) · ${clientAssigned}/${clientRequired} auxiliares</span>
+      <section class="city-section">
+        <div class="city-head">
+          <div><span>Ciudad</span><h2>${escapeHtml(cityName)}</h2></div>
+          <strong>${cityRequests.length} solicitud(es) · ${cityAssigned}/${cityRequired} auxiliares</strong>
         </div>
-        ${rows}
+        ${clients}
       </section>
     `;
   }).join('') : `<section class="client-section"><h2>Sin solicitudes para este alcance</h2><p>${includePending ? 'No hay solicitudes programadas para esta fecha.' : 'No hay solicitudes con asignación completa para esta fecha.'}</p></section>`;
@@ -341,11 +363,17 @@ export function buildProgrammingReportHtml({
   .summary-card { border: 1px solid #d8e0ea; border-radius: 12px; padding: 10px; background: #f8fafc; }
   .summary-card span { display: block; color: #60708a; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
   .summary-card strong { display: block; color: #0d7a6b; font-size: 18px; margin-top: 4px; }
-  .client-section { break-inside: avoid; margin-bottom: 16px; }
-  .client-head { border-left: 6px solid #0d7a6b; background: #eefcf8; border-radius: 12px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
-  .client-head h2 { margin: 0; font-size: 17px; color: #0f2537; }
+  .city-section { margin: 0 0 22px; }
+  .city-section + .city-section { break-before: page; page-break-before: always; }
+  .city-head { break-inside: avoid; break-after: avoid; page-break-inside: avoid; page-break-after: avoid; background: #172033; color: #fff; border-radius: 14px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .city-head span { display: block; color: #bff8ef; font-size: 9px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+  .city-head h2 { margin: 2px 0 0; font-size: 20px; }
+  .city-head strong { color: #e6fffb; font-size: 11px; text-align: right; }
+  .client-section { margin: 0 0 16px 8px; }
+  .client-head { break-after: avoid; page-break-after: avoid; border-left: 6px solid #0d7a6b; background: #eefcf8; border-radius: 12px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .client-head h3 { margin: 0; font-size: 16px; color: #0f2537; }
   .client-head span { font-weight: 800; color: #0d7a6b; font-size: 11px; }
-  .block-card { border: 1px solid #d8e0ea; border-radius: 14px; margin-bottom: 10px; overflow: hidden; break-inside: avoid; }
+  .block-card { border: 1px solid #d8e0ea; border-radius: 14px; margin-bottom: 10px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
   .block-title { background: #f8fafc; border-bottom: 1px solid #d8e0ea; padding: 9px 11px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .block-title span { display: block; color: #60708a; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
   .block-title strong { display: block; color: #172033; font-size: 15px; }
@@ -387,7 +415,7 @@ export function buildProgrammingReportHtml({
     <div class="summary-card"><span>Aux. requeridos</span><strong>${includedSummary.requiredWorkers}</strong></div>
     <div class="summary-card"><span>Aux. asignados</span><strong>${includedSummary.assignedWorkers}</strong></div>
   </section>
-  ${clientSections}
+  ${citySections}
   ${workerAbsenceSection}
   <footer class="footer"><span>Documento generado por LoginPro Operaciones.</span><span>${escapeHtml(footerScope)}</span></footer>
 </body>

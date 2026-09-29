@@ -3,7 +3,6 @@ import { prisma } from '../lib/prisma.js';
 import { sendDispatchCompletionEmail } from './dispatchCompletionEmail.js';
 import { recalculateDispatchServiceRequestStatus } from './dispatchOperationalCoverage.js';
 import {
-  AUTOMATIC_CONFIRMATION_REPLY,
   DELIVERY_RANK,
   INBOUND_LINK_STATUSES,
   TERMINAL_LINK_STATUSES,
@@ -13,7 +12,7 @@ import {
   setDispatchWhatsappRuntimeState
 } from './dispatchWhatsappCloudConfig.js';
 import { claimDispatchAssignmentConfirmation, claimDispatchAssignmentNovelty } from './dispatchWhatsappAssignmentService.js';
-import { dispatchWhatsappProviderErrorMessage, sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
+import { sendDispatchWhatsappTextMessage } from './dispatchWhatsappCloudClient.js';
 import {
   recordDispatchWhatsappInboundWindow,
   resolveDispatchAttendanceFailureCoordinatorDecision,
@@ -380,6 +379,12 @@ export async function processDispatchWhatsappInboundMessage({
   if (!claim.shouldReply) {
     return { handled: claim.duplicate, duplicate: claim.duplicate, assignmentConfirmed: claim.assignmentConfirmed, replySent: false };
   }
+
+  await prismaClient.dispatchWhatsappConfirmation.updateMany({
+    where: { assignmentId: target.assignment.id, confirmationMessageId, status: 'CONFIRMED_REPLY_PENDING' },
+    data: { status: 'CONFIRMED' }
+  });
+
   let allConfirmedAlertSent = false;
   if (claim.assignmentConfirmed && scope === 'operational') {
     const statusResult = await recalculateDispatchServiceRequestStatus(prismaClient, target.assignment.serviceRequestId);
@@ -395,36 +400,9 @@ export async function processDispatchWhatsappInboundMessage({
     }
   }
 
-  let replySent = false;
-  try {
-    const replyProviderMessageId = await sendDispatchWhatsappTextMessage({ scope, phone: target.phone, text: AUTOMATIC_CONFIRMATION_REPLY, axiosClient });
-    replySent = true;
-    await recordDispatchWhatsappMessageAudit({
-      prismaClient,
-      scope,
-      direction: 'OUTBOUND',
-      phone: target.phone,
-      body: AUTOMATIC_CONFIRMATION_REPLY,
-      messageType: 'TEXT',
-      providerMessageId: replyProviderMessageId,
-      dedupeKey: `auto-reply:${confirmationMessageId}`,
-      source: 'AUTO_CONFIRMATION_REPLY',
-      occurredAt: new Date()
-    });
-    await prismaClient.dispatchWhatsappConfirmation.updateMany({
-      where: { assignmentId: target.assignment.id, confirmationMessageId, status: 'CONFIRMED_REPLY_PENDING' },
-      data: { status: 'CONFIRMED' }
-    });
-  } catch (error) {
-    setDispatchWhatsappRuntimeState(scope, { lastError: dispatchWhatsappProviderErrorMessage(error) });
-    console.warn(`[dispatch-wa-cloud] Confirmación registrada, pero no fue posible responder Gracias. scope=${scope} assignment=${target.assignment.id}.`);
-  }
-  setDispatchWhatsappRuntimeState(scope, {
-    lastInboundAt: new Date().toISOString(),
-    ...(replySent ? { lastError: null } : {})
-  });
-  console.info(`[dispatch-wa-cloud] Confirmación inbound procesada. scope=${scope} assignment=${target.assignment.id} changed=${claim.assignmentConfirmed ? 'yes' : 'no'} reply=${replySent ? 'sent' : 'pending'} allConfirmedAlert=${allConfirmedAlertSent ? 'sent' : 'not-sent'}.`);
-  return { handled: true, duplicate: false, assignmentConfirmed: claim.assignmentConfirmed, replySent, allConfirmedAlertSent };
+  setDispatchWhatsappRuntimeState(scope, { lastInboundAt: new Date().toISOString(), lastError: null });
+  console.info(`[dispatch-wa-cloud] Confirmación inbound procesada. scope=${scope} assignment=${target.assignment.id} changed=${claim.assignmentConfirmed ? 'yes' : 'no'} allConfirmedAlert=${allConfirmedAlertSent ? 'sent' : 'not-sent'}.`);
+  return { handled: true, duplicate: false, assignmentConfirmed: claim.assignmentConfirmed, replySent: false, allConfirmedAlertSent };
 }
 
 function normalizedProviderStatus(value) {

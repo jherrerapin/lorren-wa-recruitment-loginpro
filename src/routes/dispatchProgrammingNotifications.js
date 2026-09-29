@@ -358,41 +358,50 @@ function cleanSheetName(value, fallback) {
   const base = normalizeString(value) || fallback;
   return base.replace(/[\/*?:[\]]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 31) || fallback;
 }
-function groupByClient(requests = []) {
+function groupByCity(requests = []) {
   const grouped = new Map();
   for (const request of requests) {
-    const key = request.clientName || 'Sin cliente';
+    const key = request.cityName || 'Sin ciudad';
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(request);
   }
-  return [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right, 'es'));
+  return [...grouped.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, 'es'))
+    .map(([cityName, cityRequests]) => [
+      cityName,
+      cityRequests.sort((left, right) => (
+        String(left.clientName || '').localeCompare(String(right.clientName || ''), 'es')
+        || String(left.operationPointName || '').localeCompare(String(right.operationPointName || ''), 'es')
+        || String(left.startTime || '').localeCompare(String(right.startTime || ''), 'es')
+      ))
+    ]);
 }
 
 function styleProgrammingWorksheet(sheet, title, subtitle) {
-  sheet.mergeCells('A1:I1');
+  sheet.mergeCells('A1:J1');
   sheet.getCell('A1').value = title;
   sheet.getCell('A1').font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
   sheet.getCell('A1').fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E2D3D' } };
   sheet.getCell('A1').alignment = { horizontal: 'center', vertical: 'middle' };
-  sheet.mergeCells('A2:I2');
+  sheet.mergeCells('A2:J2');
   sheet.getCell('A2').value = subtitle;
   sheet.getCell('A2').font = { bold: true, color: { argb: 'FF0D7A6B' } };
   sheet.getCell('A2').alignment = { horizontal: 'center', vertical: 'middle' };
   const header = sheet.getRow(3);
-  header.values = ['Cliente', 'Operación', 'Servicio', 'Horario', 'Requeridos', 'Asignados', 'Confirmados', 'Estado', 'Auxiliares asignados'];
+  header.values = ['Ciudad', 'Cliente', 'Operación', 'Servicio', 'Horario', 'Requeridos', 'Asignados', 'Confirmados', 'Estado', 'Auxiliares asignados'];
   header.eachCell((cell) => {
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0D7A6B' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
   });
-  sheet.columns = [{ width: 28 }, { width: 28 }, { width: 24 }, { width: 18 }, { width: 13 }, { width: 13 }, { width: 13 }, { width: 22 }, { width: 48 }];
+  sheet.columns = [{ width: 22 }, { width: 28 }, { width: 28 }, { width: 24 }, { width: 18 }, { width: 13 }, { width: 13 }, { width: 13 }, { width: 22 }, { width: 48 }];
   sheet.views = [{ state: 'frozen', ySplit: 3 }];
-  sheet.autoFilter = { from: 'A3', to: 'I3' };
+  sheet.autoFilter = { from: 'A3', to: 'J3' };
 }
 function addProgrammingRows(sheet, requests = []) {
   requests.forEach((request, index) => {
     const row = sheet.addRow([
-      request.clientName || 'Sin cliente', request.operationPointName || 'Sin operación', request.serviceName || request.service?.name || 'Sin servicio',
+      request.cityName || 'Sin ciudad', request.clientName || 'Sin cliente', request.operationPointName || 'Sin operación', request.serviceName || request.service?.name || 'Sin servicio',
       buildScheduleLabel(request), Number(request.requiredWorkers || 0), operationalAssignments(request).length,
       confirmedOperationalAssignments(request).length, requestStatusLabel(request), buildWorkersCell(request)
     ]);
@@ -448,10 +457,10 @@ export async function buildProgrammingExcelBuffer(prisma, { selectedDate, manage
   const summarySheet = workbook.addWorksheet('Programación');
   styleProgrammingWorksheet(summarySheet, 'Programación operativa', `Fecha: ${report.selectedDate} · ${scope} · Gestionado por: ${manager}`);
   addProgrammingRows(summarySheet, report.requests);
-  for (const [clientName, clientRequests] of groupByClient(report.requests)) {
-    const sheet = workbook.addWorksheet(cleanSheetName(clientName, 'Cliente'));
-    styleProgrammingWorksheet(sheet, clientName, `Fecha: ${report.selectedDate} · ${scope} · Gestionado por: ${manager}`);
-    addProgrammingRows(sheet, clientRequests);
+  for (const [cityName, cityRequests] of groupByCity(report.requests)) {
+    const sheet = workbook.addWorksheet(cleanSheetName(cityName, 'Ciudad'));
+    styleProgrammingWorksheet(sheet, `Ciudad · ${cityName}`, `Fecha: ${report.selectedDate} · ${scope} · Ordenado por cliente · Gestionado por: ${manager}`);
+    addProgrammingRows(sheet, cityRequests);
   }
   addWorkerAbsenceWorksheet(workbook, report, manager);
   return {

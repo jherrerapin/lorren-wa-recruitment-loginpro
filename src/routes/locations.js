@@ -1,10 +1,14 @@
 // routes/locations.js — CRUD de Sucursales, Operaciones y asignación territorial de usuarios
 import express from 'express';
+import { randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import {
   canCreateRecruiterUsers,
   canManageUserModulePermissions,
   encodeUserAccessCities,
   encodeUserAccessSelection,
+  generateRecoveryCode,
+  normalizeAppUserEmail,
   normalizeUserAccessScope
 } from '../services/appUsers.js';
 import { loadUnifiedCityOptions } from '../services/cityOptions.js';
@@ -28,6 +32,8 @@ function sessionAuth(req, res, next) {
   req.username = req.session?.username || null;
   req.userSource = req.session?.userSource || null;
   req.userAccessScope = req.session?.userAccessScope || 'ALL';
+  req.userAccessCity = req.session?.userAccessCity || null;
+  req.userAccessVacancyId = req.session?.userAccessVacancyId || null;
   if (!['dev', 'admin'].includes(role)) return res.redirect('/admin');
   return next();
 }
@@ -278,9 +284,141 @@ function usersRedirect(type, message, username = null) {
   return `/admin/users?${params.toString()}`;
 }
 
+function supervisorInheritedScope(req = {}) {
+  const accessScope = normalizeUserAccessScope(req.userAccessScope || req.session?.userAccessScope || 'ALL');
+  if (accessScope === 'ALL') {
+    return { accessScope: 'ALL', scopeCity: null, scopeVacancyId: null };
+  }
+  const scopeCity = req.userAccessCity || req.session?.userAccessCity || null;
+  const scopeVacancyId = accessScope === 'VACANCY'
+    ? req.userAccessVacancyId || req.session?.userAccessVacancyId || null
+    : null;
+  return { accessScope, scopeCity, scopeVacancyId };
+}
+
+function parseScopeMetadata(value) {
+  const raw = normalize(value);
+  if (!raw) return { cities: [], vacancyIds: [] };
+  if (raw.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return {
+          cities: normalizeMany(parsed.cities),
+          vacancyIds: normalizeMany(parsed.vacancyIds)
+        };
+      }
+    } catch (_error) {
+      return { cities: [raw], vacancyIds: [] };
+    }
+  }
+  if (raw.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return { cities: normalizeMany(parsed), vacancyIds: [] };
+    } catch (_error) {
+      return { cities: [raw], vacancyIds: [] };
+    }
+  }
+  return { cities: [raw], vacancyIds: [] };
+}
+
+function territorialScopeForUser(user = {}) {
+  const accessScope = normalizeUserAccessScope(user.accessScope);
+  const metadata = parseScopeMetadata(user.scopeCity);
+  return {
+    accessScope,
+    cities: accessScope === 'ALL' ? [] : metadata.cities,
+    vacancyIds: normalizeMany([...(metadata.vacancyIds || []), user.scopeVacancyId])
+  };
+}
+
+async function supervisorCreationScopeOptions(prisma, req = {}) {
+  const inherited = supervisorInheritedScope(req);
+  const metadata = parseScopeMetadata(inherited.scopeCity);
+  const inheritedVacancyIds = normalizeMany([...(metadata.vacancyIds || []), inherited.scopeVacancyId]);
+  const allCities = typeof prisma?.city?.findMany === 'function'
+    ? (await loadUnifiedCityOptions(prisma)).map((city) => city.name)
+    : [];
+  const allVacancies = typeof prisma?.vacancy?.findMany === 'function'
+    ? await prisma.vacancy.findMany({
+      orderBy: [{ city: 'asc' }, { title: 'asc' }],
+      select: { id: true, title: true, role: true, city: true }
+    })
+    : [];
+
+  if (inherited.accessScope === 'ALL') {
+    return {
+      actorScope: 'ALL',
+      canCreateAll: true,
+      allowedCities: allCities,
+      allowedVacancies: allVacancies
+    };
+  }
+
+  if (inherited.accessScope === 'CITY') {
+    const actorCities = metadata.cities;
+    return {
+      actorScope: 'CITY',
+      canCreateAll: false,
+      allowedCities: allCities.length ? allCities.filter((city) => actorCities.includes(city)) : actorCities,
+      allowedVacancies: allVacancies.filter((vacancy) => actorCities.includes(vacancy.city))
+    };
+  }
+
+  const allowedVacancyIdSet = new Set(inheritedVacancyIds);
+  const allowedVacancies = allVacancies.filter((vacancy) => allowedVacancyIdSet.has(vacancy.id));
+  const allowedCities = normalizeMany([
+    ...metadata.cities,
+    ...allowedVacancies.map((vacancy) => vacancy.city)
+  ]).sort((a, b) => a.localeCompare(b, 'es'));
+  return {
+    actorScope: 'VACANCY',
+    canCreateAll: false,
+    allowedCities,
+    allowedVacancies
+  };
+}
+
+async function resolveSupervisorRequestedScope(prisma, req, body = {}) {
+  if (!normalize(body.accessScope)) {
+    return {
+      ...supervisorInheritedScope(req),
+      selectedCities: [],
+      selectedVacancyIds: []
+    };
+  }
+
+  const options = await supervisorCreationScopeOptions(prisma, req);
+  const resolved = await resolveRecruiterAccessUpdate(prisma, body);
+  if (resolved.error) return resolved;
+  if (options.actorScope === 'ALL') return resolved;
+  if (resolved.accessScope === 'ALL') {
+    return { error: 'No puedes asignar un alcance mayor al tuyo.' };
+  }
+
+  const allowedCities = new Set(options.allowedCities || []);
+  const allowedVacancyIds = new Set((options.allowedVacancies || []).map((vacancy) => vacancy.id));
+  if (options.actorScope === 'CITY') {
+    if (resolved.accessScope === 'CITY' && resolved.selectedCities.some((city) => !allowedCities.has(city))) {
+      return { error: 'Solo puedes asignar sucursales que estén dentro de tu propio alcance.' };
+    }
+    if (resolved.accessScope === 'VACANCY' && resolved.selectedVacancyIds.some((id) => !allowedVacancyIds.has(id))) {
+      return { error: 'Solo puedes asignar vacantes que estén dentro de tu propio alcance.' };
+    }
+    return resolved;
+  }
+
+  if (resolved.accessScope !== 'VACANCY') {
+    return { error: 'Tu perfil solo puede asignar usuarios con alcance por vacantes.' };
+  }
+  if (resolved.selectedVacancyIds.some((id) => !allowedVacancyIds.has(id))) {
+    return { error: 'Solo puedes asignar vacantes que estén dentro de tu propio alcance.' };
+  }
+  return resolved;
+}
+
 function unifiedBranchCompatibilityData() {
-  // Campos legacy: mientras existan físicamente, todas las sucursales pertenecen a
-  // ambos módulos. Ya no constituyen una decisión ni una autoridad de negocio.
   return {
     usedForRecruitment: true,
     usedForDispatch: true,
@@ -288,12 +426,6 @@ function unifiedBranchCompatibilityData() {
   };
 }
 
-/**
- * Resuelve el permiso de reclutamiento solicitado.
- *
- * `scopeCity` y `scopeVacancyId` siguen siendo nombres técnicos de compatibilidad.
- * No definen el catálogo de Sucursales ni la disponibilidad de Despacho.
- */
 async function resolveRecruiterAccessUpdate(prisma, body = {}) {
   const accessScope = normalizeUserAccessScope(body.accessScope);
 
@@ -310,16 +442,12 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
 
   const requestedCities = normalizeMany(body.scopeCities)
     .sort((a, b) => a.localeCompare(b, 'es'));
-  if (!requestedCities.length) {
-    return { error: 'Selecciona al menos una sucursal para este usuario.' };
-  }
+  if (!requestedCities.length) return { error: 'Selecciona al menos una sucursal para este usuario.' };
 
   const cityOptions = await loadUnifiedCityOptions(prisma);
   const canonicalCityNames = new Set(cityOptions.map((city) => city.name));
   const invalidCities = requestedCities.filter((city) => !canonicalCityNames.has(city));
-  if (invalidCities.length) {
-    return { error: 'Una o varias sucursales seleccionadas ya no existen.' };
-  }
+  if (invalidCities.length) return { error: 'Una o varias sucursales seleccionadas ya no existen.' };
 
   if (accessScope === 'CITY') {
     return {
@@ -333,41 +461,25 @@ async function resolveRecruiterAccessUpdate(prisma, body = {}) {
   }
 
   const requestedVacancyIds = normalizeMany(body.scopeVacancyIds);
-  if (!requestedVacancyIds.length) {
-    return { error: 'Selecciona al menos una vacante para este usuario.' };
-  }
+  if (!requestedVacancyIds.length) return { error: 'Selecciona al menos una vacante para este usuario.' };
 
   const selectedVacancies = await prisma.vacancy.findMany({
     where: { id: { in: requestedVacancyIds } },
-    select: {
-      id: true,
-      title: true,
-      role: true,
-      city: true
-    }
+    select: { id: true, title: true, role: true, city: true }
   });
-
   const foundIds = new Set(selectedVacancies.map((vacancy) => vacancy.id));
   const missingVacancyIds = requestedVacancyIds.filter((id) => !foundIds.has(id));
-  if (missingVacancyIds.length) {
-    return { error: 'Una o varias vacantes seleccionadas ya no existen.' };
-  }
+  if (missingVacancyIds.length) return { error: 'Una o varias vacantes seleccionadas ya no existen.' };
 
   const requestedCityKeys = new Set(requestedCities.map(normalizeKey));
   const outsideSelectedCities = selectedVacancies.filter((vacancy) => !requestedCityKeys.has(normalizeKey(vacancy.city)));
-  if (outsideSelectedCities.length) {
-    return { error: 'Solo puedes asignar vacantes pertenecientes a las sucursales seleccionadas.' };
-  }
+  if (outsideSelectedCities.length) return { error: 'Solo puedes asignar vacantes pertenecientes a las sucursales seleccionadas.' };
 
   const selectedVacancyCityKeys = new Set(selectedVacancies.map((vacancy) => normalizeKey(vacancy.city)).filter(Boolean));
   const selectedCities = requestedCities.filter((city) => selectedVacancyCityKeys.has(normalizeKey(city)));
-
   return {
     accessScope: 'VACANCY',
-    scopeCity: encodeUserAccessSelection({
-      cities: selectedCities,
-      vacancyIds: requestedVacancyIds
-    }),
+    scopeCity: encodeUserAccessSelection({ cities: selectedCities, vacancyIds: requestedVacancyIds }),
     scopeVacancyId: requestedVacancyIds[0],
     selectedCities,
     selectedVacancyIds: requestedVacancyIds,
@@ -423,10 +535,120 @@ export function locationsRouter(prisma) {
   router.get('/users', async (req, res) => {
     if (req.userRole === 'dev') return res.redirect('/admin/users');
     if (!canManageOperationalPermissions(req)) return res.status(403).send('No tienes acceso para administrar permisos operativos.');
+    const { successMsg, errorMsg } = readFlash(req, res);
+    const creationScopeOptions = await supervisorCreationScopeOptions(prisma, req);
     return res.render('supervisor-users', {
       role: req.userRole,
-      canAccessDispatch: Boolean(req.session?.canAccessDispatch)
+      canAccessDispatch: Boolean(req.session?.canAccessDispatch),
+      successMsg,
+      errorMsg,
+      revealedRecoveryCode: normalize(req.query?.recoveryCode),
+      createdUserId: normalize(req.query?.createdUserId),
+      creationScopeOptions
     });
+  });
+
+  router.post('/users/create', express.urlencoded({ extended: true }), async (req, res) => {
+    if (req.userRole === 'dev') return res.redirect('/admin/users');
+    if (!canManageOperationalPermissions(req)) return res.status(403).send('No tienes acceso para crear usuarios.');
+
+    const displayName = normalize(req.body.displayName);
+    const email = normalizeAppUserEmail(req.body.email);
+    const password = typeof req.body.password === 'string' ? req.body.password : '';
+    const recoveryPhone = normalize(req.body.recoveryPhone);
+    if (!displayName || displayName.length < 3) {
+      flash(res, 'error', 'Debes ingresar el nombre completo del usuario.');
+      return res.redirect('/admin/locations/users');
+    }
+    if (!email) {
+      flash(res, 'error', 'Debes ingresar un correo electrónico válido.');
+      return res.redirect('/admin/locations/users');
+    }
+    if (password.length < 6) {
+      flash(res, 'error', 'La contraseña inicial debe tener al menos 6 caracteres.');
+      return res.redirect('/admin/locations/users');
+    }
+
+    const existingEmail = await prisma.appUser.findUnique({ where: { email }, select: { id: true } });
+    if (existingEmail) {
+      flash(res, 'error', 'Ese correo ya está asociado a otro usuario.');
+      return res.redirect('/admin/locations/users');
+    }
+
+    const scopeResolution = await resolveSupervisorRequestedScope(prisma, req, req.body);
+    if (scopeResolution.error) {
+      flash(res, 'error', scopeResolution.error);
+      return res.redirect('/admin/locations/users');
+    }
+
+    let operationalConfig = {
+      role: 'CONSULTA',
+      permissions: {},
+      delegablePermissions: [],
+      moduleAccess: { dispatch: false, attendance: false, time: false }
+    };
+    if (normalize(req.body.operationalAccessConfig)) {
+      try {
+        const parsed = parseOperationalAccessConfig(req.body.operationalAccessConfig);
+        operationalConfig = {
+          role: 'CONSULTA',
+          permissions: parsed.permissions || {},
+          delegablePermissions: [],
+          moduleAccess: parsed.moduleAccess
+        };
+      } catch (_error) {
+        flash(res, 'error', 'La configuración de módulos y funciones no es válida.');
+        return res.redirect('/admin/locations/users');
+      }
+    }
+
+    const username = `user-${randomUUID()}`;
+    const passwordHash = await bcrypt.hash(password, 10);
+    const recoveryCode = generateRecoveryCode();
+    const recoveryCodeHash = await bcrypt.hash(recoveryCode, 10);
+    const identityMigratedAt = new Date();
+    let createdUser = null;
+
+    try {
+      await withOptionalTransaction(prisma, async (db) => {
+        createdUser = await db.appUser.create({
+          data: {
+            username,
+            passwordHash,
+            displayName,
+            email,
+            identityMigratedAt,
+            recoveryCodeHash,
+            role: 'ADMIN',
+            accessScope: scopeResolution.accessScope,
+            scopeCity: scopeResolution.scopeCity,
+            scopeVacancyId: scopeResolution.scopeVacancyId,
+            canAccessDispatch: operationalConfig.moduleAccess.dispatch,
+            canAccessAttendance: operationalConfig.moduleAccess.attendance,
+            canAccessStatistics: false,
+            canAccessMetaAds: false,
+            canAccessCvAnalysis: false,
+            recoveryPhone,
+            recoveryEmail: email,
+            createdByUsername: req.username || req.session?.username || 'supervisor',
+            lastPasswordResetAt: identityMigratedAt,
+            isActive: true
+          }
+        });
+        await persistUnifiedOperationalAccess(db, req, createdUser.id, operationalConfig, { updateModuleFlags: false });
+      });
+    } catch (error) {
+      if (error?.code === 'P2002') flash(res, 'error', 'Ese correo ya está asociado a otro usuario.');
+      else {
+        console.error('[supervisor-user-create]', error);
+        flash(res, 'error', 'No fue posible crear el usuario.');
+      }
+      return res.redirect('/admin/locations/users');
+    }
+
+    flash(res, 'success', `${displayName} fue creado como usuario Consulta con el alcance y los permisos seleccionados.`);
+    const params = new URLSearchParams({ recoveryCode, createdUserId: createdUser.id });
+    return res.redirect(`/admin/locations/users?${params.toString()}`);
   });
 
   router.get('/api/cities', async (req, res) => {
@@ -457,11 +679,8 @@ export function locationsRouter(prisma) {
       await prisma.city.create({ data: { name, ...unifiedBranchCompatibilityData() } });
       flash(res, 'success', `Sucursal "${name}" creada correctamente.`);
     } catch (error) {
-      if (error.code === 'P2002') {
-        flash(res, 'error', `Ya existe una sucursal con el nombre "${name}".`);
-      } else {
-        flash(res, 'error', 'Error al crear la sucursal.');
-      }
+      if (error.code === 'P2002') flash(res, 'error', `Ya existe una sucursal con el nombre "${name}".`);
+      else flash(res, 'error', 'Error al crear la sucursal.');
     }
     return res.redirect('/admin/locations');
   });
@@ -491,17 +710,11 @@ export function locationsRouter(prisma) {
     }
 
     try {
-      await prisma.city.update({
-        where: { id: city.id },
-        data: { name, ...unifiedBranchCompatibilityData() }
-      });
+      await prisma.city.update({ where: { id: city.id }, data: { name, ...unifiedBranchCompatibilityData() } });
       flash(res, 'success', `Sucursal "${name}" actualizada correctamente.`);
     } catch (error) {
-      if (error.code === 'P2002') {
-        flash(res, 'error', `Ya existe una sucursal con el nombre "${name}".`);
-      } else {
-        flash(res, 'error', 'Error al actualizar la sucursal.');
-      }
+      if (error.code === 'P2002') flash(res, 'error', `Ya existe una sucursal con el nombre "${name}".`);
+      else flash(res, 'error', 'Error al actualizar la sucursal.');
     }
     return res.redirect('/admin/locations');
   });
@@ -528,34 +741,21 @@ export function locationsRouter(prisma) {
     return res.redirect('/admin/locations');
   });
 
-  // Esta ruta solo persiste la entidad Operation. La configuración de reclutamiento
-  // se delega al CRUD canónico ya existente en admin.js para evitar un segundo
-  // escritor de Vacancy/InterviewSlot.
   router.post('/cities/:cityId/operations', async (req, res) => {
     const name = normalize(req.body.name);
-    const city = await prisma.city.findUnique({
-      where: { id: req.params.cityId },
-      select: { id: true, name: true }
-    });
+    const city = await prisma.city.findUnique({ where: { id: req.params.cityId }, select: { id: true, name: true } });
     if (!city) return operationError(req, res, 404, 'Sucursal no encontrada.');
     if (!name) return operationError(req, res, 400, 'El nombre de la vacante no puede estar vacío.');
-    if (isSiberiaName(name) && !isBogotaName(city.name)) {
-      return operationError(req, res, 400, 'La vacante Siberia solo puede pertenecer a la sucursal Bogotá.');
-    }
+    if (isSiberiaName(name) && !isBogotaName(city.name)) return operationError(req, res, 400, 'La vacante Siberia solo puede pertenecer a la sucursal Bogotá.');
 
     try {
       const operation = await prisma.operation.create({ data: { name, cityId: city.id } });
       if (wantsJson(req)) {
-        return res.status(201).json({
-          ok: true,
-          operation: { id: operation.id, name: operation.name, cityId: city.id, cityName: city.name }
-        });
+        return res.status(201).json({ ok: true, operation: { id: operation.id, name: operation.name, cityId: city.id, cityName: city.name } });
       }
       flash(res, 'success', `Vacante "${name}" creada. Completa su información para activar Lórren.`);
     } catch (error) {
-      if (error.code === 'P2002') {
-        return operationError(req, res, 409, `Ya existe una vacante "${name}" en esta sucursal.`);
-      }
+      if (error.code === 'P2002') return operationError(req, res, 409, `Ya existe una vacante "${name}" en esta sucursal.`);
       return operationError(req, res, 500, 'Error al crear la vacante.');
     }
     return res.redirect('/admin/locations');
@@ -567,7 +767,6 @@ export function locationsRouter(prisma) {
       flash(res, 'error', 'El nombre no puede estar vacío.');
       return res.redirect('/admin/locations');
     }
-
     const operation = await prisma.operation.findUnique({
       where: { id: req.params.id },
       include: { city: { select: { name: true } } }
@@ -580,16 +779,12 @@ export function locationsRouter(prisma) {
       flash(res, 'error', 'La vacante Siberia solo puede pertenecer a la sucursal Bogotá.');
       return res.redirect('/admin/locations');
     }
-
     try {
       await prisma.operation.update({ where: { id: operation.id }, data: { name } });
       flash(res, 'success', `Vacante renombrada a "${name}".`);
     } catch (error) {
-      if (error.code === 'P2002') {
-        flash(res, 'error', 'Ya existe una vacante con ese nombre en la misma sucursal.');
-      } else {
-        flash(res, 'error', 'Error al renombrar la vacante.');
-      }
+      if (error.code === 'P2002') flash(res, 'error', 'Ya existe una vacante con ese nombre en la misma sucursal.');
+      else flash(res, 'error', 'Error al renombrar la vacante.');
     }
     return res.redirect('/admin/locations');
   });
@@ -608,7 +803,7 @@ export function locationsRouter(prisma) {
         flash(res, 'error', `No se puede eliminar la vacante "${operation.name}" porque ya tiene configuración de reclutamiento asociada.`);
         return res.redirect('/admin/locations');
       }
-      await prisma.operation.delete({ where: { id: operation.id } });
+      await prisma.operation.delete({ where: { id: req.params.id } });
       flash(res, 'success', `Vacante "${operation.name}" eliminada.`);
     } catch (_error) {
       flash(res, 'error', 'Error al eliminar la vacante.');
@@ -642,6 +837,9 @@ export function locationsRouter(prisma) {
         displayName: true,
         role: true,
         isActive: true,
+        accessScope: true,
+        scopeCity: true,
+        scopeVacancyId: true,
         canAccessDispatch: true,
         canAccessAttendance: true
       },
@@ -649,24 +847,74 @@ export function locationsRouter(prisma) {
     });
     const accesses = await listOperationalAccess(prisma, users);
     const usersById = new Map(users.map((user) => [user.id, user]));
-    const withModules = await Promise.all(accesses.map(async (access) => ({
-      ...access,
-      moduleAccess: await moduleAccessForUser(prisma, usersById.get(access.userId))
-    })));
+    const withModules = await Promise.all(accesses.map(async (access) => {
+      const user = usersById.get(access.userId);
+      return {
+        ...access,
+        moduleAccess: await moduleAccessForUser(prisma, user),
+        territorialScope: territorialScopeForUser(user)
+      };
+    }));
     const isDev = req.userRole === 'dev';
     const actorId = req.userId || req.session?.userId || null;
     const visible = isDev
       ? withModules
       : withModules.filter((access) => canEditOperationalTarget(req, access) && access.userId !== actorId);
     const catalog = operationalAccessCatalog();
+    const scopeOptions = await supervisorCreationScopeOptions(prisma, req);
     return res.json({
       ok: true,
       users: visible,
       roles: catalog.roles,
       capabilities: catalog.capabilities,
       editableCapabilities: editableOperationalCapabilities(req, catalog),
-      editableModules: editableOperationalModules(req, catalog)
+      editableModules: editableOperationalModules(req, catalog),
+      scopeOptions: {
+        actorScope: scopeOptions.actorScope,
+        canAssignAll: scopeOptions.canCreateAll === true,
+        allowedCities: scopeOptions.allowedCities || []
+      }
     });
+  });
+
+  router.post('/users/:id/territorial-scope', async (req, res) => {
+    if (!canManageOperationalPermissions(req)) return res.status(403).json({ ok: false, error: 'forbidden' });
+    try {
+      const current = await getOperationalAccessForUser(prisma, req.params.id);
+      if (!current) return res.status(404).json({ ok: false, error: 'user_not_found' });
+      if (!canEditOperationalTarget(req, current)) return res.status(403).json({ ok: false, error: 'forbidden' });
+
+      const target = await prisma.appUser.findUnique({
+        where: { id: req.params.id },
+        select: { id: true, role: true, accessScope: true, scopeCity: true, scopeVacancyId: true }
+      });
+      if (!target || target.role !== 'ADMIN') return res.status(404).json({ ok: false, error: 'user_not_found' });
+
+      const requestedScope = String(req.body?.accessScope || '').toUpperCase();
+      if (!['ALL', 'CITY'].includes(requestedScope)) {
+        return res.status(400).json({ ok: false, error: 'territorial_scope_invalid', message: 'Selecciona todas las sucursales o una lista concreta de sucursales.' });
+      }
+      const scopeResolution = await resolveSupervisorRequestedScope(prisma, req, {
+        accessScope: requestedScope,
+        scopeCities: Array.isArray(req.body?.scopeCities) ? req.body.scopeCities : []
+      });
+      if (scopeResolution.error) {
+        return res.status(400).json({ ok: false, error: 'territorial_scope_forbidden', message: scopeResolution.error });
+      }
+
+      const updated = await prisma.appUser.update({
+        where: { id: target.id },
+        data: {
+          accessScope: scopeResolution.accessScope,
+          scopeCity: scopeResolution.scopeCity,
+          scopeVacancyId: scopeResolution.scopeVacancyId
+        },
+        select: { id: true, accessScope: true, scopeCity: true, scopeVacancyId: true }
+      });
+      return res.json({ ok: true, territorialScope: territorialScopeForUser(updated) });
+    } catch (error) {
+      return res.status(400).json({ ok: false, error: error?.message || 'territorial_scope_failed' });
+    }
   });
 
   router.get('/users/:id/operational-access', async (req, res) => {
@@ -728,13 +976,8 @@ export function locationsRouter(prisma) {
     const user = await loadPayrollPermissionTarget(prisma, req.params.id);
     if (!user || user.role !== 'ADMIN') return res.status(404).json({ ok: false, error: 'user_not_found' });
     if (!canEditPayrollPermissionTarget(req, user)) return res.status(403).json({ ok: false, error: 'forbidden' });
-
     try {
-      const access = await resolvePayrollFeatureAccess(prisma, {
-        userRole: 'admin',
-        userId: user.id,
-        username: user.username
-      });
+      const access = await resolvePayrollFeatureAccess(prisma, { userRole: 'admin', userId: user.id, username: user.username });
       return res.json({ ok: true, enabled: access.allowed === true, userId: user.id });
     } catch (_error) {
       return res.status(400).json({ ok: false, error: 'payroll_access_failed' });
@@ -746,7 +989,6 @@ export function locationsRouter(prisma) {
     const user = await loadPayrollPermissionTarget(prisma, req.params.id);
     if (!user || user.role !== 'ADMIN') return res.status(404).json({ ok: false, error: 'user_not_found' });
     if (!canEditPayrollPermissionTarget(req, user)) return res.status(403).json({ ok: false, error: 'forbidden' });
-
     try {
       const current = await getOperationalAccessForUser(prisma, user.id);
       if (current?.configured) {
@@ -757,7 +999,6 @@ export function locationsRouter(prisma) {
         const result = await withOptionalTransaction(prisma, (db) => persistUnifiedOperationalAccess(db, req, user.id, config));
         return res.json({ ok: true, enabled: result.moduleAccess.time, userId: user.id });
       }
-
       const result = await setPayrollFeatureAccess(prisma, {
         targetUserId: user.id,
         enabled: req.body?.enabled === true,
@@ -787,17 +1028,13 @@ export function locationsRouter(prisma) {
         canAccessCvAnalysis: true
       }
     });
-    if (!user || user.role !== 'ADMIN') {
-      return res.redirect(usersRedirect('error', 'Usuario reclutador no encontrado.'));
-    }
+    if (!user || user.role !== 'ADMIN') return res.redirect(usersRedirect('error', 'Usuario reclutador no encontrado.'));
     if (req.userRole !== 'dev' && isProtectedRecruiterProfile(user)) {
       return res.redirect(usersRedirect('error', 'Solo DEV puede editar este perfil protegido.', user.username));
     }
 
     const accessUpdate = await resolveRecruiterAccessUpdate(prisma, req.body);
-    if (accessUpdate.error) {
-      return res.redirect(usersRedirect('error', accessUpdate.error, user.username));
-    }
+    if (accessUpdate.error) return res.redirect(usersRedirect('error', accessUpdate.error, user.username));
 
     let operationalConfig = null;
     try {
@@ -841,13 +1078,8 @@ export function locationsRouter(prisma) {
 
     try {
       await withOptionalTransaction(prisma, async (db) => {
-        await db.appUser.update({
-          where: { id: user.id },
-          data
-        });
-        if (operationalConfig) {
-          await persistUnifiedOperationalAccess(db, req, user.id, operationalConfig, { updateModuleFlags: false });
-        }
+        await db.appUser.update({ where: { id: user.id }, data });
+        if (operationalConfig) await persistUnifiedOperationalAccess(db, req, user.id, operationalConfig, { updateModuleFlags: false });
       });
     } catch (error) {
       return res.redirect(usersRedirect('error', 'No fue posible guardar el rol, los módulos y sus funciones.', user.username));
@@ -859,11 +1091,7 @@ export function locationsRouter(prisma) {
         ? `${accessUpdate.selectedCities.length} sucursal(es): ${accessUpdate.selectedCities.join(', ')}`
         : `${accessUpdate.selectedVacancyIds.length} vacante(s) de ${accessUpdate.selectedCities.join(', ')}`;
 
-    return res.redirect(usersRedirect(
-      'success',
-      `Usuario ${user.username} actualizado con acceso a ${accessDescription}.`,
-      user.username
-    ));
+    return res.redirect(usersRedirect('success', `Usuario ${user.username} actualizado con acceso a ${accessDescription}.`, user.username));
   });
 
   return router;

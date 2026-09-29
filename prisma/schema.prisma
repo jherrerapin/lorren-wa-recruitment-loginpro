@@ -625,6 +625,7 @@ model DispatchClient {
   name              String
   nit               String?
   cityName          String?
+  branchCityIds     String[]                 @default([])
   contactName       String?
   contactPhone      String?
   contactEmail      String?
@@ -849,7 +850,7 @@ model DispatchWorkerDevice {
   userAgent            String?
   platform             String?
   createdAt            DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
+  updatedAt            DateTime                 @updatedAt
   attendanceMarks      DispatchAttendanceMark[]
   consumedActivations  DispatchWorkerActivation[]
   portalSessions       DispatchWorkerPortalSession[]
@@ -1090,7 +1091,7 @@ model MetaCampaignSnapshot {
   spend            Decimal  @default(0) @db.Decimal(14, 4)
   impressions      Int      @default(0)
   reach            Int      @default(0)
-  clicks           Int      @default(0)
+  clicks            Int      @default(0)
   inlineLinkClicks Int      @default(0)
   ctr              Decimal  @default(0) @db.Decimal(10, 4)
   cpc              Decimal  @default(0) @db.Decimal(14, 4)
@@ -1117,7 +1118,7 @@ model MetaAdSnapshot {
   spend            Decimal  @default(0) @db.Decimal(14, 4)
   impressions      Int      @default(0)
   reach            Int      @default(0)
-  clicks           Int      @default(0)
+  clicks            Int      @default(0)
   inlineLinkClicks Int      @default(0)
   ctr              Decimal  @default(0) @db.Decimal(10, 4)
   cpc              Decimal  @default(0) @db.Decimal(14, 4)

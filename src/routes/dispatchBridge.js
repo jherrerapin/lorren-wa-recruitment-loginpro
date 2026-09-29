@@ -1,6 +1,7 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { dispatchAttendanceAdminRouter } from './dispatchAttendanceAdmin.js';
+import { attendanceFilteredExportRouter } from './attendanceFilteredExport.js';
 import { dispatchAttendancePointConfigRouter } from './dispatchAttendancePointConfig.js';
 import { dispatchWorkerPortalActivationAdminRouter } from './dispatchWorkerPortalActivationAdmin.js';
 import { dispatchBridgeRouter as dispatchBridgeCoreRouter } from './dispatchBridgeCore.js';
@@ -350,6 +351,13 @@ export function dispatchBridgeRouter() {
         });
       }
     }
+  );
+
+  router.use(
+    '/asistencia',
+    requireOps,
+    requireAttendanceAccess,
+    attendanceFilteredExportRouter(prisma)
   );
 
   router.use(
