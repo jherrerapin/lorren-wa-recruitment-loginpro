@@ -113,20 +113,24 @@ function outsideInput(markType) {
   };
 }
 
-test('la autoridad rechaza geocerca ausente, ubicación externa y precisión insuficiente', () => {
-  const cases = [
+test('la autoridad rechaza geocerca ausente o ubicación externa, pero acepta precisión degradada', () => {
+  const rejectedCases = [
     [validPolicyInput({ hasConfiguredGeofence: false }), ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED],
     [validPolicyInput({ withinGeofence: null }), ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE],
-    [validPolicyInput({ withinGeofence: false }), ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE],
-    [validPolicyInput({ accuracyMeters: 80 }), ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY]
+    [validPolicyInput({ withinGeofence: false }), ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE]
   ];
 
-  for (const [input, expectedFlag] of cases) {
+  for (const [input, expectedFlag] of rejectedCases) {
     const result = evaluateArrivalValidation(input);
     assert.equal(result.canRecordArrival, false);
     assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
     assert.deepEqual(result.riskFlags, [expectedFlag]);
   }
+
+  const lowAccuracy = evaluateArrivalValidation(validPolicyInput({ accuracyMeters: 80 }));
+  assert.equal(lowAccuracy.canRecordArrival, true);
+  assert.equal(lowAccuracy.validationStatus, ATTENDANCE_VALIDATION_STATUS.AUTO_VALIDATED);
+  assert.deepEqual(lowAccuracy.riskFlags, []);
 });
 
 test('la llegada consulta la política antes de crear la sesión o la marca', () => {
