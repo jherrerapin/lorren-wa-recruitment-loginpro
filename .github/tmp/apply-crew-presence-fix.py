@@ -1,0 +1,446 @@
+from pathlib import Path
+
+native_path = Path('mobile/android/app/src/main/assets/native-presence.js')
+sw_path = Path('src/public/worker-portal-sw.js')
+test_offline_path = Path('test/workerPortalCrewOfflineRetry.test.js')
+
+native = native_path.read_text()
+sw = sw_path.read_text()
+test_offline = test_offline_path.read_text()
+
+
+def replace_once(text, old, new, label):
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'{label}: expected exactly one match, found {count}')
+    return text.replace(old, new, 1)
+
+
+native = replace_once(
+    native,
+    "  const localQueuedMarksByService = new Map();\n  const diagnosticEvents = [];",
+    "  const localQueuedMarksByService = new Map();\n  const bluetoothVerifiedMembersByScope = new Map();\n  const diagnosticEvents = [];",
+    'optimistic map'
+)
+
+old_server_status = """  function serverStatusMap(serviceRequestId, markType) {
+    const key = statusScopeKey(serviceRequestId, markType);
+    if (!serverMemberStatusesByScope.has(key)) serverMemberStatusesByScope.set(key, new Map());
+    return serverMemberStatusesByScope.get(key);
+  }
+
+"""
+new_server_status = old_server_status + """  function bluetoothVerifiedSet(serviceRequestId, markType) {
+    const key = statusScopeKey(String(serviceRequestId || '').trim(), markType);
+    if (!bluetoothVerifiedMembersByScope.has(key)) bluetoothVerifiedMembersByScope.set(key, new Set());
+    return bluetoothVerifiedMembersByScope.get(key);
+  }
+
+  function workerIdFromPresenceCredential(credential) {
+    try {
+      const parts = String(credential || '').trim().split('.');
+      if (parts.length !== 3 || parts[0] !== 'cp1') return '';
+      let encoded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (encoded.length % 4) encoded += '=';
+      const payload = JSON.parse(atob(encoded));
+      return typeof payload?.workerId === 'string' ? payload.workerId.trim() : '';
+    } catch (_error) {
+      return '';
+    }
+  }
+
+  function rememberBluetoothVerifiedProof(attempt, proof) {
+    if (!attempt || !proof) return '';
+    const workerId = workerIdFromPresenceCredential(proof.credential);
+    if (!workerId) return '';
+    bluetoothVerifiedSet(attempt.serviceRequestId, attempt.markType).add(workerId);
+    return workerId;
+  }
+
+"""
+native = replace_once(native, old_server_status, new_server_status, 'optimistic helpers')
+
+old_member_status = """  function memberStatus(context, member, markType) {
+    const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    if (manualMarkSet(context.serviceRequestId, normalizedMark).has(member.workerId)) return 'MANUAL';
+    if (memberHasPersistedMark(member, normalizedMark)) return 'REGISTERED';
+    const serverStatus = serverStatusMap(context.serviceRequestId, normalizedMark).get(member.workerId);
+    if (serverStatus === 'VERIFIED' || serverStatus === 'REGISTERED') return serverStatus;
+    if (member.isLeader) return 'LEADER_DEVICE';
+    if (serverStatus) return serverStatus;
+    if (normalizedMark === 'ARRIVAL' && phoneExceptionSet(context.serviceRequestId).has(member.workerId)) {
+      return 'NO_PHONE_REVIEW';
+    }
+    return 'PENDING';
+  }
+"""
+new_member_status = """  function memberStatus(context, member, markType) {
+    const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    if (manualMarkSet(context.serviceRequestId, normalizedMark).has(member.workerId)) return 'MANUAL';
+    if (memberHasPersistedMark(member, normalizedMark)) return 'REGISTERED';
+    if (bluetoothVerifiedSet(context.serviceRequestId, normalizedMark).has(member.workerId)) {
+      return 'BLUETOOTH_VERIFIED';
+    }
+    const serverStatus = serverStatusMap(context.serviceRequestId, normalizedMark).get(member.workerId);
+    if (serverStatus === 'VERIFIED' || serverStatus === 'REGISTERED') return serverStatus;
+    if (member.isLeader) return 'LEADER_DEVICE';
+    if (serverStatus) return serverStatus;
+    if (normalizedMark === 'ARRIVAL' && phoneExceptionSet(context.serviceRequestId).has(member.workerId)) {
+      return 'NO_PHONE_REVIEW';
+    }
+    return 'PENDING';
+  }
+"""
+native = replace_once(native, old_member_status, new_member_status, 'memberStatus')
+
+native = replace_once(
+    native,
+    "  function memberStatusPresentation(status, markType) {\n    if (status === 'VERIFIED') return { label: '✓ Detectado', className: 'verified' };",
+    "  function memberStatusPresentation(status, markType) {\n    if (status === 'BLUETOOTH_VERIFIED') return { label: '✓ Marcado (Bluetooth)', className: 'verified' };\n    if (status === 'VERIFIED') return { label: '✓ Detectado', className: 'verified' };",
+    'memberStatusPresentation'
+)
+
+old_diag_render = """      const metadata = [];
+      if (Number.isFinite(item.statusCode)) metadata.push(`status=${item.statusCode}`);
+      if (Number.isInteger(item.retryCount) && item.retryCount >= 0) metadata.push(`retry=${item.retryCount}`);
+      const suffix = metadata.length ? ` · ${metadata.join(' · ')}` : '';
+"""
+new_diag_render = """      const metadata = [];
+      if (Number.isFinite(item.statusCode)) metadata.push(`status=${item.statusCode}`);
+      if (Number.isInteger(item.retryCount) && item.retryCount >= 0) metadata.push(`retry=${item.retryCount}`);
+      if (item.error) metadata.push(`error=${item.error}`);
+      if (item.message) metadata.push(`message=${item.message}`);
+      const suffix = metadata.length ? ` · ${metadata.join(' · ')}` : '';
+"""
+native = replace_once(native, old_diag_render, new_diag_render, 'diagnostic render')
+
+old_diag_record = """    const statusCode = Number(detail?.statusCode);
+    const retryCount = Number(detail?.retryCount);
+    diagnosticEvents.push({
+      at: new Date(),
+      actor: safeActor,
+      stage: safeStage,
+      statusCode: Number.isFinite(statusCode) ? statusCode : null,
+      retryCount: Number.isInteger(retryCount) && retryCount >= 0 ? retryCount : null
+    });
+"""
+new_diag_record = """    const statusCode = Number(detail?.statusCode ?? detail?.httpStatus);
+    const retryCount = Number(detail?.retryCount);
+    const safeError = String(detail?.error || '').trim().replace(/[\\r\\n]+/g, ' ').slice(0, 160);
+    const safeMessage = String(detail?.message || '').trim().replace(/[\\r\\n]+/g, ' ').slice(0, 200);
+    diagnosticEvents.push({
+      at: new Date(),
+      actor: safeActor,
+      stage: safeStage,
+      statusCode: Number.isFinite(statusCode) ? statusCode : null,
+      retryCount: Number.isInteger(retryCount) && retryCount >= 0 ? retryCount : null,
+      error: safeError,
+      message: safeMessage
+    });
+"""
+native = replace_once(native, old_diag_record, new_diag_record, 'diagnostic record')
+
+old_queue = """  async function queueCompletedAttempt(proofBundle) {
+    const attempt = activeAttempt;
+    if (!attempt) throw new Error('crew_attempt_missing');
+    const bundle = proofBundle || readProofBundle(attempt);
+    bundle.markType = attempt.markType;
+    bundle.phoneExceptions = attempt.markType === 'ARRIVAL'
+      ? [...phoneExceptionSet(attempt.serviceRequestId)].map((workerId) => ({
+          workerId,
+          reason: PHONE_EXCEPTION_REASON
+        }))
+      : [];
+    const nativeLocation = nativeLocationFromBundle(bundle);
+    const offline = window.LorrenWorkerPortalOffline;
+    if (typeof offline?.queueCrewPresence !== 'function') throw new Error('offline_queue_unavailable');
+    recordDiagnostic('APP', 'QUEUE_WRITE_START');
+    const queued = await offline.queueCrewPresence({ ...attempt, ...nativeLocation, proofBundle: bundle });
+    rememberQueuedMark(attempt.serviceRequestId, attempt.markType);
+    recordDiagnostic('APP', 'QUEUE_STORED');
+    if (navigator.onLine && typeof offline.syncNow === 'function') {
+      recordDiagnostic('APP', 'SYNC_REQUESTED');
+      offline.syncNow().catch(() => {});
+    } else {
+      recordDiagnostic('APP', 'SYNC_DEFERRED');
+    }
+    return { queued, proofCount: bundle.proofs.length, markType: attempt.markType };
+  }
+"""
+new_queue = """  async function queueCompletedAttempt(proofBundle) {
+    const attempt = activeAttempt;
+    if (!attempt) throw new Error('crew_attempt_missing');
+    const bundle = proofBundle || readProofBundle(attempt);
+    bundle.markType = attempt.markType;
+    bundle.phoneExceptions = attempt.markType === 'ARRIVAL'
+      ? [...phoneExceptionSet(attempt.serviceRequestId)].map((workerId) => ({
+          workerId,
+          reason: PHONE_EXCEPTION_REASON
+        }))
+      : [];
+    const nativeLocation = nativeLocationFromBundle(bundle);
+    const offline = window.LorrenWorkerPortalOffline;
+    if (typeof offline?.queueCrewPresence !== 'function') throw new Error('offline_queue_unavailable');
+    const payload = {
+      idempotencyKey: attempt.idempotencyKey,
+      assignmentId: attempt.assignmentId,
+      serviceRequestId: attempt.serviceRequestId,
+      latitude: nativeLocation.latitude,
+      longitude: nativeLocation.longitude,
+      accuracyMeters: nativeLocation.accuracyMeters,
+      clientCapturedAt: nativeLocation.clientCapturedAt,
+      proofBundle: bundle
+    };
+    recordDiagnostic('APP', 'QUEUE_WRITE_START');
+    const queued = await offline.queueCrewPresence(payload);
+    rememberQueuedMark(attempt.serviceRequestId, attempt.markType);
+    recordDiagnostic('APP', 'QUEUE_STORED');
+    if (navigator.onLine && typeof offline.syncNow === 'function') {
+      recordDiagnostic('APP', 'SYNC_REQUESTED');
+      offline.syncNow().catch((error) => {
+        recordDiagnostic('APP', 'SYNC_RETRY_SCHEDULED', {
+          error: String(error?.message || error || 'network_error')
+        });
+      });
+    } else {
+      recordDiagnostic('APP', 'SYNC_DEFERRED');
+    }
+    return { queued, proofCount: bundle.proofs.length, markType: attempt.markType };
+  }
+"""
+native = replace_once(native, old_queue, new_queue, 'queueCompletedAttempt')
+
+old_proof = """    if (type === 'proof_received') {
+      scanVerifiedCount = Math.max(scanVerifiedCount, Number(detail.verifiedCount || 0));
+      scanPendingCount = Math.max(0, Number(detail.pendingCount ?? (scanPendingCount - 1)));
+      updateCount();
+      setStatus(`${scanVerifiedCount} respuesta${scanVerifiedCount === 1 ? '' : 's'} recibida${scanVerifiedCount === 1 ? '' : 's'}.`, '');
+      return;
+    }
+"""
+new_proof = """    if (type === 'proof_received') {
+      scanVerifiedCount = Math.max(scanVerifiedCount, Number(detail.verifiedCount || 0));
+      scanPendingCount = Math.max(0, Number(detail.pendingCount ?? (scanPendingCount - 1)));
+      if (activeAttempt) {
+        try {
+          const proofBundle = readProofBundle(activeAttempt);
+          const deviceKeyId = String(detail.deviceKeyId || '').trim();
+          const proof = proofBundle.proofs.find((candidate) => (
+            !deviceKeyId || String(candidate?.deviceKeyId || '').trim() === deviceKeyId
+          ));
+          const workerId = rememberBluetoothVerifiedProof(activeAttempt, proof);
+          if (workerId) {
+            recordDiagnostic('APP', 'PROOF_VERIFIED_UI', { message: `worker=${workerId}` });
+          }
+        } catch (error) {
+          recordDiagnostic('APP', 'PROOF_VERIFIED_UI_FAILED', {
+            error: String(error?.message || error || 'unknown_error')
+          });
+        }
+      }
+      updateCount();
+      renderPanel();
+      setStatus(`${scanVerifiedCount} respuesta${scanVerifiedCount === 1 ? '' : 's'} recibida${scanVerifiedCount === 1 ? '' : 's'}.`, '');
+      return;
+    }
+"""
+native = replace_once(native, old_proof, new_proof, 'proof_received')
+
+old_rejected = """    if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {
+      // CORRECCIÓN: Mostrar el error real del backend en el log
+      const backendError = message.payload?.error || message.error || 'SYNC_REJECTED';
+      recordDiagnostic('APP', backendError);
+
+      const serviceRequestId = String(message.serviceRequestId || message.payload?.serviceRequestId || selectedServiceRequestId || '').trim();
+      const queuedMarkType = [...queuedMarkSet(serviceRequestId)].map(normalizeMarkType).find(Boolean) || null;
+      const markType = normalizeMarkType(message.payload?.markType)
+        || queuedMarkType
+        || normalizeMarkType(retryMarkType)
+        || 'ARRIVAL';
+      forgetQueuedMark(serviceRequestId, markType);
+      renderPanel();
+      setStatus(`No fue posible registrar la ${markInfo(markType).noun} de la cuadrilla. La marca no quedó confirmada; puedes intentarlo nuevamente.`, 'error');
+      return;
+    }
+    if (message.type === 'CREW_PRESENCE_SYNC_RETRY') {
+      if (Number(message.retryAfterMs || 0) > 0) {
+        recordDiagnostic('APP', 'SYNC_RETRY_SCHEDULED');
+        const markType = normalizeMarkType(retryMarkType) || onlineQueuedMarkType(currentContext()) || 'ARRIVAL';
+        setStatus(`La ${markInfo(markType).noun} de cuadrilla sigue enviada pero aún no está confirmada. Lórren la reintentará automáticamente.`, 'warning');
+      }
+    }
+"""
+new_rejected = """    if (message.type === 'CREW_PRESENCE_SYNC_REJECTED') {
+      const serviceRequestId = String(
+        message.serviceRequestId || message.payload?.serviceRequestId || selectedServiceRequestId || ''
+      ).trim();
+      const queuedMarkType = [...queuedMarkSet(serviceRequestId)].map(normalizeMarkType).find(Boolean) || null;
+      const markType = normalizeMarkType(message.payload?.markType)
+        || queuedMarkType
+        || normalizeMarkType(retryMarkType)
+        || 'ARRIVAL';
+      const httpStatus = Number(message.httpStatus || 0) || null;
+      const backendError = message.payload?.error || message.error || 'crew_presence_rejected';
+      const backendMessage = message.payload?.message || message.networkMessage || '';
+      recordDiagnostic('APP', 'SYNC_REJECTED', {
+        httpStatus,
+        error: backendError,
+        message: backendMessage
+      });
+      renderPanel();
+      setStatus(
+        `La ${markInfo(markType).noun} fue verificada por Bluetooth, pero el servidor rechazó la confirmación`
+          + `${httpStatus ? ` (HTTP ${httpStatus})` : ''}. La marca queda disponible para reintento.`,
+        'error'
+      );
+      return;
+    }
+    if (message.type === 'CREW_PRESENCE_SYNC_RETRY') {
+      const syncError = message.networkMessage || message.payload?.error || message.error || 'sync_retry_pending';
+      recordDiagnostic('APP', 'SYNC_RETRY_SCHEDULED', {
+        httpStatus: Number(message.httpStatus || 0) || null,
+        error: syncError,
+        message: message.payload?.message || ''
+      });
+      if (Number(message.retryAfterMs || 0) > 0) {
+        const markType = normalizeMarkType(retryMarkType) || onlineQueuedMarkType(currentContext()) || 'ARRIVAL';
+        setStatus(
+          `La ${markInfo(markType).noun} ya fue verificada por Bluetooth. La confirmación con el servidor sigue pendiente y se reintentará.`,
+          'warning'
+        );
+      }
+      return;
+    }
+"""
+native = replace_once(native, old_rejected, new_rejected, 'service worker message handling')
+
+old_network = """  } catch (error) {
+    const retryAfterMs = DEFAULT_RETRY_DELAY_MS;
+    await putStoreRecord(CREW_QUEUE_STORE, {
+      ...inProgress,
+      state: 'PENDING',
+      retryNotBefore: new Date(Date.now() + retryAfterMs).toISOString(),
+      lastError: 'network_unavailable',
+      updatedAt: new Date().toISOString()
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_RETRY',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: 'network_unavailable',
+      retryAfterMs
+    });
+    return { retry: true, retryAfterMs, sessionRequired: false, blockService: true, error };
+  }
+"""
+new_network = """  } catch (error) {
+    const retryAfterMs = DEFAULT_RETRY_DELAY_MS;
+    const networkMessage = String(error?.message || error || 'network_unavailable');
+    await putStoreRecord(CREW_QUEUE_STORE, {
+      ...inProgress,
+      state: 'PENDING',
+      retryNotBefore: new Date(Date.now() + retryAfterMs).toISOString(),
+      lastError: networkMessage,
+      updatedAt: new Date().toISOString()
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_RETRY',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: 'network_unavailable',
+      networkMessage,
+      retryAfterMs
+    });
+    return { retry: true, retryAfterMs, sessionRequired: false, blockService: true };
+  }
+"""
+sw = replace_once(sw, old_network, new_network, 'crew network failure')
+
+old_terminal = """  if (terminalCrewRejection(response.status)) {
+    await completeStoreRecord(CREW_QUEUE_STORE, CREW_RECEIPT_STORE, record, {
+      state: 'REJECTED',
+      error: payload.error || 'crew_presence_rejected',
+      message: payload.message || 'La comprobación de cuadrilla fue rechazada por el servidor.'
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_REJECTED',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: payload.error || 'crew_presence_rejected',
+      payload
+    });
+    return { retry: false, sessionRequired: false, blockService: false };
+  }
+"""
+new_terminal = """  if (terminalCrewRejection(response.status)) {
+    const backendError = payload.error || `http_${response.status}`;
+    await putStoreRecord(CREW_QUEUE_STORE, {
+      ...inProgress,
+      state: 'PENDING',
+      retryNotBefore: null,
+      lastError: backendError,
+      updatedAt: new Date().toISOString()
+    });
+    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_REJECTED',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      httpStatus: response.status,
+      error: backendError,
+      payload
+    });
+    return { retry: false, sessionRequired: false, blockService: true };
+  }
+"""
+sw = replace_once(sw, old_terminal, new_terminal, 'terminal crew rejection')
+
+old_session_notify = """    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_RETRY',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      error: 'portal_session_required',
+      retryAfterMs: 0
+    });
+"""
+new_session_notify = """    await notifyClients({
+      type: 'CREW_PRESENCE_SYNC_RETRY',
+      assignmentId: record.assignmentId,
+      serviceRequestId: record.serviceRequestId,
+      httpStatus: response.status,
+      error: payload.error || 'portal_session_required',
+      payload,
+      retryAfterMs: 0
+    });
+"""
+sw = replace_once(sw, old_session_notify, new_session_notify, 'crew session rejection')
+
+old_http_notify = """  await notifyClients({
+    type: 'CREW_PRESENCE_SYNC_RETRY',
+    assignmentId: record.assignmentId,
+    serviceRequestId: record.serviceRequestId,
+    error: payload.error || `http_${response.status}`,
+    retryAfterMs
+  });
+"""
+new_http_notify = """  await notifyClients({
+    type: 'CREW_PRESENCE_SYNC_RETRY',
+    assignmentId: record.assignmentId,
+    serviceRequestId: record.serviceRequestId,
+    httpStatus: response.status,
+    error: payload.error || `http_${response.status}`,
+    payload,
+    retryAfterMs
+  });
+"""
+sw = replace_once(sw, old_http_notify, new_http_notify, 'crew HTTP retry')
+
+old_test = """  assert.match(nativePresence, /queueCrewPresence\\(\\{ \\.\\.\\.attempt, \\.\\.\\.nativeLocation, proofBundle \\}\\)/);
+"""
+new_test = """  assert.match(nativePresence, /const payload = \\{[\\s\\S]*idempotencyKey: attempt\\.idempotencyKey,[\\s\\S]*assignmentId: attempt\\.assignmentId,[\\s\\S]*serviceRequestId: attempt\\.serviceRequestId,[\\s\\S]*clientCapturedAt: nativeLocation\\.clientCapturedAt,[\\s\\S]*proofBundle: bundle/);
+  assert.match(nativePresence, /queueCrewPresence\\(payload\\)/);
+"""
+test_offline = replace_once(test_offline, old_test, new_test, 'offline queue test')
+
+native_path.write_text(native)
+sw_path.write_text(sw)
+test_offline_path.write_text(test_offline)
