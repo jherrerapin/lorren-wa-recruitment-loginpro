@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { RECRUITMENT_EXTRACTION_SCHEMA } from './recruitmentExtractionSchema.js';
 import { OPENAI_EXTRACTION_MODEL } from '../services/openAiModelConfig.js';
+import { buildGenderEvidencePromptText } from '../services/genderEvidencePolicy.js';
 
 const RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const MODEL = OPENAI_EXTRACTION_MODEL;
@@ -114,6 +115,8 @@ relation solo puede ser:
 
 Regla central: QUESTION_MENTION, THIRD_PARTY, VACANCY_CONTEXT y UNKNOWN no son atributos personales del candidato. No conviertas esas menciones en fields salvo que el mismo turno contenga además una cláusula independiente SELF_ATTRIBUTE o DIRECT_ANSWER para ese campo; en ese caso el snippet debe apuntar exclusivamente a esa cláusula válida.
 
+Regla de género compartida: ${buildGenderEvidencePromptText()}
+
 Una pregunta puede coexistir con datos personales. Ejemplos:
 - "Mi CC es 1234567890. ¿Puedo ir en moto?" => documentType/documentNumber son SELF_ATTRIBUTE; moto es QUESTION_MENTION y NO es transportMode.
 - "Andrés Felipe Henao Patiño, ¿cuál es el horario?" después de que Lórren pidió nombre => fullName DIRECT_ANSWER; la pregunta no invalida el nombre.
@@ -125,7 +128,7 @@ Criterios de entidad:
 - fullName: identidad real del candidato. Un saludo, cargo, rasgo, intención, pregunta o secuencia de palabras con forma nominal no es un nombre. Un nombre desnudo es válido como DIRECT_ANSWER solo si pendingFields o lastBotQuestion muestran que Lórren acaba de pedirlo.
 - documentType/documentNumber: solo CC y PPT son documentos válidos para avanzar. Distingue "¿necesito CC?" (QUESTION_MENTION) de "mi CC es..." (SELF_ATTRIBUTE) o "CC 123..." como DIRECT_ANSWER cuando el documento estaba pendiente.
 - age: no confundas edad con dirección, cédula, experiencia ni cantidades laborales.
-- gender: solo con evidencia lingüística del propio candidato; nunca por el nombre ni por tratamientos como "señora" dirigidos a otra persona.
+- gender: detección silenciosa; jamás lo solicites. Usa evidencia lingüística del propio candidato. El nombre solo puede corroborar evidencia compatible del mismo mensaje y nunca basta por sí solo.
 - locality/neighborhood: residencia del candidato, no ciudad/sector de la vacante.
 - transportMode: medio que el candidato declara usar/tener; una pregunta sobre si puede ir en moto no es su transporte.
 - medicalRestrictions: condición declarada por el candidato o respuesta directa a esa pregunta; preguntas generales sobre restricciones no son su condición.

@@ -11,6 +11,7 @@ import axios from 'axios';
 import { extractRecruitmentTurn } from '../ai/extractRecruitmentTurn.js';
 import { isFeatureEnabled } from './featureFlags.js';
 import { OPENAI_EXTRACTION_MODEL, getOpenAiModelConfig } from './openAiModelConfig.js';
+import { buildGenderEvidencePromptText } from './genderEvidencePolicy.js';
 
 const OPENAI_CHAT_COMPLETIONS_URL = 'https://api.openai.com/v1/chat/completions';
 const REASONING_MODELS = ['o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'gpt-5'];
@@ -35,7 +36,7 @@ Campos que puedes extraer (omite los que no estén presentes o no sean claros):
   "documentType": string,     // CC | TI | CE | PPT | Pasaporte
   "documentNumber": string,   // Solo los dígitos
   "age": number,              // Edad en años — número entero
-  "gender": string,           // MALE | FEMALE | OTHER — solo con evidencia textual, nunca por nombre
+  "gender": string,           // MALE | FEMALE | OTHER — detección silenciosa; nunca preguntar ni inferir solo por nombre
   "neighborhood": string,     // Barrio, sector, localidad donde vive
   "medicalRestrictions": string, // Lo que diga el candidato sobre su condición física
   "transportMode": string,    // Moto | Bicicleta | Publico | lo que diga
@@ -56,10 +57,7 @@ Cómo pensar sobre los datos (no son reglas, son criterios de sentido común):
 • El nombre puede aparecer al inicio del mensaje, después de "soy", "me llamo",
   o simplemente escrito. Capitaliza bien: "MARIA PEREZ" → "Maria Perez".
 
-• El género solo se extrae si el candidato lo expresa lingüísticamente: "soy mujer",
-  "femenino", "candidata", "estoy interesada", "interesada en la vacante", "quedo atenta", "estoy postulada", "me postulo como candidata" → FEMALE;
-  "soy hombre", "masculino", "candidato", "estoy interesado", "interesado en la vacante", "quedo atento", "estoy postulado", "me postulo como candidato" → MALE.
-  Nunca infieras género por el nombre.
+• Regla de género compartida: ${buildGenderEvidencePromptText()}
 
 • El barrio puede mencionarse con o sin la palabra "barrio": "vivo en el Salado",
   "del Jordan", "zona norte", "ciudadela Simón Bolívar".

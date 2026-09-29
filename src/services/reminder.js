@@ -213,7 +213,7 @@ export async function scheduleReminderForCandidate(prisma, candidateId, now = ne
     }
   });
 
-  if (prisma?.jobQueue?.create && isFeatureEnabled('FF_POSTGRES_JOB_QUEUE', false)) {
+  if (prisma?.jobQueueItem?.create && isFeatureEnabled('FF_POSTGRES_JOB_QUEUE', false)) {
     await enqueueJob(prisma, {
       type: JOB_TYPES.CANDIDATE_PROCESS_REMINDER,
       payload: { candidateId },
