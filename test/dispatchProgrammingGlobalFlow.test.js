@@ -38,7 +38,18 @@ test('menú de programación concentra día y formato en una sola lista de seis 
     'dispatch_report:programming_tomorrow_excel',
     'dispatch_report:programming_tomorrow_both'
   ]);
-  assert.match(payload.interactive.body.text, /resumen operativo se enviará automáticamente/i);
+  assert.deepEqual(rows.map((row) => row.title), [
+    'Hoy · PDF',
+    'Hoy · Excel',
+    'Hoy · Ambos',
+    'Mañana · PDF',
+    'Mañana · Excel',
+    'Mañana · Ambos'
+  ]);
+  assert.equal(rows.every((row) => !Object.hasOwn(row, 'description')), true);
+  assert.doesNotMatch(payload.interactive.body.text, /resumen operativo/i);
+  const webhookSource = fs.readFileSync('src/routes/dispatchWhatsappWebhook.js', 'utf8');
+  assert.doesNotMatch(webhookSource, /El resumen operativo se envía automáticamente/i);
 });
 
 test('seleccionar programación envía documentos y después resumen para la misma fecha', async () => {
@@ -91,7 +102,7 @@ test('seleccionar programación envía documentos y después resumen para la mis
   }
 });
 
-test('PDF organiza la programación global por ciudad y luego por cliente', async () => {
+test('PDF organiza la programación global por ciudad y luego por cliente sin dejar encabezados huérfanos', async () => {
   const { buildProgrammingReportHtml } = await import('../src/services/dispatchProgrammingPdfService.js');
   const requests = [
     programmingRequest({ cityName: 'Medellín', clientName: 'Cliente B', operationPointName: 'La Estrella' }),
@@ -115,6 +126,12 @@ test('PDF organiza la programación global por ciudad y luego por cliente', asyn
   assert.ok(bogota >= 0 && medellin > bogota);
   assert.ok(clienteA > bogota && clienteC > clienteA && clienteC < medellin);
   assert.ok(clienteB > medellin);
+  assert.match(html, /\.city-section \+ \.city-section \{ break-before: page; page-break-before: always; \}/);
+  assert.match(html, /\.city-head \{ break-inside: avoid; break-after: avoid; page-break-inside: avoid; page-break-after: avoid;/);
+  assert.match(html, /\.client-head \{ break-after: avoid; page-break-after: avoid;/);
+  assert.match(html, /\.block-card \{[^}]*break-inside: avoid; page-break-inside: avoid;/);
+  assert.match(html, /\.client-section \{ margin: 0 0 16px 8px; \}/);
+  assert.doesNotMatch(html, /\.client-section \{ break-inside: avoid;/);
 });
 
 test('Excel mantiene una hoja global y crea hojas por ciudad ordenadas por cliente', () => {
