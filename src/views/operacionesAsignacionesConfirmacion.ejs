@@ -41,6 +41,7 @@
   <% const safeSameDaySet = typeof assignedWorkerIdsOnSelectedDate !== 'undefined' && assignedWorkerIdsOnSelectedDate ? assignedWorkerIdsOnSelectedDate : new Set(); %>
   <% const effectiveAvailableWorkers = typeof availableWorkers !== 'undefined' && availableWorkers ? availableWorkers : workers; %>
   <% const safeRestAssignments = typeof restAssignments !== 'undefined' && Array.isArray(restAssignments) ? restAssignments : []; %>
+  <% const safeRestWorkers = typeof restWorkers !== 'undefined' && Array.isArray(restWorkers) ? restWorkers : workers; %>
   <% const safeRestDate = typeof restDate !== 'undefined' && restDate ? restDate : ''; %>
   <% const safeAssignmentDate = typeof selectedAssignmentDate !== 'undefined' && selectedAssignmentDate ? selectedAssignmentDate : ''; %>
   <% const safeRestReasons = typeof restReasons !== 'undefined' && Array.isArray(restReasons) ? restReasons : []; %>
@@ -153,7 +154,7 @@ Hora : *{{horaInicio}} por favor.*
       <div id="restDropZone" class="drop-zone rest-drop-zone">Arrastra uno o varios auxiliares para asignarles descanso.</div>
       <div class="rest-list">
         <% if (!safeRestAssignments.length) { %><div class="rest-empty">No hay descansos asignados para esta fecha.</div><% } %>
-        <% safeRestAssignments.forEach((rest)=>{ const restWorker=workers.find((worker)=>worker.id===rest.workerId); %>
+        <% safeRestAssignments.forEach((rest)=>{ const restWorker=safeRestWorkers.find((worker)=>worker.id===rest.workerId); %>
           <article class="rest-card"><div><strong><%= restWorker?.fullName || 'Auxiliar' %></strong><div class="meta"><span>Contrato: <%= restWorker ? contractLabel(restWorker.contractType) : 'No disponible' %></span><% if(rest.reason){ %><span>Justificación: <%= restLabel(rest.reason) %></span><% } %><span><%= rest.restDate %><% if(rest.dayAdjustment===-1){ %> · Descuenta 1 día<% } %></span><% if(rest.originSundayDate){ %><span>Domingo asociado: <%= rest.originSundayDate %></span><% } %></div></div><div class="rest-card-actions"><% if(restWorker?.contractType==='DIRECTO'){ %><button class="btn" type="button" data-rest-justification data-worker-id="<%= rest.workerId %>" data-worker-name="<%= restWorker.fullName %>" data-rest-date="<%= rest.restDate %>" data-rest-reason="<%= rest.reason || '' %>" data-origin-sunday-date="<%= rest.originSundayDate || '' %>"><%= rest.reason ? 'Editar justificación' : 'Justificación' %></button><% } %><form method="post" action="/admin/operaciones/asignaciones/descansos/cancelar"><input type="hidden" name="workerId" value="<%= rest.workerId %>" /><input type="hidden" name="restDate" value="<%= rest.restDate %>" /><input type="hidden" name="serviceRequestId" value="<%= selectedServiceRequestId %>" /><button class="btn" type="submit">Retirar</button></form></div></article>
         <% }) %>
       </div>
