@@ -1146,7 +1146,7 @@ final class NearbyPresenceManager {
         if (!appContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) return false;
         try {
             ensureNearbyTransportPermissions();
-            return bluetoothAdapter.isMultipleAdvertisementSupported();
+            return bluetoothAdapter.getBluetoothLeAdvertiser() != null;
         } catch (SecurityException error) {
             throw error;
         } catch (RuntimeException error) {
