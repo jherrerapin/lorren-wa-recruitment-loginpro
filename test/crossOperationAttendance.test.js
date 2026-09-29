@@ -107,7 +107,7 @@ test('si varias geocercas destino se superponen se usa la operación válida má
   assert.equal(result.operationPointId, 'nearer');
 });
 
-test('la operación asignada conserva prioridad y su precisión no se evade con una geocerca solapada', async () => {
+test('la operación asignada conserva prioridad aunque la precisión reportada sea degradada', async () => {
   const overlapping = operation('overlap', 1, 1, { maxLocationAccuracyMeters: 500 });
   const prisma = prismaWithOperations([overlapping]);
   const result = await resolveAttendanceOperationGeofence(
@@ -116,9 +116,11 @@ test('la operación asignada conserva prioridad y su precisión no se evade con 
     { latitude: 1, longitude: 1, accuracyMeters: 80 }
   );
 
-  assert.equal(result.accepted, false);
+  assert.equal(result.accepted, true);
   assert.equal(result.operationPointId, 'operation-source');
-  assert.equal(result.errorCode, 'attendance_location_accuracy_insufficient');
+  assert.equal(result.errorCode, null);
+  assert.equal(result.accuracyMeters, 80);
+  assert.equal(result.maxAccuracyMeters, 50);
   assert.equal(prisma.queries.length, 0);
 });
 
