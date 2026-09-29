@@ -21,13 +21,13 @@ jobs:
           ref: fix/android-crew-bluetooth-optimistic-sync
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses >/dev/null || true
 
       - name: Install Android SDK 37
         run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
