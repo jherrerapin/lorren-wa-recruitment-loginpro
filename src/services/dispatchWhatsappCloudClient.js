@@ -113,18 +113,18 @@ export function buildDispatchReportMenuPayload({ phone, name }) {
     type: 'interactive',
     interactive: {
       type: 'list',
-      body: { text: `Hola ${displayName}. Selecciona la programación que deseas recibir. El resumen operativo se enviará automáticamente.` },
+      body: { text: `Hola ${displayName}. Selecciona la programación que deseas recibir.` },
       action: {
         button: 'Ver opciones',
         sections: [{
           title: 'Programación diaria',
           rows: [
-            { id: 'dispatch_report:programming_today_pdf', title: 'Hoy · PDF', description: 'PDF + resumen operativo de hoy' },
-            { id: 'dispatch_report:programming_today_excel', title: 'Hoy · Excel', description: 'Excel + resumen operativo de hoy' },
-            { id: 'dispatch_report:programming_today_both', title: 'Hoy · Ambos', description: 'PDF + Excel + resumen de hoy' },
-            { id: 'dispatch_report:programming_tomorrow_pdf', title: 'Mañana · PDF', description: 'PDF + resumen operativo de mañana' },
-            { id: 'dispatch_report:programming_tomorrow_excel', title: 'Mañana · Excel', description: 'Excel + resumen operativo de mañana' },
-            { id: 'dispatch_report:programming_tomorrow_both', title: 'Mañana · Ambos', description: 'PDF + Excel + resumen de mañana' }
+            { id: 'dispatch_report:programming_today_pdf', title: 'Hoy · PDF' },
+            { id: 'dispatch_report:programming_today_excel', title: 'Hoy · Excel' },
+            { id: 'dispatch_report:programming_today_both', title: 'Hoy · Ambos' },
+            { id: 'dispatch_report:programming_tomorrow_pdf', title: 'Mañana · PDF' },
+            { id: 'dispatch_report:programming_tomorrow_excel', title: 'Mañana · Excel' },
+            { id: 'dispatch_report:programming_tomorrow_both', title: 'Mañana · Ambos' }
           ]
         }]
       }

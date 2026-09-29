@@ -364,15 +364,16 @@ export function buildProgrammingReportHtml({
   .summary-card span { display: block; color: #60708a; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
   .summary-card strong { display: block; color: #0d7a6b; font-size: 18px; margin-top: 4px; }
   .city-section { margin: 0 0 22px; }
-  .city-head { break-inside: avoid; background: #172033; color: #fff; border-radius: 14px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .city-section + .city-section { break-before: page; page-break-before: always; }
+  .city-head { break-inside: avoid; break-after: avoid; page-break-inside: avoid; page-break-after: avoid; background: #172033; color: #fff; border-radius: 14px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
   .city-head span { display: block; color: #bff8ef; font-size: 9px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
   .city-head h2 { margin: 2px 0 0; font-size: 20px; }
   .city-head strong { color: #e6fffb; font-size: 11px; text-align: right; }
-  .client-section { break-inside: avoid; margin: 0 0 16px 8px; }
-  .client-head { border-left: 6px solid #0d7a6b; background: #eefcf8; border-radius: 12px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
+  .client-section { margin: 0 0 16px 8px; }
+  .client-head { break-after: avoid; page-break-after: avoid; border-left: 6px solid #0d7a6b; background: #eefcf8; border-radius: 12px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 10px; }
   .client-head h3 { margin: 0; font-size: 16px; color: #0f2537; }
   .client-head span { font-weight: 800; color: #0d7a6b; font-size: 11px; }
-  .block-card { border: 1px solid #d8e0ea; border-radius: 14px; margin-bottom: 10px; overflow: hidden; break-inside: avoid; }
+  .block-card { border: 1px solid #d8e0ea; border-radius: 14px; margin-bottom: 10px; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
   .block-title { background: #f8fafc; border-bottom: 1px solid #d8e0ea; padding: 9px 11px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .block-title span { display: block; color: #60708a; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
   .block-title strong { display: block; color: #172033; font-size: 15px; }

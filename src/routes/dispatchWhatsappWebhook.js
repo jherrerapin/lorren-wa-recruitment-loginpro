@@ -220,7 +220,7 @@ async function sendProgrammingMenu(prisma, contact) {
   const result = await sendDispatchWhatsappReportMenu({ scope: 'operational', phone: contact.phone, name: contact.name });
   await auditProgrammingReply(prisma, {
     phone: contact.phone,
-    body: `Hola ${contact.name}. Selecciona programación: hoy/mañana · PDF/Excel/Ambos. El resumen operativo se envía automáticamente.`,
+    body: `Hola ${contact.name}. Selecciona programación: hoy/mañana · PDF/Excel/Ambos.`,
     messageType: 'INTERACTIVE',
     providerMessageId: result.providerMessageId,
     source: 'PROGRAMMING_CONTACT_MENU'
