@@ -114,7 +114,10 @@ test('servidor monta webhook de despacho antes del parser JSON global', () => {
   assert.ok(importIndex >= 0);
   assert.ok(webhookIndex >= 0);
   assert.ok(jsonIndex > webhookIndex);
-  assert.match(server, /app\.use\('\/webhook', webhookRouter\(prisma\)\)/);
+  assert.match(
+    server,
+    /app\.post\('\/webhook', webhookJsonParser, createWebhookController\(\{ prisma \}\)\)/
+  );
 });
 
 test('webhook valida X-Hub-Signature-256 sobre el cuerpo crudo', async () => {
@@ -157,15 +160,13 @@ test('Reportar novedad conserva la asignación pendiente y el enlace sigue acept
   assert.match(webhook, /match\[1\] === 'confirm' \? 'CONFIRM' : 'NOVELTY'/);
 });
 
-test('Gracias solo se envía después de evidencia inbound real', () => {
+test('la confirmación inbound se reclama sin reintroducir la respuesta automática retirada', () => {
   const assignment = readSource('src/services/dispatchWhatsappAssignmentService.js');
   const webhook = readSource('src/services/dispatchWhatsappWebhookService.js');
   assert.match(assignment, /confirmationMessageId/);
   assert.match(assignment, /confirmationReceivedAt/);
-  assert.match(
-    webhook,
-    /const claim = await claimDispatchAssignmentConfirmation\(\{[\s\S]*?sendDispatchWhatsappTextMessage\(\{ scope, phone: target\.phone, text: AUTOMATIC_CONFIRMATION_REPLY/
-  );
+  assert.match(webhook, /const claim = await claimDispatchAssignmentConfirmation\(\{/);
+  assert.doesNotMatch(webhook, /AUTOMATIC_CONFIRMATION_REPLY/);
   assert.doesNotMatch(webhook, /setInterval|reconciliation|getChats|getChatById|message_create/);
 });
 
