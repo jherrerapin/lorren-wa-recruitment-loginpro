@@ -25,6 +25,8 @@ jobs:
           gradle-version: '9.5.0'
       - name: Apply BLE discovery patch
         run: python .github/tmp/apply-ble-discovery.py
+      - name: Clean stale discoverability reference
+        run: python .github/tmp/fix-ble-cleanup.py
       - name: Install JS dependencies
         run: npm ci --ignore-scripts
       - name: Run focused Bluetooth regression
