@@ -15,7 +15,6 @@ export const DELIVERY_RANK = new Map([
   ['DELIVERED', 2],
   ['READ', 3]
 ]);
-export const AUTOMATIC_CONFIRMATION_REPLY = 'Gracias.';
 
 export const SCOPE_DEFINITIONS = Object.freeze({
   operational: Object.freeze({

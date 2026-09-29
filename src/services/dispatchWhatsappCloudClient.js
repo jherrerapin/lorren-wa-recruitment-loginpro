@@ -53,7 +53,7 @@ function assignmentTemplateValues(assignment, { includeService = true } = {}) {
 
 export function buildDispatchAssignmentMessageBody(assignment) {
   const [name, date, operation, address, service, startTime] = assignmentTemplateValues(assignment);
-  return `Hola *${name}*,\n\nMañana: *${date}*\nLlegar a: *${operation}  - ${address}* al servicio *${service}*\nHora : *${startTime} por favor.*\n\n*Responde con CONFIRMADO*`;
+  return `Hola *${name}*,\n\nMañana: *${date}*\nLlegar a: *${operation}  - ${address}* al servicio de *${service}*\nHora : *${startTime} por favor.*\n\n*Responde con CONFIRMADO*`;
 }
 
 export function buildDispatchAssignmentInteractivePayload({ assignment, phone }) {
