@@ -1,0 +1,37 @@
+name: Apply Android terrain unblock
+
+on:
+  push:
+    branches:
+      - fix/android-crew-bluetooth-optimistic-sync
+    paths:
+      - .github/workflows/apply-android-terrain-unblock.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply scoped Android and frontend patch
+        run: python .github/scripts/apply-android-terrain-unblock.py
+      - name: Validate frontend syntax and scoped contracts
+        run: |
+          node --check mobile/android/app/src/main/assets/native-presence.js
+          grep -q "bluetoothFallbackActive = true" mobile/android/app/src/main/assets/native-presence.js
+          grep -q "scan_complete_without_auxiliaries" mobile/android/app/src/main/assets/native-presence.js
+          grep -q "LOCATION_LOW_ACCURACY_ACCEPTED" mobile/android/app/src/main/assets/native-presence.js
+          ! grep -q "TARGET_LOCATION_ACCURACY_METERS" mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java
+          grep -q "private static boolean locationUsable" mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java
+      - name: Commit scoped fix and remove temporary tooling
+        run: |
+          git config user.name "jherrerapin"
+          git config user.email "37624185+jherrerapin@users.noreply.github.com"
+          git rm .github/workflows/apply-android-terrain-unblock.yml .github/scripts/apply-android-terrain-unblock.py
+          git add mobile/android/app/src/main/assets/native-presence.js mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java "auditoria y correccion lorren.md"
+          git commit -m "fix(android): desbloquear marcación manual y GPS impreciso"
+          git push origin HEAD:fix/android-crew-bluetooth-optimistic-sync
