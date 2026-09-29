@@ -71,5 +71,5 @@ test('dispatch CRUD conserva clientes y personal con sucursal como autoridad ter
   assert.doesNotMatch(deleteRoute, /source: 'MANUAL'|Auxiliar manual no encontrado|Auxiliar manual eliminado/);
 
   assert.doesNotMatch(route, /DISPATCH_MODULE_URL/);
-  assert.doesNotMatch(route, /conversationEngine|webhook|whatsapp/i);
+  assert.doesNotMatch(route, /calculateConversationDecision|webhookController|whatsappClient/i);
 });

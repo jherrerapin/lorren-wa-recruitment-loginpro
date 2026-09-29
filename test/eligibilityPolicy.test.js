@@ -31,6 +31,22 @@ test('rechaza amablemente una edad inferior al mínimo configurado', () => {
   assert.match(decision.reply.text, /edad|futuras oportunidades/i);
 });
 
+test('rechaza amablemente una edad superior al máximo configurado', () => {
+  const decision = evaluateEligibility(input({ age: 56, minAge: 18, maxAge: 50 }));
+
+  assert.equal(decision.transitions.endConversation, true);
+  assert.match(decision.reply.text, /edad|futuras oportunidades/i);
+});
+
+test('permite continuar cuando la edad está dentro del rango configurado', () => {
+  assert.deepEqual(evaluateEligibility(input({
+    age: 30,
+    minAge: 18,
+    maxAge: 50,
+    experienceRequired: 'NO'
+  })), {});
+});
+
 test('no rechaza por edad mientras ese dato todavía está pendiente', () => {
   assert.deepEqual(evaluateEligibility(input({ minAge: 18 }, ['age'])), {});
 });

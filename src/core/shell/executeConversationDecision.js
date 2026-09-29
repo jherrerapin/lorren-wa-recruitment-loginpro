@@ -14,6 +14,8 @@ import {
 import { listOfferableSlots } from '../../services/interviewScheduler.js';
 import { deliverAutomaticOutboundText } from '../../services/automaticOutboundDeliveryService.js';
 import { sanitizeOutboundReply } from '../../services/outboundReplyPolicy.js';
+import { pauseCandidateAutomationForManualReview } from '../../services/candidateStateService.js';
+import { notifySupervisorManualReview } from '../../services/adminSupervisor.js';
 
 const CONSENT_FIELD = 'dataConsentStatus';
 const DEFAULT_SCHEDULING_TIMEZONE = 'America/Bogota';
@@ -101,12 +103,38 @@ function normalizeSuggestionLimit(value) {
 }
 
 function splitMutationFields(fieldsToPersist = {}) {
+  const source = asRecord(fieldsToPersist);
   const direct = {};
   let consentStatus = null;
+  const hasPauseInstruction = Object.hasOwn(source, 'botPaused');
+  const pauseRequested = source.botPaused === true;
 
-  for (const [field, value] of Object.entries(fieldsToPersist || {})) {
+  if (hasPauseInstruction && !pauseRequested) {
+    throw new Error('conversation_manual_review_pause_must_be_true');
+  }
+  if (Object.hasOwn(source, 'botPauseReason') && !pauseRequested) {
+    throw new Error('conversation_manual_review_pause_instruction_required');
+  }
+
+  const manualReviewPause = pauseRequested
+    ? {
+        reason: requireNonEmptyString(
+          source.botPauseReason,
+          'conversation_manual_review_pause_reason'
+        )
+      }
+    : null;
+
+  for (const [field, value] of Object.entries(source)) {
     if (field === CONSENT_FIELD) {
       consentStatus = String(value || '').trim().toUpperCase() || null;
+      continue;
+    }
+    if (field === 'botPaused' || field === 'botPauseReason') continue;
+    if (
+      manualReviewPause
+      && (field === 'reminderState' || field === 'reminderScheduledFor')
+    ) {
       continue;
     }
     if (!ALLOWED_DIRECT_CANDIDATE_FIELDS.has(field)) {
@@ -115,7 +143,24 @@ function splitMutationFields(fieldsToPersist = {}) {
     direct[field] = value;
   }
 
-  return { direct, consentStatus };
+  return { direct, consentStatus, manualReviewPause };
+}
+
+function manualReviewPauseSnapshot(candidate) {
+  if (!candidate) throw new Error('conversation_manual_review_candidate_not_found');
+  return {
+    botPaused: candidate.botPaused,
+    botPausedAt: candidate.botPausedAt,
+    botPausedBy: candidate.botPausedBy,
+    botPauseReason: candidate.botPauseReason,
+    botResumeMode: candidate.botResumeMode,
+    reminderScheduledFor: candidate.reminderScheduledFor,
+    reminderState: candidate.reminderState
+  };
+}
+
+function wasManualReviewPauseApplied(result) {
+  return result === true || Number(result?.count || 0) === 1;
 }
 
 async function executeConsentMutation(tx, {
@@ -419,7 +464,9 @@ export async function executeConversationDecision(
     llmService = null,
     whatsappClient = null,
     automaticOutboundDelivery = defaultAutomaticOutboundDelivery,
-    deliveryAdapters = {}
+    deliveryAdapters = {},
+    manualReviewPauseAuthority = pauseCandidateAutomationForManualReview,
+    manualReviewNotifier = notifySupervisorManualReview
   } = normalizeExecutionArguments(inputOrOptions, decisionArgument, dependencyArgument);
   if (!prisma?.candidate) throw new Error('conversation_executor_prisma_required');
 
@@ -438,7 +485,7 @@ export async function executeConversationDecision(
   const mayPersistCandidate = !dryRun && execution.mayPersistCandidate !== false;
   const mayReply = execution.mayReply !== false;
   const maySendOutbound = !dryRun && execution.maySendOutbound !== false;
-  const { direct, consentStatus } = splitMutationFields(
+  const { direct, consentStatus, manualReviewPause } = splitMutationFields(
     normalizedDecision.mutations.fieldsToPersist
   );
   if (normalizedDecision.mutations.nextStep) {
@@ -466,7 +513,8 @@ export async function executeConversationDecision(
     const result = {
       candidate: null,
       consent: null,
-      scheduling: null
+      scheduling: null,
+      manualReviewPause: null
     };
 
     if (typeof tx?.message?.createMany === 'function') {
@@ -489,7 +537,28 @@ export async function executeConversationDecision(
       });
     }
 
-    if (mayPersistCandidate && Object.keys(direct).length) {
+    if (mayPersistCandidate && manualReviewPause) {
+      if (typeof tx?.candidate?.findUnique !== 'function') {
+        throw new Error('conversation_manual_review_candidate_reader_required');
+      }
+      const candidateSnapshot = await tx.candidate.findUnique({
+        where: { id: candidateId }
+      });
+      result.manualReviewPause = await manualReviewPauseAuthority(tx, {
+        candidateId,
+        expected: manualReviewPauseSnapshot(candidateSnapshot),
+        reason: manualReviewPause.reason,
+        pausedAt: new Date()
+      });
+      if (wasManualReviewPauseApplied(result.manualReviewPause)) {
+        result.candidate = result.manualReviewPause?.candidate || candidateSnapshot;
+      }
+    }
+
+    const pauseAllowsCandidateUpdates = !manualReviewPause
+      || wasManualReviewPauseApplied(result.manualReviewPause);
+
+    if (mayPersistCandidate && pauseAllowsCandidateUpdates && Object.keys(direct).length) {
       result.candidate = await tx.candidate.update({
         where: { id: candidateId },
         data: direct
@@ -552,6 +621,26 @@ export async function executeConversationDecision(
     generation: { status: 'skipped' },
     delivery: { status: 'skipped' }
   };
+
+  if (manualReviewPause && mayPersistCandidate) {
+    if (!wasManualReviewPauseApplied(executionResult.manualReviewPause)) {
+      return result;
+    }
+    try {
+      await manualReviewNotifier(
+        prisma,
+        executionResult.manualReviewPause?.candidate || executionResult.candidate,
+        {
+          reason: manualReviewPause.reason,
+          inboundText: input?.turn?.rawText || '',
+          reviewType: 'question',
+          extra: { source: 'functional_core' }
+        }
+      );
+    } catch (error) {
+      throw new ConversationDecisionExecutionError('notification', error);
+    }
+  }
 
   if (!mayReply || !resolvedDecision.reply) return result;
 

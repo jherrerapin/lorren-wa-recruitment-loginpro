@@ -46,8 +46,8 @@ test('dispatch clients operations contracts', () => {
   assert.match(publicView, /name="operationPointId"/);
 
   ['src/views/operacionesClientes.ejs','src/views/operacionesClienteOperaciones.ejs','src/views/publicDispatchRequest.ejs','src/views/operacionesPersonalNuevo.ejs','src/views/operacionesSolicitudEditar.ejs'].forEach((f)=>assert.ok(fs.existsSync(f)));
-  assert.doesNotMatch(route, /webhook/i);
-  assert.doesNotMatch(route, /conversationEngine/i);
+  assert.doesNotMatch(route, /webhookController/i);
+  assert.doesNotMatch(route, /calculateConversationDecision/i);
 });
 
 

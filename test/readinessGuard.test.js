@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { evaluateCandidateEligibility, getCandidateReadiness } from '../src/services/readinessGuard.js';
+import {
+  evaluateCandidateEligibility,
+  getCandidateReadiness
+} from '../src/services/candidateReadiness.js';
 import {
   alignCandidateLocationFields,
   getCandidateResidenceValue,

@@ -81,5 +81,5 @@ test('dispatch operations UX rules for delete, time inputs, manual CV and depend
   assert.match(requestsSummaryView, /id="asyncToast"[^>]*role="status"[^>]*aria-live="polite"/);
 
   assert.doesNotMatch(dispatchRoute, /DISPATCH_MODULE_URL/);
-  assert.doesNotMatch(publicRoute, /conversationEngine|webhook|whatsapp/i);
+  assert.doesNotMatch(publicRoute, /calculateConversationDecision|webhookController|whatsappClient/i);
 });

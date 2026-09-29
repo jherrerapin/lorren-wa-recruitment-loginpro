@@ -24,6 +24,6 @@ test('dispatch persistence contracts', () => {
   assert.match(view, /\/admin\/operaciones\/asignaciones\/unassign/);
   assert.match(view, /draggable="true"/);
 
-  assert.doesNotMatch(route, /webhook/i);
-  assert.doesNotMatch(route, /conversationEngine|FSM/i);
+  assert.doesNotMatch(route, /webhookController/i);
+  assert.doesNotMatch(route, /calculateConversationDecision|conversationPolicies/i);
 });

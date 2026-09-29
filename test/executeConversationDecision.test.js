@@ -36,6 +36,35 @@ function decision(reply = { directive: 'ASK_FOR_CITY' }) {
   };
 }
 
+function manualReviewDecision() {
+  const result = decision({ text: 'Guardamos tu información para revisión del equipo.' });
+  result.mutations.fieldsToPersist = {
+    gender: 'FEMALE',
+    botPaused: true,
+    botPauseReason: 'Candidata pendiente de revisión humana',
+    reminderState: 'SKIPPED',
+    reminderScheduledFor: null
+  };
+  result.mutations.nextStep = 'MANUAL_REVIEW';
+  return result;
+}
+
+function manualReviewCandidate(overrides = {}) {
+  return {
+    id: 'candidate-1',
+    phone: '573001112233',
+    fullName: 'Ana Pérez',
+    botPaused: false,
+    botPausedAt: null,
+    botPausedBy: null,
+    botPauseReason: null,
+    botResumeMode: null,
+    reminderScheduledFor: null,
+    reminderState: 'NONE',
+    ...overrides
+  };
+}
+
 function dependencies(calls) {
   return {
     prisma: {
@@ -106,6 +135,64 @@ test('persiste género silenciosamente pero nunca lo expone al redactor', async 
   assert.equal(calls[0][1].data.gender, 'FEMALE');
   assert.deepEqual(calls[1][2].fieldsToPersist, {});
   assert.deepEqual(calls[1][2].pendingFields, ['city']);
+});
+
+test('una pausa manual aplicada por CAS notifica al supervisor después de persistir', async () => {
+  const calls = [];
+  const deps = dependencies(calls);
+  const candidate = manualReviewCandidate();
+  deps.prisma.candidate.findUnique = async () => candidate;
+  deps.manualReviewPauseAuthority = async (_client, args) => {
+    calls.push(['pause', args]);
+    return { count: 1, candidate: { ...candidate, botPaused: true } };
+  };
+  deps.manualReviewNotifier = async (_prisma, notifiedCandidate, options) => {
+    calls.push(['notify', notifiedCandidate, options]);
+  };
+
+  const result = await executeConversationDecision(
+    input(),
+    manualReviewDecision(),
+    deps
+  );
+
+  assert.deepEqual(calls.map(([phase]) => phase), [
+    'pause',
+    'persist',
+    'notify',
+    'deliver'
+  ]);
+  assert.deepEqual(calls[1][1].data, {
+    gender: 'FEMALE',
+    currentStep: 'MANUAL_REVIEW'
+  });
+  assert.equal(calls[2][1].botPaused, true);
+  assert.equal(calls[2][2].reason, 'Candidata pendiente de revisión humana');
+  assert.equal(result.manualReviewPause.count, 1);
+});
+
+test('un conflicto CAS de pausa guarda silencio y no notifica ni reintenta', async () => {
+  const calls = [];
+  const deps = dependencies(calls);
+  deps.prisma.candidate.findUnique = async () => manualReviewCandidate();
+  deps.manualReviewPauseAuthority = async (_client, args) => {
+    calls.push(['pause', args]);
+    return { count: 0, candidate: manualReviewCandidate({ botPaused: true }) };
+  };
+  deps.manualReviewNotifier = async () => {
+    calls.push(['notify']);
+  };
+
+  const result = await executeConversationDecision(
+    input(),
+    manualReviewDecision(),
+    deps
+  );
+
+  assert.deepEqual(calls.map(([phase]) => phase), ['pause']);
+  assert.equal(result.manualReviewPause.count, 0);
+  assert.deepEqual(result.generation, { status: 'skipped' });
+  assert.deepEqual(result.delivery, { status: 'skipped' });
 });
 
 test('los textos estrictos se entregan sin llamar al LLM', async () => {
