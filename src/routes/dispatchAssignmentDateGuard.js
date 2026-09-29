@@ -41,6 +41,30 @@ function hasExplicitCitySelection(query = {}) {
     || Boolean(normalizeString(query.operationalCityId));
 }
 
+function citySelectionFromUrl(sourceUrl) {
+  if (!sourceUrl) return null;
+  let source;
+  try {
+    source = new URL(sourceUrl, 'https://lorren.invalid');
+  } catch {
+    return null;
+  }
+  if (source.pathname !== ASSIGNMENT_PATH) return null;
+  return {
+    cityFilter: source.searchParams.get('cityFilter'),
+    operationalCityIds: source.searchParams.getAll('operationalCityIds'),
+    operationalCityId: source.searchParams.get('operationalCityId')
+  };
+}
+
+function citySelectionSource(req = {}) {
+  const body = req.body || {};
+  if (hasExplicitCitySelection(body)) return body;
+  const query = req.query || {};
+  if (hasExplicitCitySelection(query)) return query;
+  return citySelectionFromUrl(normalizeString(req.get?.('referer')));
+}
+
 async function resolveAssignmentCityScope(prisma, req, { requestedCityIds = [], selectionExplicit = false } = {}) {
   return resolveUserCityScope(prisma, req, { requestedCityIds, selectionExplicit });
 }
@@ -78,23 +102,11 @@ export function addDateToAssignmentRedirect(target, dateKey) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
-export function addCityFilterToAssignmentRedirect(target, sourceUrl) {
-  if (typeof target !== 'string' || !target.startsWith(ASSIGNMENT_PATH) || !sourceUrl) return target;
+export function addCityFilterToAssignmentRedirect(target, source) {
+  if (typeof target !== 'string' || !target.startsWith(ASSIGNMENT_PATH) || !source) return target;
 
-  let source;
-  try {
-    source = new URL(sourceUrl, 'https://lorren.invalid');
-  } catch {
-    return target;
-  }
-  if (source.pathname !== ASSIGNMENT_PATH) return target;
-
-  const sourceQuery = {
-    cityFilter: source.searchParams.get('cityFilter'),
-    operationalCityIds: source.searchParams.getAll('operationalCityIds'),
-    operationalCityId: source.searchParams.get('operationalCityId')
-  };
-  if (!hasExplicitCitySelection(sourceQuery)) return target;
+  const sourceQuery = typeof source === 'string' ? citySelectionFromUrl(source) : source;
+  if (!sourceQuery || !hasExplicitCitySelection(sourceQuery)) return target;
 
   const cityIds = requestedOperationalCityIds(sourceQuery);
   const url = new URL(target, 'https://lorren.invalid');
@@ -306,10 +318,10 @@ async function installAssignmentRedirectDate(prisma, req, res, cityScope) {
   const dateKey = dispatchServiceDateKey(serviceRequest.serviceDate);
   if (!dateKey) return true;
 
-  const sourceUrl = normalizeString(req.get?.('referer'));
+  const filterSource = citySelectionSource(req);
   const decorateRedirect = (target) => addCityFilterToAssignmentRedirect(
     addDateToAssignmentRedirect(target, dateKey),
-    sourceUrl
+    filterSource
   );
   const originalRedirect = res.redirect.bind(res);
   res.redirect = (statusOrUrl, maybeUrl) => {
@@ -378,8 +390,16 @@ export function dispatchAssignmentDateGuard(prisma) {
       }
 
       if (req.method === 'POST') {
-        const cityScope = await resolveAssignmentCityScope(prisma, req);
+        const filterSource = citySelectionSource(req) || {};
+        const selectionExplicit = hasExplicitCitySelection(filterSource);
+        const cityScope = await resolveAssignmentCityScope(prisma, req, {
+          requestedCityIds: requestedOperationalCityIds(filterSource),
+          selectionExplicit
+        });
         req.operationalCityScope = cityScope;
+        if (cityScope.unauthorizedRequestedCityIds.length) {
+          return res.status(403).send('Una o más ciudades seleccionadas están fuera de tu alcance territorial.');
+        }
         if (!await enforceAssignmentEditScope(prisma, req, res, cityScope)) return;
         const allowed = await installAssignmentRedirectDate(prisma, req, res, cityScope);
         if (!allowed) return;
