@@ -75,6 +75,14 @@
     'payload_transfer_failed',
     'payload_send_failed'
   ]);
+  const BLUETOOTH_FALLBACK_ERRORS = new Set([
+    'advertising_failed',
+    'advertising_unsupported',
+    'discovery_failed',
+    'permissions_required',
+    'bluetooth_unavailable',
+    'nearby_radio_error'
+  ]);
   const NATIVE_START_ERRORS = new Set([
     'advertising_failed',
     'advertising_unsupported',
@@ -105,7 +113,9 @@
   let pendingPhoneExceptionWorkerId = '';
   let pendingCompletedScan = null;
   let pendingManualArrival = null;
+  let bluetoothFallbackActive = false;
   const phoneExceptionsByService = new Map();
+  const manuallyMarkedMembersByScope = new Map();
   const serverMemberStatusesByScope = new Map();
   const localQueuedMarksByService = new Map();
   const diagnosticEvents = [];
@@ -426,7 +436,7 @@
       .native-presence-status{padding:10px 11px;border-radius:11px;background:#eaf8ef;color:#176c36;font-size:12px;font-weight:800;line-height:1.45}.native-presence-status.warning{background:#fff6df;color:#76520b}.native-presence-status.error{background:#fff1f2;color:#9f1239}
       .native-presence-diagnostics{border:1px dashed #aebbb2;border-radius:11px;background:#fff;padding:8px 10px}.native-presence-diagnostics summary{cursor:pointer;font-size:11px;font-weight:900;color:#34553e}.native-presence-diagnostic-help{margin:6px 0;font-size:9px;line-height:1.35;color:#718078}.native-presence-diagnostic-list{display:grid;gap:4px;max-height:210px;overflow:auto}.native-presence-diagnostic-row,.native-presence-diagnostic-empty{font-family:monospace;font-size:9px;line-height:1.4;color:#35453b;overflow-wrap:anywhere}.native-presence-diagnostic-empty{color:#718078}
       .native-presence-count{font-size:26px;font-weight:900;color:#176c36;line-height:1}.native-presence-small{font-size:11px;color:#647568}
-      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-history{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.native-presence-member-mark{display:inline-flex;padding:4px 6px;border-radius:8px;background:#eaf8ef;color:#176c36;font-size:9px;font-weight:850;white-space:nowrap}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-member-action:disabled{opacity:.55;cursor:wait}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
+      .native-presence-members{display:grid;gap:7px}.native-presence-member{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;padding:10px 11px;border:1px solid #d6e4da;border-radius:12px;background:#fff}.native-presence-member-copy{min-width:0}.native-presence-member-name{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:850;color:#173b25}.native-presence-member-role{display:block;margin-top:2px;font-size:10px;color:#718078}.native-presence-member-history{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}.native-presence-member-mark{display:inline-flex;padding:4px 6px;border-radius:8px;background:#eaf8ef;color:#176c36;font-size:9px;font-weight:850;white-space:nowrap}.native-presence-member-side{display:flex;align-items:center;justify-content:flex-end;gap:7px;flex-wrap:wrap}.native-presence-badge{display:inline-flex;align-items:center;min-height:28px;padding:5px 8px;border-radius:999px;font-size:10px;font-weight:900;white-space:nowrap}.native-presence-badge.verified,.native-presence-badge.registered,.native-presence-badge.manual{background:#eaf8ef;color:#176c36}.native-presence-badge.self{background:#edf1f4;color:#384954}.native-presence-badge.pending{background:#fff6df;color:#76520b}.native-presence-badge.no-phone{background:#fff0e6;color:#934b12}.native-presence-member-action{min-height:30px;border:0;border-radius:9px;padding:6px 8px;background:#edf1f4;color:#384954;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-member-action:disabled{opacity:.55;cursor:wait}.native-presence-confirm{grid-column:1/-1;display:grid;gap:7px;padding-top:7px;border-top:1px solid #e3e9e5}.native-presence-confirm-copy{font-size:11px;color:#68490c}.native-presence-confirm-actions{display:flex;gap:7px}.native-presence-confirm-actions button{flex:1;min-height:34px;border:0;border-radius:9px;padding:7px;font:inherit;font-size:10px;font-weight:850;cursor:pointer}.native-presence-confirm-yes{background:#a65b17;color:#fff}.native-presence-confirm-no{background:#edf1f4;color:#384954}
       @media(max-width:620px){.native-presence-row{grid-template-columns:1fr}.native-presence-btn{width:100%}.native-presence-member{grid-template-columns:minmax(0,1fr)}.native-presence-member-side{justify-content:flex-start}}
     `;
     document.head.appendChild(style);
@@ -552,6 +562,12 @@
     return `${serviceRequestId}:${normalizeMarkType(markType) || 'ARRIVAL'}`;
   }
 
+  function manualMarkSet(serviceRequestId, markType) {
+    const key = statusScopeKey(serviceRequestId, markType);
+    if (!manuallyMarkedMembersByScope.has(key)) manuallyMarkedMembersByScope.set(key, new Set());
+    return manuallyMarkedMembersByScope.get(key);
+  }
+
   function serverStatusMap(serviceRequestId, markType) {
     const key = statusScopeKey(serviceRequestId, markType);
     if (!serverMemberStatusesByScope.has(key)) serverMemberStatusesByScope.set(key, new Map());
@@ -617,6 +633,7 @@
 
   function memberStatus(context, member, markType) {
     const normalizedMark = normalizeMarkType(markType) || 'ARRIVAL';
+    if (manualMarkSet(context.serviceRequestId, normalizedMark).has(member.workerId)) return 'MANUAL';
     if (memberHasPersistedMark(member, normalizedMark)) return 'REGISTERED';
     const serverStatus = serverStatusMap(context.serviceRequestId, normalizedMark).get(member.workerId);
     if (serverStatus === 'VERIFIED' || serverStatus === 'REGISTERED') return serverStatus;
@@ -646,6 +663,7 @@
 
   function memberStatusPresentation(status, markType) {
     if (status === 'VERIFIED') return { label: '✓ Detectado', className: 'verified' };
+    if (status === 'MANUAL') return { label: '✓ Marcado (Manual)', className: 'manual' };
     if (status === 'REGISTERED') return { label: '✓ Registrado', className: 'registered' };
     if (status === 'LEADER_DEVICE') return { label: 'Este teléfono', className: 'self' };
     if (status === 'NO_PHONE_REVIEW') return { label: 'Sin teléfono · por revisar', className: 'no-phone' };
@@ -708,15 +726,22 @@
 
       if (
         memberMarkType === 'ARRIVAL'
-        && normalizedMark !== 'ARRIVAL'
+        && (bluetoothFallbackActive || normalizedMark !== 'ARRIVAL')
         && !member.isLeader
         && status === 'PENDING'
       ) {
-        const manualArrival = element('button', 'native-presence-member-action', 'Marcar entrada');
+        const manualArrival = element(
+          'button',
+          'native-presence-member-action',
+          bluetoothFallbackActive ? 'Marcación Manual' : 'Marcar entrada'
+        );
         manualArrival.type = 'button';
         manualArrival.dataset.nativePresenceManualArrival = member.workerId;
         manualArrival.disabled = !navigator.onLine || Boolean(pendingManualArrival);
-        manualArrival.addEventListener('click', () => startManualArrival(member));
+        manualArrival.addEventListener('click', () => {
+          if (bluetoothFallbackActive) markMemberManually(member);
+          else startManualArrival(member);
+        });
         side.appendChild(manualArrival);
       }
 
@@ -798,6 +823,13 @@
       : `crew_${Date.now()}_${randomToken(12)}`;
   }
 
+  function markMemberManually(member) {
+    // El fallback entra por la ruta manual existente y nunca espera el escaneo Bluetooth.
+    startManualArrival(member).catch(() => {
+      setStatus('No fue posible iniciar la marcación manual.', 'error');
+    });
+  }
+
   async function startManualArrival(member) {
     const context = currentContext();
     if (
@@ -861,11 +893,12 @@
         throw new Error(String(payload?.message || 'No fue posible registrar la entrada pendiente.'));
       }
       phoneExceptionSet(pending.serviceRequestId).delete(pending.workerId);
+      manualMarkSet(pending.serviceRequestId, 'ARRIVAL').add(pending.workerId);
       serverStatusMap(pending.serviceRequestId, 'ARRIVAL').set(pending.workerId, 'REGISTERED');
       contexts = await loadContexts();
       pendingManualArrival = null;
       renderPanel();
-      setStatus('Entrada registrada.', '');
+      setStatus('Auxiliar marcado manualmente.', '');
     } catch (error) {
       pendingManualArrival = null;
       renderPanel();
@@ -879,7 +912,7 @@
       native_presence_credential_required: 'Este teléfono necesita conectarse una vez para preparar o renovar su credencial de asistencia.',
       native_location_credential_required: 'Este teléfono necesita conectarse una vez para preparar o renovar su credencial de asistencia.',
       bluetooth_disabled: 'Bluetooth está apagado. Actívalo para continuar.',
-      bluetooth_unavailable: 'Este teléfono no tiene Bluetooth disponible para verificar la cuadrilla.',
+      bluetooth_unavailable: 'Bluetooth no está disponible en este dispositivo. Usa la Marcación Manual para los auxiliares por detectar.',
       advertising_failed: 'No fue posible iniciar la señal Bluetooth del encargado. Intenta nuevamente.',
       advertising_unsupported: 'Este teléfono no soporta la función Bluetooth requerida para actuar como encargado de cuadrilla.',
       discovery_failed: 'No fue posible iniciar la escucha Bluetooth para la marcación. Intenta nuevamente.',
@@ -935,6 +968,7 @@
   }
 
   function scheduleAuxiliaryRearm() {
+    if (bluetoothFallbackActive) return;
     clearAuxiliaryRearm();
     auxiliaryRearmTimer = window.setTimeout(() => {
       auxiliaryRearmTimer = null;
@@ -945,6 +979,7 @@
   function resetLeaderAttemptState() {
     pendingPhoneExceptionWorkerId = '';
     pendingManualArrival = null;
+    bluetoothFallbackActive = false;
     retryNotDetectedCount = 0;
     retryMarkType = '';
     hasCompletedLeaderScan = false;
@@ -1037,7 +1072,9 @@
 
     const presentationMarkType = activePresentationMarkType(context);
     const offlineQueued = !navigator.onLine && queuedMarkSet(context?.serviceRequestId || '').size > 0;
-    const status = element('div', 'native-presence-status warning', context?.isCrewLeader
+    const status = element('div', 'native-presence-status warning', bluetoothFallbackActive
+      ? 'Bluetooth no está disponible. Usa “Marcación Manual” junto a cada auxiliar por detectar.'
+      : context?.isCrewLeader
       ? waitingServerMarkType
         ? `${markInfo(waitingServerMarkType).title} enviada · esperando confirmación del servidor. La siguiente marcación se habilitará cuando quede registrada.`
         : offlineQueued
@@ -1122,6 +1159,7 @@
   async function startReady() {
     const context = currentContext();
     if (!context || context.isCrewLeader || ['PREPARING', 'READY'].includes(activeMode)) return;
+    bluetoothFallbackActive = false;
     activeMode = 'PREPARING';
     const prepare = document.querySelector(`#${PANEL_ID} [data-native-presence-aux-ready]`);
     if (prepare) {
@@ -1139,6 +1177,10 @@
         prepare.disabled = false;
         prepare.textContent = 'Preparar para marcación';
       }
+      if (BLUETOOTH_FALLBACK_ERRORS.has(String(result?.error || ''))) {
+        activateBluetoothFallback({ code: result.error, operation: 'auxiliary_ready' });
+        return;
+      }
       setStatus(publicNativeError(result?.error), 'warning');
       return;
     }
@@ -1151,6 +1193,7 @@
     const normalizedMark = normalizeMarkType(markType);
     if (!context?.isCrewLeader || !normalizedMark || activeMode === 'LEADER') return;
     clearAutoRetry();
+    bluetoothFallbackActive = false;
     pendingPhoneExceptionWorkerId = '';
     pendingCompletedScan = null;
     retryMarkType = normalizedMark;
@@ -1190,6 +1233,10 @@
     if (!result?.ok) {
       recordDiagnostic('APP', 'LEADER_SCAN_BRIDGE_REJECTED');
       activeAttempt = null;
+      if (BLUETOOTH_FALLBACK_ERRORS.has(String(result?.error || ''))) {
+        activateBluetoothFallback({ code: result.error, operation: 'leader_discovery' });
+        return;
+      }
       setStatus(publicNativeError(result?.error), 'warning');
       return;
     }
@@ -1202,6 +1249,28 @@
         ? `Reintentando automáticamente la ${markInfo(normalizedMark).noun} para quienes faltan…`
         : `Buscando señales de la cuadrilla para ${markInfo(normalizedMark).noun}…`,
       'warning'
+    );
+  }
+
+  function activateBluetoothFallback(detail = {}) {
+    clearAutoRetry();
+    clearAuxiliaryRearm();
+    bridgeCall('stopReady');
+    bridgeCall('stopCrewScan');
+    activeMode = 'IDLE';
+    activeAttempt = null;
+    pendingCompletedScan = null;
+    scanPendingCount = 0;
+    bluetoothFallbackActive = true;
+    recordDiagnostic(
+      currentContext()?.isCrewLeader ? 'ENC' : 'AUX',
+      'BLUETOOTH_UNAVAILABLE',
+      detail
+    );
+    renderPanel();
+    setStatus(
+      'Bluetooth no está disponible. Usa “Marcación Manual” junto a cada auxiliar por detectar.',
+      'error'
     );
   }
 
@@ -1362,6 +1431,10 @@
       recordDiagnostic(detail.actor, detail.stage, detail);
       return;
     }
+    if (type === 'bluetooth_unavailable') {
+      activateBluetoothFallback(detail);
+      return;
+    }
     if (type === 'permissions') {
       const context = currentContext();
       recordDiagnostic(
@@ -1432,6 +1505,7 @@
       return;
     }
     if (type === 'scan_started') {
+      bluetoothFallbackActive = false;
       activeMode = 'LEADER';
       const markType = normalizeMarkType(activeAttempt?.markType) || 'ARRIVAL';
       setStatus(`Buscando señales de la cuadrilla para ${markInfo(markType).noun}…`, 'warning');
@@ -1492,6 +1566,10 @@
       const errorStage = `ERROR_${code.toUpperCase().replace(/[^A-Z0-9_]/g, '').slice(0, 48)}`;
       recordDiagnostic(currentContext()?.isCrewLeader ? 'ENC' : 'AUX', errorStage);
       if (activeMode === 'LEADER' && TRANSIENT_SCAN_ERRORS.has(code)) scanTransientFailureCount += 1;
+      if (BLUETOOTH_FALLBACK_ERRORS.has(code)) {
+        activateBluetoothFallback(detail);
+        return;
+      }
       if (NATIVE_START_ERRORS.has(code)) {
         activeMode = 'IDLE';
         activeAttempt = null;
