@@ -5,6 +5,10 @@ import ExcelJS from 'exceljs';
 import { prisma } from '../lib/prisma.js';
 import { upsertDispatchWorkerFromCandidate } from '../services/dispatchWorkerSync.js';
 import { loadUnifiedCityOptions, resolveEquivalentCityIds } from '../services/cityOptions.js';
+import {
+  dispatchClientBranchErrorStatus,
+  resolveDispatchClientBranchSelection
+} from '../services/dispatchClientBranches.js';
 import { normalizeTransportMode, uniqueNormalizedTransportModes } from '../services/transportMode.js';
 import {
   DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE,
@@ -150,9 +154,32 @@ export function dispatchBridgeRouter() {
     return res.render('operacionesClientes', { clients, cities, role: req.session?.userRole || req.userRole, message: normalizeString(req.query.message), baseUrl: `${req.protocol}://${req.get('host')}` });
   });
   router.post('/clientes', requireOps, async (req, res) => {
-    const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre requerido');
-    await prisma.dispatchClient.create({ data: { name, publicToken: randomBytes(24).toString('hex'), nit: normalizeString(req.body.nit), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), contactEmail: normalizeString(req.body.contactEmail), notes: normalizeString(req.body.notes), isActive: normalizeString(req.body.isActive) !== 'false', ...(isDev(req) ? { isTestClient: normalizeString(req.body.isTestClient) === 'true' } : {}), createdByUsername: req.session?.username || req.username || null } });
-    return res.redirect('/admin/operaciones/clientes');
+    try {
+      const name = normalizeString(req.body.name);
+      if (!name) return res.status(400).send('Nombre requerido');
+      const branches = await resolveDispatchClientBranchSelection(prisma, req, normalizeStringList(req.body.cityIds));
+      await prisma.dispatchClient.create({
+        data: {
+          name,
+          branchCityIds: branches.branchCityIds,
+          cityName: branches.cityName,
+          publicToken: randomBytes(24).toString('hex'),
+          nit: normalizeString(req.body.nit),
+          contactName: normalizeString(req.body.contactName),
+          contactPhone: normalizeString(req.body.contactPhone),
+          contactEmail: normalizeString(req.body.contactEmail),
+          notes: normalizeString(req.body.notes),
+          isActive: normalizeString(req.body.isActive) !== 'false',
+          ...(isDev(req) ? { isTestClient: normalizeString(req.body.isTestClient) === 'true' } : {}),
+          createdByUsername: req.session?.username || req.username || null
+        }
+      });
+      return res.redirect('/admin/operaciones/clientes');
+    } catch (error) {
+      const status = dispatchClientBranchErrorStatus(error);
+      if (status === 500) console.error(error);
+      return res.status(status).send(error?.message || 'No fue posible crear el cliente.');
+    }
   });
   router.get('/clientes/:clientId/editar', requireOps, async (req, res) => {
     const client = await prisma.dispatchClient.findUnique({ where: { id: req.params.clientId } });
@@ -163,7 +190,43 @@ export function dispatchBridgeRouter() {
     ]);
     return res.render('operacionesClientes', { clients, cities, editClient: client, role: req.session?.userRole || req.userRole, message: normalizeString(req.query.message), baseUrl: `${req.protocol}://${req.get('host')}` });
   });
-  router.post('/clientes/:clientId/editar', requireOps, async (req, res) => { const name = normalizeString(req.body.name); if (!name) return res.status(400).send('Nombre requerido'); await prisma.dispatchClient.update({ where: { id: req.params.clientId }, data: { name, nit: normalizeString(req.body.nit), contactName: normalizeString(req.body.contactName), contactPhone: normalizeString(req.body.contactPhone), contactEmail: normalizeString(req.body.contactEmail), notes: normalizeString(req.body.notes), isActive: normalizeString(req.body.isActive) !== 'false', ...(isDev(req) ? { isTestClient: normalizeString(req.body.isTestClient) === 'true' } : {}) } }); return res.redirect(`/admin/operaciones/clientes?message=${encodeURIComponent('Cliente actualizado.')}`); });
+  router.post('/clientes/:clientId/editar', requireOps, async (req, res) => {
+    try {
+      const name = normalizeString(req.body.name);
+      if (!name) return res.status(400).send('Nombre requerido');
+      const existing = await prisma.dispatchClient.findUnique({
+        where: { id: req.params.clientId },
+        select: { id: true, cityName: true, branchCityIds: true }
+      });
+      if (!existing) return res.status(404).send('Cliente no encontrado');
+      const branches = await resolveDispatchClientBranchSelection(
+        prisma,
+        req,
+        normalizeStringList(req.body.cityIds),
+        { existingClient: existing }
+      );
+      await prisma.dispatchClient.update({
+        where: { id: existing.id },
+        data: {
+          name,
+          branchCityIds: branches.branchCityIds,
+          cityName: branches.cityName,
+          nit: normalizeString(req.body.nit),
+          contactName: normalizeString(req.body.contactName),
+          contactPhone: normalizeString(req.body.contactPhone),
+          contactEmail: normalizeString(req.body.contactEmail),
+          notes: normalizeString(req.body.notes),
+          isActive: normalizeString(req.body.isActive) !== 'false',
+          ...(isDev(req) ? { isTestClient: normalizeString(req.body.isTestClient) === 'true' } : {})
+        }
+      });
+      return res.redirect(`/admin/operaciones/clientes?message=${encodeURIComponent('Cliente actualizado.')}`);
+    } catch (error) {
+      const status = dispatchClientBranchErrorStatus(error);
+      if (status === 500) console.error(error);
+      return res.status(status).send(error?.message || 'No fue posible actualizar el cliente.');
+    }
+  });
   router.post('/clientes/:clientId/toggle', requireOps, async (req, res) => { const client = await prisma.dispatchClient.findUnique({ where: { id: req.params.clientId }, select: { id: true, isActive: true } }); if (!client) return res.status(404).send('Cliente no encontrado'); await prisma.dispatchClient.update({ where: { id: client.id }, data: { isActive: !client.isActive } }); return res.redirect(`/admin/operaciones/clientes?message=${encodeURIComponent(client.isActive ? 'Cliente desactivado.' : 'Cliente reactivado.')}`); });
   router.post('/clientes/:clientId/regenerar-link', requireOps, async (req, res) => { const client = await prisma.dispatchClient.findUnique({ where: { id: req.params.clientId }, select: { id: true } }); if (!client) return res.status(404).send('Cliente no encontrado'); await prisma.dispatchClient.update({ where: { id: client.id }, data: { publicToken: randomBytes(24).toString('hex') } }); return res.redirect(`/admin/operaciones/clientes?message=${encodeURIComponent('Link público regenerado.')}`); });
   router.post('/clientes/:clientId/eliminar', requireOps, async (req, res) => { await prisma.dispatchClient.update({ where: { id: req.params.clientId }, data: { isActive: false } }); return res.redirect(`/admin/operaciones/clientes?message=${encodeURIComponent('Cliente eliminado del flujo activo.')}`); });
@@ -181,8 +244,8 @@ export function dispatchBridgeRouter() {
     const q = normalizeString(req.query.q); const operationalCityId = normalizeString(req.query.operationalCityId); const vacancyId = normalizeString(req.query.vacancyId); const transportMode = normalizeTransportMode(req.query.transportMode); const locality = normalizeString(req.query.locality);
     const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds(operationalCityId); const operationalCityFilter = buildOperationalCityFilter(compatibleOperationalCityIds); const dispatchEligibilityFilter = buildDispatchEligibilityFilter();
     const workers = await prisma.dispatchWorker.findMany({ where: { ...dispatchEligibilityFilter, ...(q ? { AND: [{ OR: [{ fullName: { contains: q, mode: 'insensitive' } }, { documentNumber: { contains: q, mode: 'insensitive' } }, { phone: { contains: q, mode: 'insensitive' } }] }] } : {}), ...operationalCityFilter, ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}), ...(transportMode ? { transportMode } : {}), ...(locality ? { residenceLocality: locality } : {}) }, include: { candidate: true, cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } }, orderBy: { createdAt: 'desc' } });
-    const localityWhere = { ...dispatchEligibilityFilter, ...operationalCityFilter, ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}), ...(transportMode ? { transportMode } : {}) };
-    const transportWhere = { ...dispatchEligibilityFilter, ...operationalCityFilter, ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}), ...(locality ? { residenceLocality: locality } : {}) };
+    const localityWhere = { ...dispatchEligibilityFilter(), ...operationalCityFilter, ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}), ...(transportMode ? { transportMode } : {}) };
+    const transportWhere = { ...dispatchEligibilityFilter(), ...operationalCityFilter, ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {}), ...(locality ? { residenceLocality: locality } : {}) };
     const serviceRequestId = normalizeString(req.query.serviceRequestId);
     const [cities, vacancies, transportModeRows, localityRows, serviceRequests, clients] = await Promise.all([
       loadDispatchCities(), prisma.vacancy.findMany({ select: { id: true, title: true }, orderBy: { title: 'asc' } }), prisma.dispatchWorker.findMany({ where: transportWhere, select: { transportMode: true }, distinct: ['transportMode'], orderBy: { transportMode: 'asc' } }), prisma.dispatchWorker.findMany({ where: localityWhere, select: { residenceLocality: true }, distinct: ['residenceLocality'], orderBy: { residenceLocality: 'asc' } }), prisma.dispatchServiceRequest.findMany({ include: { service: true, ...DISPATCH_SERVICE_REQUEST_POLICY_INCLUDE, assignments: { include: { worker: true }, orderBy: { createdAt: 'asc' } } }, orderBy: [{ serviceDate: 'desc' }, { createdAt: 'desc' }] }), loadRequestFormClients()

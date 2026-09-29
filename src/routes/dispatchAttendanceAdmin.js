@@ -9,6 +9,10 @@ import {
   reviewAttendanceWorkdaySession
 } from '../modules/dispatch-attendance/application/attendanceAdminWorkday.js';
 import {
+  applyAttendanceCityFilter,
+  attendanceCitiesForRows
+} from '../modules/dispatch-attendance/application/attendanceBoardCityFilter.js';
+import {
   crewAttendanceConfigErrorMessage,
   loadCrewAttendanceConfiguration,
   saveCrewAttendanceOperationCapability,
@@ -23,7 +27,7 @@ import { loadAttendanceMapTile } from '../services/attendanceMapTileRelay.js';
 import { getSignedDownloadUrl } from '../services/storage.js';
 import { dispatchPayrollRouter } from './dispatchPayroll.js';
 
-const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'q']);
+const SAFE_FILTER_KEYS = Object.freeze(['from', 'to', 'status', 'client', 'city', 'q']);
 const CORRECTION_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000;
 const PAYROLL_CANONICAL_ROUTE = '/gestion-tiempo';
@@ -52,6 +56,7 @@ function sanitizeBoardFilterState(board) {
     filters: {
       status: safeHtmlAttributeState(board?.filters?.status, 'ALL'),
       client: safeHtmlAttributeState(board?.filters?.client, 'ALL'),
+      city: safeHtmlAttributeState(board?.filters?.city, 'ALL'),
       q: safeHtmlAttributeState(board?.filters?.q)
     }
   };
@@ -411,11 +416,35 @@ export function dispatchAttendanceAdminRouter(prisma) {
     }
   });
 
+  router.get('/filter-options', async (req, res) => {
+    applyNoStore(res);
+    try {
+      const client = normalizeString(req.query?.client) || 'ALL';
+      if (client === 'ALL') return res.status(200).json({ ok: true, client, cities: [] });
+      const board = await loadAttendanceAdminBoard(prisma, {
+        from: req.query?.from,
+        to: req.query?.to,
+        status: 'ALL',
+        client,
+        q: ''
+      });
+      return res.status(200).json({
+        ok: true,
+        client,
+        cities: attendanceCitiesForRows(board.rows)
+      });
+    } catch (error) {
+      console.warn('[ATTENDANCE_FILTER_OPTIONS_FAILED]', { code: error?.message });
+      return res.status(500).json({ ok: false, client: normalizeString(req.query?.client) || 'ALL', cities: [] });
+    }
+  });
+
   router.get('/', async (req, res) => {
     applyNoStore(res);
     try {
       const baseBoard = await loadAttendanceAdminBoard(prisma, req.query || {});
-      const enrichedBoard = await enrichAttendanceBoardWithWorkday(prisma, baseBoard);
+      const cityBoard = applyAttendanceCityFilter(baseBoard, req.query?.city);
+      const enrichedBoard = await enrichAttendanceBoardWithWorkday(prisma, cityBoard);
       const board = sanitizeBoardFilterState(enrichedBoard);
       return res.render('operacionesAsistencia', {
         pageTitle: 'Asistencia operativa',
@@ -432,8 +461,8 @@ export function dispatchAttendanceAdminRouter(prisma) {
         role: req.session?.userRole || req.userRole,
         board: {
           range: { from: '', to: '' },
-          filters: { status: 'ALL', client: 'ALL', q: '' },
-          clients: [], rows: [],
+          filters: { status: 'ALL', client: 'ALL', city: 'ALL', q: '' },
+          clients: [], cities: [], rows: [],
           metrics: { total: 0, pendingReview: 0, autoValidated: 0, manualValidated: 0, late: 0, rejected: 0, noShow: 0 }
         },
         success: null,

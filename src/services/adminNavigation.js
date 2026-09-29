@@ -22,6 +22,7 @@ const SHELL_STYLESHEET = '/public/admin-module-shell.css';
 const DESKTOP_NAVIGATION_STYLESHEET = '/public/admin-module-navigation-desktop.css';
 const USERS_PROGRAMMING_ACCESS_SCRIPT = '/public/users-programming-access.js';
 const LIVE_SEARCH_SCRIPT = '/public/lorren-live-search.js';
+const SEARCHABLE_MULTISELECT_SCRIPT = '/public/lorren-searchable-multiselect.js';
 const CANDIDATE_EXPORT_DATE_RANGE_SCRIPT = '/public/candidate-export-date-range.js';
 const CANDIDATE_VACANCY_SECTION_TABS_SCRIPT = '/public/candidate-vacancy-section-tabs.js';
 const MODULE_MENU_GROUP = 'admin-primary-navigation';
@@ -328,6 +329,13 @@ function ensureLiveSearchScript(html) {
   return html.replace(/<\/body>/i, `  <script src="${LIVE_SEARCH_SCRIPT}" defer></script>\n</body>`);
 }
 
+function ensureSearchableMultiselectScript(html, req = {}) {
+  const path = requestPath(req);
+  const supported = path === ATTENDANCE_PATH || path.startsWith(PAYROLL_PATH) || path.startsWith(LEGACY_PAYROLL_PATH);
+  if (!supported || html.includes(SEARCHABLE_MULTISELECT_SCRIPT) || !/<\/body>/i.test(html)) return html;
+  return html.replace(/<\/body>/i, `  <script src="${SEARCHABLE_MULTISELECT_SCRIPT}" defer></script>\n</body>`);
+}
+
 function ensureCandidateExportDateRangeScript(html, req = {}) {
   const path = requestPath(req);
   if (path !== RECRUITMENT_PATH || requestRole(req) === 'dev' || html.includes(CANDIDATE_EXPORT_DATE_RANGE_SCRIPT) || !/<\/body>/i.test(html)) return html;
@@ -342,6 +350,7 @@ function ensureCandidateVacancySectionTabsScript(html, req = {}) {
 
 function ensureAdminEnhancementScripts(html, req = {}) {
   let output = ensureLiveSearchScript(html);
+  output = ensureSearchableMultiselectScript(output, req);
   output = ensureCandidateExportDateRangeScript(output, req);
   return ensureCandidateVacancySectionTabsScript(output, req);
 }

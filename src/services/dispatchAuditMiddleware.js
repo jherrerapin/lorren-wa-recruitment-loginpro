@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
 import { canManageUserModulePermissions } from './appUsers.js';
+import {
+  clientMatchesOperationalCityScope,
+  filterOperationalClientsByCityScope,
+  operationalCityIdsAllowed,
+  operationalCityScopeAllowsName,
+  resolveUserCityScope
+} from './cityOptions.js';
 import { resolvePayrollFeatureAccess } from './payrollFeatureAccess.js';
 import { resolveTestWorkspaceFeatureAccess } from './testWorkspaceFeatureAccess.js';
 import { injectAdminModuleNavigation } from './adminNavigation.js';
@@ -16,11 +23,42 @@ const DEV_TEST_REQUEST_SOURCE = 'DEV_TEST';
 const DEV_TEST_ASSIGNMENT_STATUSES = new Set(['DEV_TEST_ASSIGNED', 'DEV_TEST_CONFIRMED']);
 const GUARDED_PRISMA_CLIENTS = new WeakSet();
 const AUDIT_FINGERPRINT_CONTEXT = 'lorren-dispatch-audit-v1';
+const SERVICE_REQUESTS_PATH = '/admin/operaciones/solicitudes';
+const SERVICE_REQUESTS_VIEW = 'operacionesSolicitudes';
+const CLIENTS_PATH = '/admin/operaciones/clientes';
+const PERSONNEL_PATH = '/admin/operaciones/personal';
+const OPERATIONS_CITY_API_PATH = '/operaciones/api/ciudades';
+const DEV_MONITOR_PATH = '/admin/monitor';
+const DISPATCH_ACTIVITY_ACTIONS = [
+  'DISPATCH_SERVICE_REQUEST_CREATE',
+  'DISPATCH_SERVICE_REQUEST_CHANGE',
+  'DISPATCH_SERVICE_REQUEST_DELETE',
+  'DISPATCH_ASSIGNMENT_CREATE',
+  'DISPATCH_ASSIGNMENT_CONFIRM',
+  'DISPATCH_ASSIGNMENT_NO_CONFIRM',
+  'DISPATCH_ASSIGNMENT_REMOVE',
+  'DISPATCH_WHATSAPP_SEND'
+];
+const DISPATCH_ACTIVITY_LABELS = Object.freeze({
+  DISPATCH_SERVICE_REQUEST_CREATE: 'Solicitud creada',
+  DISPATCH_SERVICE_REQUEST_CHANGE: 'Solicitud actualizada',
+  DISPATCH_SERVICE_REQUEST_DELETE: 'Solicitud eliminada',
+  DISPATCH_ASSIGNMENT_CREATE: 'Asignación creada',
+  DISPATCH_ASSIGNMENT_CONFIRM: 'Confirmación manual registrada',
+  DISPATCH_ASSIGNMENT_NO_CONFIRM: 'Asignación marcada manualmente como no confirmada',
+  DISPATCH_ASSIGNMENT_REMOVE: 'Asignación retirada',
+  DISPATCH_WHATSAPP_SEND: 'Mensaje de Despacho enviado'
+});
 
 function normalizeString(value) {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return trimmed.length ? trimmed : null;
+}
+
+function normalizeStringList(value) {
+  const values = Array.isArray(value) ? value : value === null || value === undefined ? [] : [value];
+  return [...new Set(values.map((item) => normalizeString(item)).filter(Boolean))];
 }
 
 function requestPath(req = {}) {
@@ -165,6 +203,7 @@ function inferAction(req) {
   if (path.includes('/asignaciones/no-confirmado')) return 'DISPATCH_ASSIGNMENT_NO_CONFIRM';
   if (path.includes('/asignaciones/unassign')) return 'DISPATCH_ASSIGNMENT_REMOVE';
   if (path.includes('/solicitudes') && path.includes('/eliminar')) return 'DISPATCH_SERVICE_REQUEST_DELETE';
+  if (String(req.method || '').toUpperCase() === 'POST' && path === SERVICE_REQUESTS_PATH) return 'DISPATCH_SERVICE_REQUEST_CREATE';
   if (path.includes('/solicitudes')) return 'DISPATCH_SERVICE_REQUEST_CHANGE';
   if (path.includes('/personal')) return 'DISPATCH_WORKER_CHANGE';
   if (path.includes('/clientes')) return 'DISPATCH_CLIENT_CHANGE';
@@ -423,6 +462,288 @@ async function refreshDatabaseUserPermissions(prisma, req) {
   req.canAccessCvAnalysis = canAccessCvAnalysis;
 }
 
+function operationalCityAllowed(scope, cityName) {
+  return operationalCityScopeAllowsName(scope, cityName, { selected: false });
+}
+
+function workerInCityScope(worker, scope) {
+  if (!scope?.restricted) return true;
+  const assignedCityNames = (worker?.cities || [])
+    .map((entry) => entry?.city?.name || entry?.name)
+    .filter(Boolean);
+  if (assignedCityNames.length) return assignedCityNames.some((name) => operationalCityAllowed(scope, name));
+  return operationalCityAllowed(scope, worker?.residenceCity);
+}
+
+function filterWorkersByCityScope(workers, scope) {
+  if (!Array.isArray(workers) || !scope?.restricted) return workers;
+  return workers.filter((worker) => workerInCityScope(worker, scope));
+}
+
+function filterVacanciesByCityScope(vacancies, scope) {
+  if (!Array.isArray(vacancies) || !scope?.restricted) return vacancies;
+  return vacancies.filter((vacancy) => operationalCityAllowed(scope, vacancy?.city));
+}
+
+function filterCityOptions(cities, scope) {
+  if (!Array.isArray(cities) || !scope?.restricted) return cities;
+  const allowedIds = new Set(scope.allowedCityIds || []);
+  return cities.filter((city) => allowedIds.has(city?.id));
+}
+
+function installOperationalCityRenderGate(res, scope) {
+  const originalRender = res.render.bind(res);
+  res.render = (view, locals, callback) => {
+    let renderLocals = locals || {};
+    let renderCallback = callback;
+    if (typeof locals === 'function') {
+      renderCallback = locals;
+      renderLocals = {};
+    }
+
+    const nextLocals = { ...renderLocals, operationalCityScope: scope };
+    if (Array.isArray(nextLocals.cities)) nextLocals.cities = filterCityOptions(nextLocals.cities, scope);
+    if (Array.isArray(nextLocals.vacancies)) nextLocals.vacancies = filterVacanciesByCityScope(nextLocals.vacancies, scope);
+    if (Array.isArray(nextLocals.clients)) nextLocals.clients = filterOperationalClientsByCityScope(nextLocals.clients, scope);
+    if (Array.isArray(nextLocals.serviceRequests)) {
+      nextLocals.serviceRequests = nextLocals.serviceRequests.filter((request) => operationalCityAllowed(scope, request?.cityName));
+    }
+    if (Array.isArray(nextLocals.workers)) nextLocals.workers = filterWorkersByCityScope(nextLocals.workers, scope);
+    if (Array.isArray(nextLocals.availableWorkers)) nextLocals.availableWorkers = filterWorkersByCityScope(nextLocals.availableWorkers, scope);
+    if (nextLocals.client && Array.isArray(nextLocals.client.operationPoints)) {
+      nextLocals.client = {
+        ...nextLocals.client,
+        operationPoints: nextLocals.client.operationPoints.filter((point) => operationalCityAllowed(scope, point?.cityName || nextLocals.client?.cityName))
+      };
+    }
+    if (nextLocals.selectedServiceRequest && !operationalCityAllowed(scope, nextLocals.selectedServiceRequest.cityName)) {
+      nextLocals.selectedServiceRequest = null;
+      nextLocals.selectedServiceRequestId = '';
+    }
+
+    return originalRender(view, nextLocals, renderCallback);
+  };
+}
+
+function installOperationalCityJsonGate(res, scope) {
+  if (!res || typeof res.json !== 'function') return;
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    if (!body || !Array.isArray(body.cities)) return originalJson(body);
+    return originalJson({ ...body, cities: filterCityOptions(body.cities, scope) });
+  };
+}
+
+function clientIdFromPath(path) {
+  const patterns = [
+    /^\/admin\/operaciones\/clientes\/([^/]+)/,
+    /^\/operaciones\/admin-clientes\/([^/]+)/,
+    /^\/operaciones\/admin-delete\/clientes\/([^/]+)/
+  ];
+  for (const pattern of patterns) {
+    const match = path.match(pattern);
+    if (match?.[1]) return decodeURIComponent(match[1]);
+  }
+  return null;
+}
+
+function operationPointIdFromPath(path) {
+  const patterns = [
+    /^\/admin\/operaciones\/clientes\/[^/]+\/operaciones\/([^/]+)/,
+    /^\/operaciones\/admin-clientes\/[^/]+\/operaciones\/([^/]+)/,
+    /^\/operaciones\/admin-delete\/clientes\/[^/]+\/operaciones\/([^/]+)/
+  ];
+  for (const pattern of patterns) {
+    const match = path.match(pattern);
+    if (match?.[1]) return decodeURIComponent(match[1]);
+  }
+  return null;
+}
+
+function isOperationPointPath(path) {
+  return /^\/admin\/operaciones\/clientes\/[^/]+\/operaciones(?:\/|$)/.test(path)
+    || /^\/operaciones\/admin-clientes\/[^/]+\/operaciones(?:\/|$)/.test(path)
+    || /^\/operaciones\/admin-delete\/clientes\/[^/]+\/operaciones(?:\/|$)/.test(path);
+}
+
+function workerIdFromPath(path) {
+  const patterns = [
+    /^\/admin\/operaciones\/personal\/([^/]+)/,
+    /^\/operaciones\/admin-worker\/([^/]+)/,
+    /^\/operaciones\/admin-delete\/personal\/([^/]+)/
+  ];
+  const reserved = new Set(['nuevo', 'importar-excel', 'exportar-excel', 'eliminar-bulk', 'documento-existe']);
+  for (const pattern of patterns) {
+    const match = path.match(pattern);
+    const id = match?.[1] ? decodeURIComponent(match[1]) : null;
+    if (id && !reserved.has(id)) return id;
+  }
+  return null;
+}
+
+async function enforceClientCityScope(prisma, req, res, scope) {
+  const path = requestPath(req);
+  const method = String(req.method || 'GET').toUpperCase();
+  const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  if (!path.startsWith(CLIENTS_PATH)
+    && !path.startsWith('/operaciones/admin-clientes')
+    && !path.startsWith('/operaciones/admin-delete/clientes')) return true;
+
+  const operationPath = isOperationPointPath(path);
+  if (isWrite && operationPath && normalizeString(req.body?.cityName) && !operationalCityAllowed(scope, req.body.cityName)) {
+    res.status(403).send('No tienes permiso para gestionar clientes u operaciones en esta ciudad.');
+    return false;
+  }
+
+  const requestedBranchIds = normalizeStringList(req.body?.cityIds);
+  if (scope.restricted && requestedBranchIds.length && !operationalCityIdsAllowed(scope, requestedBranchIds)) {
+    res.status(403).send('No tienes permiso para gestionar clientes en una de las sucursales seleccionadas.');
+    return false;
+  }
+
+  const isClientCreate = method === 'POST' && (path === CLIENTS_PATH || path === '/operaciones/admin-clientes');
+  if (isClientCreate && scope.restricted && !requestedBranchIds.length) {
+    res.status(403).send('Debes seleccionar al menos una sucursal dentro de tu alcance.');
+    return false;
+  }
+
+  const clientId = clientIdFromPath(path);
+  if (!clientId) return true;
+  const client = await prisma.dispatchClient.findUnique({
+    where: { id: clientId },
+    select: {
+      id: true,
+      cityName: true,
+      branchCityIds: true,
+      operationPoints: { select: { id: true, cityName: true } }
+    }
+  });
+
+  if (operationPath) {
+    const operationPointId = operationPointIdFromPath(path);
+    if (operationPointId) {
+      const operationPoint = client?.operationPoints?.find((point) => point.id === operationPointId) || null;
+      if (operationPoint && !operationalCityAllowed(scope, operationPoint.cityName || client?.cityName)) {
+        res.status(403).send('No tienes permiso para gestionar este punto de operación.');
+        return false;
+      }
+      return true;
+    }
+
+    if (isWrite && normalizeString(req.body?.cityName)) return true;
+    const hasVisiblePoint = (client?.operationPoints || []).some((point) => operationalCityAllowed(scope, point.cityName || client?.cityName));
+    if (client && !clientMatchesOperationalCityScope(client, scope, { selected: false }) && !hasVisiblePoint) {
+      res.status(403).send('No tienes permiso para gestionar operaciones de este cliente.');
+      return false;
+    }
+    return true;
+  }
+
+  if (client && !clientMatchesOperationalCityScope(client, scope, { selected: false })) {
+    res.status(403).send('No tienes permiso para gestionar este cliente.');
+    return false;
+  }
+  return true;
+}
+
+async function enforceWorkerCityScope(prisma, req, res, scope) {
+  const path = requestPath(req);
+  if (!path.startsWith(PERSONNEL_PATH)
+    && !path.startsWith('/operaciones/admin-worker')
+    && !path.startsWith('/operaciones/admin-delete/personal')) return true;
+
+  const requestedCityIds = normalizeStringList(req.body?.cityIds);
+  if (scope.restricted && requestedCityIds.length) {
+    const allowedIds = new Set(scope.allowedCityIds || []);
+    if (requestedCityIds.some((id) => !allowedIds.has(id))) {
+      res.status(403).send('No tienes permiso para gestionar auxiliares en una de las ciudades seleccionadas.');
+      return false;
+    }
+  }
+
+  const workerId = workerIdFromPath(path);
+  if (!workerId) return true;
+  const worker = await prisma.dispatchWorker.findUnique({
+    where: { id: workerId },
+    select: {
+      id: true,
+      residenceCity: true,
+      cities: { select: { city: { select: { name: true } } } }
+    }
+  });
+  if (worker && !workerInCityScope(worker, scope)) {
+    res.status(403).send('No tienes permiso para gestionar este auxiliar.');
+    return false;
+  }
+  return true;
+}
+
+async function enforceServiceRequestCityScope(prisma, req, res, scope) {
+  const path = requestPath(req);
+  const method = String(req.method || 'GET').toUpperCase();
+  if (method !== 'POST' || !path.startsWith(SERVICE_REQUESTS_PATH)) return true;
+
+  if (path === SERVICE_REQUESTS_PATH) {
+    const clientId = normalizeString(req.body?.clientId);
+    const operationPointId = normalizeString(req.body?.operationPointId);
+    if (!clientId || !operationPointId) return true;
+    const client = await prisma.dispatchClient.findFirst({
+      where: { id: clientId, isActive: true },
+      select: {
+        cityName: true,
+        operationPoints: { where: { id: operationPointId, isActive: true }, select: { id: true, cityName: true } }
+      }
+    });
+    const operationPoint = client?.operationPoints?.[0] || null;
+    if (!client || !operationPoint) return true;
+    const cityName = operationPoint.cityName || client.cityName;
+    if (!operationalCityAllowed(scope, cityName)) {
+      res.status(403).send('No tienes permiso para crear solicitudes en esta ciudad.');
+      return false;
+    }
+    return true;
+  }
+
+  const deleteMatch = path.match(/^\/admin\/operaciones\/solicitudes\/([^/]+)\/eliminar\/?$/);
+  if (!deleteMatch) return true;
+  const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+    where: { id: decodeURIComponent(deleteMatch[1]) },
+    select: { cityName: true }
+  });
+  if (serviceRequest && !operationalCityAllowed(scope, serviceRequest.cityName)) {
+    res.status(403).send('No tienes permiso para gestionar solicitudes de esta ciudad.');
+    return false;
+  }
+  return true;
+}
+
+function needsOperationalCityScope(path) {
+  return path.startsWith(SERVICE_REQUESTS_PATH)
+    || path.startsWith(CLIENTS_PATH)
+    || path.startsWith(PERSONNEL_PATH)
+    || path.startsWith('/operaciones/admin-clientes')
+    || path.startsWith('/operaciones/admin-delete/clientes')
+    || path.startsWith('/operaciones/admin-worker')
+    || path.startsWith('/operaciones/admin-delete/personal')
+    || path === OPERATIONS_CITY_API_PATH;
+}
+
+async function applyOperationalCityAccess(prisma, req, res) {
+  const path = requestPath(req);
+  if (!needsOperationalCityScope(path)) return true;
+  const scope = await resolveUserCityScope(prisma, req);
+  req.operationalCityScope = scope;
+
+  if (String(req.method || 'GET').toUpperCase() === 'GET') {
+    installOperationalCityRenderGate(res, scope);
+    if (path === OPERATIONS_CITY_API_PATH) installOperationalCityJsonGate(res, scope);
+  }
+
+  if (!await enforceServiceRequestCityScope(prisma, req, res, scope)) return false;
+  if (!await enforceClientCityScope(prisma, req, res, scope)) return false;
+  return enforceWorkerCityScope(prisma, req, res, scope);
+}
+
 function isHtmlDocumentBody(body) {
   if (typeof body !== 'string') return false;
   const trimmed = body.trimStart().toLowerCase();
@@ -468,6 +789,62 @@ function escapeHtml(value) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
+}
+
+function dispatchActivityTime(value) {
+  const date = value instanceof Date ? value : new Date(value || Number.NaN);
+  if (Number.isNaN(date.getTime())) return 'Hora no disponible';
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  }).format(date);
+}
+
+export async function loadDispatchDevActivity(prisma, { limit = 80 } = {}) {
+  if (!prisma?.devAuditEvent?.findMany) return [];
+  const rows = await prisma.devAuditEvent.findMany({
+    where: { entityType: 'DISPATCH', action: { in: DISPATCH_ACTIVITY_ACTIONS } },
+    select: { id: true, action: true, actorUserId: true, actorRole: true, actorSource: true, createdAt: true },
+    orderBy: { createdAt: 'desc' },
+    take: Math.max(1, Math.min(200, Number(limit) || 80))
+  });
+  const userIds = [...new Set(rows.map((row) => normalizeString(row.actorUserId)).filter(Boolean))];
+  const users = userIds.length && prisma?.appUser?.findMany
+    ? await prisma.appUser.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, username: true, displayName: true }
+    })
+    : [];
+  const usersById = new Map(users.map((user) => [user.id, user]));
+  return rows.map((row) => {
+    const user = usersById.get(row.actorUserId);
+    const actor = normalizeString(user?.displayName)
+      || normalizeString(user?.username)
+      || (row.actorSource === 'public-client' ? 'Cliente / canal público' : 'Registro histórico · usuario no identificado');
+    return {
+      id: row.id,
+      label: DISPATCH_ACTIVITY_LABELS[row.action] || 'Actividad de Despacho',
+      actor,
+      at: dispatchActivityTime(row.createdAt)
+    };
+  });
+}
+
+function renderDispatchDevActivity(items = []) {
+  const rows = items.length
+    ? items.map((item) => `<li style="display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(160px,1fr) auto;gap:14px;align-items:center;padding:12px 0;border-top:1px solid #e2e8f0"><strong style="color:#172033">${escapeHtml(item.label)}</strong><span style="color:#475569">${escapeHtml(item.actor)}</span><time style="color:#64748b;white-space:nowrap">${escapeHtml(item.at)}</time></li>`).join('')
+    : '<li style="padding:14px 0;color:#64748b">Aún no hay actividad reciente de Despacho para mostrar.</li>';
+  return `<section id="dispatch-dev-activity" style="margin:24px 0;background:#fff;border:1px solid #dbe4ee;border-radius:16px;padding:20px;box-shadow:0 8px 24px rgba(15,23,42,.06)"><div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap"><div><h2 style="margin:0;color:#172033;font-size:20px">Trazabilidad de Despacho</h2><p style="margin:6px 0 0;color:#64748b;font-size:13px">Acciones recientes en lenguaje operativo: qué ocurrió, quién lo hizo y a qué hora.</p></div><span style="font-size:12px;font-weight:800;color:#0d7a6b;background:#ecfdf5;border-radius:999px;padding:6px 10px">Solo DEV</span></div><ul style="list-style:none;margin:16px 0 0;padding:0">${rows}</ul></section>`;
+}
+
+function injectDispatchDevActivity(html, req) {
+  const role = req.session?.userRole || req.userRole;
+  if (requestPath(req) !== DEV_MONITOR_PATH || role !== 'dev' || html.includes('id="dispatch-dev-activity"')) return html;
+  const panel = renderDispatchDevActivity(Array.isArray(req.dispatchDevActivity) ? req.dispatchDevActivity : []);
+  return /<\/main>/i.test(html)
+    ? html.replace(/<\/main>/i, `${panel}\n</main>`)
+    : html.replace(/<\/body>/i, `${panel}\n</body>`);
 }
 
 function renderAdminAccessDenied(message) {
@@ -522,7 +899,8 @@ function injectPayrollUsersScript(html, req) {
   const operationalActorRole = isDev ? 'dev' : canSupervise ? 'supervisor' : 'none';
   return html.replace(
     /<\/body>/i,
-    `  <script src="${PAYROLL_USERS_SCRIPT}" data-can-manage-test-workspace="${canManageTestWorkspace ? 'true' : 'false'}" data-operational-actor-role="${operationalActorRole}" data-can-supervise-operational-permissions="${canSupervise ? 'true' : 'false'}"></script>\n</body>`
+    `  <script src="${PAYROLL_USERS_SCRIPT}" data-can-manage-test-workspace="${canManageTestWorkspace ? 'true' : 'false'}" data-operational-actor-role="${operationalActorRole}" data-can-supervise-operational-permissions="${canSupervise ? 'true' : 'false'}"></script>\
+</body>`
   );
 }
 
@@ -539,7 +917,8 @@ function injectProgrammingContactsScript(html, req) {
   const path = String(req.originalUrl || '').split('?')[0];
   if (path !== '/admin/operaciones' || html.includes(PROGRAMMING_CONTACTS_SCRIPT)) return html;
   const isDev = (req.session?.userRole || req.userRole) === 'dev';
-  return html.replace(/<\/body>/i, `  <script src="${PROGRAMMING_CONTACTS_SCRIPT}" data-dev="${isDev ? 'true' : 'false'}"></script>\n</body>`);
+  return html.replace(/<\/body>/i, `  <script src="${PROGRAMMING_CONTACTS_SCRIPT}" data-dev="${isDev ? 'true' : 'false'}"></script>\
+</body>`);
 }
 
 function installAdminHtmlBridge(req, res) {
@@ -561,7 +940,8 @@ function installAdminHtmlBridge(req, res) {
       : withNavigation;
     const withPayrollUsers = injectPayrollUsersScript(withPrivateCopyRemoved, req);
     const withProgrammingCopy = normalizeProgrammingPresentation(withPayrollUsers, req);
-    return originalSend(injectProgrammingContactsScript(withProgrammingCopy, req));
+    const withDispatchActivity = injectDispatchDevActivity(withProgrammingCopy, req);
+    return originalSend(injectProgrammingContactsScript(withDispatchActivity, req));
   };
 }
 
@@ -578,6 +958,7 @@ export function buildDispatchAuditEventData(req, res, startedAt = Date.now()) {
     entityId: auditFingerprint(targetFor(req), 'target'),
     entityLabel: routeName,
     action: inferAction(req),
+    actorUserId: normalizeString(req.session?.userId || req.userId),
     actorUsername: auditFingerprint(actorUsername(req), 'actor'),
     actorRole: normalizeString(req.session?.userRole || req.userRole),
     actorSource: actorSource(req),
@@ -608,7 +989,21 @@ export function dispatchAuditMiddleware(prisma) {
       else denyOperationalAccess(req);
     }
 
+    const role = req.session?.userRole || req.userRole;
+    if (requestPath(req) === DEV_MONITOR_PATH && role === 'dev') {
+      req.dispatchDevActivity = await loadDispatchDevActivity(prisma).catch((error) => {
+        console.warn('No fue posible cargar la trazabilidad de Despacho para DEV.', error);
+        return [];
+      });
+    }
+
     if (!enforceOperationalCapability(req, res)) return;
+    try {
+      if (!await applyOperationalCityAccess(prisma, req, res)) return;
+    } catch (error) {
+      console.warn('No fue posible aplicar el alcance territorial operativo.', error);
+      return res.status(500).send('No fue posible validar el alcance territorial operativo.');
+    }
     if (!shouldAudit(req) || !prisma?.devAuditEvent?.create) return next();
     const startedAt = Date.now();
     res.on('finish', () => {

@@ -220,7 +220,7 @@ async function sendProgrammingMenu(prisma, contact) {
   const result = await sendDispatchWhatsappReportMenu({ scope: 'operational', phone: contact.phone, name: contact.name });
   await auditProgrammingReply(prisma, {
     phone: contact.phone,
-    body: `Hola ${contact.name}. ¿Cómo te puedo ayudar hoy? [Programación] [Resumen del día]`,
+    body: `Hola ${contact.name}. Selecciona programación: hoy/mañana · PDF/Excel/Ambos.`,
     messageType: 'INTERACTIVE',
     providerMessageId: result.providerMessageId,
     source: 'PROGRAMMING_CONTACT_MENU'
@@ -298,6 +298,7 @@ export async function processProgrammingContacts(prisma, payload, {
       else if (action?.type === 'PROGRAMMING_DOCUMENTS') {
         const selectedDate = programmingDateForChoice(action.dateChoice);
         await senders.documents(prisma, contact, action.formats, selectedDate);
+        await senders.summary(prisma, contact, selectedDate);
       } else if (action?.type === 'SUMMARY_DATE') await senders.reportDateMenu(prisma, contact, 'summary');
       else if (action?.type === 'SUMMARY') {
         const selectedDate = programmingDateForChoice(action.dateChoice);

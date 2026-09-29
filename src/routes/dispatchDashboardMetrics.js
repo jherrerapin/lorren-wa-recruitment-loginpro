@@ -7,6 +7,10 @@ import {
   filterDispatchServiceRequestsByDate,
   normalizeDispatchDateParam
 } from '../services/dispatchDate.js';
+import {
+  operationalCityScopeAllowsName,
+  resolveUserCityScope
+} from '../services/cityOptions.js';
 import { confirmedOperationalAssignments, deriveDispatchRequestOperationalState, operationalAssignments } from '../services/dispatchOperationalCoverage.js';
 import { resolveAttendanceFeatureAccess } from '../services/attendanceFeatureAccess.js';
 import {
@@ -187,6 +191,10 @@ function filterRequestsBySummaryType(requests = [], type = 'total') {
   if (type === 'complete') return requests.filter((request) => request.status === 'ASSIGNMENT_COMPLETE');
   if (type === 'incidents') return requests.filter((request) => (request.incidents || []).some((incident) => OPEN_INCIDENT_STATUSES.includes(incident.status)));
   return requests;
+}
+
+function filterRequestsByCityScope(requests = [], cityScope) {
+  return requests.filter((request) => operationalCityScopeAllowsName(cityScope, request?.cityName, { selected: false }));
 }
 
 function buildOperationsDashboardMetrics(requests = []) {
@@ -402,9 +410,15 @@ export function dispatchDashboardMetricsRouter(prisma) {
     const range = selectedDateRangeFromQuery(req.query);
     const rangeRequestsPromise = loadServiceRequestsForRange(prisma, range);
     const programmingRequestsPromise = range.from === range.to ? rangeRequestsPromise : loadServiceRequestsForDate(prisma, range.to);
-    const [requests, programmingRequests, attendanceAccess, dispatchAlertSettings] = await Promise.all([
-      rangeRequestsPromise, programmingRequestsPromise, loadAttendanceAccessForDashboard(prisma, req), loadCurrentDispatchAlertSettings(prisma, req)
+    const [rawRequests, rawProgrammingRequests, attendanceAccess, dispatchAlertSettings, cityScope] = await Promise.all([
+      rangeRequestsPromise,
+      programmingRequestsPromise,
+      loadAttendanceAccessForDashboard(prisma, req),
+      loadCurrentDispatchAlertSettings(prisma, req),
+      resolveUserCityScope(prisma, req)
     ]);
+    const requests = filterRequestsByCityScope(rawRequests, cityScope);
+    const programmingRequests = filterRequestsByCityScope(rawProgrammingRequests, cityScope);
     return renderHome(res, req, range, requests, programmingRequests, attendanceAccess, dispatchAlertSettings);
   });
 
@@ -425,13 +439,21 @@ export function dispatchDashboardMetricsRouter(prisma) {
 
   router.get('/resumen', requireOps, async (req, res) => {
     const range = selectedDateRangeFromQuery(req.query);
-    const requests = await loadServiceRequestsForRange(prisma, range);
+    const [rawRequests, cityScope] = await Promise.all([
+      loadServiceRequestsForRange(prisma, range),
+      resolveUserCityScope(prisma, req)
+    ]);
+    const requests = filterRequestsByCityScope(rawRequests, cityScope);
     return renderSummary(res, req, range, normalizeSummaryType(req.query.type), requests);
   });
 
   router.get('/resumen/exportar', requireOps, async (req, res) => {
     const range = selectedDateRangeFromQuery(req.query);
-    const requests = await loadServiceRequestsForRange(prisma, range);
+    const [rawRequests, cityScope] = await Promise.all([
+      loadServiceRequestsForRange(prisma, range),
+      resolveUserCityScope(prisma, req)
+    ]);
+    const requests = filterRequestsByCityScope(rawRequests, cityScope);
     const type = normalizeSummaryType(req.query.type);
     return exportRequestsToExcel(res, range, filterRequestsBySummaryType(requests, type));
   });
@@ -447,6 +469,10 @@ export function dispatchDashboardMetricsRouter(prisma) {
       }
     });
     if (!request || request.source === DEV_TEST_REQUEST_SOURCE) return res.status(404).send('Solicitud no encontrada');
+    const cityScope = req.operationalCityScope || await resolveUserCityScope(prisma, req);
+    if (!operationalCityScopeAllowsName(cityScope, request.cityName, { selected: false })) {
+      return res.status(403).send('No tienes permiso para consultar solicitudes de esta ciudad.');
+    }
     const derivedRequest = { ...request, status: deriveDispatchRequestOperationalState(request).status };
     return res.render('operacionesSolicitudDetalle', {
       role: req.session?.userRole || req.userRole, request: derivedRequest,

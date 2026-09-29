@@ -17,7 +17,8 @@ test('dispatch assignment board view contracts', () => {
   assert.match(view, /data-worker-id/);
   assert.match(view, /assignmentDropZone/);
   assert.match(view, /name="q"/);
-  assert.match(view, /name="operationalCityId"/);
+  assert.match(view, /name="operationalCityIds"/);
+  assert.doesNotMatch(view, /name="operationalCityId"/);
   assert.doesNotMatch(view, /name="vacancyId"/);
   assert.match(view, /name="transportMode"/);
   assert.match(view, /name="locality"/);

@@ -2,7 +2,15 @@ import express from 'express';
 import multer from 'multer';
 import { randomBytes } from 'node:crypto';
 import { prisma } from '../lib/prisma.js';
-import { loadUnifiedCityOptions } from '../services/cityOptions.js';
+import {
+  loadUnifiedCityOptions,
+  operationalCityScopeAllowsName,
+  resolveUserCityScope
+} from '../services/cityOptions.js';
+import {
+  dispatchClientBranchErrorStatus,
+  resolveDispatchClientBranchSelection
+} from '../services/dispatchClientBranches.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
 import { deleteDispatchServiceRequestWithPolicy } from '../services/dispatchServiceRequestPolicy.js';
 import { findDispatchWorkerByDocumentIdentity } from '../services/dispatchWorkerExcelImport.js';
@@ -117,7 +125,6 @@ function buildClientData(body, { canManageTestClient = false } = {}) {
   return {
     name: normalizeString(body.name),
     nit: normalizeString(body.nit),
-    cityName: normalizeString(body.cityName),
     contactName: normalizeString(body.contactName),
     contactPhone: normalizeString(body.contactPhone),
     contactEmail: normalizeString(body.contactEmail),
@@ -146,20 +153,19 @@ function buildInitialClientServiceNames(body = {}) {
   });
 }
 
-async function loadWorkerFormOptions() {
-  return { cities: await loadUnifiedCityOptions(prisma) };
+async function loadWorkerFormOptions(req) {
+  const scope = await resolveUserCityScope(prisma, req);
+  return { cities: scope.allowedCities };
 }
 
-async function validateSelectedBranches(cityIds) {
+async function validateSelectedBranches(req, cityIds) {
   const uniqueIds = [...new Set(cityIds)];
   if (!uniqueIds.length) throw new Error('Selecciona al menos una sucursal operativa.');
 
-  const branches = await prisma.city.findMany({
-    where: { id: { in: uniqueIds }, NOT: { id: { startsWith: 'city_' } } },
-    select: { id: true }
-  });
-  if (branches.length !== uniqueIds.length) {
-    throw new Error('Una o más sucursales seleccionadas ya no existen.');
+  const scope = await resolveUserCityScope(prisma, req);
+  const allowedIds = new Set(scope.allowedCityIds);
+  if (uniqueIds.some((cityId) => !allowedIds.has(cityId))) {
+    throw new Error('Una o más sucursales seleccionadas están fuera de tu alcance territorial.');
   }
   return uniqueIds;
 }
@@ -295,30 +301,67 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-clientes', requireOps, async (req, res) => {
-    const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
-    if (!data.name) return res.status(400).send('Nombre requerido');
-    const serviceNames = buildInitialClientServiceNames(req.body);
-    const createdByUsername = req.session?.username || req.username || null;
-    await prisma.dispatchClient.create({
-      data: {
-        ...data,
-        publicToken: randomBytes(24).toString('hex'),
-        createdByUsername,
-        ...(serviceNames.length ? {
-          services: {
-            create: serviceNames.map((name) => ({ name, createdByUsername }))
-          }
-        } : {})
-      }
-    });
-    return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente creado.'));
+    try {
+      const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
+      if (!data.name) return res.status(400).send('Nombre requerido');
+      const branches = await resolveDispatchClientBranchSelection(
+        prisma,
+        req,
+        normalizeStringList(req.body.cityIds)
+      );
+      const serviceNames = buildInitialClientServiceNames(req.body);
+      const createdByUsername = req.session?.username || req.username || null;
+      await prisma.dispatchClient.create({
+        data: {
+          ...data,
+          branchCityIds: branches.branchCityIds,
+          cityName: branches.cityName,
+          publicToken: randomBytes(24).toString('hex'),
+          createdByUsername,
+          ...(serviceNames.length ? {
+            services: {
+              create: serviceNames.map((name) => ({ name, createdByUsername }))
+            }
+          } : {})
+        }
+      });
+      return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente creado.'));
+    } catch (error) {
+      const status = dispatchClientBranchErrorStatus(error);
+      if (status === 500) console.error(error);
+      return res.status(status).send(error?.message || 'No fue posible crear el cliente.');
+    }
   });
 
   router.post('/admin-clientes/:clientId/editar', requireOps, async (req, res) => {
-    const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
-    if (!data.name) return res.status(400).send('Nombre requerido');
-    await prisma.dispatchClient.update({ where: { id: req.params.clientId }, data });
-    return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente actualizado.'));
+    try {
+      const existing = await prisma.dispatchClient.findUnique({
+        where: { id: req.params.clientId },
+        select: { id: true, cityName: true, branchCityIds: true }
+      });
+      if (!existing) return res.status(404).send('Cliente no encontrado');
+      const data = buildClientData(req.body, { canManageTestClient: isDev(req) });
+      if (!data.name) return res.status(400).send('Nombre requerido');
+      const branches = await resolveDispatchClientBranchSelection(
+        prisma,
+        req,
+        normalizeStringList(req.body.cityIds),
+        { existingClient: existing }
+      );
+      await prisma.dispatchClient.update({
+        where: { id: existing.id },
+        data: {
+          ...data,
+          branchCityIds: branches.branchCityIds,
+          cityName: branches.cityName
+        }
+      });
+      return res.redirect(redirectWithMessage('/admin/operaciones/clientes', 'Cliente actualizado.'));
+    } catch (error) {
+      const status = dispatchClientBranchErrorStatus(error);
+      if (status === 500) console.error(error);
+      return res.status(status).send(error?.message || 'No fue posible actualizar el cliente.');
+    }
   });
 
   router.post('/admin-delete/clientes/:clientId', requireOps, async (req, res) => {
@@ -364,6 +407,15 @@ export function publicDispatchClientRouter() {
   });
 
   router.post('/admin-delete/solicitudes/:serviceRequestId', requireOps, async (req, res) => {
+    const serviceRequest = await prisma.dispatchServiceRequest.findUnique({
+      where: { id: req.params.serviceRequestId },
+      select: { cityName: true }
+    });
+    if (!serviceRequest) return res.status(404).send('Solicitud no encontrada');
+    const cityScope = await resolveUserCityScope(prisma, req);
+    if (!operationalCityScopeAllowsName(cityScope, serviceRequest.cityName, { selected: false })) {
+      return res.status(403).send('No tienes permiso para eliminar solicitudes de esta ciudad.');
+    }
     const result = await deleteDispatchServiceRequestWithPolicy(prisma, req.params.serviceRequestId);
     if (result.status === 'NOT_FOUND') return res.status(404).send('Solicitud no encontrada');
     if (result.status === 'BLOCKED') {
@@ -387,7 +439,7 @@ export function publicDispatchClientRouter() {
   });
 
   router.get('/admin-worker/nuevo', requireOps, async (req, res) => {
-    const { cities } = await loadWorkerFormOptions();
+    const { cities } = await loadWorkerFormOptions(req);
     return res.render('operacionesPersonalNuevo', {
       cities,
       worker: null,
@@ -402,7 +454,7 @@ export function publicDispatchClientRouter() {
     try {
       const workerData = buildWorkerData(req.body);
       if (!workerData.fullName) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent('Nombre requerido.'));
-      const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
+      const cityIds = await validateSelectedBranches(req, normalizeStringList(req.body.cityIds));
       const worker = await createWorkerWithBranches(workerData, cityIds);
       if (!worker) return res.redirect('/operaciones/admin-worker/nuevo?error=' + encodeURIComponent(DUPLICATE_WORKER_DOCUMENT_MESSAGE));
       await saveWorkerCv(worker.id, req.file);
@@ -414,7 +466,7 @@ export function publicDispatchClientRouter() {
   });
 
   router.get('/admin-worker/:workerId/editar', requireOps, async (req, res) => {
-    const [worker, options] = await Promise.all([findWorkerOr404(req.params.workerId), loadWorkerFormOptions()]);
+    const [worker, options] = await Promise.all([findWorkerOr404(req.params.workerId), loadWorkerFormOptions(req)]);
     if (!worker) return res.status(404).send('Auxiliar no encontrado');
     return res.render('operacionesPersonalNuevo', {
       cities: options.cities,
@@ -432,7 +484,7 @@ export function publicDispatchClientRouter() {
       if (!existing) return res.status(404).send('Auxiliar no encontrado');
       const workerData = buildWorkerData(req.body);
       if (!workerData.fullName) return res.redirect(`/operaciones/admin-worker/${existing.id}/editar?error=` + encodeURIComponent('Nombre requerido.'));
-      const cityIds = await validateSelectedBranches(normalizeStringList(req.body.cityIds));
+      const cityIds = await validateSelectedBranches(req, normalizeStringList(req.body.cityIds));
       const candidateData = existing.candidateId ? {
         fullName: workerData.fullName,
         phone: workerData.phone || existing.candidate.phone,
