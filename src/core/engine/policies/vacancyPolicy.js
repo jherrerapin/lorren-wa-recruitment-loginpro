@@ -27,6 +27,13 @@ function normalize(value = '') {
 
 function poolDecision(input = {}) {
   const intent = String(input?.interpretation?.intent || '').trim().toUpperCase();
+  const interpreted = String(
+    input?.interpretation?.poolConsentDecision
+      ?? input?.interpretation?.generalPoolDecision
+      ?? ''
+  ).trim().toUpperCase();
+  if (['ACCEPTED', 'AGREED', 'YES', 'OPT_IN'].includes(interpreted)) return 'ACCEPTED';
+  if (['REJECTED', 'DECLINED', 'NO', 'OPT_OUT'].includes(interpreted)) return 'REJECTED';
   if (['ACCEPTED', 'AGREED', 'YES', 'OPT_IN'].includes(intent)) return 'ACCEPTED';
   if (['REJECTED', 'DECLINED', 'NO', 'OPT_OUT'].includes(intent)) return 'REJECTED';
   const text = normalize(input?.turn?.rawText);
@@ -221,16 +228,9 @@ export function buildVacancyPolicyReply(vacancy = {}, rawText = '') {
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
-export async function vacancyPolicy(input) {
+export function vacancyPolicy(input) {
   const intent = String(input?.interpretation?.intent || '').trim().toUpperCase();
   if (['INACTIVITY_REMINDER', 'INTERVIEW_REMINDER'].includes(intent)) return {};
-
-  if (!input?.vacancy && !input?.candidate?.facts?.vacancyId) {
-    return {
-      reply: { directive: 'ASK_WHICH_FLYER_SEEN' },
-      transitions: { keepCurrentStep: true }
-    };
-  }
 
   if (isAwaitingPoolConsent(input)) {
     const decision = poolDecision(input);
@@ -239,11 +239,18 @@ export async function vacancyPolicy(input) {
     }
     if (decision === 'REJECTED') {
       return {
-        reply: { text: POOL_DECLINED_REPLY },
+        reply: { text: POOL_DECLINED_REPLY, interactiveOptions: [] },
         transitions: { endConversation: true }
       };
     }
     return {};
+  }
+
+  if (input?.vacancy === null && !input?.candidate?.facts?.vacancyId) {
+    return {
+      reply: { directive: 'ASK_WHICH_FLYER_SEEN' },
+      transitions: { keepCurrentStep: true }
+    };
   }
 
   const vacancyActive = input?.vacancy?.isActive ?? input?.candidate?.facts?.vacancyActive;

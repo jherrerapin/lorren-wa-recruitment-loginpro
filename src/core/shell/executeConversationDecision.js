@@ -46,6 +46,10 @@ function normalizeExecutionArguments(inputOrOptions, decision, dependencies) {
   return asRecord(inputOrOptions);
 }
 
+async function defaultAutomaticOutboundDelivery(prisma, outbound, adapters) {
+  return await deliverAutomaticOutboundText(prisma, outbound, adapters);
+}
+
 const ALLOWED_DIRECT_CANDIDATE_FIELDS = new Set([
   'fullName',
   'documentType',
@@ -169,6 +173,9 @@ async function executeSchedulingMutation(tx, {
   schedulingContext = {}
 }) {
   if (!scheduling) return null;
+  if (scheduling.action === 'none') {
+    return { action: 'none', persisted: false };
+  }
 
   const candidateId = candidateIdFromInput(input);
   const vacancyId = vacancyIdFromInput(input);
@@ -347,6 +354,7 @@ async function deliverResolvedReply({
   decision,
   text,
   whatsappClient,
+  deliveryAuthority = deliverAutomaticOutboundText,
   deliveryAdapters = {}
 }) {
   if (!text || typeof whatsappClient?.sendMessage !== 'function') return null;
@@ -364,7 +372,7 @@ async function deliverResolvedReply({
     ? decision.scheduling.action.trim() || null
     : null;
 
-  return deliverAutomaticOutboundText(prisma, {
+  return await deliveryAuthority(prisma, {
     candidateId,
     to: phone,
     body: text,
@@ -409,6 +417,7 @@ export async function executeConversationDecision(
     schedulingContext = {},
     llmService = null,
     whatsappClient = null,
+    automaticOutboundDelivery = defaultAutomaticOutboundDelivery,
     deliveryAdapters = {}
   } = normalizeExecutionArguments(inputOrOptions, decisionArgument, dependencyArgument);
   if (!prisma?.candidate) throw new Error('conversation_executor_prisma_required');
@@ -514,8 +523,6 @@ export async function executeConversationDecision(
           reminderState: 'SKIPPED'
         }
       });
-    } else if (mayPersistCandidate && !result.candidate) {
-      result.candidate = await tx.candidate.findUnique({ where: { id: candidateId } });
     }
 
     return result;
@@ -540,7 +547,7 @@ export async function executeConversationDecision(
     decision: resolvedDecision,
     reply: resolvedDecision.reply,
     dryRun: false,
-    persistence: { status: 'applied' },
+    persistence: { status: mayPersistCandidate ? 'applied' : 'skipped' },
     generation: { status: 'skipped' },
     delivery: { status: 'skipped' }
   };
@@ -564,6 +571,7 @@ export async function executeConversationDecision(
       decision: resolvedDecision,
       text: outbound.text,
       whatsappClient,
+      deliveryAuthority: automaticOutboundDelivery,
       deliveryAdapters
     });
     result.delivery = {

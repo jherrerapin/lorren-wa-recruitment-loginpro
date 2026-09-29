@@ -185,10 +185,10 @@ export const InterpretationCandidateFieldsSchema = z.object({
  * not call models or external classifiers; it only consumes this evidence.
  */
 export const InterpretationSchema = z.object({
-  intent: z.string().trim().min(1).nullable().default(null),
-  fields: InterpretationCandidateFieldsSchema.default({}),
-  scheduling: InterpretationSchedulingSchema.default({ slot: null }),
-  consent: InterpretationConsentSchema.default({ decision: null }),
+  intent: z.string().trim().min(1).nullable().optional(),
+  fields: InterpretationCandidateFieldsSchema.optional(),
+  scheduling: InterpretationSchedulingSchema.optional(),
+  consent: InterpretationConsentSchema.optional(),
   providedFields: z.record(z.string(), z.unknown()).readonly().optional(),
   detectedFields: z.record(z.string(), z.unknown()).readonly().optional(),
   extractedFields: z.record(z.string(), z.unknown()).readonly().optional()
@@ -218,12 +218,7 @@ export const ConversationTurnInputSchema = z.object({
     hasCv: false,
     current: []
   }),
-  interpretation: InterpretationSchema.default({
-    intent: null,
-    fields: {},
-    scheduling: { slot: null },
-    consent: { decision: null }
-  }),
+  interpretation: InterpretationSchema.optional(),
   attribution: AttributionSchema.optional()
 }).strict().readonly();
 

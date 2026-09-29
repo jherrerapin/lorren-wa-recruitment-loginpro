@@ -31,11 +31,11 @@ const EXCLUSIVE_POLICY_INTENTS = new Map([
  * 7. Consent and vacancy FAQ retain final specialized reply precedence.
  */
 export const conversationPolicies = Object.freeze([
+  chatPolicy,
+  eligibilityPolicy,
   candidateDataPolicy,
   vacancyAssignmentPolicy,
-  eligibilityPolicy,
   vacancyChangePolicy,
-  chatPolicy,
   schedulingPolicy,
   progressionPolicy,
   attachmentPolicy,

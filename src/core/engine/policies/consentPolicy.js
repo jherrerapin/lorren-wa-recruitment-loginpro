@@ -1,4 +1,7 @@
-import { CONSENT_REQUEST_TEXT } from '../../contracts/consentDefinition.js';
+import {
+  CONSENT_REQUEST_TEXT,
+  CURRENT_CONSENT_VERSION
+} from '../../contracts/consentDefinition.js';
 
 const CONSENT_ACCEPTANCE_INTENTS = new Set([
   'ACCEPT_DATA_CONSENT',
@@ -39,14 +42,14 @@ const CONSENT_GREETING_PREFIX = '¡Hola! Soy Lórren, tu asistente virtual. ';
 const CONSENT_REVOKED_REPLY =
   'Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
 
-const CONSENT_BUTTONS = Object.freeze([
+const CONSENT_OPTIONS = Object.freeze([
   Object.freeze({
-    id: 'data_consent_accept',
-    title: 'Sí autorizo'
+    id: `data_consent:${CURRENT_CONSENT_VERSION}:accept`,
+    label: 'Sí autorizo'
   }),
   Object.freeze({
-    id: 'data_consent_reject',
-    title: 'No autorizo'
+    id: `data_consent:${CURRENT_CONSENT_VERSION}:reject`,
+    label: 'No autorizo'
   })
 ]);
 
@@ -78,6 +81,9 @@ function isVacancyQuestion(input = {}) {
 }
 
 function hasExplicitConsentAcceptance(rawText = '') {
+  if (/\?|\b(que pasa|que haran|como|para que|por que|cuales?)\b/i.test(normalize(rawText))) {
+    return false;
+  }
   const normalized = normalize(rawText);
   if (!normalized) return false;
 
@@ -95,6 +101,7 @@ function hasExplicitConsentAcceptance(rawText = '') {
 function hasExplicitConsentRejection(rawText = '') {
   const normalized = normalize(rawText);
   if (!normalized) return false;
+  if (/\?|\b(vacante|cargo|oferta)\b/.test(normalized)) return false;
 
   return [
     /\b(no autorizo|no consiento)\b/,
@@ -106,27 +113,40 @@ function hasExplicitConsentRejection(rawText = '') {
 
 function resolvesConsentAcceptance(input = {}) {
   const intent = interpretationIntent(input);
-  const decision = input?.interpretation?.consent?.decision;
+  const decision = input?.interpretation?.consentDecision
+    ?? input?.interpretation?.consent?.decision;
+  const shortAcceptance = /^(si|sí|acepto|de acuerdo)$/i.test(String(input?.turn?.rawText || '').trim());
 
   return CONSENT_ACCEPTANCE_INTENTS.has(intent)
     || decision === 'ACCEPTED'
+    || (shortAcceptance && isConsentAwaited(input))
     || hasExplicitConsentAcceptance(input?.turn?.rawText || '');
 }
 
 function resolvesConsentRejection(input = {}) {
   const intent = interpretationIntent(input);
-  const decision = input?.interpretation?.consent?.decision;
+  const decision = input?.interpretation?.consentDecision
+    ?? input?.interpretation?.consent?.decision;
+  const shortRejection = /^(no|no gracias)$/i.test(String(input?.turn?.rawText || '').trim());
 
   return CONSENT_REJECTION_INTENTS.has(intent)
     || decision === 'REJECTED'
     || decision === 'REVOKED'
+    || (shortRejection && isConsentAwaited(input))
     || hasExplicitConsentRejection(input?.turn?.rawText || '');
+}
+
+function isConsentAwaited(input = {}) {
+  const status = String(candidateFacts(input).dataConsentStatus || '').trim().toUpperCase();
+  return status === 'PENDING'
+    || (input?.pending?.fields || []).some((field) => String(field).trim() === 'dataConsent');
 }
 
 function isConsentPending(input = {}) {
   const facts = candidateFacts(input);
   const status = String(facts.dataConsentStatus || '').trim().toUpperCase();
-  const interpretedDecision = input?.interpretation?.consent?.decision;
+  const interpretedDecision = input?.interpretation?.consentDecision
+    ?? input?.interpretation?.consent?.decision;
 
   if (interpretedDecision === 'PENDING') return true;
   if (status === 'ACCEPTED') return false;
@@ -166,17 +186,16 @@ function isConsentPromptReady(input = {}) {
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
-export async function consentPolicy(input) {
+export function consentPolicy(input) {
+  if (['INACTIVITY_REMINDER', 'INTERVIEW_REMINDER'].includes(interpretationIntent(input))) {
+    return {};
+  }
+  if (input?.vacancy === null) return {};
   if (resolvesConsentRejection(input)) {
     return {
-      ...(input?.execution?.mayReply === true
-        ? { reply: { text: CONSENT_REVOKED_REPLY } }
+      ...(input?.execution?.mayReply !== false
+        ? { reply: { text: CONSENT_REVOKED_REPLY, interactiveOptions: [] } }
         : {}),
-      mutations: {
-        fieldsToPersist: {
-          dataConsentStatus: 'REVOKED'
-        }
-      },
       transitions: {
         endConversation: true
       }
@@ -195,8 +214,8 @@ export async function consentPolicy(input) {
 
   if (!isConsentPending(input)) return {};
   if (isVacancyQuestion(input)) return {};
-  if (!isConsentPromptReady(input)) return {};
-  if (input?.execution?.mayReply !== true) return {};
+  if (!isConsentAwaited(input) && !isConsentPromptReady(input)) return {};
+  if (input?.execution?.mayReply === false) return {};
 
   const intent = interpretationIntent(input);
   const replyText = SIMPLE_GREETING_INTENTS.has(intent)
@@ -206,8 +225,10 @@ export async function consentPolicy(input) {
   return {
     reply: {
       text: replyText,
-      buttons: CONSENT_BUTTONS
-    }
+      interactiveOptions: CONSENT_OPTIONS
+    },
+    mutations: { nextStep: 'AWAITING_DATA_CONSENT' },
+    transitions: { keepCurrentStep: false }
   };
 }
 

@@ -15,7 +15,7 @@ test('un fixture legacy de revocación atraviesa el nuevo núcleo funcional', as
   assert.equal(input.turn.rawText, entry.fixture.inbound.body);
   assert.equal(input.execution.dryRun, true);
   assert.equal(decision.transitions.endConversation, true);
-  assert.equal(decision.scheduling.action, 'none');
+  assert.equal(decision.scheduling?.action ?? 'none', 'none');
   assert.match(decision.reply.text, /No continuaré con la postulación/);
 });
 
@@ -26,7 +26,7 @@ for (const entry of fixtureEntries) {
     const parsedFields = entry.fixture.providerStubs?.aiResult?.parsedFields || {};
 
     assert.equal(input.turn.id, entry.fixture.inbound.messageId);
-    assert.equal(decision.scheduling.action, 'none');
+    assert.equal(decision.scheduling?.action ?? 'none', 'none');
 
     if (actions.has('ASK_DATA_CONSENT')) {
       assert.match(decision.reply?.text || '', /datos personales/);

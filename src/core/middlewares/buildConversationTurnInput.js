@@ -244,21 +244,14 @@ export function deriveCandidatePendingFields(candidate) {
 
 function mapInterpretation(inboundMessage, lastBotQuestion = null) {
   if (inboundMessage.isSystemAction === true) {
-    return {
-      intent: requireString(inboundMessage.intent, 'inboundMessage.intent'),
-      fields: {},
-      scheduling: { slot: null },
-      consent: { decision: null }
-    };
+    return { intent: requireString(inboundMessage.intent, 'inboundMessage.intent') };
   }
 
   const source = asRecord(inboundMessage.interpretation);
-  const interpretation = {
-    intent: typeof source.intent === 'string' && source.intent.trim() ? source.intent.trim() : null,
-    fields: {},
-    scheduling: { slot: null },
-    consent: { decision: null }
-  };
+  const interpretation = {};
+  if (typeof source.intent === 'string' && source.intent.trim()) {
+    interpretation.intent = source.intent.trim();
+  }
   for (const key of ['providedFields', 'detectedFields', 'extractedFields']) {
     if (Object.keys(asRecord(source[key])).length) interpretation[key] = source[key];
   }
@@ -274,9 +267,10 @@ function mapInterpretation(inboundMessage, lastBotQuestion = null) {
     ...asRecord(source.providedFields),
     ...asRecord(source.fields)
   };
-  interpretation.fields = Object.fromEntries(
+  const fields = Object.fromEntries(
     Object.entries(mergedFields).filter(([field]) => candidateFieldNames.has(field))
   );
+  if (Object.keys(fields).length) interpretation.fields = fields;
   const sourceScheduling = asRecord(source.scheduling);
   const sourceSlot = asRecord(sourceScheduling.slot);
   if (Object.keys(sourceSlot).length) {
@@ -309,7 +303,7 @@ function mapInterpretation(inboundMessage, lastBotQuestion = null) {
       gender: localGender
     };
   }
-  return interpretation;
+  return Object.keys(interpretation).length ? interpretation : undefined;
 }
 
 async function loadOrCreateCandidate(prisma, phone) {

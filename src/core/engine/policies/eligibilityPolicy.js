@@ -53,7 +53,7 @@ function isOutsideAgeRange(age, vacancy = null) {
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
-export async function evaluateEligibility(input) {
+export function evaluateEligibility(input) {
   const intent = String(input?.interpretation?.intent || '').trim().toUpperCase();
   if (['INACTIVITY_REMINDER', 'INTERVIEW_REMINDER'].includes(intent)) return {};
 
@@ -61,9 +61,13 @@ export async function evaluateEligibility(input) {
   const pending = new Set(Array.isArray(input?.pending?.fields) ? input.pending.fields : []);
   const age = candidateAge(input);
 
-  if (isOutsideAgeRange(age, input?.vacancy)) {
+  if (String(facts.dataConsentStatus || '').trim().toUpperCase() !== 'ACCEPTED') return {};
+  if (facts.vacancyActive === false || facts.vacancyAcceptingApplications === false) return {};
+  if (pending.has('age')) return {};
+
+  if (isOutsideAgeRange(age, input?.vacancy || facts)) {
     return {
-      ...(input?.execution?.mayReply === true ? { reply: { text: AGE_REJECTION_REPLY } } : {}),
+      ...(input?.execution?.mayReply !== false ? { reply: { text: AGE_REJECTION_REPLY } } : {}),
       mutations: { fieldsToPersist: { status: 'REGISTRADO' } },
       transitions: { endConversation: true }
     };
@@ -78,7 +82,7 @@ export async function evaluateEligibility(input) {
   if (experienceRequired === 'YES' && !pending.has('experienceInfo')
     && ['NO', 'FALSE'].includes(experience)) {
     return {
-      ...(input?.execution?.mayReply === true
+      ...(input?.execution?.mayReply !== false
         ? { reply: { text: EXPERIENCE_REJECTION_REPLY } }
         : {}),
       mutations: { fieldsToPersist: { status: 'REGISTRADO' } },
@@ -103,9 +107,8 @@ export async function evaluateEligibility(input) {
         },
         nextStep: 'MANUAL_REVIEW'
       },
-      transitions: { handoffToHuman: true },
       scheduling: { action: 'none' }
-    }
+    };
   }
 
   return {};

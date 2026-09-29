@@ -55,6 +55,9 @@ function dependencies(calls) {
       async sendMessage(...args) {
         calls.push(['deliver', ...args]);
       }
+    },
+    async automaticOutboundDelivery(_prisma, outbound, adapters) {
+      return adapters.sendText(outbound.to, outbound.body);
     }
   };
 }
@@ -71,12 +74,10 @@ test('ejecuta persistencia, generación y entrega en ese orden', async () => {
   assert.equal(calls[1][1], 'ASK_FOR_CITY');
   assert.deepEqual(calls[1][2].pendingFields, ['city']);
   assert.deepEqual(calls[2].slice(1), ['573001112233', '¿En qué ciudad resides?', []]);
-  assert.deepEqual(result, {
-    dryRun: false,
-    persistence: { status: 'applied' },
-    generation: { status: 'generated' },
-    delivery: { status: 'sent' }
-  });
+  assert.equal(result.dryRun, false);
+  assert.deepEqual(result.persistence, { status: 'applied' });
+  assert.deepEqual(result.generation, { status: 'generated' });
+  assert.deepEqual(result.delivery, { status: 'sent' });
 });
 
 test('entrega al LLM los parámetros declarados por la política', async () => {

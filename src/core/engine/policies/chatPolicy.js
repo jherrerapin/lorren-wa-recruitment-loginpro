@@ -18,6 +18,17 @@ const ACKNOWLEDGEMENT_INTENTS = new Set([
 ]);
 
 const SYSTEM_REMINDER_INTENTS = new Set(['INACTIVITY_REMINDER', 'INTERVIEW_REMINDER']);
+const INFORMATION_DIRECTIVES = Object.freeze({
+  ASK_VACANCY_INFORMATION: 'ANSWER_VACANCY_INFORMATION',
+  ASK_VACANCY_SCHEDULE: 'ANSWER_VACANCY_SCHEDULE',
+  ASK_APPLICATION_STATUS: 'ANSWER_APPLICATION_STATUS',
+  ASK_CV_SUBMISSION: 'EXPLAIN_CV_SUBMISSION'
+});
+const PERSISTABLE_FIELDS = new Set([
+  'vacancyId', 'fullName', 'city', 'residenceCity', 'locality', 'neighborhood',
+  'documentType', 'documentNumber', 'age', 'gender', 'medicalRestrictions',
+  'transportMode', 'experienceInfo', 'experienceTime', 'experienceSummary'
+]);
 
 export function isSystemReminderIntent(input = {}) {
   return SYSTEM_REMINDER_INTENTS.has(getIntent(input));
@@ -48,6 +59,33 @@ function getPendingFields(input = {}) {
     : [];
 }
 
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isSerializable(value) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isSerializable);
+  return isRecord(value) && Object.values(value).every(isSerializable);
+}
+
+function providedFields(interpretation = {}) {
+  const merged = {
+    ...asFields(interpretation.extractedFields),
+    ...asFields(interpretation.detectedFields),
+    ...asFields(interpretation.providedFields),
+    ...asFields(interpretation.fields)
+  };
+  return Object.fromEntries(Object.entries(merged).filter(([field, value]) => (
+    PERSISTABLE_FIELDS.has(field) && isSerializable(value)
+  )));
+}
+
+function asFields(value) {
+  return isRecord(value) ? value : {};
+}
+
 function fieldLabel(field = '') {
   const key = String(field || '').trim();
   return FIELD_LABELS[key] || key;
@@ -71,7 +109,7 @@ function buildPendingFieldsReply(fields = []) {
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
  */
-export async function chatPolicy(input) {
+export function chatPolicy(input) {
   const intent = getIntent(input);
 
   if (isSystemReminderIntent(input)) {
@@ -83,13 +121,17 @@ export async function chatPolicy(input) {
     };
   }
 
-  if (input?.candidate?.facts?.dataConsentStatus !== 'ACCEPTED') {
-    return {};
+  const interpretation = isRecord(input?.interpretation) ? input.interpretation : null;
+  const reminderMutation = input?.candidate?.facts?.inactivityReminderSent === true
+    ? { inactivityReminderSent: false }
+    : {};
+  if (!interpretation) {
+    return Object.keys(reminderMutation).length
+      ? { mutations: { fieldsToPersist: reminderMutation } }
+      : {};
   }
 
-  const reminderMutation = input?.candidate?.facts?.inactivityReminderSent === true
-    ? { mutations: { fieldsToPersist: { inactivityReminderSent: false } } }
-    : {};
+  const fieldsToPersist = { ...reminderMutation, ...providedFields(interpretation) };
 
   if (FINALIZATION_INTENTS.has(intent)) {
     return {
@@ -99,17 +141,48 @@ export async function chatPolicy(input) {
     };
   }
 
-  if (input?.execution?.mayReply !== true) return {};
+  if (input?.execution?.mayReply === false) {
+    return Object.keys(fieldsToPersist).length ? { mutations: { fieldsToPersist } } : {};
+  }
 
-  const pendingFields = getPendingFields(input);
+  const pendingFields = getPendingFields(input).filter((field) => (
+    !Object.prototype.hasOwnProperty.call(fieldsToPersist, field)
+  ));
   if (pendingFields.length) {
     return {
-      ...reminderMutation,
       reply: {
         directive: 'ASK_MISSING_FIELDS',
         parameters: { missingFields: pendingFields }
       },
+      ...(Object.keys(fieldsToPersist).length
+        ? { mutations: { fieldsToPersist } }
+        : {}),
       transitions: { keepCurrentStep: true }
+    };
+  }
+
+  if (INFORMATION_DIRECTIVES[intent]) {
+    return {
+      reply: { directive: INFORMATION_DIRECTIVES[intent] },
+      ...(Object.keys(fieldsToPersist).length ? { mutations: { fieldsToPersist } } : {})
+    };
+  }
+
+  if (intent === 'CORRECT_CANDIDATE_DATA') {
+    return {
+      reply: { directive: 'ACKNOWLEDGE_CORRECTION' },
+      ...(Object.keys(fieldsToPersist).length ? { mutations: { fieldsToPersist } } : {})
+    };
+  }
+
+  if (Object.keys(fieldsToPersist).length) {
+    const hasConversationalField = Object.keys(fieldsToPersist)
+      .some((field) => field !== 'gender' && field !== 'inactivityReminderSent');
+    return {
+      ...(hasConversationalField && intent
+        ? { reply: { directive: 'ACKNOWLEDGE_DATA' } }
+        : {}),
+      mutations: { fieldsToPersist }
     };
   }
 
@@ -117,8 +190,7 @@ export async function chatPolicy(input) {
     return {
       reply: {
         text: 'Hola. Cuéntame cómo puedo ayudarte con tu proceso de selección.'
-      },
-      ...reminderMutation
+      }
     };
   }
 
@@ -126,12 +198,11 @@ export async function chatPolicy(input) {
     return {
       reply: {
         text: 'Con gusto. Si necesitas revisar algo más de tu proceso, cuéntame.'
-      },
-      ...reminderMutation
+      }
     };
   }
 
-  return reminderMutation;
+  return {};
 }
 
 export default chatPolicy;
