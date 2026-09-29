@@ -1,0 +1,34 @@
+name: Prepare RFCOMM resilience patch
+
+on:
+  push:
+    branches:
+      - fix/android-rfcomm-discovery-resilience
+    paths:
+      - '.github/workflows/prepare-rfcomm-resilience.yml'
+      - '.github/tmp/apply-rfcomm-resilience.py'
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/android-rfcomm-discovery-resilience
+      - name: Apply patch in workspace
+        run: python .github/tmp/apply-rfcomm-resilience.py
+      - name: Validate source contracts
+        run: |
+          grep -q 'FLAG_KEEP_SCREEN_ON' mobile/android/app/src/main/java/com/loginpro/lorren/portal/MainActivity.java
+          grep -q 'BLUETOOTH_DISCOVERABLE_SECONDS = 300' mobile/android/app/src/main/java/com/loginpro/lorren/portal/MainActivity.java
+          grep -q 'MAX_DISCOVERY_BURSTS = 3' mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java
+          grep -q 'CLASSIC_DISCOVERY_RETRY' mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rfcomm-resilience-java
+          path: |
+            mobile/android/app/src/main/java/com/loginpro/lorren/portal/MainActivity.java
+            mobile/android/app/src/main/java/com/loginpro/lorren/portal/NearbyPresenceManager.java
