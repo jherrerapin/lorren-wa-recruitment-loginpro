@@ -374,6 +374,7 @@ test('novedad conserva wamid y los detalles técnicos quedan en la superficie DE
   const webhook = readSource('src/services/dispatchWhatsappWebhookService.js');
   const route = readSource('src/routes/dispatchWhatsappNotifications.js');
   assert.match(adminAlerts, /return \{ sent: true, userId: user\.id, phone, providerMessageId \}/);
+  assert.match(adminAlerts, /link\?\.alertOwnerUsername \|\| assignment\?\.createdByUsername/);
   assert.match(webhook, /source: 'NOVELTY_ADMIN_ALERT'/);
   assert.match(webhook, /recordDispatchWhatsappProviderStatusAudit/);
   assert.match(route, /router\.get\('\/monitor', requireDevMonitor/);
