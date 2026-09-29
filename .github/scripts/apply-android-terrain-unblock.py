@@ -140,17 +140,18 @@ bridge = replace_once(bridge, old_usable, new_usable, 'aceptar ubicación Androi
 bridge_path.write_text(bridge, encoding='utf-8')
 
 audit_path = Path('auditoria y correccion lorren.md')
-audit_path.write_text(
-    """# Auditoría y corrección Lórren\n\n"
-    "## 2026-09-29 — APK asistencia: desbloqueos operativos en terreno\n\n"
-    "### 1. Fallback manual tras SCAN_COMPLETE sin auxiliares\n"
-    "- `native-presence.js` activa `bluetoothFallbackActive` cuando el escaneo termina esperando auxiliares pero no recibe ninguna prueba (`expectedProofCount > 0 && proofCount === 0`).\n"
-    "- En ese estado se muestra únicamente la acción universal `Marcación Manual`; el botón secundario `Reportar sin teléfono` queda oculto durante el fallback.\n"
-    "- No se modifica el protocolo Nearby/Bluetooth ni el payload de presencia.\n\n"
-    "### 2. GPS impreciso no bloquea la marcación\n"
-    "- `PresenceBridge.java` elimina el umbral obligatorio de 50 m y acepta cualquier ubicación Android válida, conservando el `accuracyMeters` real.\n"
-    "- `native-presence.js` mantiene las validaciones de coordenadas/datos inválidos y mock location, pero una precisión superior a 50 m solo genera `LOCATION_LOW_ACCURACY_ACCEPTED`; no impide escribir la cola ni solicitar sincronización.\n"
-    "- No se altera la estructura del payload enviado al servidor.\n"
-    """,
-    encoding='utf-8'
-)
+audit_text = """# Auditoría y corrección Lórren
+
+## 2026-09-29 — APK asistencia: desbloqueos operativos en terreno
+
+### 1. Fallback manual tras SCAN_COMPLETE sin auxiliares
+- `native-presence.js` activa `bluetoothFallbackActive` cuando el escaneo termina esperando auxiliares pero no recibe ninguna prueba (`expectedProofCount > 0 && proofCount === 0`).
+- En ese estado se muestra únicamente la acción universal `Marcación Manual`; el botón secundario `Reportar sin teléfono` queda oculto durante el fallback.
+- No se modifica el protocolo Nearby/Bluetooth ni el payload de presencia.
+
+### 2. GPS impreciso no bloquea la marcación
+- `PresenceBridge.java` elimina el umbral obligatorio de 50 m y acepta cualquier ubicación Android válida, conservando el `accuracyMeters` real.
+- `native-presence.js` mantiene las validaciones de coordenadas/datos inválidos y mock location, pero una precisión superior a 50 m solo genera `LOCATION_LOW_ACCURACY_ACCEPTED`; no impide escribir la cola ni solicitar sincronización.
+- No se altera la estructura del payload enviado al servidor.
+"""
+audit_path.write_text(audit_text, encoding='utf-8')
