@@ -44,6 +44,7 @@ test('tráfico orgánico enriquecido por NLU entra al núcleo con la vacante res
 
   assert.equal(input.attribution.source, 'ORGANIC');
   assert.equal(input.vacancy.id, vacancy.id);
+  assert.equal(input.vacancy.requiredDocuments, 'Hoja de vida física y cédula original');
   assert.equal(input.candidate.facts.vacancyId, vacancy.id);
   assert.equal(input.candidate.facts.vacancyCity, 'Bogotá');
   assert.equal(input.interpretation.extractedFields.vacancyId, vacancy.id);
@@ -106,6 +107,7 @@ function baseCandidate(overrides = {}) {
       maxAge: 45,
       experienceRequired: 'YES',
       experienceTimeText: 'mínimo 6 meses',
+      requiredDocuments: 'Hoja de vida física y cédula original',
       schedulingEnabled: true,
       isActive: true,
       acceptingApplications: true
@@ -369,7 +371,67 @@ test('un CV procesado en el turno actual deja de estar pendiente sin pre-escritu
   }), dependencies({ candidate }));
 
   assert.equal(input.attachments.current[0].status, 'processed');
+  assert.equal(input.attachments.items[0].isCv, true);
+  assert.equal(input.attachments.hasCv, true);
   assert.equal(input.pending.fields.includes('cv'), false);
+});
+
+test('un turno mixto conserva texto, datos interpretados y CV procesado en un solo contrato', async () => {
+  const candidate = baseCandidate({
+    dataConsentStatus: 'ACCEPTED',
+    fullName: 'Ana Pérez',
+    documentType: 'CC',
+    documentNumber: '1000123456',
+    age: null,
+    neighborhood: 'Modelia',
+    medicalRestrictions: 'Sin restricciones médicas',
+    transportMode: 'Moto',
+    experienceInfo: 'Sí',
+    experienceTime: '1 año',
+    experienceSummary: 'Experiencia en bodega'
+  });
+  const rawText = 'Tengo 30 años y adjunto mi hoja de vida';
+  const input = await buildConversationTurnInput(inbound({
+    type: 'document',
+    text: rawText,
+    interpretation: {
+      intent: 'PROVIDE_CANDIDATE_DATA',
+      fields: { age: 30 }
+    },
+    media: {
+      mediaId: 'media-mixed-turn',
+      mimeType: 'application/pdf',
+      fileName: 'hv.pdf',
+      extractedText: 'Experiencia laboral verificable.',
+      status: 'processed'
+    }
+  }), dependencies({ candidate }));
+
+  assert.equal(input.turn.rawText, rawText);
+  assert.equal(input.turn.messageType, 'document');
+  assert.equal(input.interpretation.fields.age, 30);
+  assert.equal(input.attachments.hasCv, true);
+  assert.equal(input.pending.fields.includes('cv'), false);
+});
+
+test('un documento fallido conserva el CV pendiente y no crea evidencia fantasma', async () => {
+  const candidate = baseCandidate({ dataConsentStatus: 'ACCEPTED' });
+  const input = await buildConversationTurnInput(inbound({
+    type: 'document',
+    text: 'Adjunto mi hoja de vida',
+    media: {
+      mediaId: 'media-failed-turn',
+      mimeType: 'application/pdf',
+      fileName: 'hv.pdf',
+      extractedText: null,
+      status: 'failed'
+    }
+  }), dependencies({ candidate }));
+
+  assert.equal(input.attachments.current[0].status, 'failed');
+  assert.equal(input.attachments.items[0].isCv, false);
+  assert.equal(input.attachments.hasCv, false);
+  assert.equal(input.pending.fields.includes('cv'), true);
 });
 
 test('lanza un error descriptivo cuando los datos de Prisma rompen el contrato', async () => {

@@ -162,3 +162,26 @@ test('una respuesta posterior reactiva el ciclo de inactividad', () => {
     age: 27
   });
 });
+
+test('falta de interés o cancelación explícita termina la conversación sin agendar', () => {
+  for (const intent of ['CANCEL_APPLICATION', 'STOP_APPLICATION', 'DECLINE_PROCESS']) {
+    assert.deepEqual(chatPolicy(input({ intent })), {
+      transitions: { endConversation: true }
+    });
+  }
+});
+
+test('mayReply false conserva la captura de datos sin producir respuesta', () => {
+  assert.deepEqual(chatPolicy({
+    interpretation: {
+      intent: 'PROVIDE_CANDIDATE_DATA',
+      providedFields: { documentNumber: '1000123456' }
+    },
+    pending: { fields: ['documentNumber'] },
+    execution: { mayReply: false }
+  }), {
+    mutations: {
+      fieldsToPersist: { documentNumber: '1000123456' }
+    }
+  });
+});

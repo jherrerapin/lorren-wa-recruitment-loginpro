@@ -50,24 +50,25 @@ function textSupportsResolvedVacancy(input = {}) {
   const vacancy = input?.vacancy || {};
   if (!text) return false;
 
-  const exactAnchors = [
-    vacancy.city,
-    vacancy?.operation?.city?.name
-  ]
-    .map(normalize)
-    .filter((value) => value.length >= 3);
-
-  if (exactAnchors.some((anchor) => text.includes(anchor))) {
-    return true;
-  }
-
   const roleTokens = [
     ...significantTokens(vacancy.title),
     ...significantTokens(vacancy.role),
     ...significantTokens(vacancy?.operation?.name)
   ];
 
-  return [...new Set(roleTokens)].some((token) => text.includes(token));
+  const interpretation = input?.interpretation || {};
+  const roleHints = [
+    interpretation?.providedFields?.roleHint,
+    interpretation?.detectedFields?.roleHint,
+    interpretation?.extractedFields?.roleHint
+  ]
+    .map(normalize)
+    .filter(Boolean);
+
+  return [...new Set(roleTokens)].some((token) => (
+    text.includes(token)
+    || roleHints.some((hint) => hint.includes(token) || token.includes(hint))
+  ));
 }
 
 /**

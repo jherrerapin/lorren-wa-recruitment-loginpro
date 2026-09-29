@@ -93,6 +93,13 @@ function currentAttachments(message) {
   }];
 }
 
+function isProcessedCvAttachment(attachment) {
+  return attachment.type === 'document'
+    && attachment.status === 'processed'
+    && typeof attachment.extractedText === 'string'
+    && attachment.extractedText.trim().length > 0;
+}
+
 function attachmentItems(attachments) {
   return attachments.map((attachment) => ({
     type: attachment.type,
@@ -101,19 +108,14 @@ function attachmentItems(attachments) {
     fileName: attachment.fileName,
     mimeType: attachment.mimeType,
     caption: null,
-    isCv: attachment.type === 'document',
+    isCv: isProcessedCvAttachment(attachment),
     extractedText: attachment.extractedText,
     status: attachment.status
   }));
 }
 
 function turnBringsProcessedCv(attachments) {
-  return attachments.some((attachment) => (
-    attachment.type === 'document'
-      && attachment.status === 'processed'
-      && typeof attachment.extractedText === 'string'
-      && attachment.extractedText.trim().length > 0
-  ));
+  return attachments.some(isProcessedCvAttachment);
 }
 
 /** @param {unknown} value */
@@ -405,7 +407,7 @@ export async function buildConversationTurnInput(inboundMessage, dependencies = 
     attachments: {
       current: attachments,
       items: attachmentItems(attachments),
-      hasCv: attachments.some((attachment) => attachment.type === 'document')
+      hasCv: turnBringsProcessedCv(attachments)
     },
     ...(interpretation ? { interpretation } : {})
   };

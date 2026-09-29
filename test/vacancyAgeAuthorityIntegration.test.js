@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { candidateDataPolicy } from '../src/core/engine/policies/candidateDataPolicy.js';
 import { eligibilityPolicy } from '../src/core/engine/policies/eligibilityPolicy.js';
 import { parseNaturalData } from '../src/services/candidateData.js';
-import { evaluateCandidateEligibility } from '../src/services/readinessGuard.js';
+import { evaluateCandidateEligibility } from '../src/services/candidateReadiness.js';
 
 async function evaluateTurn({ text, persistedAge = null, vacancy }) {
   const interpretedFields = parseNaturalData(text);
@@ -11,7 +11,14 @@ async function evaluateTurn({ text, persistedAge = null, vacancy }) {
     interpretation: { fields: interpretedFields }
   });
   const decision = await eligibilityPolicy({
-    candidate: { facts: { age: persistedAge } },
+    candidate: {
+      facts: {
+        age: persistedAge,
+        dataConsentStatus: 'ACCEPTED',
+        vacancyActive: true,
+        vacancyAcceptingApplications: true
+      }
+    },
     interpretation: { fields: interpretedFields },
     vacancy,
     execution: { mayReply: true }

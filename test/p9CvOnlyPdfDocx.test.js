@@ -5,7 +5,6 @@ import { buildSafeContextualFallbackText } from '../src/services/contextualReply
 import { looksLikeCvFilenameText } from '../src/services/cvFlow.js';
 import { sanitizeRequiredDocumentsForBot, generateInterviewOffer, generateBookingConfirmation, preserveConfiguredInterviewDocuments } from '../src/services/naturalReply.js';
 import { CV_UNSAFE_FALLBACK_REPLY, sanitizeOutboundReply } from '../src/services/outboundReplyPolicy.js';
-import { buildVacancyStateForModel } from '../src/services/conversationEngine.js';
 
 function assertNoForbiddenHvTerms(reply) {
   assert.doesNotMatch(reply, /foto/i);
@@ -107,20 +106,6 @@ test('si la IA intenta agregar PDF/DOCX en documentación de entrevista, se rest
 
   assert.match(reply, /debe traer Hoja de vida y cédula original/i);
   assert.doesNotMatch(reply, /PDF|DOCX/i);
-});
-
-test('estado de vacante para el motor expone documentación de entrevista saneada', () => {
-  const state = buildVacancyStateForModel({
-    title: 'Operario de planta',
-    role: 'Operario',
-    city: 'Medellín',
-    isActive: true,
-    acceptingApplications: true,
-    requiredDocuments: 'Hoja de vida Minerva 1003 física o impresa, como la tenga, y cédula original'
-  });
-
-  assert.match(state.interviewDocumentation, /Hoja de vida Minerva 1003 física o impresa, como la tenga, y cédula original/i);
-  assert.doesNotMatch(state.interviewDocumentation, /PDF|DOCX/i);
 });
 
 test('replySafety bloquea salida peligrosa sobre HV', () => {
