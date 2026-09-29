@@ -461,13 +461,29 @@ export function dispatchOpsExtrasRouter(prisma) {
       loadActiveClientsForServiceRequestForm(prisma),
       loadWorkerRestAssignments(prisma, { from: restDate, to: restDate })
     ]);
+    const restWorkerIds = [...new Set(restAssignments.map((rest) => rest.workerId).filter(Boolean))];
+    const loadedRestWorkers = restWorkerIds.length
+      ? await prisma.dispatchWorker.findMany({
+          where: { id: { in: restWorkerIds } },
+          select: {
+            id: true,
+            fullName: true,
+            contractType: true,
+            residenceCity: true,
+            cities: { select: { city: { select: { name: true } } } }
+          }
+        })
+      : [];
+    const restWorkers = loadedRestWorkers.filter((worker) => workerMatchesOperationalCityScope(worker, req.operationalCityScope));
+    const restWorkerIdSet = new Set(restWorkers.map((worker) => worker.id));
+    const visibleRestAssignments = restAssignments.filter((rest) => restWorkerIdSet.has(rest.workerId));
     const selectedServiceRequest = serviceRequestId ? serviceRequests.find((item) => item.id === serviceRequestId) || null : serviceRequests[0] || null;
     const blockedWorkerIds = new Set(selectedServiceRequest ? selectedServiceRequest.assignments.map((assignment) => assignment.workerId) : []);
     const availableWorkers = workers.filter((worker) => !blockedWorkerIds.has(worker.id));
     const selectedDateRange = selectedServiceRequest ? buildUtcDayRangeFromDateValue(selectedServiceRequest.serviceDate) : null;
     const sameDayAssignments = selectedServiceRequest ? await prisma.dispatchAssignment.findMany({ where: { serviceRequestId: { not: selectedServiceRequest.id }, status: { in: ACTIVE_ASSIGNMENT_STATUSES }, serviceRequest: { serviceDate: { gte: selectedDateRange.start, lt: selectedDateRange.end } } }, select: { workerId: true } }) : [];
     const assignedWorkerIdsOnSelectedDate = new Set(sameDayAssignments.map((assignment) => assignment.workerId));
-    return res.render('operacionesAsignacionesConfirmacion', { activeStatuses: ACTIVE_ASSIGNMENT_STATUSES, workers, availableWorkers, assignedWorkerIdsOnSelectedDate, cities, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, restDate, restAssignments, restReasons: Object.values(WORKER_REST_REASONS), message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', transportMode: transportMode || '', locality: locality || '' }, transportModes: cleanDistinctStrings(transportModeRows, 'transportMode'), localities: cleanDistinctStrings(localityRows, 'residenceLocality'), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
+    return res.render('operacionesAsignacionesConfirmacion', { activeStatuses: ACTIVE_ASSIGNMENT_STATUSES, workers, availableWorkers, assignedWorkerIdsOnSelectedDate, cities, serviceRequests, selectedServiceRequest, selectedServiceRequestId: selectedServiceRequest?.id || '', clients, restDate, restAssignments: visibleRestAssignments, restWorkers, restReasons: Object.values(WORKER_REST_REASONS), message: normalizeString(req.query.message), filters: { q: q || '', operationalCityId: operationalCityId || '', transportMode: transportMode || '', locality: locality || '' }, transportModes: cleanDistinctStrings(transportModeRows, 'transportMode'), localities: cleanDistinctStrings(localityRows, 'residenceLocality'), role: req.session?.userRole || req.userRole, canAccessDispatch: Boolean(req.session?.canAccessDispatch || req.canAccessDispatch) });
   });
 
   router.get('/solicitudes', requireOps, async (req, res) => {
