@@ -26,11 +26,12 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Accept Android SDK licenses
-        run: yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses >/dev/null || true
-
-      - name: Install Android SDK 37
-        run: /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager 'platforms;android-37' 'build-tools;37.0.0'
+      - name: Inspect Android SDK
+        run: |
+          echo "Installed platforms:"
+          ls -1 /usr/local/lib/android/sdk/platforms || true
+          echo "Installed build tools:"
+          ls -1 /usr/local/lib/android/sdk/build-tools || true
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -42,7 +43,7 @@ jobs:
         env:
           ANDROID_HOME: /usr/local/lib/android/sdk
           ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        run: gradle :app:assembleDebug -PlorrenPortalBaseUrl=https://lorren-wa-recruitment-loginpro-production.up.railway.app -PlorrenVersionCode=2 -PlorrenVersionName=0.1.1-terrain
+        run: gradle :app:assembleDebug --stacktrace -PlorrenPortalBaseUrl=https://lorren-wa-recruitment-loginpro-production.up.railway.app -PlorrenVersionCode=2 -PlorrenVersionName=0.1.1-terrain
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
