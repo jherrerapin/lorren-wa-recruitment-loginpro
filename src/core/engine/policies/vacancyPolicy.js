@@ -150,6 +150,53 @@ function isVacancyQuestionIntent(interpretation = {}) {
   return VACANCY_QUESTION_INTENTS.has(intent) || intent.startsWith('ASK_VACANCY_');
 }
 
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function unresolvedRecruitmentContext(input = {}) {
+  const facts = input?.candidate?.facts || {};
+  const interpretation = input?.interpretation || {};
+  const detected = interpretation.detectedFields || {};
+  const extracted = interpretation.extractedFields || {};
+  const provided = interpretation.providedFields || {};
+  const fields = interpretation.fields || {};
+
+  return {
+    city: firstNonEmptyString(
+      facts.recruitmentCity,
+      fields.recruitmentCity,
+      provided.recruitmentCity,
+      extracted.recruitmentCity,
+      detected.recruitmentCity,
+      provided.cityHint,
+      extracted.cityHint,
+      detected.cityHint,
+      fields.city,
+      provided.city,
+      extracted.city,
+      detected.city
+    ),
+    role: firstNonEmptyString(
+      facts.recruitmentRole,
+      fields.recruitmentRole,
+      provided.recruitmentRole,
+      extracted.recruitmentRole,
+      detected.recruitmentRole,
+      provided.roleHint,
+      extracted.roleHint,
+      detected.roleHint,
+      fields.role,
+      provided.role,
+      extracted.role,
+      detected.role
+    )
+  };
+}
+
 export function buildVacancyPolicyReply(vacancy = {}, rawText = '') {
   if (!vacancy) return '';
 
@@ -260,20 +307,36 @@ export function vacancyPolicy(input) {
   }
 
   if (input?.vacancy === null && !input?.candidate?.facts?.vacancyId) {
-    const detected = input?.interpretation?.detectedFields || {};
-    const roleHint = typeof detected.roleHint === 'string' ? detected.roleHint.trim() : '';
-    const cityHint = typeof detected.cityHint === 'string' ? detected.cityHint.trim() : '';
-    if (roleHint && cityHint) {
+    const context = unresolvedRecruitmentContext(input);
+    if (!context.city && !context.role) {
+      return {
+        reply: { directive: 'ASK_CITY_AND_VACANCY' },
+        transitions: { keepCurrentStep: true }
+      };
+    }
+    if (context.city && !context.role) {
       return {
         reply: {
-          directive: 'CLARIFY_VACANCY_SELECTION',
-          parameters: { roleHint, cityHint }
+          directive: 'ASK_VACANCY_FOR_CITY',
+          parameters: { city: context.city }
+        },
+        transitions: { keepCurrentStep: true }
+      };
+    }
+    if (!context.city && context.role) {
+      return {
+        reply: {
+          directive: 'ASK_CITY_FOR_ROLE',
+          parameters: { role: context.role }
         },
         transitions: { keepCurrentStep: true }
       };
     }
     return {
-      reply: { directive: 'ASK_WHICH_FLYER_SEEN' },
+      reply: {
+        directive: 'CLARIFY_VACANCY_SELECTION',
+        parameters: { roleHint: context.role, cityHint: context.city }
+      },
       transitions: { keepCurrentStep: true }
     };
   }
