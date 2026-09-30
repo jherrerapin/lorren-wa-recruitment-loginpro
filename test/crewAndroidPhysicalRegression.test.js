@@ -90,7 +90,7 @@ test('la UI Android deja de inventar Cuadrilla 1/2 y etiqueta por operación, fe
   assert.match(nativePresence, /member\.isLeader \? 'Encargado' : 'Auxiliar'/);
 });
 
-test('la captura nativa solicita GPS y red habilitados sin duplicar la política de geocerca', async () => {
+test('la captura nativa solicita GPS y red habilitados sin duplicar la política de geocerca ni bloquear por precisión', async () => {
   const [bridge, policy] = await Promise.all([
     read('mobile/android/app/src/main/java/com/loginpro/lorren/portal/PresenceBridge.java'),
     read('src/modules/dispatch-attendance/domain/attendanceValidationPolicy.js')
@@ -104,6 +104,6 @@ test('la captura nativa solicita GPS y red habilitados sin duplicar la política
   assert.match(bridge, /for \(String provider : providers\)/);
   assert.match(bridge, /requestSingleUpdate\(provider, listener, Looper\.getMainLooper\(\)\)/);
   assert.doesNotMatch(bridge, /private String preferredProvider\(\)/);
-  assert.match(policy, /accuracyMeters > maxAccuracyMeters/);
+  assert.doesNotMatch(policy, /accuracyMeters > maxAccuracyMeters/);
   assert.doesNotMatch(bridge, /maxAccuracyMeters|LOW_LOCATION_ACCURACY|OUTSIDE_GEOFENCE/);
 });

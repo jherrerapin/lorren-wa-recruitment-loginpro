@@ -65,7 +65,7 @@ function rejectedResult(flag) {
   };
 }
 
-function requiredGeofenceRejection(input, accuracyMeters, maxAccuracyMeters) {
+function requiredGeofenceRejection(input, accuracyMeters) {
   if (input.hasConfiguredGeofence !== true) {
     return ATTENDANCE_RISK_FLAG.GEOFENCE_NOT_CONFIGURED;
   }
@@ -78,9 +78,6 @@ function requiredGeofenceRejection(input, accuracyMeters, maxAccuracyMeters) {
   if (accuracyMeters === null) {
     return ATTENDANCE_RISK_FLAG.LOCATION_NOT_AVAILABLE;
   }
-  if (accuracyMeters > maxAccuracyMeters) {
-    return ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY;
-  }
   return null;
 }
 
@@ -88,7 +85,8 @@ function requiredGeofenceRejection(input, accuracyMeters, maxAccuracyMeters) {
  * Evalúa una marcación de llegada sin persistir datos ni depender de Express o Prisma.
  *
  * La geocerca es una condición obligatoria: una operación sin punto válido, una ubicación
- * ausente, una precisión insuficiente o una posición fuera del radio rechazan la marca.
+ * ausente o una posición fuera del radio rechazan la marca. La precisión reportada por el
+ * dispositivo se conserva como evidencia, pero no interrumpe la marcación.
  * La revisión humana se reserva para señales posteriores como dispositivo no autorizado,
  * almacenamiento no persistente o una captura web offline que sí cumplió la geocerca.
  */
@@ -115,9 +113,8 @@ export function evaluateArrivalValidation(input = {}) {
 
   const toleranceMinutes = Math.max(0, finiteNumber(input.toleranceMinutes, 0));
   const minutesLate = Math.max(0, finiteNumber(input.minutesLate, 0));
-  const maxAccuracyMeters = Math.max(1, finiteNumber(input.maxAccuracyMeters, 100));
   const accuracyMeters = finiteNumber(input.accuracyMeters, null);
-  const geofenceRejection = requiredGeofenceRejection(input, accuracyMeters, maxAccuracyMeters);
+  const geofenceRejection = requiredGeofenceRejection(input, accuracyMeters);
   if (geofenceRejection) return rejectedResult(geofenceRejection);
 
   const syncDelayMinutes = Math.max(0, finiteNumber(input.syncDelayMinutes, 0));

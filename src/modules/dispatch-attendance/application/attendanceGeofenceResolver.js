@@ -54,9 +54,6 @@ function acceptance(signals, sourceOperationPointId) {
   if (signals.insideGeofence !== true) {
     return { ...signals, accepted: false, errorCode: 'attendance_outside_operation_range' };
   }
-  if (signals.accuracyMeters > signals.maxAccuracyMeters) {
-    return { ...signals, accepted: false, errorCode: 'attendance_location_accuracy_insufficient' };
-  }
   return {
     ...signals,
     accepted: true,
@@ -87,7 +84,6 @@ export async function resolveAttendanceOperationGeofence(
   const sourceAcceptance = acceptance(sourceSignals, sourceOperationPointId);
 
   // La operación de la asignación siempre tiene prioridad si la ubicación cae dentro de ella.
-  // Esto evita escoger otra operación solapada para eludir su precisión configurada.
   if (sourceSignals.insideGeofence === true) return sourceAcceptance;
 
   const crossOperationAllowed = options.allowCrossOperation !== false
@@ -127,8 +123,6 @@ export async function resolveAttendanceOperationGeofence(
   const accepted = evaluated.find((result) => result.accepted);
   if (accepted) return accepted;
 
-  // Si físicamente está dentro de una operación registrada pero la precisión no alcanza,
-  // se conserva ese rechazo en vez de degradarlo a "fuera de rango".
   if (evaluated.length) return evaluated[0];
   return sourceAcceptance;
 }

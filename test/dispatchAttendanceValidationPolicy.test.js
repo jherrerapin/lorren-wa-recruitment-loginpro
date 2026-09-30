@@ -63,12 +63,13 @@ test('rechaza una marcación fuera de la geocerca', () => {
   assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.OUTSIDE_GEOFENCE]);
 });
 
-test('rechaza una precisión GPS superior al máximo permitido', () => {
+test('acepta una precisión GPS superior al máximo configurado', () => {
   const result = evaluateArrivalValidation(trustedArrival({ accuracyMeters: 180 }));
 
-  assert.equal(result.canRecordArrival, false);
-  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.REJECTED);
-  assert.deepEqual(result.riskFlags, [ATTENDANCE_RISK_FLAG.LOW_LOCATION_ACCURACY]);
+  assert.equal(result.canRecordArrival, true);
+  assert.equal(result.attendanceStatus, ATTENDANCE_STATUS.ON_TIME);
+  assert.equal(result.validationStatus, ATTENDANCE_VALIDATION_STATUS.AUTO_VALIDATED);
+  assert.deepEqual(result.riskFlags, []);
 });
 
 test('una señal de dispositivo compartido produce riesgo crítico y revisión', () => {
