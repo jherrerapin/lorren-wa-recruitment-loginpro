@@ -41,7 +41,9 @@
       "dataConsentRecordedBy": "candidate_whatsapp",
       "lastInboundAt": "2026-08-03T15:25:00.000Z",
       "botResumeMode": null,
-      "vacancyId": "vacancy-replay-conv-007"
+      "vacancyId": "vacancy-replay-conv-007",
+      "recruitmentCity": "Ciudad de prueba",
+      "recruitmentRole": "Cargo operativo de prueba"
     },
     "vacancy": {
       "vacancyId": "vacancy-replay-conv-007",
@@ -157,5 +159,25 @@
       "status": "NUEVO",
       "botResumeMode": null
     }
+  },
+  "expectedDecision": {
+    "reply": {
+      "text": "Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.",
+      "interactiveOptions": []
+    },
+    "mutations": {
+      "fieldsToPersist": {
+        "botResumeMode": null,
+        "status": "REGISTRADO"
+      },
+      "nextStep": null,
+      "nextStage": null
+    },
+    "transitions": {
+      "keepCurrentStep": true,
+      "handoffToHuman": false,
+      "endConversation": true
+    },
+    "scheduling": null
   }
 }

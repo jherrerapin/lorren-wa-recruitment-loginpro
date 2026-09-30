@@ -41,7 +41,9 @@
       "dataConsentRecordedBy": null,
       "lastInboundAt": null,
       "botResumeMode": "awaiting_data_consent",
-      "vacancyId": "vacancy-test-bogota-consent"
+      "vacancyId": "vacancy-test-bogota-consent",
+      "recruitmentCity": "Bogotá",
+      "recruitmentRole": "Auxiliar de bodega"
     },
     "vacancy": {
       "vacancyId": "vacancy-test-bogota-consent",
@@ -49,7 +51,9 @@
       "acceptingApplications": true,
       "city": "Bogotá",
       "title": "Auxiliar de bodega",
-      "requiredCandidateFields": ["fullName"]
+      "requiredCandidateFields": [
+        "fullName"
+      ]
     }
   },
   "history": [
@@ -136,8 +140,14 @@
         "La hoja de vida quedó almacenada",
         "La postulación quedó completa"
       ],
-      "requiredText": ["autorización quedó registrada", "nombre completo"],
-      "forbiddenText": ["No continuaré con la postulación", "postulación quedó completa"]
+      "requiredText": [
+        "autorización quedó registrada",
+        "nombre completo"
+      ],
+      "forbiddenText": [
+        "No continuaré con la postulación",
+        "postulación quedó completa"
+      ]
     },
     "finalState": {
       "dataConsentStatus": "ACCEPTED",
@@ -148,5 +158,22 @@
       "status": "NUEVO",
       "botResumeMode": null
     }
+  },
+  "expectedDecision": {
+    "reply": null,
+    "mutations": {
+      "fieldsToPersist": {
+        "dataConsentStatus": "ACCEPTED",
+        "botResumeMode": null
+      },
+      "nextStep": null,
+      "nextStage": null
+    },
+    "transitions": {
+      "keepCurrentStep": true,
+      "handoffToHuman": false,
+      "endConversation": false
+    },
+    "scheduling": null
   }
 }

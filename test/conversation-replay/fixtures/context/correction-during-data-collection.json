@@ -46,7 +46,9 @@
       "dataConsentStatus": "ACCEPTED",
       "vacancyId": "vacancy-test-bogota-warehouse",
       "locality": "Suba",
-      "transportMode": null
+      "transportMode": null,
+      "recruitmentCity": "Bogotá",
+      "recruitmentRole": "Auxiliar de bodega"
     },
     "vacancy": {
       "vacancyId": "vacancy-test-bogota-warehouse",
@@ -55,7 +57,9 @@
       "city": "Bogotá",
       "title": "Auxiliar de bodega"
     },
-    "pendingFields": ["transportMode"]
+    "pendingFields": [
+      "transportMode"
+    ]
   },
   "history": [
     {
@@ -119,13 +123,44 @@
         "El medio de transporte quedó registrado",
         "La postulación quedó completa"
       ],
-      "requiredText": ["Engativá", "medio de transporte"],
-      "forbiddenText": ["medio de transporte quedó registrado", "postulación quedó completa"]
+      "requiredText": [
+        "Engativá",
+        "medio de transporte"
+      ],
+      "forbiddenText": [
+        "medio de transporte quedó registrado",
+        "postulación quedó completa"
+      ]
     },
     "finalState": {
       "currentStep": "COLLECTING_DATA",
       "locality": "Engativá",
-      "pendingFields": ["transportMode"]
+      "pendingFields": [
+        "transportMode"
+      ]
     }
+  },
+  "expectedDecision": {
+    "reply": {
+      "directive": "ASK_MISSING_FIELDS",
+      "parameters": {
+        "missingFields": [
+          "transportMode"
+        ]
+      }
+    },
+    "mutations": {
+      "fieldsToPersist": {
+        "locality": "Engativá"
+      },
+      "nextStep": null,
+      "nextStage": null
+    },
+    "transitions": {
+      "keepCurrentStep": true,
+      "handoffToHuman": false,
+      "endConversation": false
+    },
+    "scheduling": null
   }
 }

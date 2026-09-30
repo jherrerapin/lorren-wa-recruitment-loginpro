@@ -41,7 +41,9 @@
       "dataConsentRecordedBy": null,
       "lastInboundAt": null,
       "botResumeMode": "awaiting_data_consent",
-      "vacancyId": "vacancy-test-bogota-consent"
+      "vacancyId": "vacancy-test-bogota-consent",
+      "recruitmentCity": "Bogotá",
+      "recruitmentRole": "Auxiliar de bodega"
     },
     "vacancy": {
       "vacancyId": "vacancy-test-bogota-consent",
@@ -136,8 +138,14 @@
         "La autorización quedó registrada",
         "La recolección de datos continuará"
       ],
-      "requiredText": ["No continuaré con la postulación", "ni procesaré tus datos"],
-      "forbiddenText": ["autorización quedó registrada", "seguimos con tu postulación"]
+      "requiredText": [
+        "No continuaré con la postulación",
+        "ni procesaré tus datos"
+      ],
+      "forbiddenText": [
+        "autorización quedó registrada",
+        "seguimos con tu postulación"
+      ]
     },
     "finalState": {
       "dataConsentStatus": "REVOKED",
@@ -148,5 +156,25 @@
       "status": "NUEVO",
       "botResumeMode": null
     }
+  },
+  "expectedDecision": {
+    "reply": {
+      "text": "Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.",
+      "interactiveOptions": []
+    },
+    "mutations": {
+      "fieldsToPersist": {
+        "botResumeMode": null,
+        "status": "REGISTRADO"
+      },
+      "nextStep": null,
+      "nextStage": null
+    },
+    "transitions": {
+      "keepCurrentStep": true,
+      "handoffToHuman": false,
+      "endConversation": true
+    },
+    "scheduling": null
   }
 }

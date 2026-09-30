@@ -1,7 +1,6 @@
 import {
   DATA_CONSENT_TEXT,
   DATA_CONSENT_VERSION,
-  buildConsentPendingMode,
   parseConsentPendingMode
 } from '../../src/core/contracts/DataConsentContract.js';
 import { CONSENT_REQUEST_TEXT } from '../../src/core/contracts/consentDefinition.js';
@@ -55,17 +54,17 @@ function buildFinalState(state) {
 function planConsentRequest(fixture, state) {
   const consentDecision = consentPolicy({
     turn: { rawText: String(fixture.inbound.body || '') },
-    candidate: { facts: { dataConsentStatus: state.candidate.dataConsentStatus } },
+    candidate: { facts: state.candidate },
     pending: { fields: ['dataConsent'] },
-    vacancy: state.vacancy || {},
+    vacancy: { ...state.vacancy, id: state.vacancy.vacancyId },
     interpretation: { intent: 'APPLY_INTENT' },
     execution: { mayReply: true }
   });
-  if (consentDecision?.mutations?.nextStep !== 'AWAITING_DATA_CONSENT') {
+  if (consentDecision?.mutations?.fieldsToPersist?.botResumeMode !== 'awaiting_data_consent') {
     throw new Error(`${fixture.id}: la autoridad de consentimiento no bloqueó un turno protegido`);
   }
 
-  state.candidate.botResumeMode = buildConsentPendingMode();
+  state.candidate.botResumeMode = consentDecision.mutations.fieldsToPersist.botResumeMode;
   const allowedWrites = ['candidate.botResumeMode'];
   appendOutboundWrites(allowedWrites);
 
