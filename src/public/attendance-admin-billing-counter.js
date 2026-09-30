@@ -28,6 +28,14 @@
     }).format(date).replace('.', '');
   }
 
+  function moneyLabel(value) {
+    return new Intl.NumberFormat('es-CO', {
+      style: 'currency',
+      currency: 'COP',
+      maximumFractionDigits: 0
+    }).format(Math.max(0, Number(value) || 0));
+  }
+
   function documentLabel(worker) {
     const number = text(worker?.documentNumber);
     if (!number) return 'Documento no registrado';
@@ -80,9 +88,16 @@
       .attendance-billing-worker small { display:block; margin-top:2px; color:var(--muted); font-size:10px; }
       .attendance-billing-reason { justify-self:start; display:inline-flex; border-radius:999px; padding:4px 7px; background:#e6f4f1; color:#0d6b5f; font-size:9px; font-weight:900; }
       .attendance-billing-duplicate { display:inline-block; margin-left:5px; color:#b45309; font-size:9px; font-weight:900; }
+      .attendance-billing-invoices { border-top:1px solid var(--border); padding-top:12px; display:grid; gap:9px; }
+      .attendance-billing-invoices h3 { margin:0; color:var(--navy); font-size:13px; }
+      .attendance-billing-invoice-list { display:grid; gap:8px; }
+      .attendance-billing-invoice { border:1px solid #d8e0ea; border-radius:13px; padding:10px 11px; background:#f8fafc; display:grid; grid-template-columns:minmax(150px,1.2fr) repeat(3,minmax(110px,.8fr)); gap:8px 14px; align-items:center; }
+      .attendance-billing-invoice strong { color:var(--navy); font-size:12px; }
+      .attendance-billing-invoice small { display:block; margin-top:2px; color:var(--muted); font-size:10px; }
+      .attendance-billing-invoice-total { color:#0d7a6b !important; font-size:15px !important; }
       .attendance-billing-empty, .attendance-billing-error { margin:0; color:var(--muted); font-size:12px; }
       .attendance-billing-error { color:#991b1b; }
-      @media (max-width:760px) { .attendance-billing-worker,.attendance-billing-policy { grid-template-columns:1fr; } .attendance-billing-reason { justify-self:start; } .attendance-billing-config-controls { align-items:stretch; } .attendance-billing-config-field { width:100%; } }
+      @media (max-width:760px) { .attendance-billing-worker,.attendance-billing-policy,.attendance-billing-invoice { grid-template-columns:1fr; } .attendance-billing-reason { justify-self:start; } .attendance-billing-config-controls { align-items:stretch; } .attendance-billing-config-field { width:100%; } }
     `;
     document.head.appendChild(style);
   }
@@ -128,6 +143,43 @@
     reason.textContent = text(worker?.reasonLabel, 'Gestionado');
 
     row.append(identity, dates, assignments, reason);
+    return row;
+  }
+
+  function invoiceNode(invoice) {
+    const row = document.createElement('article');
+    row.className = 'attendance-billing-invoice';
+
+    const identity = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = text(invoice?.invoiceNumber, 'Factura de Asistencia');
+    const period = document.createElement('small');
+    period.textContent = `${dateLabel(invoice?.cycleStart)} – ${dateLabel(invoice?.cycleEnd)}`;
+    identity.append(title, period);
+
+    const count = document.createElement('div');
+    const countTitle = document.createElement('strong');
+    countTitle.textContent = `${Number(invoice?.count || 0)} auxiliares`;
+    const countMeta = document.createElement('small');
+    countMeta.textContent = 'Ciclo cerrado';
+    count.append(countTitle, countMeta);
+
+    const unit = document.createElement('div');
+    const unitTitle = document.createElement('strong');
+    unitTitle.textContent = moneyLabel(invoice?.unitPrice);
+    const unitMeta = document.createElement('small');
+    unitMeta.textContent = 'Valor unitario';
+    unit.append(unitTitle, unitMeta);
+
+    const total = document.createElement('div');
+    const totalTitle = document.createElement('strong');
+    totalTitle.className = 'attendance-billing-invoice-total';
+    totalTitle.textContent = moneyLabel(invoice?.total);
+    const totalMeta = document.createElement('small');
+    totalMeta.textContent = `Pago: ${dateLabel(invoice?.paymentDate)}`;
+    total.append(totalTitle, totalMeta);
+
+    row.append(identity, count, unit, total);
     return row;
   }
 
@@ -189,7 +241,7 @@
         <button type="button" data-billing-use-today>Usar hoy</button>
         <button type="button" data-primary data-billing-save-start>Guardar fecha oficial</button>
       </div>
-      <p class="attendance-billing-note">Cambiar esta fecha no borra marcaciones ni reinicia historial; únicamente redefine desde cuándo entra información al contador. Después, los ciclos cambian solos cada día 8.</p>
+      <p class="attendance-billing-note">Cambiar esta fecha no borra marcaciones ni reinicia historial. Los ciclos facturables son mensuales: del día 1 al día 1 del mes siguiente.</p>
       <p class="attendance-billing-config-feedback" data-billing-config-feedback aria-live="polite"></p>
     `;
     const input = editor.querySelector('[data-billing-start-input]');
@@ -251,7 +303,7 @@
     section.innerHTML = `
       <div class="attendance-billing-head">
         <div>
-          <div class="attendance-billing-eyebrow">Contador del ciclo 8 → 7</div>
+          <div class="attendance-billing-eyebrow">Contador del ciclo 1 → 1</div>
           <div class="attendance-billing-value" data-billing-value>0<span>auxiliares facturables</span></div>
           <p class="attendance-billing-cycle" data-billing-cycle></p>
         </div>
@@ -259,14 +311,18 @@
       </div>
       <div class="attendance-billing-policy" aria-label="Reglas del ciclo facturable">
         <div class="attendance-billing-policy-item"><small>Inicio oficial</small><strong data-billing-start>${dateLabel(settings.billingStartDate, 'Pendiente')}</strong></div>
-        <div class="attendance-billing-policy-item"><small>Corte mensual</small><strong>Día 8 · ciclo 8 → 7</strong></div>
+        <div class="attendance-billing-policy-item"><small>Corte mensual</small><strong>Día 1 · ciclo 1 → 1</strong></div>
         <div class="attendance-billing-policy-item"><small>Pago de este ciclo</small><strong data-billing-payment>Pendiente</strong></div>
       </div>
-      <p class="attendance-billing-note">El día 8 el contador pasa automáticamente al nuevo ciclo. No se borran asistencias ni se reinicia el historial; solo cambia el período que se consulta.</p>
+      <p class="attendance-billing-note">El día 1 se cierra el mes anterior y comienza el nuevo ciclo. Las asistencias permanecen intactas; el cierre queda congelado como factura histórica.</p>
       <details class="attendance-billing-details" data-billing-details>
         <summary data-billing-summary>Ver auxiliares incluidos (0)</summary>
         <div class="attendance-billing-list" data-billing-list></div>
       </details>
+      <section class="attendance-billing-invoices" data-billing-invoices>
+        <h3>Facturas del módulo</h3>
+        <div class="attendance-billing-invoice-list" data-billing-invoice-list></div>
+      </section>
     `;
 
     const editor = buildDevEditor(payload);
@@ -290,6 +346,16 @@
       });
       tabs.appendChild(button);
     });
+
+    const invoiceList = section.querySelector('[data-billing-invoice-list]');
+    const invoices = Array.isArray(payload?.invoices) ? payload.invoices : [];
+    if (invoices.length) invoices.forEach((invoice) => invoiceList.appendChild(invoiceNode(invoice)));
+    else {
+      const empty = document.createElement('p');
+      empty.className = 'attendance-billing-empty';
+      empty.textContent = 'Aún no hay ciclos cerrados facturados.';
+      invoiceList.appendChild(empty);
+    }
 
     renderCycle(section, payload.current, settings);
     return section;
