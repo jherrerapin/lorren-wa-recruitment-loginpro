@@ -4,6 +4,8 @@ const CANDIDATE_MUTATION_FIELDS = Object.freeze([
   'documentNumber',
   'age',
   'gender',
+  'recruitmentCity',
+  'recruitmentRole',
   'neighborhood',
   'locality',
   'medicalRestrictions',
