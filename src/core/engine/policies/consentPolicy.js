@@ -28,19 +28,19 @@ const VACANCY_QUESTION_INTENTS = new Set([
   'ASK_VACANCY_SCHEDULE'
 ]);
 
-const SIMPLE_GREETING_INTENTS = new Set([
-  'GREETING',
-  'HELLO'
-]);
-
 const EXPLICIT_APPLICATION_INTENTS = new Set([
-  'APPLY_INTENT'
+  'APPLY_INTENT',
+  'CONTINUE_APPLICATION'
 ]);
 
-const CONSENT_GREETING_PREFIX = '¡Hola! Soy Lórren, tu asistente virtual. ';
+const AWAITING_VACANCY_INTEREST = 'awaiting_vacancy_interest';
+const AWAITING_DATA_CONSENT = 'awaiting_data_consent';
 
 const CONSENT_REVOKED_REPLY =
   'Entendido. No continuaré con la postulación por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
+
+const NOT_INTERESTED_REPLY =
+  'Entendido. Gracias por tu tiempo. Si más adelante te interesa continuar con esta u otra convocatoria que hayas visto, puedes volver a escribirnos.';
 
 const CONSENT_OPTIONS = Object.freeze([
   Object.freeze({
@@ -73,6 +73,10 @@ function candidateFacts(input = {}) {
   return facts && typeof facts === 'object' && !Array.isArray(facts)
     ? facts
     : {};
+}
+
+function resumeMode(input = {}) {
+  return String(candidateFacts(input).botResumeMode || '').trim().toLowerCase();
 }
 
 function isVacancyQuestion(input = {}) {
@@ -119,7 +123,7 @@ function resolvesConsentAcceptance(input = {}) {
 
   return CONSENT_ACCEPTANCE_INTENTS.has(intent)
     || decision === 'ACCEPTED'
-    || (shortAcceptance && isConsentAwaited(input))
+    || (shortAcceptance && resumeMode(input) === AWAITING_DATA_CONSENT)
     || hasExplicitConsentAcceptance(input?.turn?.rawText || '');
 }
 
@@ -132,26 +136,32 @@ function resolvesConsentRejection(input = {}) {
   return CONSENT_REJECTION_INTENTS.has(intent)
     || decision === 'REJECTED'
     || decision === 'REVOKED'
-    || (shortRejection && isConsentAwaited(input))
+    || (shortRejection && resumeMode(input) === AWAITING_DATA_CONSENT)
     || hasExplicitConsentRejection(input?.turn?.rawText || '');
 }
 
-function isConsentAwaited(input = {}) {
-  const status = String(candidateFacts(input).dataConsentStatus || '').trim().toUpperCase();
-  return status === 'PENDING'
-    || (input?.pending?.fields || []).some((field) => String(field).trim() === 'dataConsent');
+function resolvesPositiveInterest(input = {}) {
+  const intent = interpretationIntent(input);
+  const text = normalize(input?.turn?.rawText);
+  if (EXPLICIT_APPLICATION_INTENTS.has(intent)) return true;
+  if (/^(si|sí|claro|me interesa|estoy interesado|estoy interesada|quiero continuar|quiero postularme|deseo continuar)\b/.test(text)) {
+    return true;
+  }
+  return false;
+}
+
+function resolvesNegativeInterest(input = {}) {
+  const intent = interpretationIntent(input);
+  const text = normalize(input?.turn?.rawText);
+  if (['DECLINE_PROCESS', 'CANCEL_APPLICATION', 'STOP_APPLICATION', 'NO_INTEREST'].includes(intent)) {
+    return true;
+  }
+  return /^(no|no gracias|no me interesa|ya no me interesa|prefiero no|no deseo continuar)\b/.test(text);
 }
 
 function isConsentPending(input = {}) {
-  const facts = candidateFacts(input);
-  const status = String(facts.dataConsentStatus || '').trim().toUpperCase();
-  const interpretedDecision = input?.interpretation?.consentDecision
-    ?? input?.interpretation?.consent?.decision;
-
-  if (interpretedDecision === 'PENDING') return true;
-  if (status === 'ACCEPTED') return false;
-  if (status === 'REVOKED' || status === 'REJECTED') return false;
-  return true;
+  const status = String(candidateFacts(input).dataConsentStatus || '').trim().toUpperCase();
+  return !['ACCEPTED', 'REVOKED', 'REJECTED'].includes(status);
 }
 
 function hasResolvedVacancy(input = {}) {
@@ -159,29 +169,10 @@ function hasResolvedVacancy(input = {}) {
   return Boolean(facts.vacancyId || input?.vacancy?.id);
 }
 
-function isConsentPromptReady(input = {}) {
-  const intent = interpretationIntent(input);
-  if (!intent) return false;
-
-  if (SIMPLE_GREETING_INTENTS.has(intent)) {
-    return true;
-  }
-
-  if (EXPLICIT_APPLICATION_INTENTS.has(intent)) {
-    return true;
-  }
-
-  return hasResolvedVacancy(input);
-}
-
 /**
- * Pure consent policy. It declares state mutations but never persists them.
- * Vacancy questions remain available to vacancyPolicy even while consent is
- * pending; consent controls progression, not comprehension of the current turn.
- *
- * A PENDING greeting is enough to restore onboarding voice and present the
- * legal consent request. Non-greeting turns require explicit application intent
- * or an already resolved vacancy before the consent prompt is emitted.
+ * Consent is only requested after the vacancy is resolved and the candidate
+ * has explicitly confirmed interest. Short yes/no answers only resolve legal
+ * consent while botResumeMode says the consent question is actually pending.
  *
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
@@ -190,12 +181,16 @@ export function consentPolicy(input) {
   if (['INACTIVITY_REMINDER', 'INTERVIEW_REMINDER'].includes(interpretationIntent(input))) {
     return {};
   }
-  if (input?.vacancy === null) return {};
+  if (input?.vacancy === null || !hasResolvedVacancy(input)) return {};
+
   if (resolvesConsentRejection(input)) {
     return {
       ...(input?.execution?.mayReply !== false
         ? { reply: { text: CONSENT_REVOKED_REPLY, interactiveOptions: [] } }
         : {}),
+      mutations: {
+        fieldsToPersist: { botResumeMode: null }
+      },
       transitions: {
         endConversation: true
       }
@@ -206,7 +201,8 @@ export function consentPolicy(input) {
     return {
       mutations: {
         fieldsToPersist: {
-          dataConsentStatus: 'ACCEPTED'
+          dataConsentStatus: 'ACCEPTED',
+          botResumeMode: null
         }
       }
     };
@@ -214,22 +210,46 @@ export function consentPolicy(input) {
 
   if (!isConsentPending(input)) return {};
   if (isVacancyQuestion(input)) return {};
-  if (!isConsentAwaited(input) && !isConsentPromptReady(input)) return {};
-  if (input?.execution?.mayReply === false) return {};
 
-  const intent = interpretationIntent(input);
-  const replyText = SIMPLE_GREETING_INTENTS.has(intent)
-    ? `${CONSENT_GREETING_PREFIX}${CONSENT_REQUEST_TEXT}`
-    : CONSENT_REQUEST_TEXT;
+  const mode = resumeMode(input);
+  if (mode === AWAITING_VACANCY_INTEREST) {
+    if (resolvesNegativeInterest(input)) {
+      return {
+        reply: { text: NOT_INTERESTED_REPLY, interactiveOptions: [] },
+        mutations: {
+          fieldsToPersist: { botResumeMode: null }
+        },
+        transitions: { endConversation: true }
+      };
+    }
+    if (!resolvesPositiveInterest(input)) return {};
 
-  return {
-    reply: {
-      text: replyText,
-      interactiveOptions: CONSENT_OPTIONS
-    },
-    mutations: { nextStep: 'AWAITING_DATA_CONSENT' },
-    transitions: { keepCurrentStep: false }
-  };
+    return {
+      reply: {
+        text: CONSENT_REQUEST_TEXT,
+        interactiveOptions: CONSENT_OPTIONS
+      },
+      mutations: {
+        fieldsToPersist: { botResumeMode: AWAITING_DATA_CONSENT }
+      },
+      transitions: { keepCurrentStep: true }
+    };
+  }
+
+  if (mode === AWAITING_DATA_CONSENT) {
+    if (input?.execution?.mayReply === false) return {};
+    if (['ACKNOWLEDGEMENT', 'SOFT_CONFIRMATION'].includes(interpretationIntent(input))) {
+      return {
+        reply: {
+          text: CONSENT_REQUEST_TEXT,
+          interactiveOptions: CONSENT_OPTIONS
+        },
+        transitions: { keepCurrentStep: true }
+      };
+    }
+  }
+
+  return {};
 }
 
 export default consentPolicy;
