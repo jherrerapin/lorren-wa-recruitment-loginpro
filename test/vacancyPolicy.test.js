@@ -7,28 +7,71 @@ function input(facts, rawText = '', { pendingFields = [], interpretation } = {})
     turn: { rawText },
     candidate: { facts },
     pending: { fields: pendingFields },
+    execution: { mayReply: true },
     ...(interpretation ? { interpretation } : {})
   };
 }
 
-test('deja continuar una vacante activa que recibe postulaciones', () => {
+function activeVacancy(overrides = {}) {
+  return {
+    id: 'vac-1',
+    title: 'Auxiliar de cargue y descargue',
+    role: 'Auxiliar de cargue y descargue',
+    city: 'Bogotá',
+    isActive: true,
+    acceptingApplications: true,
+    requirements: 'Bachiller y disponibilidad para labor física',
+    conditions: 'Contrato con prestaciones de ley',
+    roleDescription: 'Cargue, descargue y organización de mercancía',
+    operationAddress: 'Bogotá',
+    ...overrides
+  };
+}
+
+test('deja continuar una vacante activa que recibe postulaciones cuando no hay snapshot cargado', () => {
   assert.deepEqual(vacancyPolicy(input({
     vacancyActive: true,
     vacancyAcceptingApplications: true
   })), {});
 });
 
-test('tráfico orgánico pide identificar el volante mediante una directiva pura', () => {
+test('tráfico orgánico sin contexto pregunta ciudad y vacante en una sola intervención', () => {
   assert.deepEqual(vacancyPolicy({
     ...input({}),
     vacancy: null
   }), {
-    reply: { directive: 'ASK_WHICH_FLYER_SEEN' },
+    reply: { directive: 'ASK_CITY_AND_VACANCY' },
     transitions: { keepCurrentStep: true }
   });
 });
 
-test('rol y ciudad ambiguos fuerzan desambiguación sin asignar una vacante', () => {
+test('si la ciudad ya es conocida pregunta únicamente la vacante', () => {
+  assert.deepEqual(vacancyPolicy({
+    ...input({ recruitmentCity: 'Bogotá' }),
+    vacancy: null
+  }), {
+    reply: {
+      directive: 'ASK_VACANCY_FOR_CITY',
+      parameters: { city: 'Bogotá' }
+    },
+    transitions: { keepCurrentStep: true }
+  });
+});
+
+test('si el cargo ya es conocido pregunta únicamente la ciudad', () => {
+  assert.deepEqual(vacancyPolicy({
+    ...input({ recruitmentRole: 'Auxiliar de cargue y descargue' }),
+    vacancy: null
+  }), {
+    reply: {
+      directive: 'ASK_CITY_FOR_ROLE',
+      parameters: { role: 'Auxiliar de cargue y descargue' }
+    },
+    transitions: { keepCurrentStep: true }
+  });
+});
+
+test('rol y ciudad conocidos pero todavía ambiguos fuerzan desambiguación sin asignar una vacante', () => {
   const decision = vacancyPolicy({
     ...input({}, 'Auxiliar de bodega en Bogotá', {
       interpretation: {
@@ -46,6 +89,63 @@ test('rol y ciudad ambiguos fuerzan desambiguación sin asignar una vacante', ()
     },
     transitions: { keepCurrentStep: true }
   });
+});
+
+test('vacante resuelta presenta solo información configurada y pregunta interés antes del consentimiento', () => {
+  const vacancy = activeVacancy();
+  const decision = vacancyPolicy({
+    ...input({
+      vacancyId: vacancy.id,
+      recruitmentCity: vacancy.city,
+      recruitmentRole: vacancy.role,
+      dataConsentStatus: 'PENDING'
+    }),
+    vacancy
+  });
+
+  assert.match(decision.reply.text, /Auxiliar de cargue y descargue en Bogotá/);
+  assert.match(decision.reply.text, /Bachiller y disponibilidad para labor física/);
+  assert.match(decision.reply.text, /Contrato con prestaciones de ley/);
+  assert.match(decision.reply.text, /¿Te interesa continuar con la postulación\?/);
+  assert.deepEqual(decision.reply.interactiveOptions, [
+    { id: 'vacancy_interest:accept', label: 'Sí, me interesa' },
+    { id: 'vacancy_interest:reject', label: 'No, gracias' }
+  ]);
+  assert.deepEqual(decision.mutations, {
+    fieldsToPersist: { botResumeMode: 'awaiting_vacancy_interest' }
+  });
+});
+
+test('una pregunta fuera del libreto responde y conserva el objetivo de interés', () => {
+  const vacancy = activeVacancy();
+  const decision = vacancyPolicy({
+    ...input({
+      vacancyId: vacancy.id,
+      dataConsentStatus: 'PENDING',
+      botResumeMode: 'awaiting_vacancy_interest'
+    }, '¿Cuáles son los requisitos?', {
+      interpretation: { intent: 'ASK_VACANCY_REQUIREMENTS' }
+    }),
+    vacancy
+  });
+
+  assert.match(decision.reply.text, /Bachiller y disponibilidad para labor física/);
+  assert.match(decision.reply.text, /¿Te interesa continuar con la postulación\?/);
+  assert.equal(decision.mutations, undefined);
+});
+
+test('no pisa la respuesta de consentimiento cuando ya está esperando interés y llega una respuesta libre', () => {
+  const vacancy = activeVacancy();
+  assert.deepEqual(vacancyPolicy({
+    ...input({
+      vacancyId: vacancy.id,
+      dataConsentStatus: 'PENDING',
+      botResumeMode: 'awaiting_vacancy_interest'
+    }, 'Sí, me interesa', {
+      interpretation: { intent: 'APPLY_INTENT' }
+    }),
+    vacancy
+  }), {});
 });
 
 test('ofrece guardar una postulación con el rol y la ciudad de la vacante inactiva', () => {
