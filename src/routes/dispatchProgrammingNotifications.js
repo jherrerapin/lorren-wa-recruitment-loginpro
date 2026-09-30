@@ -9,10 +9,12 @@ import {
   buildProgrammingFilename,
   buildProgrammingPdfBuffer,
   buildProgrammingCompletionSummary,
+  formatProgrammingWorkerPhone,
   loadProgrammingReportData,
   loadProgrammingRequests,
   normalizeProgrammingDate,
-  normalizeProgrammingIncludePending
+  normalizeProgrammingIncludePending,
+  programmingWorkerWhatsappUrl
 } from '../services/dispatchProgrammingPdfService.js';
 import {
   confirmedOperationalAssignments,
@@ -351,7 +353,7 @@ function buildWorkersCell(request) {
   if (!assignments.length) return 'Sin auxiliares asignados';
   return assignments.map((assignment, index) => {
     const worker = assignment.worker || {};
-    return `${index + 1}. ${worker.fullName || 'Auxiliar'} · ${workerDocumentLabel(worker)} · ${assignmentStatusLabel(assignment.status)}`;
+    return `${index + 1}. ${worker.fullName || 'Auxiliar'} · ${workerDocumentLabel(worker)} · Tel: ${formatProgrammingWorkerPhone(worker.phone)} · ${assignmentStatusLabel(assignment.status)}`;
   }).join('\n');
 }
 function cleanSheetName(value, fallback) {
@@ -400,11 +402,21 @@ function styleProgrammingWorksheet(sheet, title, subtitle) {
 }
 function addProgrammingRows(sheet, requests = []) {
   requests.forEach((request, index) => {
+    const assignments = operationalAssignments(request);
+    const workersCellText = buildWorkersCell(request);
     const row = sheet.addRow([
       request.cityName || 'Sin ciudad', request.clientName || 'Sin cliente', request.operationPointName || 'Sin operación', request.serviceName || request.service?.name || 'Sin servicio',
-      buildScheduleLabel(request), Number(request.requiredWorkers || 0), operationalAssignments(request).length,
-      confirmedOperationalAssignments(request).length, requestStatusLabel(request), buildWorkersCell(request)
+      buildScheduleLabel(request), Number(request.requiredWorkers || 0), assignments.length,
+      confirmedOperationalAssignments(request).length, requestStatusLabel(request), workersCellText
     ]);
+    const workersCell = row.getCell(10);
+    if (assignments.length === 1) {
+      const whatsappUrl = programmingWorkerWhatsappUrl(assignments[0]?.worker?.phone);
+      if (whatsappUrl) {
+        workersCell.value = { text: workersCellText, hyperlink: whatsappUrl, tooltip: 'Abrir WhatsApp' };
+        workersCell.font = { ...(workersCell.font || {}), color: { argb: 'FF0563C1' }, underline: true };
+      }
+    }
     row.eachCell((cell) => {
       cell.alignment = { vertical: 'top', wrapText: true };
       if (index % 2 === 0) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
