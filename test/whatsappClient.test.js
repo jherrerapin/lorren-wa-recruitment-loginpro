@@ -7,22 +7,43 @@ import {
 } from '../src/infrastructure/transport/whatsappClient.js';
 
 async function withWhatsAppEnvironment(run) {
-  const previousUrl = process.env.WHATSAPP_API_URL;
-  const previousToken = process.env.WHATSAPP_TOKEN;
+  const keys = ['WHATSAPP_API_URL', 'WHATSAPP_TOKEN', 'META_ACCESS_TOKEN', 'META_PHONE_NUMBER_ID', 'META_API_VERSION'];
+  const previous = Object.fromEntries(keys.map((key) => [key, process.env[key]]));
   const previousPost = axios.post;
 
   try {
+    for (const key of keys) delete process.env[key];
     process.env.WHATSAPP_API_URL = 'https://graph.facebook.com/v23.0/phone-id/messages';
     process.env.WHATSAPP_TOKEN = 'test-secret-token';
     await run();
   } finally {
     axios.post = previousPost;
-    if (previousUrl === undefined) delete process.env.WHATSAPP_API_URL;
-    else process.env.WHATSAPP_API_URL = previousUrl;
-    if (previousToken === undefined) delete process.env.WHATSAPP_TOKEN;
-    else process.env.WHATSAPP_TOKEN = previousToken;
+    for (const key of keys) {
+      if (previous[key] === undefined) delete process.env[key];
+      else process.env[key] = previous[key];
+    }
   }
 }
+
+test('usa la configuración META ya desplegada cuando no existen WHATSAPP_API_URL ni WHATSAPP_TOKEN', async () => {
+  await withWhatsAppEnvironment(async () => {
+    delete process.env.WHATSAPP_API_URL;
+    delete process.env.WHATSAPP_TOKEN;
+    process.env.META_ACCESS_TOKEN = 'meta-token';
+    process.env.META_PHONE_NUMBER_ID = '1234567890';
+    process.env.META_API_VERSION = 'v23.0';
+    let request = null;
+    axios.post = async (...args) => {
+      request = args;
+      return { data: { messages: [{ id: 'wamid.meta-config' }] } };
+    };
+
+    const result = await sendMessage('573001112233', 'Hola');
+    assert.equal(request[0], 'https://graph.facebook.com/v23.0/1234567890/messages');
+    assert.equal(request[2].headers.Authorization, 'Bearer meta-token');
+    assert.equal(result.messages[0].id, 'wamid.meta-config');
+  });
+});
 
 test('envía un payload text cuando no hay opciones interactivas', async () => {
   await withWhatsAppEnvironment(async () => {
@@ -156,7 +177,8 @@ test('reporta configuración faltante sin intentar la petición', async () => {
     await assert.rejects(
       sendMessage('573001112233', 'Hola'),
       (error) => error instanceof WhatsAppDeliveryError
-        && /WHATSAPP_TOKEN/.test(error.message)
+        && /WHATSAPP_TOKEN or META_ACCESS_TOKEN/.test(error.message)
+        && error.requestAttempted === false
     );
     assert.equal(called, false);
   });

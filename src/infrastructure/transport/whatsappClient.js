@@ -13,6 +13,7 @@ export class WhatsAppDeliveryError extends Error {
     this.name = 'WhatsAppDeliveryError';
     this.status = details.status ?? null;
     this.providerCode = details.providerCode ?? null;
+    this.requestAttempted = details.requestAttempted ?? null;
   }
 }
 
@@ -98,11 +99,22 @@ function describeProviderFailure(error) {
   };
 }
 
+function outboundApiUrl() {
+  if (process.env.WHATSAPP_API_URL?.trim()) {
+    return requireString(process.env.WHATSAPP_API_URL, 'WHATSAPP_API_URL', 2048);
+  }
+  const phoneNumberId = requireString(process.env.META_PHONE_NUMBER_ID, 'META_PHONE_NUMBER_ID', 64);
+  const version = requireString(process.env.META_API_VERSION || 'v23.0', 'META_API_VERSION', 16);
+  if (!/^\d+$/.test(phoneNumberId)) throw new TypeError('META_PHONE_NUMBER_ID must contain digits only');
+  if (!/^v\d+\.\d+$/.test(version)) throw new TypeError('META_API_VERSION must use the vXX.X format');
+  return `https://graph.facebook.com/${version}/${phoneNumberId}/messages`;
+}
+
 /** Send one text or reply-button message through the WhatsApp Cloud API. */
 export async function sendMessage(phone, text, interactiveOptions = []) {
   try {
-    const apiUrl = requireString(process.env.WHATSAPP_API_URL, 'WHATSAPP_API_URL', 2048);
-    const token = requireString(process.env.WHATSAPP_TOKEN, 'WHATSAPP_TOKEN', 8192);
+    const apiUrl = outboundApiUrl();
+    const token = requireString(process.env.WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN, 'WHATSAPP_TOKEN or META_ACCESS_TOKEN', 8192);
     const recipient = requireString(phone, 'phone', 32);
     const buttons = normalizeOptions(interactiveOptions);
     const body = requireString(
@@ -124,7 +136,7 @@ export async function sendMessage(phone, text, interactiveOptions = []) {
   } catch (error) {
     if (error instanceof WhatsAppDeliveryError) throw error;
     if (error instanceof TypeError) {
-      throw new WhatsAppDeliveryError(`WhatsApp delivery configuration or payload is invalid: ${error.message}`);
+      throw new WhatsAppDeliveryError(`WhatsApp delivery configuration or payload is invalid: ${error.message}`, { requestAttempted: false });
     }
 
     const failure = describeProviderFailure(error);

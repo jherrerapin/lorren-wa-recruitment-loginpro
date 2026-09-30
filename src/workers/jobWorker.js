@@ -251,6 +251,15 @@ export async function tick(dependencies = {}) {
       await runJob(job, { ...dependencies, prisma: activePrisma });
       await completeJob(activePrisma, job.id);
     } catch (error) {
+      if (job.type === JOB_TYPES.WHATSAPP_INBOUND_MESSAGE) {
+        console.error('[WHATSAPP_INBOUND_JOB_FAILED]', {
+          jobId: job.id,
+          errorName: error?.name || 'UnknownError',
+          providerStatus: error?.status ?? null,
+          providerCode: error?.providerCode ?? null,
+          requestAttempted: error?.requestAttempted ?? null
+        });
+      }
       await failJob(activePrisma, job.id, error?.message || 'worker_error');
     }
   }
