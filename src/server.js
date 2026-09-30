@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import cookieParser from 'cookie-parser';
 import { PrismaClient } from '@prisma/client';
-import { createWebhookController } from './routes/webhookController.js';
+import { createMetaVerificationHandler, createWebhookController, createWebhookJsonParser } from './routes/webhookController.js';
 import { adminRouter } from './routes/admin.js';
 import { adminCandidateGlobalExportRouter } from './routes/adminCandidateGlobalExport.js';
 import { interviewOutreachManagementRouter } from './routes/interviewOutreachManagement.js';
@@ -422,22 +422,9 @@ app.use(morgan('combined'));
 app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
 app.use('/webhook/dispatch', dispatchWhatsappWebhookRouter(prisma));
 
-const webhookJsonParser = express.json({
-  limit: '2mb',
-  verify(req, _res, buffer) {
-    req.rawBody = Buffer.from(buffer);
-  }
-});
+const webhookJsonParser = createWebhookJsonParser();
 
-app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-  if (mode === 'subscribe' && token === process.env.META_VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
-  return res.sendStatus(403);
-});
+app.get('/webhook', createMetaVerificationHandler());
 
 app.post('/webhook', webhookJsonParser, createWebhookController({ prisma }));
 app.use(express.json({ limit: '2mb' }));

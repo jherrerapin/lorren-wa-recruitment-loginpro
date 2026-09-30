@@ -587,10 +587,23 @@ model AppUser {
 }
 
 model BotKnowledge {
-  id        String   @id @default(cuid())
-  key       String   @unique
-  value     String
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  scope       String   @default("GLOBAL")
+  content     String   @default("")
+  tags        String?
+  vacancyId   String?
+  candidateId String?
+  isActive    Boolean  @default(true)
+  createdBy   String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  key         String?  @unique
+  value       String?
+
+  @@index([scope, isActive, updatedAt])
+  @@index([vacancyId, isActive])
+  @@index([candidateId, isActive])
 }
 
 model DevAuditEvent {
