@@ -9,7 +9,9 @@ test('schema incluye experienceTime en fields requeridos', () => {
 
 test('schema incluye evidence y conflicts para experienceTime', () => {
   const fieldEvidence = RECRUITMENT_EXTRACTION_SCHEMA.schema.properties.fieldEvidence.properties;
+  const evidenceRequired = RECRUITMENT_EXTRACTION_SCHEMA.schema.properties.fieldEvidence.required;
   const conflictsEnum = RECRUITMENT_EXTRACTION_SCHEMA.schema.properties.conflicts.items.properties.field.enum;
   assert.ok(Object.hasOwn(fieldEvidence, 'experienceTime'));
+  assert.deepEqual(evidenceRequired, Object.keys(fieldEvidence));
   assert.ok(conflictsEnum.includes('experienceTime'));
 });

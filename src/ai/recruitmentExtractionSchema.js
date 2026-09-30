@@ -39,7 +39,8 @@ export const RECRUITMENT_EXTRACTION_SCHEMA = {
           medicalRestrictions: { $ref: '#/$defs/evidence' },
           experienceInfo: { $ref: '#/$defs/evidence' },
           experienceTime: { $ref: '#/$defs/evidence' }
-        }
+        },
+        required: ['fullName', 'age', 'documentType', 'documentNumber', 'gender', 'locality', 'neighborhood', 'transportMode', 'medicalRestrictions', 'experienceInfo', 'experienceTime']
       },
       conflicts: {
         type: 'array',
