@@ -17,14 +17,16 @@ jobs:
         with:
           node-version: '22'
       - name: Apply universal manual marks
-        run: python .github/tmp/apply-universal-manual-marks.py
+        run: |
+          python .github/tmp/apply-universal-manual-marks.py
+          python .github/tmp/update-universal-manual-tests.py
       - name: Install dependencies
         run: npm ci --ignore-scripts
       - name: Run focused regression
         run: node --test test/workerPortalAndroidCrewUniversalManualMarks.test.js test/workerPortalAndroidCrewMemberProgressionRegression.test.js
       - name: Commit validated implementation
         run: |
-          rm -f .github/tmp/apply-universal-manual-marks.py .github/workflows/apply-universal-manual-marks.yml
+          rm -f .github/tmp/apply-universal-manual-marks.py .github/tmp/update-universal-manual-tests.py .github/workflows/apply-universal-manual-marks.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
