@@ -9,6 +9,7 @@ import {
   normalizeDispatchDateParam
 } from './dispatchDate.js';
 import { deriveDispatchRequestOperationalState, operationalAssignments } from './dispatchOperationalCoverage.js';
+import { normalizeDispatchWhatsappPhone } from './dispatchWhatsappCloudConfig.js';
 import {
   WORKER_REST_REASONS,
   loadWorkerRestAssignments
@@ -86,6 +87,17 @@ function workerDocumentLabel(worker) {
   if (documentType && documentNumber) return `${documentType} ${documentNumber}`;
   if (documentNumber) return documentNumber;
   return 'Sin documento registrado';
+}
+
+export function formatProgrammingWorkerPhone(value) {
+  const normalized = normalizeDispatchWhatsappPhone(value);
+  if (!normalized) return 'Sin teléfono registrado';
+  return normalized.startsWith('57') && normalized.length === 12 ? normalized.slice(2) : normalized;
+}
+
+export function programmingWorkerWhatsappUrl(value) {
+  const normalized = normalizeDispatchWhatsappPhone(value);
+  return normalized ? `https://wa.me/${normalized}` : null;
 }
 
 export function programmingWorkerAbsenceLabel(reason) {
@@ -255,7 +267,12 @@ function buildWorkersHtml(request) {
   if (!assignments.length) return '<p class="empty-workers">Sin auxiliares asignados.</p>';
   return `<ol class="workers-list">${assignments.map((assignment) => {
     const worker = assignment.worker || {};
-    return `<li><strong>${escapeHtml(worker.fullName || 'Auxiliar')}</strong><span>${escapeHtml(workerDocumentLabel(worker))}</span><em>${escapeHtml(assignmentStatusLabel(assignment.status))}</em></li>`;
+    const phoneLabel = formatProgrammingWorkerPhone(worker.phone);
+    const whatsappUrl = programmingWorkerWhatsappUrl(worker.phone);
+    const phoneHtml = whatsappUrl
+      ? `<a class="worker-phone" href="${escapeHtml(whatsappUrl)}">${escapeHtml(phoneLabel)}</a>`
+      : `<span class="worker-phone">${escapeHtml(phoneLabel)}</span>`;
+    return `<li><strong>${escapeHtml(worker.fullName || 'Auxiliar')}</strong><span>${escapeHtml(workerDocumentLabel(worker))}</span><span>Tel: ${phoneHtml}</span><em>${escapeHtml(assignmentStatusLabel(assignment.status))}</em></li>`;
   }).join('')}</ol>`;
 }
 
@@ -388,6 +405,7 @@ export function buildProgrammingReportHtml({
   .workers-list li { margin: 5px 0; line-height: 1.35; }
   .workers-list strong { color: #172033; }
   .workers-list span { color: #475569; margin-left: 6px; }
+  .workers-list a.worker-phone { color: #0d7a6b; text-decoration: underline; font-weight: 700; }
   .workers-list em { display: inline-block; margin-left: 6px; color: #1d4ed8; font-size: 10px; font-style: normal; font-weight: 800; }
   .empty-workers { padding: 0 11px 11px; color: #991b1b; font-weight: 800; }
   .absence-section { margin-top: 18px; break-inside: avoid; }
