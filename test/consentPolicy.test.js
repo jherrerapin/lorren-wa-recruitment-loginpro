@@ -62,9 +62,14 @@ test('rechazo de interés cierra amablemente sin tratarlo como rechazo legal', (
 
 test('un sí breve no autoriza hasta que la pregunta legal esté pendiente', () => {
   assert.deepEqual(consentPolicy(turn('Sí')), {});
-  assert.deepEqual(consentPolicy(turn('Sí', {
+  const interestDecision = consentPolicy(turn('Sí', {
     resumeMode: 'awaiting_vacancy_interest'
-  })), {});
+  }));
+  assert.match(interestDecision.reply.text, /Autorizo a LoginPro a tratar mis datos personales/);
+  assert.deepEqual(interestDecision.mutations, {
+    fieldsToPersist: { botResumeMode: 'awaiting_data_consent' }
+  });
+  assert.equal(interestDecision.mutations.fieldsToPersist.dataConsentStatus, undefined);
   assert.deepEqual(consentPolicy(turn('Sí', {
     resumeMode: 'awaiting_data_consent'
   })), {

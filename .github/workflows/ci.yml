@@ -85,11 +85,13 @@ jobs:
         run: >-
           node --test
           test/conversationCoreContracts.test.js
+          test/conversationReplyIdentity.test.js
           test/buildConversationTurnInput.test.js
           test/jobWorkerInboundMessage.test.js
           test/executeConversationDecision.test.js
           test/consentPolicy.test.js
           test/vacancyPolicy.test.js
+          test/openaiAdapter.test.js
           test/chatPolicy.test.js
           test/eligibilityPolicy.test.js
 
