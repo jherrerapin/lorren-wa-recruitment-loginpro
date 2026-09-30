@@ -272,7 +272,7 @@ function buildWorkersHtml(request) {
     const phoneHtml = whatsappUrl
       ? `<a class="worker-phone" href="${escapeHtml(whatsappUrl)}">${escapeHtml(phoneLabel)}</a>`
       : `<span class="worker-phone">${escapeHtml(phoneLabel)}</span>`;
-    return `<li><strong>${escapeHtml(worker.fullName || 'Auxiliar')}</strong><span>${escapeHtml(workerDocumentLabel(worker))}</span><span>Tel: ${phoneHtml}</span><em>${escapeHtml(assignmentStatusLabel(assignment.status))}</em></li>`;
+    return `<li><div class="worker-row"><strong class="worker-name">${escapeHtml(worker.fullName || 'Auxiliar')}</strong><span class="worker-document">${escapeHtml(workerDocumentLabel(worker))}</span><span class="worker-phone-wrap">Tel: ${phoneHtml}</span><em>${escapeHtml(assignmentStatusLabel(assignment.status))}</em></div></li>`;
   }).join('')}</ol>`;
 }
 
@@ -403,10 +403,12 @@ export function buildProgrammingReportHtml({
   .block-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; padding: 10px 11px 0; color: #334155; }
   .workers-list { margin: 8px 0 0; padding: 0 11px 11px 32px; }
   .workers-list li { margin: 5px 0; line-height: 1.35; }
-  .workers-list strong { color: #172033; }
-  .workers-list span { color: #475569; margin-left: 6px; }
+  .worker-row { display: grid; grid-template-columns: minmax(0, 2.2fr) 112px 130px 128px; column-gap: 10px; align-items: baseline; width: 100%; }
+  .workers-list strong { color: #172033; min-width: 0; overflow-wrap: anywhere; }
+  .workers-list span { color: #475569; }
+  .workers-list .worker-document, .workers-list .worker-phone-wrap { white-space: nowrap; }
   .workers-list a.worker-phone { color: #0d7a6b; text-decoration: underline; font-weight: 700; }
-  .workers-list em { display: inline-block; margin-left: 6px; color: #1d4ed8; font-size: 10px; font-style: normal; font-weight: 800; }
+  .workers-list em { display: inline-block; color: #1d4ed8; font-size: 10px; font-style: normal; font-weight: 800; white-space: nowrap; }
   .empty-workers { padding: 0 11px 11px; color: #991b1b; font-weight: 800; }
   .absence-section { margin-top: 18px; break-inside: avoid; }
   .absence-head { border-left: 6px solid #7c3aed; background: #f5f3ff; border-radius: 12px; padding: 10px 12px; display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 8px; }
