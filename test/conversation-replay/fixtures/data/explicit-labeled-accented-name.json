@@ -18,7 +18,9 @@
       "dataConsentStatus": "ACCEPTED",
       "vacancyId": "vacancy-test-name-capture",
       "fullName": null,
-      "documentType": null
+      "documentType": null,
+      "recruitmentCity": "Ibagué",
+      "recruitmentRole": "Auxiliar de cargue y descargue"
     },
     "vacancy": {
       "vacancyId": "vacancy-test-name-capture",
@@ -129,5 +131,28 @@
         "documentType"
       ]
     }
+  },
+  "expectedDecision": {
+    "reply": {
+      "directive": "ASK_MISSING_FIELDS",
+      "parameters": {
+        "missingFields": [
+          "documentType"
+        ]
+      }
+    },
+    "mutations": {
+      "fieldsToPersist": {
+        "fullName": "José Ángel Peña"
+      },
+      "nextStep": null,
+      "nextStage": null
+    },
+    "transitions": {
+      "keepCurrentStep": true,
+      "handoffToHuman": false,
+      "endConversation": false
+    },
+    "scheduling": null
   }
 }

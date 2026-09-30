@@ -19,14 +19,61 @@ function inbound(overrides = {}) {
   };
 }
 
-test('tráfico orgánico nuevo pregunta vacante sin fallar ni consultar campañas', async () => {
+function unresolvedCandidate(overrides = {}) {
+  return baseCandidate({
+    vacancyId: null,
+    vacancy: null,
+    recruitmentCity: null,
+    recruitmentRole: null,
+    ...overrides
+  });
+}
+
+test('tráfico orgánico nuevo pregunta ciudad y vacante sin consultar campañas', async () => {
   const input = await buildConversationTurnInput(inbound(), dependencies({
-    candidate: baseCandidate({ vacancyId: null, vacancy: null })
+    candidate: unresolvedCandidate()
   }));
   assert.equal(input.vacancy, null);
   assert.equal(input.attribution.source, 'ORGANIC');
+  assert.deepEqual(input.pending.fields, ['recruitmentCity', 'recruitmentRole', 'vacancyId']);
   const decision = await calculateConversationDecision(input);
-  assert.deepEqual(decision.reply, { directive: 'ASK_WHICH_FLYER_SEEN' });
+  assert.deepEqual(decision.reply, { directive: 'ASK_CITY_AND_VACANCY' });
+});
+
+test('ciudad recibida en un turno queda como hecho canónico y deja pendiente solo el cargo/vacante', async () => {
+  const input = await buildConversationTurnInput(inbound({
+    text: 'Estoy en Bogotá',
+    interpretation: {
+      intent: 'PROVIDE_CANDIDATE_DATA',
+      detectedFields: { cityHint: 'Bogotá' }
+    }
+  }), dependencies({ candidate: unresolvedCandidate() }));
+
+  assert.equal(input.candidate.facts.recruitmentCity, 'Bogotá');
+  assert.equal(input.interpretation.fields.recruitmentCity, 'Bogotá');
+  assert.deepEqual(input.pending.fields, ['recruitmentRole', 'vacancyId']);
+  assert.deepEqual((await calculateConversationDecision(input)).reply, {
+    directive: 'ASK_VACANCY_FOR_CITY',
+    parameters: { city: 'Bogotá' }
+  });
+});
+
+test('cargo recibido primero queda como hecho canónico y deja pendiente ciudad/vacante', async () => {
+  const input = await buildConversationTurnInput(inbound({
+    text: 'Auxiliar de cargue y descargue',
+    interpretation: {
+      intent: 'PROVIDE_CANDIDATE_DATA',
+      detectedFields: { roleHint: 'Auxiliar de cargue y descargue' }
+    }
+  }), dependencies({ candidate: unresolvedCandidate() }));
+
+  assert.equal(input.candidate.facts.recruitmentRole, 'Auxiliar de cargue y descargue');
+  assert.equal(input.interpretation.fields.recruitmentRole, 'Auxiliar de cargue y descargue');
+  assert.deepEqual(input.pending.fields, ['recruitmentCity', 'vacancyId']);
+  assert.deepEqual((await calculateConversationDecision(input)).reply, {
+    directive: 'ASK_CITY_FOR_ROLE',
+    parameters: { role: 'Auxiliar de cargue y descargue' }
+  });
 });
 
 test('tráfico orgánico enriquecido por NLU entra al núcleo con la vacante resuelta', async () => {
@@ -38,19 +85,28 @@ test('tráfico orgánico enriquecido por NLU entra al núcleo con la vacante res
       extractedFields: { vacancyId: vacancy.id },
       detectedFields: { roleHint: 'bodega', cityHint: 'Bogotá' }
     }
-  }), dependencies({
-    candidate: baseCandidate({ vacancyId: null, vacancy: null })
-  }));
+  }), dependencies({ candidate: unresolvedCandidate() }));
 
   assert.equal(input.attribution.source, 'ORGANIC');
   assert.equal(input.vacancy.id, vacancy.id);
   assert.equal(input.vacancy.requiredDocuments, 'Hoja de vida física y cédula original');
   assert.equal(input.candidate.facts.vacancyId, vacancy.id);
   assert.equal(input.candidate.facts.vacancyCity, 'Bogotá');
+  assert.equal(input.candidate.facts.recruitmentCity, 'Bogotá');
+  assert.equal(input.candidate.facts.recruitmentRole, vacancy.role);
   assert.equal(input.interpretation.extractedFields.vacancyId, vacancy.id);
 });
 
-test('referral normalizado resuelve el ad_id mediante Campaign.code', async () => {
+test('una vacante persistida vuelve a cruzar la frontera del core en turnos posteriores', async () => {
+  const candidate = baseCandidate();
+  const input = await buildConversationTurnInput(inbound({ text: '¿Cuál es el horario?' }), dependencies({ candidate }));
+
+  assert.equal(input.vacancy.id, candidate.vacancy.id);
+  assert.equal(input.vacancy.city, 'Bogotá');
+  assert.equal(input.candidate.facts.vacancyId, candidate.vacancy.id);
+});
+
+test('referral normalizado resuelve el ad_id mediante Campaign.code y consolida contexto', async () => {
   const vacancy = baseCandidate().vacancy;
   const message = parseWebhookPayload({
     object: 'whatsapp_business_account',
@@ -60,7 +116,7 @@ test('referral normalizado resuelve el ad_id mediante Campaign.code', async () =
     }] } }] }]
   });
   assert.deepEqual(message.referral, { ad_id: '12345', headline: 'Anuncio' });
-  const deps = dependencies({ candidate: baseCandidate({ vacancyId: null, vacancy: null }) });
+  const deps = dependencies({ candidate: unresolvedCandidate() });
   deps.prisma.campaign = { async findMany() {
     return [{ id: 'campaign-1', code: '12345', vacancy }];
   } };
@@ -68,10 +124,12 @@ test('referral normalizado resuelve el ad_id mediante Campaign.code', async () =
   assert.equal(input.attribution.source, 'META_ADS');
   assert.equal(input.vacancy.id, vacancy.id);
   assert.equal(input.candidate.facts.vacancyRole, vacancy.role);
+  assert.equal(input.candidate.facts.recruitmentCity, vacancy.city);
+  assert.equal(input.candidate.facts.recruitmentRole, vacancy.role);
 });
 
 test('anuncio desconocido no asigna una vacante por coincidencia accidental de titular', async () => {
-  const deps = dependencies({ candidate: baseCandidate({ vacancyId: null, vacancy: null }) });
+  const deps = dependencies({ candidate: unresolvedCandidate() });
   deps.prisma.campaign = { async findMany() { return []; } };
   const input = await buildConversationTurnInput(inbound({
     referral: { ad_id: 'unknown', headline: 'Auxiliar de bodega' }
@@ -80,13 +138,13 @@ test('anuncio desconocido no asigna una vacante por coincidencia accidental de t
   assert.equal(input.vacancy, null);
   assert.deepEqual(
     (await calculateConversationDecision(input)).reply,
-    { directive: 'ASK_WHICH_FLYER_SEEN' }
+    { directive: 'ASK_CITY_AND_VACANCY' }
   );
 });
 
 test('titular exacto y único resuelve vacante cuando no hay ID publicitario', async () => {
   const vacancy = baseCandidate().vacancy;
-  const deps = dependencies();
+  const deps = dependencies({ candidate: unresolvedCandidate() });
   deps.prisma.campaign = { async findMany() { return []; } };
   deps.prisma.vacancy = { async findMany() { return [vacancy]; } };
   const input = await buildConversationTurnInput(inbound({ referral: { headline: vacancy.title } }), deps);
@@ -98,6 +156,8 @@ function baseCandidate(overrides = {}) {
     id: 'candidate-1',
     phone: '573001112233',
     vacancyId: 'vacancy-1',
+    recruitmentCity: 'Bogotá',
+    recruitmentRole: 'Auxiliar de bodega',
     vacancy: {
       id: 'vacancy-1',
       title: 'Auxiliar de bodega',
@@ -117,6 +177,7 @@ function baseCandidate(overrides = {}) {
     currentStep: 'MENU',
     gender: 'UNKNOWN',
     botPaused: false,
+    botResumeMode: null,
     updatedAt: new Date('2026-09-23T11:00:00.000Z'),
     ...overrides
   };
@@ -168,6 +229,8 @@ test('carga candidato, vacante e historial reales en el contrato estricto', asyn
   assert.equal(input.candidate.id, 'candidate-1');
   assert.equal(input.candidate.facts.phone, '573001112233');
   assert.equal(input.candidate.facts.currentStep, 'MENU');
+  assert.equal(input.candidate.facts.recruitmentCity, 'Bogotá');
+  assert.equal(input.candidate.facts.recruitmentRole, 'Auxiliar de bodega');
   assert.equal(input.candidate.facts.vacancyRole, 'Auxiliar de bodega');
   assert.equal(input.candidate.facts.vacancyCity, 'Bogotá');
   assert.equal(input.candidate.facts.minAge, 18);
@@ -180,12 +243,27 @@ test('carga candidato, vacante e historial reales en el contrato estricto', asyn
   assert.deepEqual(input.pending.fields, ['dataConsent']);
   assert.deepEqual(input.history.messages.map(({ role }) => role), ['assistant', 'user']);
   assert.equal(input.history.lastBotQuestion, '¿Cuál es tu nombre?');
+  assert.equal(input.history.lastBotReplyIdentity, 'text:¿cuál es tu nombre?');
   assert.equal(input.interpretation.intent, 'PROVIDE_CANDIDATE_DATA');
   assert.deepEqual(input.execution, {
     mayReply: true,
     mayPersistCandidate: true,
     maySendOutbound: true
   });
+});
+
+test('recupera la directiva original del último outbound como identidad anti-repetición', async () => {
+  const input = await buildConversationTurnInput(inbound(), dependencies({
+    candidate: unresolvedCandidate({ recruitmentCity: 'Bogotá' }),
+    messages: [{
+      direction: 'OUTBOUND',
+      body: '¿Qué vacante viste?',
+      rawPayload: { directive: 'ASK_VACANCY_FOR_CITY' },
+      createdAt: new Date('2026-09-23T11:59:00.000Z')
+    }]
+  }));
+
+  assert.equal(input.history.lastBotReplyIdentity, 'directive:ASK_VACANCY_FOR_CITY');
 });
 
 test('conserva hechos e historial previos junto con la extracción del turno actual', async () => {
@@ -279,11 +357,9 @@ test('crea un candidato base cuando el teléfono todavía no existe', async () =
   const deps = dependencies({ candidate: null });
   deps.prisma.candidate.create = async (args) => {
     createdWith = args;
-    return baseCandidate({
+    return unresolvedCandidate({
       id: 'candidate-new',
-      phone: args.data.phone,
-      vacancyId: null,
-      vacancy: null
+      phone: args.data.phone
     });
   };
 
@@ -295,6 +371,7 @@ test('crea un candidato base cuando el teléfono todavía no existe', async () =
   });
   assert.equal(input.candidate.id, 'candidate-new');
   assert.equal(input.candidate.facts.phone, '573001112233');
+  assert.deepEqual(input.pending.fields, ['recruitmentCity', 'recruitmentRole', 'vacancyId']);
 });
 
 test('tolera una carrera de creación consultando el candidato ganador', async () => {

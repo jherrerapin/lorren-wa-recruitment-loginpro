@@ -34,7 +34,9 @@
       "fullName": "Persona Prueba",
       "documentType": "CC",
       "documentNumber": "TEST-DOC-002",
-      "locality": null
+      "locality": null,
+      "recruitmentCity": "Bogotá",
+      "recruitmentRole": "Auxiliar de bodega"
     },
     "vacancy": {
       "vacancyId": "vacancy-test-bogota-warehouse",
@@ -44,7 +46,9 @@
       "title": "Auxiliar de bodega",
       "conditions": "Turnos rotativos y salario registrado en la configuración de prueba"
     },
-    "pendingFields": ["locality"]
+    "pendingFields": [
+      "locality"
+    ]
   },
   "history": [
     {
@@ -97,12 +101,36 @@
         "La localidad quedó registrada",
         "La postulación quedó completa"
       ],
-      "requiredText": ["Turnos rotativos", "localidad"],
-      "forbiddenText": ["localidad quedó registrada", "postulación quedó completa"]
+      "requiredText": [
+        "Turnos rotativos",
+        "localidad"
+      ],
+      "forbiddenText": [
+        "localidad quedó registrada",
+        "postulación quedó completa"
+      ]
     },
     "finalState": {
       "currentStep": "COLLECTING_DATA",
-      "pendingFields": ["locality"]
+      "pendingFields": [
+        "locality"
+      ]
     }
+  },
+  "expectedDecision": {
+    "reply": {
+      "text": "Solo tengo registrado sobre la jornada: Turnos rotativos y salario registrado en la configuración de prueba. No hay días ni un horario exacto configurados."
+    },
+    "mutations": {
+      "fieldsToPersist": {},
+      "nextStep": null,
+      "nextStage": null
+    },
+    "transitions": {
+      "keepCurrentStep": true,
+      "handoffToHuman": false,
+      "endConversation": false
+    },
+    "scheduling": null
   }
 }

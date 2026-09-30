@@ -59,6 +59,8 @@ const ALLOWED_DIRECT_CANDIDATE_FIELDS = new Set([
   'documentNumber',
   'age',
   'gender',
+  'recruitmentCity',
+  'recruitmentRole',
   'locality',
   'neighborhood',
   'transportMode',

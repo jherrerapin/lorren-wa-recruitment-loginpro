@@ -126,6 +126,8 @@ function asRecord(value) {
 const CANDIDATE_FACT_FIELDS = Object.freeze([
   'phone',
   'vacancyId',
+  'recruitmentCity',
+  'recruitmentRole',
   'dataConsentStatus',
   'fullName',
   'documentType',
@@ -176,6 +178,13 @@ function isoDate(value, fallback = null) {
   return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
 }
 
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 function interpretedGender(interpretation) {
   for (const source of [
     interpretation?.providedFields,
@@ -186,6 +195,33 @@ function interpretedGender(interpretation) {
     if (typeof value === 'string' && value.trim()) return value.trim();
   }
   return null;
+}
+
+function interpretedRecruitmentFacts(interpretation) {
+  const fields = asRecord(interpretation?.fields);
+  const provided = asRecord(interpretation?.providedFields);
+  const detected = asRecord(interpretation?.detectedFields);
+  const extracted = asRecord(interpretation?.extractedFields);
+  return {
+    recruitmentCity: firstString(
+      fields.recruitmentCity,
+      provided.recruitmentCity,
+      extracted.recruitmentCity,
+      detected.recruitmentCity,
+      detected.cityHint,
+      extracted.cityHint,
+      provided.cityHint
+    ),
+    recruitmentRole: firstString(
+      fields.recruitmentRole,
+      provided.recruitmentRole,
+      extracted.recruitmentRole,
+      detected.recruitmentRole,
+      detected.roleHint,
+      extracted.roleHint,
+      provided.roleHint
+    )
+  };
 }
 
 function buildCandidateFacts(candidate, interpretation) {
@@ -206,12 +242,22 @@ function buildCandidateFacts(candidate, interpretation) {
     facts.gender = detectedGender;
   }
 
+  const recruitmentFacts = interpretedRecruitmentFacts(interpretation);
+  if (!facts.recruitmentCity && recruitmentFacts.recruitmentCity) {
+    facts.recruitmentCity = recruitmentFacts.recruitmentCity;
+  }
+  if (!facts.recruitmentRole && recruitmentFacts.recruitmentRole) {
+    facts.recruitmentRole = recruitmentFacts.recruitmentRole;
+  }
+
   if (vacancy) {
     facts.vacancyActive = vacancy.isActive;
     facts.vacancyAcceptingApplications = vacancy.acceptingApplications;
     facts.acceptingApplications = vacancy.acceptingApplications;
     facts.vacancyRole = vacancy.role || vacancy.title;
     facts.vacancyCity = vacancy.city;
+    facts.recruitmentCity = facts.recruitmentCity || vacancy.city;
+    facts.recruitmentRole = facts.recruitmentRole || vacancy.role || vacancy.title;
     facts.minAge = vacancy.minAge;
     facts.maxAge = vacancy.maxAge;
     facts.experienceRequired = vacancy.experienceRequired;
@@ -233,12 +279,27 @@ function mapHistory(messages) {
   }));
 }
 
+function outboundIdentity(message) {
+  if (!message) return null;
+  const payload = asRecord(message.rawPayload);
+  if (typeof payload.directive === 'string' && payload.directive.trim()) {
+    return `directive:${payload.directive.trim()}`;
+  }
+  const text = String(message.body || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-CO');
+  return text ? `text:${text}` : null;
+}
+
 export function deriveCandidatePendingFields(candidate) {
+  const fields = [];
+  if (!candidate.recruitmentCity) fields.push('recruitmentCity');
+  if (!candidate.vacancyId) {
+    if (!candidate.recruitmentRole) fields.push('recruitmentRole');
+    fields.push('vacancyId');
+    return [...new Set(fields)];
+  }
   if (candidate.dataConsentStatus !== 'ACCEPTED') return ['dataConsent'];
 
   const readiness = getCandidateReadiness(candidate, candidate.vacancy || null);
-  const fields = [];
-  if (!candidate.vacancyId) fields.push('vacancyId');
   fields.push(...(readiness.missingFields || []));
   if (!readiness.hasValidCv) fields.push('cv');
   return [...new Set(fields)].filter((field) => field !== 'gender');
@@ -259,8 +320,9 @@ function mapInterpretation(inboundMessage, lastBotQuestion = null) {
   }
 
   const candidateFieldNames = new Set([
-    'fullName', 'documentType', 'documentNumber', 'age', 'gender', 'neighborhood',
-    'locality', 'medicalRestrictions', 'transportMode', 'experienceInfo',
+    'fullName', 'documentType', 'documentNumber', 'age', 'gender',
+    'recruitmentCity', 'recruitmentRole', 'neighborhood', 'locality',
+    'medicalRestrictions', 'transportMode', 'experienceInfo',
     'experienceTime', 'experienceSummary'
   ]);
   const mergedFields = {
@@ -269,6 +331,19 @@ function mapInterpretation(inboundMessage, lastBotQuestion = null) {
     ...asRecord(source.providedFields),
     ...asRecord(source.fields)
   };
+  const city = firstString(
+    mergedFields.recruitmentCity,
+    mergedFields.city,
+    mergedFields.cityHint
+  );
+  const role = firstString(
+    mergedFields.recruitmentRole,
+    mergedFields.role,
+    mergedFields.roleHint
+  );
+  if (city) mergedFields.recruitmentCity = city;
+  if (role) mergedFields.recruitmentRole = role;
+
   const fields = Object.fromEntries(
     Object.entries(mergedFields).filter(([field]) => candidateFieldNames.has(field))
   );
@@ -346,8 +421,17 @@ export async function buildConversationTurnInput(inboundMessage, dependencies = 
   const messageId = requireString(message.messageId, 'inboundMessage.messageId');
   const candidate = await loadOrCreateCandidate(prisma, phone);
   const inboundContext = await resolveInboundVacancy(message, prisma);
-  const effectiveCandidate = !candidate.vacancyId && inboundContext.vacancy
-    ? { ...candidate, vacancy: inboundContext.vacancy, vacancyId: inboundContext.vacancy.id }
+  const effectiveCandidate = inboundContext.vacancy
+    ? {
+        ...candidate,
+        vacancy: candidate.vacancy || inboundContext.vacancy,
+        vacancyId: candidate.vacancyId || inboundContext.vacancy.id,
+        recruitmentCity: candidate.recruitmentCity || inboundContext.vacancy.city || null,
+        recruitmentRole: candidate.recruitmentRole
+          || inboundContext.vacancy.role
+          || inboundContext.vacancy.title
+          || null
+      }
     : candidate;
   if (typeof candidate?.id !== 'string' || !candidate.id.trim()) {
     throw new ConversationTurnInputBuildError([{
@@ -363,6 +447,7 @@ export async function buildConversationTurnInput(inboundMessage, dependencies = 
     select: {
       direction: true,
       body: true,
+      rawPayload: true,
       createdAt: true
     }
   });
@@ -370,13 +455,22 @@ export async function buildConversationTurnInput(inboundMessage, dependencies = 
   const lastBotQuestion = [...historyMessages]
     .reverse()
     .find((item) => item.role === 'assistant' && item.text.includes('?'))?.text ?? null;
+  const lastBotReplyIdentity = outboundIdentity(
+    recentMessages.find((item) => item.direction === 'OUTBOUND')
+  );
   const interpretation = mapInterpretation(message, lastBotQuestion);
+  const currentFacts = interpretedRecruitmentFacts(interpretation);
+  const candidateForPending = {
+    ...effectiveCandidate,
+    recruitmentCity: effectiveCandidate.recruitmentCity || currentFacts.recruitmentCity || null,
+    recruitmentRole: effectiveCandidate.recruitmentRole || currentFacts.recruitmentRole || null
+  };
   const attachments = currentAttachments(message);
-  const pendingFields = deriveCandidatePendingFields(effectiveCandidate)
+  const pendingFields = deriveCandidatePendingFields(candidateForPending)
     .filter((field) => field !== 'cv' || !turnBringsProcessedCv(attachments));
 
   const mappedInput = {
-    vacancy: vacancySnapshot(inboundContext.vacancy),
+    vacancy: vacancySnapshot(effectiveCandidate.vacancy || inboundContext.vacancy),
     attribution: inboundContext.attribution,
     turn: {
       id: messageId,
@@ -388,12 +482,13 @@ export async function buildConversationTurnInput(inboundMessage, dependencies = 
     },
     candidate: {
       id: candidate.id,
-      facts: buildCandidateFacts(effectiveCandidate, interpretation),
+      facts: buildCandidateFacts(candidateForPending, interpretation),
       updatedAt: isoDate(candidate.updatedAt)
     },
     history: {
       messages: historyMessages,
-      lastBotQuestion
+      lastBotQuestion,
+      lastBotReplyIdentity
     },
     pending: {
       fields: pendingFields,

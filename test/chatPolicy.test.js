@@ -13,11 +13,11 @@ test('persiste datos detectados y agrupa todos los campos pendientes', () => {
   assert.deepEqual(chatPolicy(input({
     intent: 'PROVIDE_CANDIDATE_DATA',
     providedFields: { fullName: 'Ana Pérez' },
-    pendingFields: ['fullName', 'city', 'documentType']
+    pendingFields: ['fullName', 'recruitmentCity', 'documentType']
   })), {
     reply: {
       directive: 'ASK_MISSING_FIELDS',
-      parameters: { missingFields: ['city', 'documentType'] }
+      parameters: { missingFields: ['recruitmentCity', 'documentType'] }
     },
     mutations: {
       fieldsToPersist: { fullName: 'Ana Pérez' }
@@ -57,10 +57,10 @@ test('persiste varios campos juntos sin emitir preguntas secuenciales', () => {
     intent: 'PROVIDE_CANDIDATE_DATA',
     providedFields: {
       fullName: 'Ana Pérez',
-      city: 'Bogotá',
+      recruitmentCity: 'Bogotá',
       documentNumber: '1000123456'
     },
-    pendingFields: ['fullName', 'city', 'documentType', 'documentNumber']
+    pendingFields: ['fullName', 'recruitmentCity', 'documentType', 'documentNumber']
   })), {
     reply: {
       directive: 'ASK_MISSING_FIELDS',
@@ -69,7 +69,7 @@ test('persiste varios campos juntos sin emitir preguntas secuenciales', () => {
     mutations: {
       fieldsToPersist: {
         fullName: 'Ana Pérez',
-        city: 'Bogotá',
+        recruitmentCity: 'Bogotá',
         documentNumber: '1000123456'
       }
     },
