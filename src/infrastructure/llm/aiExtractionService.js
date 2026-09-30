@@ -109,6 +109,7 @@ REGLAS OBLIGATORIAS PARA vacancyId:
 1. Interpreta semánticamente el cargo mencionado. Ejemplo: "bodega", "cargar camiones" o "cargue" puede corresponder a "Cargue y Descargue".
 2. Debes cruzar SIEMPRE cargo Y ciudad. Nunca asocies una vacante usando solamente el cargo.
 3. Usa primero la ciudad mencionada en el mensaje y, si no aparece, candidateCity.
+3a. Si el mensaje actual solo responde la ciudad, puedes recuperar el cargo mencionado explícitamente en recentCandidateMessages. No inventes el cargo ni reemplaces una corrección más reciente por un mensaje antiguo.
 4. Solo si existe una coincidencia ÚNICA de rol y ciudad, devuelve el id exacto del catálogo en vacancyId.
 5. Si falta la ciudad, no coincide con la ciudad de la vacante, hay varias coincidencias o existe cualquier ambigüedad, devuelve vacancyId: null.
 6. Aunque vacancyId sea null, devuelve roleHint y cityHint con lo comprendido. Usa null cuando uno de esos datos no esté disponible.
@@ -186,7 +187,13 @@ export async function extractCandidateData(text, pendingFields, context = {}, de
       },
       {
         role: 'user',
-        content: JSON.stringify({ text: rawText, pendingFields: pending })
+        content: JSON.stringify({
+          text: rawText,
+          pendingFields: pending,
+          recentCandidateMessages: Array.isArray(context.recentCandidateMessages)
+            ? context.recentCandidateMessages.slice(-4).map((message) => String(message).slice(0, 500))
+            : []
+        })
       }
     ],
     max_completion_tokens: 500

@@ -272,6 +272,15 @@ export function vacancyPolicy(input) {
         transitions: { keepCurrentStep: true }
       };
     }
+    if (roleHint) {
+      return {
+        reply: {
+          directive: 'ASK_FOR_VACANCY_CITY',
+          parameters: { roleHint }
+        },
+        transitions: { keepCurrentStep: true }
+      };
+    }
     return {
       reply: { directive: 'ASK_WHICH_FLYER_SEEN' },
       transitions: { keepCurrentStep: true }

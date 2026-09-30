@@ -13,6 +13,7 @@ import {
 } from '../../services/interviewBookingStateService.js';
 import { listOfferableSlots } from '../../services/interviewScheduler.js';
 import { deliverAutomaticOutboundText } from '../../services/automaticOutboundDeliveryService.js';
+import { directiveKey } from '../engine/directiveKey.js';
 import { sanitizeOutboundReply } from '../../services/outboundReplyPolicy.js';
 import { pauseCandidateAutomationForManualReview } from '../../services/candidateStateService.js';
 import { notifySupervisorManualReview } from '../../services/adminSupervisor.js';
@@ -429,6 +430,7 @@ async function deliverResolvedReply({
       intent,
       schedulingAction,
       ...(decision?.reply?.directive ? { directive: decision.reply.directive } : {}),
+      ...(decision?.reply?.directive ? { directiveKey: directiveKey(decision.reply) } : {}),
       ...(interactiveOptions.length ? { interactiveOptions } : {})
     },
     idempotencyKey: `conversation-turn:${candidateId}:${turnId}`

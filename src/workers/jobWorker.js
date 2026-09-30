@@ -94,7 +94,7 @@ async function processInboundDocument(payload, dependencies) {
 
 async function loadExtractionContext(payload, activePrisma) {
   if (typeof payload?.from !== 'string' || !payload.from.trim()) {
-    return { pendingFields: [], activeVacancies: [], candidateSummary: {}, candidateCity: null };
+    return { pendingFields: [], activeVacancies: [], candidateSummary: {}, candidateCity: null, recentCandidateMessages: [] };
   }
   const candidate = await activePrisma.candidate.findUnique({
     where: { phone: payload.from.trim() },
@@ -123,12 +123,38 @@ async function loadExtractionContext(payload, activePrisma) {
     neighborhood: candidate.neighborhood ?? null,
     vacancyId: candidate.vacancyId ?? null
   } : {};
+  const recentCandidateMessages = candidate?.id && !candidate.vacancyId
+    && typeof activePrisma.message?.findMany === 'function'
+    ? (await activePrisma.message.findMany({
+        where: { candidateId: candidate.id, direction: 'INBOUND' },
+        orderBy: { createdAt: 'desc' },
+        take: 4,
+        select: { body: true }
+      })).reverse().map((item) => String(item.body || '').slice(0, 500))
+    : [];
 
   return {
     pendingFields: candidate ? deriveCandidatePendingFields(candidate) : ['dataConsent', 'vacancyId'],
     activeVacancies,
     candidateSummary,
-    candidateCity: candidate?.city ?? candidate?.locality ?? null
+    candidateCity: candidate?.city ?? candidate?.locality ?? null,
+    recentCandidateMessages
+  };
+}
+
+export function conversationDecisionTrace(input, decision, extractionStatus = 'not_run') {
+  const detected = asRecord(input?.interpretation?.detectedFields);
+  const directive = decision?.reply?.directive;
+  return {
+    event: 'conversation_decision.trace',
+    extractionStatus: ['ok', 'no_result', 'not_run'].includes(extractionStatus)
+      ? extractionStatus : 'not_run',
+    roleDetected: typeof detected.roleHint === 'string' && Boolean(detected.roleHint.trim()),
+    cityDetected: typeof detected.cityHint === 'string' && Boolean(detected.cityHint.trim()),
+    vacancyMatched: Boolean(input?.vacancy?.id || input?.candidate?.facts?.vacancyId),
+    directive: typeof directive === 'string' && /^[A-Z][A-Z0-9_]{0,79}$/.test(directive)
+      ? directive : null,
+    handoffToHuman: decision?.transitions?.handoffToHuman === true
   };
 }
 
@@ -179,6 +205,7 @@ export async function runJob(job, dependencies = {}) {
 
     try {
       let enrichedPayload = await processInboundDocument(payload, dependencies);
+      let extractionStatus = 'not_run';
       const hasExtractableEvidence = typeof enrichedPayload?.text === 'string'
         || (typeof enrichedPayload?.media?.extractedText === 'string'
           && enrichedPayload.media.extractedText.trim().length > 0);
@@ -192,6 +219,7 @@ export async function runJob(job, dependencies = {}) {
             pendingFields,
             extractionContext
           );
+          extractionStatus = interpretation ? 'ok' : 'no_result';
           enrichedPayload = withInterpretation(
             enrichedPayload,
             interpretation,
@@ -201,6 +229,9 @@ export async function runJob(job, dependencies = {}) {
       }
       const input = await buildInput(enrichedPayload, { prisma: activePrisma });
       const decision = await calculate(input);
+      console.info('[CONVERSATION_DECISION_TRACE]', JSON.stringify(
+        conversationDecisionTrace(input, decision, extractionStatus)
+      ));
       await execute(input, decision, {
         prisma: activePrisma,
         llmService,

@@ -226,7 +226,11 @@ function buildCandidateFacts(candidate, interpretation) {
 }
 
 function mapHistory(messages) {
-  return [...messages].reverse().map((message) => ({
+  return [...messages].reverse().filter((message) => {
+    if (message.direction !== 'OUTBOUND') return true;
+    const state = asRecord(asRecord(message.rawPayload).delivery).state;
+    return !state || ['SENT', 'DELIVERED', 'READ'].includes(state);
+  }).map((message) => ({
     role: message.direction === 'INBOUND' ? 'user' : 'assistant',
     text: typeof message.body === 'string' ? message.body : '',
     occurredAt: isoDate(message.createdAt, new Date(0).toISOString())
@@ -363,13 +367,19 @@ export async function buildConversationTurnInput(inboundMessage, dependencies = 
     select: {
       direction: true,
       body: true,
-      createdAt: true
+      createdAt: true,
+      rawPayload: true
     }
   });
   const historyMessages = mapHistory(recentMessages);
   const lastBotQuestion = [...historyMessages]
     .reverse()
     .find((item) => item.role === 'assistant' && item.text.includes('?'))?.text ?? null;
+  const latestDeliveredOutbound = recentMessages.find((item) => item.direction === 'OUTBOUND'
+    && ['SENT', 'DELIVERED', 'READ'].includes(asRecord(asRecord(item.rawPayload).delivery).state));
+  const lastBotDirectiveKey = /^[a-f0-9]{64}$/.test(asRecord(latestDeliveredOutbound?.rawPayload).directiveKey)
+    ? latestDeliveredOutbound.rawPayload.directiveKey
+    : null;
   const interpretation = mapInterpretation(message, lastBotQuestion);
   const attachments = currentAttachments(message);
   const pendingFields = deriveCandidatePendingFields(effectiveCandidate)
@@ -393,7 +403,8 @@ export async function buildConversationTurnInput(inboundMessage, dependencies = 
     },
     history: {
       messages: historyMessages,
-      lastBotQuestion
+      lastBotQuestion,
+      lastBotDirectiveKey
     },
     pending: {
       fields: pendingFields,

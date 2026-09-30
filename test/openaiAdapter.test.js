@@ -103,6 +103,17 @@ test('ASK_WHICH_FLYER_SEEN conserva la pregunta correcta si OpenAI no está disp
   });
 });
 
+test('ASK_FOR_VACANCY_CITY no vuelve a pedir el cargo si falla OpenAI', async () => {
+  await withOpenAiEnvironment(async () => {
+    delete process.env.OPENAI_API_KEY;
+    const reply = await generateReply('ASK_FOR_VACANCY_CITY', {
+      roleHint: 'Auxiliar de cargue y descargue'
+    }, {});
+    assert.match(reply, /en qué ciudad te encuentras/i);
+    assert.doesNotMatch(reply, /qué cargo viste|experiencia|vacantes activas/i);
+  });
+});
+
 test('usa el texto de contingencia ante rechazo o respuesta vacía de la API', async () => {
   await withOpenAiEnvironment(async () => {
     axios.post = async () => {

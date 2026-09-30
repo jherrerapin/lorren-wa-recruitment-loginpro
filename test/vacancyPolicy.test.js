@@ -48,6 +48,23 @@ test('rol y ciudad ambiguos fuerzan desambiguación sin asignar una vacante', ()
   });
 });
 
+test('si conoce el cargo pero falta la ciudad pregunta solo por la ciudad', () => {
+  const decision = vacancyPolicy({
+    ...input({}, 'Auxiliar de cargue y descargue', {
+      interpretation: { detectedFields: { roleHint: 'Auxiliar de cargue y descargue' } }
+    }),
+    vacancy: null
+  });
+
+  assert.deepEqual(decision, {
+    reply: {
+      directive: 'ASK_FOR_VACANCY_CITY',
+      parameters: { roleHint: 'Auxiliar de cargue y descargue' }
+    },
+    transitions: { keepCurrentStep: true }
+  });
+});
+
 test('ofrece guardar una postulación con el rol y la ciudad de la vacante inactiva', () => {
   const decision = vacancyPolicy(input({
     vacancyActive: false,

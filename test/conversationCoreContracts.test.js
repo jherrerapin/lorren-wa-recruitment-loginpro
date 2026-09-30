@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ConversationTurnInputSchema } from '../src/core/contracts/ConversationTurnInputSchema.js';
 import { ConversationDecisionSchema } from '../src/core/contracts/ConversationDecisionSchema.js';
-import { calculateConversationDecision } from '../src/core/engine/calculateConversationDecision.js';
+import { calculateConversationDecision, preventRepeatedReply } from '../src/core/engine/calculateConversationDecision.js';
+import { directiveKey } from '../src/core/engine/directiveKey.js';
 
 function validInput(overrides = {}) {
   return {
@@ -49,6 +50,28 @@ function validDecision(reply) {
     scheduling: { action: 'none' }
   };
 }
+
+test('una directiva enviada y repetida activa pausa humana sin repetir la pregunta', () => {
+  const reply = { directive: 'ASK_FOR_VACANCY_CITY', parameters: { roleHint: 'Auxiliar' } };
+  const key = directiveKey(reply);
+  const result = preventRepeatedReply({
+    history: { lastBotQuestion: '¿En qué ciudad te encuentras?', lastBotDirectiveKey: key }
+  }, validDecision(reply));
+
+  assert.equal(result.transitions.handoffToHuman, true);
+  assert.equal(result.mutations.nextStep, 'MANUAL_REVIEW');
+  assert.equal(result.mutations.fieldsToPersist.botPaused, true);
+  assert.equal(result.scheduling.action, 'none');
+  assert.match(result.reply.text, /revisión/i);
+});
+
+test('una directiva con parámetros nuevos no se confunde con la respuesta anterior', () => {
+  const previous = { directive: 'ASK_MISSING_FIELDS', parameters: { missingFields: ['fullName'] } };
+  const current = { directive: 'ASK_MISSING_FIELDS', parameters: { missingFields: ['city'] } };
+  assert.notEqual(directiveKey(previous), directiveKey(current));
+  const decision = validDecision(current);
+  assert.equal(preventRepeatedReply({ history: { lastBotDirectiveKey: directiveKey(previous) } }, decision), decision);
+});
 
 test('acepta una interpretación semántica estricta y mantiene sus objetos inmutables', () => {
   const result = ConversationTurnInputSchema.safeParse(validInput({

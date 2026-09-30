@@ -37,7 +37,8 @@ export const HistoryMessageSchema = z.object({
 
 export const HistorySchema = z.object({
   messages: z.array(HistoryMessageSchema).readonly(),
-  lastBotQuestion: z.string().nullable()
+  lastBotQuestion: z.string().nullable(),
+  lastBotDirectiveKey: z.string().regex(/^[a-f0-9]{64}$/).nullable().default(null)
 }).strict().readonly();
 
 /** Canonical scheduling slot understood by the functional core. */

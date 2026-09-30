@@ -1,7 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runJob } from '../src/workers/jobWorker.js';
+import { runJob, conversationDecisionTrace } from '../src/workers/jobWorker.js';
 import { JOB_TYPES } from '../src/services/jobQueue.js';
+
+test('el trace de decisión expone solo indicadores operativos, sin PII', () => {
+  const trace = conversationDecisionTrace({
+    turn: { rawText: 'Mi teléfono es 3001234567' },
+    interpretation: { detectedFields: { roleHint: 'Auxiliar', cityHint: 'Bogotá' } },
+    vacancy: { id: 'vacancy-secret' },
+    candidate: { facts: { phone: '3001234567' } }
+  }, { reply: { directive: 'ASK_FOR_VACANCY_CITY', parameters: { roleHint: 'Auxiliar' } } }, 'ok');
+
+  assert.deepEqual(trace, {
+    event: 'conversation_decision.trace', extractionStatus: 'ok',
+    roleDetected: true, cityDetected: true, vacancyMatched: true,
+    directive: 'ASK_FOR_VACANCY_CITY', handoffToHuman: false
+  });
+  assert.doesNotMatch(JSON.stringify(trace), /3001234567|Auxiliar|Bogotá|vacancy-secret/);
+});
 
 function harness({ acquired = true } = {}) {
   const calls = [];

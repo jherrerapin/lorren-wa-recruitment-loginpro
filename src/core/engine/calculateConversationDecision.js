@@ -10,6 +10,7 @@ import { progressionPolicy } from './policies/progressionPolicy.js';
 import { attachmentPolicy } from './policies/attachmentPolicy.js';
 import { consentPolicy } from './policies/consentPolicy.js';
 import { vacancyPolicy } from './policies/vacancyPolicy.js';
+import { directiveKey } from './directiveKey.js';
 
 const DEFAULT_TERMINAL_STATUS = 'REGISTRADO';
 const EXCLUSIVE_POLICY_INTENTS = new Map([
@@ -166,19 +167,37 @@ function normalizeReplyText(value = '') {
 }
 
 export function preventRepeatedReply(input, decision) {
+  if (decision?.transitions?.endConversation === true || decision?.transitions?.handoffToHuman === true) {
+    return decision;
+  }
   const replyText = normalizeReplyText(decision?.reply?.text);
   const lastBotQuestion = normalizeReplyText(input?.history?.lastBotQuestion);
-  if (!replyText || !lastBotQuestion || replyText !== lastBotQuestion) return decision;
+  const repeatedText = Boolean(replyText && lastBotQuestion && replyText === lastBotQuestion);
+  const currentDirectiveKey = directiveKey(decision?.reply);
+  const repeatedDirective = Boolean(currentDirectiveKey
+    && currentDirectiveKey === input?.history?.lastBotDirectiveKey);
+  if (!repeatedText && !repeatedDirective) return decision;
 
   return {
     ...decision,
     reply: {
       text: 'Para evitar repetirte la misma respuesta, dejaré este punto en revisión con el equipo de selección.'
     },
+    mutations: {
+      ...(isPlainObject(decision.mutations) ? decision.mutations : {}),
+      fieldsToPersist: {
+        ...(isPlainObject(decision?.mutations?.fieldsToPersist) ? decision.mutations.fieldsToPersist : {}),
+        botPaused: true,
+        botPauseReason: 'Respuesta automática repetida'
+      },
+      nextStep: 'MANUAL_REVIEW'
+    },
     transitions: {
       ...(isPlainObject(decision.transitions) ? decision.transitions : {}),
+      keepCurrentStep: false,
       handoffToHuman: true
-    }
+    },
+    scheduling: { action: 'none' }
   };
 }
 
