@@ -65,8 +65,8 @@ function errorDetails(error) {
 export async function downloadWhatsappMedia(mediaId, dependencies = {}) {
   const normalizedMediaId = requireNonEmptyString(mediaId, 'mediaId');
   const token = requireNonEmptyString(
-    dependencies.token ?? process.env.WHATSAPP_TOKEN,
-    'WHATSAPP_TOKEN'
+    dependencies.token ?? (process.env.WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN),
+    'WHATSAPP_TOKEN or META_ACCESS_TOKEN'
   );
   const graphApiBaseUrl = cleanBaseUrl(
     dependencies.graphApiBaseUrl
@@ -76,6 +76,7 @@ export async function downloadWhatsappMedia(mediaId, dependencies = {}) {
   const graphApiVersion = cleanVersion(
     dependencies.graphApiVersion
       ?? process.env.WHATSAPP_GRAPH_API_VERSION
+      ?? process.env.META_API_VERSION
       ?? DEFAULT_GRAPH_API_VERSION
   );
   const maxMediaBytes = positiveInteger(

@@ -72,6 +72,7 @@ function providerMessageId(response) {
 }
 
 function providerFailureState(error) {
+  if (error?.requestAttempted === false) return 'FAILED';
   const status = Number(error?.response?.status);
   return Number.isInteger(status) && status >= 400 && status < 500 ? 'FAILED' : 'UNKNOWN';
 }

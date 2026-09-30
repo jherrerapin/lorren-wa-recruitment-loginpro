@@ -211,6 +211,24 @@ test('un rechazo confirmado del proveedor queda FAILED y permite un reintento po
   assert.equal(harness.sends.length, 1);
 });
 
+test('una configuración inválida anterior al HTTP queda FAILED y permite reintentar', async () => {
+  const harness = createHarness();
+  const error = new Error('META_ACCESS_TOKEN missing');
+  error.requestAttempted = false;
+
+  await assert.rejects(
+    () => deliverAutomaticOutboundText(harness.prisma, deliveryInput(), {
+      sendText: async () => { throw error; }
+    }),
+    /META_ACCESS_TOKEN missing/
+  );
+  assert.equal(harness.messages[0].rawPayload.delivery.state, 'FAILED');
+  const retry = await deliverAutomaticOutboundText(harness.prisma, deliveryInput(), {
+    sendText: harness.sendText
+  });
+  assert.equal(retry.sent, true);
+});
+
 test('una entrega incierta queda UNKNOWN y no se reenvía automáticamente', async () => {
   const harness = createHarness();
   const uncertain = new Error('network timeout after provider request');
