@@ -279,7 +279,7 @@ export function buildVacancyPolicyReply(vacancy = {}, rawText = '') {
       : 'La información disponible de esta vacante no especifica un requisito adicional de experiencia.';
   }
 
-  if (/\b(requisito|perfil|estudio|formacion|documento|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+  if (/\b(requisitos?|perfil|estudios?|formacion|documentos?|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
     const parts = [];
     if (vacancy.requirements) parts.push(vacancy.requirements);
 

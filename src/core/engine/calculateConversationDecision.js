@@ -77,6 +77,13 @@ export function mergeDecisionObjects(current = {}, fragment = {}) {
 
     const currentValue = merged[key];
     if (isPlainObject(currentValue) && isPlainObject(incomingValue)) {
+      if (key === 'reply' && (
+        (incomingValue.directive !== undefined && incomingValue.directive !== currentValue.directive)
+        || (incomingValue.text !== undefined && currentValue.directive !== undefined)
+      )) {
+        merged[key] = { ...incomingValue };
+        continue;
+      }
       merged[key] = mergeDecisionObjects(currentValue, incomingValue);
       continue;
     }
