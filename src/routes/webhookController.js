@@ -1,8 +1,31 @@
+import express from 'express';
 import {
   parseWebhookPayload,
   verifySignature
 } from '../infrastructure/transport/metaAdapter.js';
 import { enqueueInboundMessage } from '../services/jobQueue.js';
+
+export function createWebhookJsonParser() {
+  return express.json({
+    limit: '2mb',
+    verify(req, _res, buffer) {
+      req.rawBody = Buffer.from(buffer);
+    }
+  });
+}
+
+export function createMetaVerificationHandler(verifyToken = process.env.META_VERIFY_TOKEN) {
+  return function metaVerificationHandler(req, res) {
+    const mode = req.query['hub.mode'];
+    const token = req.query['hub.verify_token'];
+    const challenge = req.query['hub.challenge'];
+    if (typeof verifyToken === 'string' && verifyToken.length > 0
+      && mode === 'subscribe' && token === verifyToken && typeof challenge === 'string') {
+      return res.status(200).send(challenge);
+    }
+    return res.sendStatus(403);
+  };
+}
 
 function signatureHeader(req) {
   if (typeof req?.get === 'function') return req.get('x-hub-signature-256');
@@ -54,7 +77,20 @@ export function createWebhookController(dependencies = {}, overrides = {}) {
   const parse = overrides.parseWebhookPayload ?? parseWebhookPayload;
   const enqueue = overrides.enqueueInboundMessage ?? enqueueInboundMessage;
 
+  if (typeof secret !== 'string' || !secret.trim()) {
+    try {
+      logger?.error?.({ event: 'conversation_webhook.missing_app_secret' },
+        'META_APP_SECRET (or WHATSAPP_APP_SECRET) is required for signed webhook requests');
+    } catch {
+      // Configuration logging must not prevent the admin server from starting.
+    }
+  }
+
   return async function webhookController(req, res) {
+    if (typeof secret !== 'string' || !secret.trim()) {
+      res.sendStatus(503);
+      return;
+    }
     const rawBody = rawRequestBody(req);
     const signature = signatureHeader(req);
 
