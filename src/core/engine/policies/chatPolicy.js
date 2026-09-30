@@ -25,7 +25,7 @@ const INFORMATION_DIRECTIVES = Object.freeze({
   ASK_CV_SUBMISSION: 'EXPLAIN_CV_SUBMISSION'
 });
 const PERSISTABLE_FIELDS = new Set([
-  'vacancyId', 'fullName', 'city', 'residenceCity', 'locality', 'neighborhood',
+  'vacancyId', 'recruitmentCity', 'recruitmentRole', 'fullName', 'locality', 'neighborhood',
   'documentType', 'documentNumber', 'age', 'gender', 'medicalRestrictions',
   'transportMode', 'experienceInfo', 'experienceTime', 'experienceSummary'
 ]);
@@ -35,6 +35,8 @@ export function isSystemReminderIntent(input = {}) {
 }
 
 const FIELD_LABELS = Object.freeze({
+  recruitmentCity: 'ciudad',
+  recruitmentRole: 'vacante o cargo que viste',
   fullName: 'nombre completo',
   documentType: 'tipo de documento',
   documentNumber: 'número de documento',
@@ -55,7 +57,7 @@ function getPendingFields(input = {}) {
   return Array.isArray(input?.pending?.fields)
     ? input.pending.fields
       .filter((field) => typeof field === 'string' && field.trim())
-      .filter((field) => !['dataConsent', 'gender'].includes(field.trim()))
+      .filter((field) => !['dataConsent', 'gender', 'vacancyId'].includes(field.trim()))
     : [];
 }
 
