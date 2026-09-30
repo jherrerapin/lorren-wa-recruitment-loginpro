@@ -43,42 +43,6 @@ function normalizedMimeType(value) {
   return typeof value === 'string' ? value.split(';', 1)[0].trim().toLowerCase() : '';
 }
 
-function normalizeComparable(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9ñ\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function cityMentionedInText(text, activeVacancies = []) {
-  const normalizedText = ` ${normalizeComparable(text)} `;
-  if (normalizedText.trim().length === 0) return null;
-
-  const cities = [...new Set(activeVacancies
-    .map((vacancy) => typeof vacancy?.city === 'string' ? vacancy.city.trim() : '')
-    .filter(Boolean))];
-  const matches = cities.filter((city) => {
-    const normalizedCity = normalizeComparable(city);
-    return normalizedCity && normalizedText.includes(` ${normalizedCity} `);
-  });
-
-  return matches.length === 1 ? matches[0] : null;
-}
-
-function inferCandidateCity(payload, recentInboundMessages, activeVacancies) {
-  const currentTurnCity = cityMentionedInText(payload?.text, activeVacancies);
-  if (currentTurnCity) return currentTurnCity;
-
-  for (const message of recentInboundMessages) {
-    const historicalCity = cityMentionedInText(message?.body, activeVacancies);
-    if (historicalCity) return historicalCity;
-  }
-  return null;
-}
-
 function attachmentsFromPayload(payload) {
   const media = asRecord(payload?.media);
   if (!['document', 'image', 'audio'].includes(payload?.type)
@@ -130,8 +94,15 @@ async function processInboundDocument(payload, dependencies) {
 
 async function loadExtractionContext(payload, activePrisma) {
   if (typeof payload?.from !== 'string' || !payload.from.trim()) {
-    return { pendingFields: [], activeVacancies: [], candidateSummary: {}, candidateCity: null };
+    return {
+      pendingFields: [],
+      activeVacancies: [],
+      candidateSummary: {},
+      candidateCity: null,
+      candidateRole: null
+    };
   }
+
   const candidate = await activePrisma.candidate.findUnique({
     where: { phone: payload.from.trim() },
     include: { vacancy: true }
@@ -153,26 +124,30 @@ async function loadExtractionContext(payload, activePrisma) {
       zoneFilterEnabled: true
     }
   });
-  const recentInboundMessages = candidate?.id && typeof activePrisma.message?.findMany === 'function'
-    ? await activePrisma.message.findMany({
-        where: { candidateId: candidate.id, direction: 'INBOUND' },
-        orderBy: { createdAt: 'desc' },
-        take: 8,
-        select: { body: true }
-      })
-    : [];
+
+  const candidateCity = candidate?.recruitmentCity
+    ?? candidate?.vacancy?.city
+    ?? null;
+  const candidateRole = candidate?.recruitmentRole
+    ?? candidate?.vacancy?.role
+    ?? candidate?.vacancy?.title
+    ?? null;
   const candidateSummary = candidate ? {
-    city: null,
+    city: candidateCity,
+    role: candidateRole,
     locality: candidate.locality ?? null,
     neighborhood: candidate.neighborhood ?? null,
     vacancyId: candidate.vacancyId ?? null
   } : {};
 
   return {
-    pendingFields: candidate ? deriveCandidatePendingFields(candidate) : ['dataConsent', 'vacancyId'],
+    pendingFields: candidate
+      ? deriveCandidatePendingFields(candidate)
+      : ['recruitmentCity', 'recruitmentRole', 'vacancyId'],
     activeVacancies,
     candidateSummary,
-    candidateCity: inferCandidateCity(payload, recentInboundMessages, activeVacancies)
+    candidateCity,
+    candidateRole
   };
 }
 
