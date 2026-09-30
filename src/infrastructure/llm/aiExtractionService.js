@@ -92,7 +92,7 @@ function parseJsonContent(response) {
   }
 }
 
-function buildSystemPrompt({ activeVacancies, candidateCity, candidateSummary }) {
+function buildSystemPrompt({ activeVacancies, candidateCity, candidateRole, candidateSummary }) {
   return `Eres el extractor semántico de Lórren, una asistente de selección de LoginPro.
 Devuelve exclusivamente un objeto JSON válido. No redactes una respuesta conversacional.
 
@@ -102,15 +102,18 @@ ${JSON.stringify(activeVacancies)}
 CIUDAD CONOCIDA DEL CANDIDATO:
 ${JSON.stringify(candidateCity || null)}
 
+CARGO CONOCIDO DEL CANDIDATO:
+${JSON.stringify(candidateRole || null)}
+
 RESUMEN CONOCIDO DEL CANDIDATO:
 ${JSON.stringify(candidateSummary)}
 
 REGLAS OBLIGATORIAS PARA vacancyId:
 1. Interpreta semánticamente el cargo mencionado. Ejemplo: "bodega", "cargar camiones" o "cargue" puede corresponder a "Cargue y Descargue".
-2. Debes cruzar SIEMPRE cargo Y ciudad. Nunca asocies una vacante usando solamente el cargo.
-3. Usa primero la ciudad mencionada en el mensaje y, si no aparece, candidateCity.
+2. Debes cruzar SIEMPRE cargo Y ciudad. Nunca asocies una vacante usando solamente uno de los dos datos.
+3. Usa primero la ciudad/cargo mencionados en el mensaje y, si uno no aparece, usa candidateCity/candidateRole respectivamente.
 4. Solo si existe una coincidencia ÚNICA de rol y ciudad, devuelve el id exacto del catálogo en vacancyId.
-5. Si falta la ciudad, no coincide con la ciudad de la vacante, hay varias coincidencias o existe cualquier ambigüedad, devuelve vacancyId: null.
+5. Si falta la ciudad o el cargo, no coincide con el catálogo, hay varias coincidencias o existe cualquier ambigüedad, devuelve vacancyId: null.
 6. Aunque vacancyId sea null, devuelve roleHint y cityHint con lo comprendido. Usa null cuando uno de esos datos no esté disponible.
 7. Nunca inventes ids, ciudades, cargos ni datos del candidato.
 
@@ -143,15 +146,24 @@ function vacancyMatchesRoleHint(vacancy, roleHint) {
   return hintTokens.some((token) => vacancyText.includes(token));
 }
 
-function validatedVacancyId(parsedVacancyId, roleHint, cityHint, candidateCity, activeVacancies) {
+function validatedVacancyId(
+  parsedVacancyId,
+  roleHint,
+  cityHint,
+  candidateCity,
+  candidateRole,
+  activeVacancies
+) {
   if (typeof parsedVacancyId !== 'string' || !parsedVacancyId.trim()) return null;
   const selected = activeVacancies.find((vacancy) => vacancy.id === parsedVacancyId.trim());
   if (!selected) return null;
   const effectiveCity = normalizeComparable(cityHint || candidateCity);
+  const effectiveRole = roleHint || candidateRole;
   if (!effectiveCity || effectiveCity !== normalizeComparable(selected.city)) return null;
+  if (!effectiveRole) return null;
   const matchingVacancies = activeVacancies.filter((vacancy) => (
     normalizeComparable(vacancy.city) === effectiveCity
-      && vacancyMatchesRoleHint(vacancy, roleHint)
+      && vacancyMatchesRoleHint(vacancy, effectiveRole)
   ));
   if (matchingVacancies.length !== 1 || matchingVacancies[0].id !== selected.id) return null;
   return selected.id;
@@ -171,6 +183,9 @@ export async function extractCandidateData(text, pendingFields, context = {}, de
   const candidateCity = typeof context.candidateCity === 'string' && context.candidateCity.trim()
     ? context.candidateCity.trim()
     : null;
+  const candidateRole = typeof context.candidateRole === 'string' && context.candidateRole.trim()
+    ? context.candidateRole.trim()
+    : null;
   const apiKey = dependencies.apiKey ?? process.env.OPENAI_API_KEY;
   if (!apiKey) return null;
 
@@ -182,7 +197,12 @@ export async function extractCandidateData(text, pendingFields, context = {}, de
     messages: [
       {
         role: 'system',
-        content: buildSystemPrompt({ activeVacancies, candidateCity, candidateSummary })
+        content: buildSystemPrompt({
+          activeVacancies,
+          candidateCity,
+          candidateRole,
+          candidateSummary
+        })
       },
       {
         role: 'user',
@@ -214,11 +234,28 @@ export async function extractCandidateData(text, pendingFields, context = {}, de
         allowed.has(field) && value !== undefined && value !== null && value !== ''
       ))
     );
+
+    if (
+      pending.includes('recruitmentCity')
+      && typeof parsed.cityHint === 'string'
+      && parsed.cityHint.trim()
+    ) {
+      extractedFields.recruitmentCity = parsed.cityHint.trim();
+    }
+    if (
+      pending.includes('recruitmentRole')
+      && typeof parsed.roleHint === 'string'
+      && parsed.roleHint.trim()
+    ) {
+      extractedFields.recruitmentRole = parsed.roleHint.trim();
+    }
+
     const vacancyId = validatedVacancyId(
       parsed.vacancyId,
       parsed.roleHint,
       parsed.cityHint,
       candidateCity,
+      candidateRole,
       activeVacancies
     );
     if (vacancyId) extractedFields.vacancyId = vacancyId;
