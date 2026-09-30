@@ -11,11 +11,17 @@ const VACANCY_QUESTION_INTENTS = new Set([
   'ASK_VACANCY_SCHEDULE'
 ]);
 const AWAITING_POOL_CONSENT = 'AWAITING_POOL_CONSENT';
+const AWAITING_VACANCY_INTEREST = 'awaiting_vacancy_interest';
+const AWAITING_DATA_CONSENT = 'awaiting_data_consent';
 const POOL_DECLINED_REPLY =
   'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
 const POOL_OPTIONS = Object.freeze([
   Object.freeze({ id: 'pool_consent:accept', label: 'Sí, de acuerdo' }),
   Object.freeze({ id: 'pool_consent:reject', label: 'No, gracias' })
+]);
+const INTEREST_OPTIONS = Object.freeze([
+  Object.freeze({ id: 'vacancy_interest:accept', label: 'Sí, me interesa' }),
+  Object.freeze({ id: 'vacancy_interest:reject', label: 'No, gracias' })
 ]);
 
 function normalize(value = '') {
@@ -88,6 +94,37 @@ function vacancyLocation(vacancy = {}) {
     || vacancy?.operation?.name
     || vacancyCity(vacancy)
     || '';
+}
+
+function candidateResumeMode(input = {}) {
+  return String(input?.candidate?.facts?.botResumeMode || '').trim().toLowerCase();
+}
+
+function consentIsPending(input = {}) {
+  const status = String(input?.candidate?.facts?.dataConsentStatus || '').trim().toUpperCase();
+  return !['ACCEPTED', 'REVOKED', 'REJECTED'].includes(status);
+}
+
+function buildVacancyOverview(vacancy = {}) {
+  const parts = [];
+  const title = vacancyTitle(vacancy);
+  const city = vacancyCity(vacancy);
+  parts.push(`La vacante es ${title}${city ? ` en ${city}` : ''}.`);
+
+  const description = cleanConfiguredFragment(vacancy.roleDescription);
+  if (description) parts.push(`Funciones: ${description}.`);
+
+  const requirements = cleanConfiguredFragment(vacancy.requirements);
+  if (requirements) parts.push(`Requisitos: ${requirements}.`);
+
+  const conditions = cleanConfiguredFragment(vacancy.conditions);
+  if (conditions) parts.push(`Condiciones: ${conditions}.`);
+
+  const location = cleanConfiguredFragment(vacancy.operationAddress);
+  if (location) parts.push(`Lugar de trabajo: ${location}.`);
+
+  parts.push('¿Te interesa continuar con la postulación?');
+  return parts.join('\n');
 }
 
 function getConfiguredAgeRequirementText(vacancy = {}) {
@@ -356,10 +393,55 @@ export function vacancyPolicy(input) {
     };
   }
 
-  if (!isVacancyQuestionIntent(input?.interpretation)) return {};
-  if (!input?.vacancy) return {};
-  if (input?.execution?.mayReply !== true) return {};
+  if (!input?.vacancy || input?.execution?.mayReply !== true) return {};
 
+  const mode = candidateResumeMode(input);
+  const vacancyQuestion = isVacancyQuestionIntent(input?.interpretation);
+
+  if (consentIsPending(input) && mode !== AWAITING_DATA_CONSENT) {
+    if (mode === AWAITING_VACANCY_INTEREST) {
+      if (!vacancyQuestion) return {};
+      const answer = buildVacancyPolicyReply(input.vacancy, input?.turn?.rawText || '');
+      return answer
+        ? {
+            reply: {
+              text: `${answer}\n\n¿Te interesa continuar con la postulación?`,
+              interactiveOptions: INTEREST_OPTIONS
+            },
+            transitions: { keepCurrentStep: true }
+          }
+        : {};
+    }
+
+    if (vacancyQuestion) {
+      const answer = buildVacancyPolicyReply(input.vacancy, input?.turn?.rawText || '');
+      return answer
+        ? {
+            reply: {
+              text: `${answer}\n\n¿Te interesa continuar con la postulación?`,
+              interactiveOptions: INTEREST_OPTIONS
+            },
+            mutations: {
+              fieldsToPersist: { botResumeMode: AWAITING_VACANCY_INTEREST }
+            },
+            transitions: { keepCurrentStep: true }
+          }
+        : {};
+    }
+
+    return {
+      reply: {
+        text: buildVacancyOverview(input.vacancy),
+        interactiveOptions: INTEREST_OPTIONS
+      },
+      mutations: {
+        fieldsToPersist: { botResumeMode: AWAITING_VACANCY_INTEREST }
+      },
+      transitions: { keepCurrentStep: true }
+    };
+  }
+
+  if (!vacancyQuestion) return {};
   const text = buildVacancyPolicyReply(input.vacancy, input?.turn?.rawText || '');
   return text ? { reply: { text } } : {};
 }
