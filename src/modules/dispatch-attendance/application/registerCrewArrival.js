@@ -428,11 +428,18 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
   const captureMode = normalizeCaptureMode(input.captureMode);
   const now = requireDate(input.now ?? new Date(), 'crew_group_mark_now');
   const presenceValidated = input.presenceValidated === true;
+  const manualTargetAssignmentId = typeof input.manualTargetAssignmentId === 'string' && input.manualTargetAssignmentId.trim()
+    ? input.manualTargetAssignmentId.trim().slice(0, 160)
+    : null;
+  const targetedManualMark = Boolean(manualTargetAssignmentId);
   const validatedWorkerIds = presenceValidated
     ? normalizeValidatedWorkerIds(input.validatedWorkerIds, 'crew_group_mark')
     : null;
   if (![ONLINE_WEB_CAPTURE_MODE, OFFLINE_WEB_CAPTURE_MODE].includes(captureMode)) {
     throw new Error('crew_group_mark_capture_mode_invalid');
+  }
+  if (presenceValidated && targetedManualMark) {
+    throw new Error('crew_group_mark_manual_target_conflict');
   }
   if (presenceValidated && !validatedWorkerIds.includes(leaderWorkerId)) {
     throw new Error('crew_group_mark_leader_presence_required');
@@ -467,9 +474,19 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
   }
 
   const selectedWorkerSet = presenceValidated ? new Set(validatedWorkerIds) : null;
-  const selectedMembers = presenceValidated
+  let selectedMembers = presenceValidated
     ? members.filter((member) => selectedWorkerSet.has(member.workerId))
     : members;
+  if (targetedManualMark) {
+    if (manualTargetAssignmentId === leaderAssignmentId) {
+      throw new Error('crew_group_mark_manual_target_invalid');
+    }
+    const targetMember = members.find((member) => member.id === manualTargetAssignmentId);
+    if (!targetMember || targetMember.workerId === leaderWorkerId) {
+      throw new Error('crew_group_mark_manual_target_not_assigned');
+    }
+    selectedMembers = [targetMember];
+  }
   const registerMarkFn = markType === 'DEPARTURE'
     ? options.registerDepartureFn
     : options.registerBreakFn;

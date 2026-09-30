@@ -22,3 +22,12 @@ El backend conservaba la política de dominio restrictiva (`attendance_location_
 
 ### Corrección Aplicada
 Se purgó el rechazo por baja precisión en las políticas de asistencia del backend (`attendanceValidationPolicy.js` y `attendanceGeofenceResolver.js`) y se alinearon las pruebas unitarias para garantizar la aceptación de estas coordenadas degradadas. Se actualizó el archivo `gradle-wrapper.properties` a la versión 9.5.0, estabilizando el pipeline de CI/CD para la aplicación móvil.
+
+## 2026-09-29 — Bluetooth RFCOMM: resiliencia de descubrimiento
+
+### Fallo Detectado
+La marcación automática por Bluetooth fallaba esporádicamente porque el escaneo del líder se rendía demasiado rápido ante interferencias de radio, y los dispositivos auxiliares entraban en suspensión (Doze Mode), apagando la antena Bluetooth.
+
+### Corrección Aplicada
+Se estabilizó la visibilidad de los auxiliares manteniendo la pantalla encendida (`FLAG_KEEP_SCREEN_ON`) y solicitando visibilidad prolongada de 300s en la capa nativa (Android API 31+ compatible). En el frontend (`native-presence.js`), se implementó un sistema de reintentos agresivos (`MAX_SCAN_RETRIES = 2`) que reinicia el ciclo de búsqueda de forma transparente para el usuario antes de activar el fallback de marcación manual.
+

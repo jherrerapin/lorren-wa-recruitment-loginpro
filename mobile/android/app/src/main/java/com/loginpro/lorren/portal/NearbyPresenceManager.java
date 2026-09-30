@@ -5,16 +5,21 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
-import android.content.BroadcastReceiver;
+import android.bluetooth.le.AdvertiseCallback;
+import android.bluetooth.le.AdvertiseData;
+import android.bluetooth.le.AdvertiseSettings;
+import android.bluetooth.le.BluetoothLeAdvertiser;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelUuid;
-import android.os.Parcelable;
 import android.util.Base64;
 
 import org.json.JSONArray;
@@ -26,6 +31,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -38,8 +44,8 @@ import java.util.regex.Pattern;
 /**
  * Autoridad nativa única de presencia local de cuadrilla.
  *
- * La prueba local usa Bluetooth Classic RFCOMM/SDP de extremo a extremo para no
- * depender de Wi-Fi, WAN ni de Google Nearby durante el intercambio local. Antes
+ * La presencia local usa BLE únicamente para descubrimiento silencioso por UUID y
+ * Bluetooth Classic RFCOMM para el intercambio challenge/proof. Antes
  * de tocar el stack Bluetooth se validan los permisos modernos que Android exige;
  * si falta alguno se solicita desde MainActivity y la operación no continúa hasta
  * que Android resuelva el permiso. Esta clase transporta y verifica challenge/proof;
@@ -58,14 +64,12 @@ final class NearbyPresenceManager {
     private static final String SERVICE_NAME = "LORREN_CREW_PRESENCE";
     private static final ParcelUuid SERVICE_PARCEL_UUID = new ParcelUuid(SERVICE_UUID);
 
-    // Bluetooth Classic inquiry suele consumir ~12 s. La ventana nativa deja
-    // margen real para inquiry + SDP + RFCOMM y termina antes si llegan las proofs.
+    // BLE descubre auxiliares de forma inmediata por UUID; RFCOMM conserva
+    // el intercambio challenge/proof y la ventana termina al completar proofs.
     private static final long MIN_SCAN_MS = 35_000L;
     private static final long MAX_SCAN_MS = 45_000L;
-    private static final long INQUIRY_CHECKPOINT_MS = 15_000L;
     private static final long CONNECTION_GRACE_MS = 1_500L;
     private static final long RFCOMM_EXCHANGE_TIMEOUT_MS = 12_000L;
-    private static final int MAX_DISCOVERED_DEVICES = 24;
     private static final int MAX_MESSAGE_BYTES = 16_384;
 
     // 8029 apareció en la implementación histórica basada en Google Nearby y
@@ -93,8 +97,10 @@ final class NearbyPresenceManager {
     private Thread auxiliaryAcceptThread;
     private Thread auxiliaryExchangeThread;
     private Runnable auxiliaryExchangeTimeout;
+    private BluetoothLeAdvertiser auxiliaryAdvertiser;
+    private AdvertiseCallback auxiliaryAdvertiseCallback;
 
-    // ENC: discovery Classic + SDP + conexiones RFCOMM de una marcación.
+    // ENC: BLE scan filtrado por UUID + conexiones RFCOMM de una marcación.
     private String attemptId = "";
     private String scanServiceRequestId = "";
     private String challenge = "";
@@ -102,15 +108,13 @@ final class NearbyPresenceManager {
     private int expectedProofCount = 0;
     private long leaderTimeoutMs = MIN_SCAN_MS;
     private final Map<String, JSONObject> proofsByKey = new LinkedHashMap<>();
-    private final Map<String, BluetoothDevice> discoveredDevices = new LinkedHashMap<>();
-    private final Set<String> sdpRequestedAddresses = new LinkedHashSet<>();
     private final Set<String> leaderConnectionAddresses = new LinkedHashSet<>();
     private final Map<String, BluetoothSocket> leaderSockets = new LinkedHashMap<>();
     private final Map<String, Runnable> leaderSocketTimeouts = new LinkedHashMap<>();
-    private boolean leaderReceiverRegistered = false;
-    private Runnable leaderInquiryCheckpoint;
     private Runnable leaderTimeout;
     private Runnable leaderCompleteTimeout;
+    private BluetoothLeScanner leaderBleScanner;
+    private ScanCallback leaderBleScanCallback;
 
     NearbyPresenceManager(MainActivity activity, EventSink eventSink, CredentialProvider credentialProvider) {
         this.activity = activity;
@@ -127,13 +131,14 @@ final class NearbyPresenceManager {
         if (!supportsBleAdvertising()) {
             emitBluetoothUnavailable(
                 "AUX",
-                "auxiliary_advertising",
+                "auxiliary_ble_advertising",
                 null,
                 "advertising_unsupported"
             );
             throw new IllegalStateException("advertising_unsupported");
         }
         role = Role.READY;
+        activity.setPresenceKeepScreenOn(true);
         readyServiceRequestId = normalizedService;
         emitDiagnostic("AUX", "READY_REQUESTED");
         startAuxiliaryServer();
@@ -144,23 +149,8 @@ final class NearbyPresenceManager {
             failReadyBluetooth("auxiliary_ready", null);
             return;
         }
-        try {
-            ensureNearbyTransportPermissions();
-            if (bluetoothAdapter.getScanMode() != BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE) {
-                emitDiagnostic("AUX", "DISCOVERABLE_NOT_READY");
-                failReadyBluetooth("auxiliary_discovery", null);
-                return;
-            }
-        } catch (SecurityException error) {
-            failReadyPermissions("auxiliary_discovery", error);
-            return;
-        } catch (RuntimeException error) {
-            failReadyBluetooth("auxiliary_discovery", error);
-            return;
-        }
-        emitDiagnostic("AUX", "DISCOVERABLE_CONFIRMED");
         if (auxiliaryServerSocket != null) {
-            emitReady();
+            startAuxiliaryBleAdvertising();
             return;
         }
         emitDiagnostic("AUX", "RFCOMM_SERVER_START");
@@ -171,19 +161,87 @@ final class NearbyPresenceManager {
                 SERVICE_UUID
             );
         } catch (SecurityException error) {
-            failReadyPermissions("auxiliary_advertising", error);
+            failReadyPermissions("auxiliary_rfcomm_server", error);
             return;
         } catch (IOException | RuntimeException error) {
-            failReadyBluetooth("auxiliary_advertising", error);
+            failReadyBluetooth("auxiliary_rfcomm_server", error);
             return;
         }
         if (auxiliaryServerSocket == null) {
-            failReadyBluetooth("auxiliary_advertising", null);
+            failReadyBluetooth("auxiliary_rfcomm_server", null);
             return;
         }
         emitDiagnostic("AUX", "RFCOMM_SERVER_READY");
-        emitReady();
         startAuxiliaryAcceptLoop(auxiliaryServerSocket);
+        startAuxiliaryBleAdvertising();
+    }
+
+    private synchronized void startAuxiliaryBleAdvertising() {
+        if (role != Role.READY || auxiliaryServerSocket == null || bluetoothAdapter == null) return;
+        if (auxiliaryAdvertiseCallback != null) return;
+        try {
+            ensureNearbyTransportPermissions();
+            BluetoothLeAdvertiser advertiser = bluetoothAdapter.getBluetoothLeAdvertiser();
+            if (advertiser == null) {
+                failReadyBluetooth("auxiliary_ble_advertising", null);
+                return;
+            }
+
+            AdvertiseSettings settings = new AdvertiseSettings.Builder()
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+                .setConnectable(true)
+                .setTimeout(0)
+                .build();
+            AdvertiseData data = new AdvertiseData.Builder()
+                .addServiceUuid(SERVICE_PARCEL_UUID)
+                .setIncludeDeviceName(false)
+                .build();
+
+            AdvertiseCallback callback = new AdvertiseCallback() {
+                @Override
+                public void onStartSuccess(AdvertiseSettings settingsInEffect) {
+                    synchronized (NearbyPresenceManager.this) {
+                        if (role != Role.READY || auxiliaryAdvertiseCallback != this) return;
+                        emitDiagnostic("AUX", "BLE_ADVERTISING_READY");
+                        emitReady();
+                    }
+                }
+
+                @Override
+                public void onStartFailure(int errorCode) {
+                    synchronized (NearbyPresenceManager.this) {
+                        if (role != Role.READY || auxiliaryAdvertiseCallback != this) return;
+                        auxiliaryAdvertiseCallback = null;
+                        auxiliaryAdvertiser = null;
+                        emitDiagnostic("AUX", "BLE_ADVERTISING_FAILED");
+                        failReadyBluetooth("auxiliary_ble_advertising", null);
+                    }
+                }
+            };
+
+            auxiliaryAdvertiser = advertiser;
+            auxiliaryAdvertiseCallback = callback;
+            emitDiagnostic("AUX", "BLE_ADVERTISING_START");
+            advertiser.startAdvertising(settings, data, callback);
+        } catch (SecurityException error) {
+            failReadyPermissions("auxiliary_ble_advertising", error);
+        } catch (RuntimeException error) {
+            failReadyBluetooth("auxiliary_ble_advertising", error);
+        }
+    }
+
+    private synchronized void stopAuxiliaryBleAdvertising() {
+        BluetoothLeAdvertiser advertiser = auxiliaryAdvertiser;
+        AdvertiseCallback callback = auxiliaryAdvertiseCallback;
+        auxiliaryAdvertiser = null;
+        auxiliaryAdvertiseCallback = null;
+        if (advertiser == null || callback == null) return;
+        try {
+            advertiser.stopAdvertising(callback);
+        } catch (SecurityException ignored) {
+        } catch (RuntimeException ignored) {
+        }
     }
 
     private synchronized void emitReady() {
@@ -347,6 +405,7 @@ final class NearbyPresenceManager {
     private synchronized void failReady(String code) {
         stopReadyRuntime();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         readyServiceRequestId = "";
         emitError(code);
     }
@@ -354,6 +413,7 @@ final class NearbyPresenceManager {
     private synchronized void failReadyPermissions(String operation, Throwable error) {
         stopReadyRuntime();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         readyServiceRequestId = "";
         emitPermissionsRequired("AUX", operation, error);
     }
@@ -361,6 +421,7 @@ final class NearbyPresenceManager {
     private synchronized void failReadyBluetooth(String operation, Throwable error) {
         stopReadyRuntime();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         readyServiceRequestId = "";
         emitBluetoothUnavailable("AUX", operation, error);
     }
@@ -377,16 +438,12 @@ final class NearbyPresenceManager {
 
         ensureNearbyTransportPermissions();
         stopAllInternal(false);
-        if (!supportsBleAdvertising()) {
-            emitBluetoothUnavailable(
-                "ENC",
-                "leader_advertising",
-                null,
-                "advertising_unsupported"
-            );
-            throw new IllegalStateException("advertising_unsupported");
+        if (!supportsBleScan()) {
+            emitBluetoothUnavailable("ENC", "leader_ble_scan", null, "bluetooth_unavailable");
+            throw new IllegalStateException("bluetooth_unavailable");
         }
         role = Role.LEADER;
+        activity.setPresenceKeepScreenOn(true);
         attemptId = nextAttemptId;
         scanServiceRequestId = serviceRequestId;
         challenge = nextChallenge;
@@ -394,8 +451,6 @@ final class NearbyPresenceManager {
         expectedProofCount = nextExpectedProofCount;
         leaderTimeoutMs = timeoutMs;
         proofsByKey.clear();
-        discoveredDevices.clear();
-        sdpRequestedAddresses.clear();
         leaderConnectionAddresses.clear();
 
         emitDiagnostic("ENC", "SCAN_REQUESTED");
@@ -412,25 +467,13 @@ final class NearbyPresenceManager {
 
         try {
             ensureNearbyTransportPermissions();
-            registerLeaderReceiver();
-            if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
-
-            Set<BluetoothDevice> bonded = bluetoothAdapter.getBondedDevices();
-            if (bonded != null) {
-                for (BluetoothDevice dev : bonded) {
-                    rememberDiscoveredDevice(dev);
-                }
-            }
-
-            emitDiagnostic("ENC", "CLASSIC_DISCOVERY_START");
-            if (!bluetoothAdapter.startDiscovery()) {
-                failLeaderBluetooth("leader_discovery", null);
-                return;
-            }
             challengeSentAt = System.currentTimeMillis();
             emitLeaderScanStarted();
             scheduleLeaderTimeout(nextAttemptId, timeoutMs);
-            scheduleLeaderInquiryCheckpoint(nextAttemptId);
+            if (!startLeaderBleScan(nextAttemptId)) {
+                failLeaderBluetooth("leader_ble_scan", null);
+                return;
+            }
         } catch (SecurityException error) {
             failLeaderPermissions("leader_discovery", error);
         } catch (RuntimeException error) {
@@ -438,84 +481,63 @@ final class NearbyPresenceManager {
         }
     }
 
-    private final BroadcastReceiver leaderDiscoveryReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            if (intent == null) return;
-            String action = intent.getAction();
-            if (BluetoothAdapter.ACTION_DISCOVERY_STARTED.equals(action)) {
-                synchronized (NearbyPresenceManager.this) {
-                    if (role != Role.LEADER) return;
-                    emitDiagnostic("ENC", "CLASSIC_DISCOVERY_READY");
-                }
-                return;
-            }
-            if (BluetoothDevice.ACTION_FOUND.equals(action)) {
-                BluetoothDevice device = parcelableDevice(intent);
-                rememberDiscoveredDevice(device);
-                return;
-            }
-            if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
-                synchronized (NearbyPresenceManager.this) {
-                    if (role != Role.LEADER) return;
-                    cancelLeaderInquiryCheckpoint();
-                    emitDiagnostic("ENC", "CLASSIC_INQUIRY_FINISHED");
-                }
-                requestSdpForDiscoveredDevices();
-                return;
-            }
-            if (BluetoothDevice.ACTION_UUID.equals(action)) {
-                BluetoothDevice device = parcelableDevice(intent);
-                if (device != null && intentContainsServiceUuid(intent, device)) {
+    private synchronized boolean startLeaderBleScan(String currentAttemptId) {
+        if (role != Role.LEADER || !attemptId.equals(currentAttemptId) || bluetoothAdapter == null) {
+            return false;
+        }
+        try {
+            ensureNearbyTransportPermissions();
+            BluetoothLeScanner scanner = bluetoothAdapter.getBluetoothLeScanner();
+            if (scanner == null) return false;
+
+            ScanFilter filter = new ScanFilter.Builder()
+                .setServiceUuid(SERVICE_PARCEL_UUID)
+                .build();
+            ScanSettings settings = new ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build();
+
+            ScanCallback callback = new ScanCallback() {
+                @Override
+                public void onScanResult(int callbackType, ScanResult result) {
+                    BluetoothDevice device = result == null ? null : result.getDevice();
+                    if (device == null) return;
+                    String address = safeAddress(device);
+                    if (address.isEmpty()) return;
+                    synchronized (NearbyPresenceManager.this) {
+                        if (role != Role.LEADER || leaderBleScanCallback != this) return;
+                        emitDiagnostic("ENC", "BLE_SERVICE_FOUND");
+                    }
                     connectLeaderToAuxiliary(device);
                 }
-            }
-        }
-    };
 
-    private synchronized void rememberDiscoveredDevice(BluetoothDevice device) {
-        if (role != Role.LEADER || device == null || discoveredDevices.size() >= MAX_DISCOVERED_DEVICES) return;
-        String address = safeAddress(device);
-        if (address.isEmpty() || discoveredDevices.containsKey(address)) return;
-        discoveredDevices.put(address, device);
-        emitDiagnostic("ENC", "CLASSIC_DEVICE_FOUND");
-    }
+                @Override
+                public void onBatchScanResults(List<ScanResult> results) {
+                    if (results == null) return;
+                    for (ScanResult result : results) onScanResult(0, result);
+                }
 
-    private void requestSdpForDiscoveredDevices() {
-        List<BluetoothDevice> devices;
-        synchronized (this) {
-            if (role != Role.LEADER) return;
-            devices = new ArrayList<>(discoveredDevices.values());
-        }
-        for (BluetoothDevice device : devices) {
-            String address = safeAddress(device);
-            if (address.isEmpty()) continue;
-            if (deviceHasServiceUuid(device)) {
-                connectLeaderToAuxiliary(device);
-                continue;
-            }
-            synchronized (this) {
-                if (role != Role.LEADER || !sdpRequestedAddresses.add(address)) continue;
-            }
-            try {
-                ensureNearbyTransportPermissions();
-                emitDiagnostic("ENC", "SDP_REQUESTED");
-                if (!device.fetchUuidsWithSdp()) {
-                    synchronized (this) {
-                        sdpRequestedAddresses.remove(address);
+                @Override
+                public void onScanFailed(int errorCode) {
+                    synchronized (NearbyPresenceManager.this) {
+                        if (role != Role.LEADER || leaderBleScanCallback != this) return;
+                        emitDiagnostic("ENC", "BLE_SCAN_FAILED");
+                        failLeaderBluetooth("leader_ble_scan", null);
                     }
                 }
-            } catch (SecurityException error) {
-                synchronized (this) {
-                    sdpRequestedAddresses.remove(address);
-                    if (role == Role.LEADER) failLeaderPermissions("leader_sdp", error);
-                }
-                return;
-            } catch (RuntimeException error) {
-                synchronized (this) {
-                    sdpRequestedAddresses.remove(address);
-                }
-            }
+            };
+
+            leaderBleScanner = scanner;
+            leaderBleScanCallback = callback;
+            emitDiagnostic("ENC", "BLE_SCAN_START");
+            scanner.startScan(Collections.singletonList(filter), settings, callback);
+            return true;
+        } catch (SecurityException error) {
+            failLeaderPermissions("leader_ble_scan", error);
+            return false;
+        } catch (RuntimeException error) {
+            failLeaderBluetooth("leader_ble_scan", error);
+            return false;
         }
     }
 
@@ -524,7 +546,7 @@ final class NearbyPresenceManager {
         if (address.isEmpty()) return;
         synchronized (this) {
             if (role != Role.LEADER || !leaderConnectionAddresses.add(address)) return;
-            emitDiagnostic("ENC", "SDP_MATCHED");
+            emitDiagnostic("ENC", "BLE_SERVICE_MATCHED");
             emitDiagnostic("ENC", "ENDPOINT_FOUND");
             int pendingCount = leaderConnectionAddresses.size();
             emit("endpoint_found", event -> event.put("pendingCount", pendingCount));
@@ -686,33 +708,6 @@ final class NearbyPresenceManager {
         handler.postDelayed(timeout, RFCOMM_EXCHANGE_TIMEOUT_MS);
     }
 
-    private synchronized void scheduleLeaderInquiryCheckpoint(String completedAttemptId) {
-        cancelLeaderInquiryCheckpoint();
-        leaderInquiryCheckpoint = () -> {
-            synchronized (NearbyPresenceManager.this) {
-                if (role != Role.LEADER || !attemptId.equals(completedAttemptId)) return;
-                emitDiagnostic("ENC", "CLASSIC_INQUIRY_CHECKPOINT");
-                try {
-                    ensureNearbyTransportPermissions();
-                    if (bluetoothAdapter != null && bluetoothAdapter.isDiscovering()) {
-                        bluetoothAdapter.cancelDiscovery();
-                    }
-                } catch (SecurityException error) {
-                    failLeaderPermissions("leader_discovery", error);
-                    return;
-                } catch (RuntimeException ignored) {
-                }
-            }
-            requestSdpForDiscoveredDevices();
-        };
-        handler.postDelayed(leaderInquiryCheckpoint, INQUIRY_CHECKPOINT_MS);
-    }
-
-    private synchronized void cancelLeaderInquiryCheckpoint() {
-        if (leaderInquiryCheckpoint != null) handler.removeCallbacks(leaderInquiryCheckpoint);
-        leaderInquiryCheckpoint = null;
-    }
-
     private synchronized void scheduleLeaderTimeout(String completedAttemptId, long timeoutMs) {
         cancelLeaderTimeouts();
         leaderTimeout = () -> {
@@ -746,6 +741,7 @@ final class NearbyPresenceManager {
         stopLeaderDiscovery();
         closeLeaderSockets();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         emitError(code);
     }
 
@@ -755,6 +751,7 @@ final class NearbyPresenceManager {
         stopLeaderDiscovery();
         closeLeaderSockets();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         emitPermissionsRequired("ENC", operation, error);
     }
 
@@ -764,6 +761,7 @@ final class NearbyPresenceManager {
         stopLeaderDiscovery();
         closeLeaderSockets();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         emitBluetoothUnavailable("ENC", operation, error);
     }
 
@@ -784,6 +782,7 @@ final class NearbyPresenceManager {
             event.put("expectedProofCount", expectedProofCount);
         });
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
     }
 
     synchronized void stopReady() {
@@ -832,14 +831,14 @@ final class NearbyPresenceManager {
         expectedProofCount = 0;
         leaderTimeoutMs = MIN_SCAN_MS;
         proofsByKey.clear();
-        discoveredDevices.clear();
-        sdpRequestedAddresses.clear();
         leaderConnectionAddresses.clear();
         role = Role.IDLE;
+        activity.setPresenceKeepScreenOn(false);
         if (notify) emit("stopped", event -> {});
     }
 
     private synchronized void stopReadyRuntime() {
+        stopAuxiliaryBleAdvertising();
         closeAuxiliarySocket();
         BluetoothServerSocket server = auxiliaryServerSocket;
         auxiliaryServerSocket = null;
@@ -865,33 +864,18 @@ final class NearbyPresenceManager {
         auxiliaryExchangeTimeout = null;
     }
 
-    private synchronized void registerLeaderReceiver() {
-        if (leaderReceiverRegistered) return;
-        IntentFilter filter = new IntentFilter();
-        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
-        filter.addAction(BluetoothDevice.ACTION_FOUND);
-        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
-        filter.addAction(BluetoothDevice.ACTION_UUID);
-        appContext.registerReceiver(leaderDiscoveryReceiver, filter);
-        leaderReceiverRegistered = true;
-    }
-
     private synchronized void stopLeaderDiscovery() {
-        cancelLeaderInquiryCheckpoint();
-        if (bluetoothAdapter != null) {
+        BluetoothLeScanner scanner = leaderBleScanner;
+        ScanCallback callback = leaderBleScanCallback;
+        leaderBleScanner = null;
+        leaderBleScanCallback = null;
+        if (scanner != null && callback != null) {
             try {
-                if (bluetoothAdapter.isDiscovering()) bluetoothAdapter.cancelDiscovery();
+                scanner.stopScan(callback);
             } catch (SecurityException ignored) {
             } catch (RuntimeException ignored) {
             }
         }
-        if (leaderReceiverRegistered) {
-            try {
-                appContext.unregisterReceiver(leaderDiscoveryReceiver);
-            } catch (RuntimeException ignored) {
-            }
-        }
-        leaderReceiverRegistered = false;
     }
 
     private synchronized void closeLeaderSockets() {
@@ -914,7 +898,6 @@ final class NearbyPresenceManager {
     }
 
     private synchronized void cancelLeaderTimeouts() {
-        cancelLeaderInquiryCheckpoint();
         if (leaderTimeout != null) handler.removeCallbacks(leaderTimeout);
         if (leaderCompleteTimeout != null) handler.removeCallbacks(leaderCompleteTimeout);
         leaderTimeout = null;
@@ -937,12 +920,25 @@ final class NearbyPresenceManager {
                 == PackageManager.PERMISSION_GRANTED;
     }
 
+    private boolean supportsBleScan() {
+        if (bluetoothAdapter == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false;
+        if (!appContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) return false;
+        try {
+            ensureNearbyTransportPermissions();
+            return bluetoothAdapter.getBluetoothLeScanner() != null;
+        } catch (SecurityException error) {
+            throw error;
+        } catch (RuntimeException error) {
+            return false;
+        }
+    }
+
     private boolean supportsBleAdvertising() {
         if (bluetoothAdapter == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false;
         if (!appContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)) return false;
         try {
             ensureNearbyTransportPermissions();
-            return bluetoothAdapter.isMultipleAdvertisementSupported();
+            return bluetoothAdapter.getBluetoothLeAdvertiser() != null;
         } catch (SecurityException error) {
             throw error;
         } catch (RuntimeException error) {
@@ -979,45 +975,6 @@ final class NearbyPresenceManager {
         byte[] bytes = new byte[length];
         input.readFully(bytes);
         return new JSONObject(new String(bytes, StandardCharsets.UTF_8));
-    }
-
-    private static boolean deviceHasServiceUuid(BluetoothDevice device) {
-        if (device == null) return false;
-        try {
-            ParcelUuid[] uuids = device.getUuids();
-            if (uuids == null) return false;
-            for (ParcelUuid uuid : uuids) {
-                if (SERVICE_PARCEL_UUID.equals(uuid)) return true;
-            }
-        } catch (SecurityException ignored) {
-        }
-        return false;
-    }
-
-    private static boolean intentContainsServiceUuid(Intent intent, BluetoothDevice device) {
-        try {
-            Parcelable[] raw = intent.getParcelableArrayExtra(BluetoothDevice.EXTRA_UUID);
-            if (raw != null) {
-                for (Parcelable value : raw) {
-                    if (value instanceof ParcelUuid && SERVICE_PARCEL_UUID.equals(value)) return true;
-                }
-            }
-        } catch (RuntimeException ignored) {
-        }
-        return deviceHasServiceUuid(device);
-    }
-
-    @SuppressWarnings("deprecation")
-    private static BluetoothDevice parcelableDevice(Intent intent) {
-        if (intent == null) return null;
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                return intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice.class);
-            }
-            return intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
-        } catch (RuntimeException ignored) {
-            return null;
-        }
     }
 
     private static String safeAddress(BluetoothDevice device) {

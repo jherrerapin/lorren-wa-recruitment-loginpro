@@ -81,7 +81,9 @@ test('replay seudonimizado: auxiliar sin entrada no avanza visualmente a almuerz
   assert.match(renderSource, /memberPresentationMarkType\(member, normalizedMark\)/);
   assert.match(renderSource, /memberStatus\(context, member, memberMarkType\)/);
   assert.match(renderSource, /memberStatusPresentation\(status, memberMarkType\)/);
-  assert.match(renderSource, /memberMarkType === 'ARRIVAL'[\s\S]{0,360}Marcar entrada/);
+  assert.match(renderSource, /memberMarkType[\s\S]{0,260}status === 'PENDING'[\s\S]{0,320}markInfo\(memberMarkType\)\.noun/);
+  assert.match(renderSource, /startManualMark\(member, memberMarkType\)/);
+  assert.match(renderSource, /markMemberManually\(member, memberMarkType\)/);
   assert.match(renderSource, /memberMarkType === 'ARRIVAL'[\s\S]{0,520}Reportar sin teléfono/);
 });
 
@@ -240,11 +242,12 @@ test('entrada manual reutiliza ubicación nativa existente y no inicia un scan B
 
   const manualSource = sliceFunctionBlock(
     nativePresence,
-    'async function startManualArrival(member)',
+    'async function startManualMark(member, markType)',
     '\n  function publicNativeError'
   );
   assert.match(manualSource, /bridgeCall\('requestAttendanceLocation'/);
-  assert.match(manualSource, /MANUAL_ARRIVAL_PATH/);
+  assert.match(manualSource, /markType: normalizedMark/);
+  assert.match(manualSource, /MANUAL_MARK_PATH/);
   assert.doesNotMatch(manualSource, /startCrewScan/);
 
   assert.match(bridge, /requestAttendanceLocation\(String inputJson\)/);
@@ -252,7 +255,7 @@ test('entrada manual reutiliza ubicación nativa existente y no inicia un scan B
 
   const routeSource = sliceFunctionBlock(
     route,
-    "router.post('/cuadrillas/presencia/entrada-manual'",
+    "router.post('/cuadrillas/presencia/marca-manual'",
     "\n  router.post('/cuadrillas/presencia/sincronizar'"
   );
   assert.match(routeSource, /requireNativeAttendanceLocation/);
@@ -261,5 +264,7 @@ test('entrada manual reutiliza ubicación nativa existente y no inicia un scan B
   assert.match(routeSource, /manualTargetAssignmentId: targetAssignmentId/);
   assert.match(routeSource, /installationIdHash: null/);
   assert.match(routeSource, /registerCrewPresenceArrivalFn/);
+  assert.match(routeSource, /registerCrewPresenceMarkFn/);
+  assert.match(routeSource, /markType = normalizeBiometricMarkType/);
   assert.doesNotMatch(routeSource, /registerDispatchArrival/);
 });

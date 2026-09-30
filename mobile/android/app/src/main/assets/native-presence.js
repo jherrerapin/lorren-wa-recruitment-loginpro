@@ -7,11 +7,12 @@
 
   const CONTEXT_PATH = '/operaciones/portal/cuadrillas/proximidad/contexto';
   const CREDENTIAL_PATH = '/operaciones/portal/cuadrillas/presencia/credencial';
-  const MANUAL_ARRIVAL_PATH = '/operaciones/portal/cuadrillas/presencia/entrada-manual';
+  const MANUAL_MARK_PATH = '/operaciones/portal/cuadrillas/presencia/marca-manual';
   const CACHE_KEY = 'lorren-native-presence-context-v1';
   const PANEL_ID = 'lorren-native-presence-panel';
   const DEFAULT_SCAN_MS = 15_000;
   const AUTO_RETRY_DELAY_MS = 1_500;
+  const MAX_SCAN_RETRIES = 2;
   const AUXILIARY_REARM_DELAY_MS = 250;
   const DIAGNOSTIC_LIMIT = 20;
   const PHONE_EXCEPTION_REASON = 'NO_PHONE_AVAILABLE';
@@ -106,13 +107,13 @@
   let retryMarkType = '';
   let hasCompletedLeaderScan = false;
   let scanTransientFailureCount = 0;
-  let autoRetryRemaining = 1;
+  let scanRetries = 0;
   let autoRetryTimer = null;
   let auxiliaryRearmTimer = null;
   let provisioningPromise = null;
   let pendingPhoneExceptionWorkerId = '';
   let pendingCompletedScan = null;
-  let pendingManualArrival = null;
+  let pendingManualMark = null;
   let bluetoothFallbackActive = false;
   const phoneExceptionsByService = new Map();
   const manuallyMarkedMembersByScope = new Map();
@@ -725,24 +726,27 @@
       side.appendChild(element('span', `native-presence-badge ${presentation.className}`, presentation.label));
 
       if (
-        memberMarkType === 'ARRIVAL'
-        && (bluetoothFallbackActive || normalizedMark !== 'ARRIVAL')
+        memberMarkType
         && !member.isLeader
         && status === 'PENDING'
+        && (bluetoothFallbackActive || hasCompletedLeaderScan || normalizedMark !== memberMarkType)
       ) {
-        const manualArrival = element(
+        const manualAction = element(
           'button',
           'native-presence-member-action',
-          bluetoothFallbackActive ? 'Marcación Manual' : 'Marcar entrada'
+          bluetoothFallbackActive
+            ? 'Marcación Manual'
+            : `Marcar ${markInfo(memberMarkType).noun}`
         );
-        manualArrival.type = 'button';
-        manualArrival.dataset.nativePresenceManualArrival = member.workerId;
-        manualArrival.disabled = !navigator.onLine || Boolean(pendingManualArrival);
-        manualArrival.addEventListener('click', () => {
-          if (bluetoothFallbackActive) markMemberManually(member);
-          else startManualArrival(member);
+        manualAction.type = 'button';
+        manualAction.dataset.nativePresenceManualMark = member.workerId;
+        manualAction.dataset.nativePresenceManualMarkType = memberMarkType;
+        manualAction.disabled = !navigator.onLine || Boolean(pendingManualMark);
+        manualAction.addEventListener('click', () => {
+          if (bluetoothFallbackActive) markMemberManually(member, memberMarkType);
+          else startManualMark(member, memberMarkType);
         });
-        side.appendChild(manualArrival);
+        side.appendChild(manualAction);
       }
 
       if (
@@ -824,55 +828,58 @@
       : `crew_${Date.now()}_${randomToken(12)}`;
   }
 
-  function markMemberManually(member) {
+  function markMemberManually(member, markType) {
     // El fallback entra por la ruta manual existente y nunca espera el escaneo Bluetooth.
-    startManualArrival(member).catch(() => {
+    startManualMark(member, markType).catch(() => {
       setStatus('No fue posible iniciar la marcación manual.', 'error');
     });
   }
 
-  async function startManualArrival(member) {
+  async function startManualMark(member, markType) {
     const context = currentContext();
+    const normalizedMark = normalizeMarkType(markType);
     if (
       !context?.isCrewLeader
       || !member
       || member.isLeader
-      || memberHasPersistedMark(member, 'ARRIVAL')
-      || pendingManualArrival
+      || !normalizedMark
+      || memberHasPersistedMark(member, normalizedMark)
+      || pendingManualMark
     ) return;
     if (!navigator.onLine) {
-      setStatus('Conéctate para registrar esta entrada.', 'warning');
+      setStatus(`Conéctate para registrar ${markInfo(normalizedMark).noun}.`, 'warning');
       return;
     }
     if (!credentialPrepared()) await provisionCredential();
     const idempotencyKey = newAttemptId();
-    pendingManualArrival = {
+    pendingManualMark = {
       assignmentId: context.assignmentId,
       serviceRequestId: context.serviceRequestId,
       targetAssignmentId: member.assignmentId,
       workerId: member.workerId,
+      markType: normalizedMark,
       idempotencyKey
     };
     renderPanel();
     const result = bridgeCall('requestAttendanceLocation', JSON.stringify({
       assignmentId: context.assignmentId,
-      markType: 'ARRIVAL',
+      markType: normalizedMark,
       idempotencyKey
     }));
     if (!result?.ok) {
-      pendingManualArrival = null;
+      pendingManualMark = null;
       renderPanel();
       setStatus(publicNativeError(result?.error), 'error');
       return;
     }
-    setStatus('Validando ubicación para registrar la entrada…', 'warning');
+    setStatus(`Validando ubicación para registrar ${markInfo(normalizedMark).noun}…`, 'warning');
   }
 
-  async function submitManualArrival(nativeLocationProof) {
-    const pending = pendingManualArrival;
+  async function submitManualMark(nativeLocationProof) {
+    const pending = pendingManualMark;
     if (!pending) return;
     try {
-      const response = await fetch(MANUAL_ARRIVAL_PATH, {
+      const response = await fetch(MANUAL_MARK_PATH, {
         method: 'POST',
         credentials: 'same-origin',
         cache: 'no-store',
@@ -885,25 +892,35 @@
           assignmentId: pending.assignmentId,
           serviceRequestId: pending.serviceRequestId,
           targetAssignmentId: pending.targetAssignmentId,
+          markType: pending.markType,
           idempotencyKey: pending.idempotencyKey,
           nativeLocationProof
         })
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok || payload?.ok !== true) {
-        throw new Error(String(payload?.message || 'No fue posible registrar la entrada pendiente.'));
+        throw new Error(String(
+          payload?.message
+          || `No fue posible registrar ${markInfo(pending.markType).noun} pendiente.`
+        ));
       }
-      phoneExceptionSet(pending.serviceRequestId).delete(pending.workerId);
-      manualMarkSet(pending.serviceRequestId, 'ARRIVAL').add(pending.workerId);
-      serverStatusMap(pending.serviceRequestId, 'ARRIVAL').set(pending.workerId, 'REGISTERED');
+      if (pending.markType === 'ARRIVAL') {
+        phoneExceptionSet(pending.serviceRequestId).delete(pending.workerId);
+      }
+      manualMarkSet(pending.serviceRequestId, pending.markType).add(pending.workerId);
+      serverStatusMap(pending.serviceRequestId, pending.markType).set(pending.workerId, 'REGISTERED');
       contexts = await loadContexts();
-      pendingManualArrival = null;
+      pendingManualMark = null;
       renderPanel();
-      setStatus('Auxiliar marcado manualmente.', '');
+      setStatus(`Auxiliar marcado manualmente: ${markInfo(pending.markType).title}.`, '');
     } catch (error) {
-      pendingManualArrival = null;
+      const markType = pending.markType;
+      pendingManualMark = null;
       renderPanel();
-      setStatus(error?.message || 'No fue posible registrar la entrada pendiente.', 'error');
+      setStatus(
+        error?.message || `No fue posible registrar ${markInfo(markType).noun} pendiente.`,
+        'error'
+      );
     }
   }
 
@@ -979,12 +996,12 @@
 
   function resetLeaderAttemptState() {
     pendingPhoneExceptionWorkerId = '';
-    pendingManualArrival = null;
+    pendingManualMark = null;
     bluetoothFallbackActive = false;
     retryNotDetectedCount = 0;
     retryMarkType = '';
     hasCompletedLeaderScan = false;
-    autoRetryRemaining = 1;
+    scanRetries = 0;
     scanVerifiedCount = 0;
     scanPendingCount = 0;
   }
@@ -1201,7 +1218,7 @@
     if (normalizedMark !== 'ARRIVAL') phoneExceptionSet(context.serviceRequestId).clear();
     if (!automaticRetry) {
       resetDiagnosticLog('APP', 'LEADER_SCAN_REQUESTED');
-      autoRetryRemaining = 1;
+      scanRetries = 0;
       retryNotDetectedCount = 0;
       hasCompletedLeaderScan = false;
     } else {
@@ -1283,7 +1300,7 @@
     activeMode = 'IDLE';
     activeAttempt = null;
     pendingCompletedScan = null;
-    pendingManualArrival = null;
+    pendingManualMark = null;
   }
 
   function nativeLocationFromBundle(proofBundle) {
@@ -1371,8 +1388,28 @@
       return;
     }
     const proofCount = proofBundle.proofs.length;
-    const noAuxiliaryDetected = completion.expectedProofCount > 0 && proofCount === 0;
-    if (noAuxiliaryDetected) {
+    const incompleteScan = completion.expectedProofCount > 0 && proofCount < completion.expectedProofCount;
+    if (incompleteScan && proofCount === 0) {
+      if (scanRetries < MAX_SCAN_RETRIES) {
+        scanRetries += 1;
+        pendingCompletedScan = null;
+        activeAttempt = null;
+        recordDiagnostic('APP', 'BLUETOOTH_SCAN_RETRY', {
+          attempt: scanRetries,
+          expected: completion.expectedProofCount,
+          found: proofCount
+        });
+        setStatus(
+          `No se detectaron auxiliares. Reintentando automáticamente (${scanRetries}/${MAX_SCAN_RETRIES})…`,
+          'warning'
+        );
+        autoRetryTimer = window.setTimeout(() => {
+          autoRetryTimer = null;
+          startLeaderScan(completionMarkType, true);
+        }, AUTO_RETRY_DELAY_MS);
+        return;
+      }
+
       const pendingCount = completion.expectedProofCount;
       activeAttempt = null;
       pendingCompletedScan = null;
@@ -1381,14 +1418,14 @@
       hasCompletedLeaderScan = true;
       bluetoothFallbackActive = true;
       recordDiagnostic('APP', 'BLUETOOTH_MANUAL_FALLBACK', {
-        reason: 'scan_complete_without_auxiliaries',
+        reason: 'scan_retries_exhausted',
         markType: completionMarkType,
         expectedProofCount: completion.expectedProofCount,
         proofCount
       });
       renderPanel();
       setStatus(
-        `No se detectó ningún auxiliar por Bluetooth. Usa “Marcación Manual” para registrar la ${markInfo(completionMarkType).noun}.`,
+        'No se detectó la totalidad de la cuadrilla tras varios intentos. Usa “Marcación Manual” para los auxiliares pendientes.',
         'warning'
       );
       markRetryAvailable(completionMarkType);
@@ -1404,10 +1441,15 @@
         hasCompletedLeaderScan = incomplete;
         retryMarkType = incomplete ? completionMarkType : '';
         renderPanel();
-        if (incomplete && autoRetryRemaining > 0) {
-          autoRetryRemaining -= 1;
+        if (incomplete && scanRetries < MAX_SCAN_RETRIES) {
+          scanRetries += 1;
+          recordDiagnostic('APP', 'BLUETOOTH_SCAN_RETRY', {
+            attempt: scanRetries,
+            expected: completion.expectedProofCount,
+            found: queuedProofCount
+          });
           setStatus(
-            `Faltan respuestas para la ${markInfo(completionMarkType).noun}. Lórren reintentará automáticamente una vez.`,
+            `Faltan respuestas para la ${markInfo(completionMarkType).noun}. Reintentando automáticamente (${scanRetries}/${MAX_SCAN_RETRIES})…`,
             'warning'
           );
           autoRetryTimer = window.setTimeout(() => {
@@ -1415,6 +1457,17 @@
             startLeaderScan(completionMarkType, true);
           }, AUTO_RETRY_DELAY_MS);
           return;
+        }
+        if (incomplete) {
+          bluetoothFallbackActive = true;
+          recordDiagnostic('APP', 'BLUETOOTH_MANUAL_FALLBACK', {
+            reason: 'scan_retries_exhausted',
+            markType: completionMarkType,
+            expectedProofCount: completion.expectedProofCount,
+            proofCount: queuedProofCount
+          });
+        } else {
+          scanRetries = 0;
         }
         setStatus(
           navigator.onLine
@@ -1496,25 +1549,25 @@
       return;
     }
     if (type === 'attendance_location_ready') {
-      const pending = pendingManualArrival;
+      const pending = pendingManualMark;
       if (
         !pending
         || String(detail.assignmentId || '') !== pending.assignmentId
-        || normalizeMarkType(detail.markType) !== 'ARRIVAL'
+        || normalizeMarkType(detail.markType) !== pending.markType
         || String(detail.idempotencyKey || '') !== pending.idempotencyKey
       ) return;
-      submitManualArrival(detail.proof).catch(() => {});
+      submitManualMark(detail.proof).catch(() => {});
       return;
     }
     if (type === 'attendance_location_error') {
-      const pending = pendingManualArrival;
+      const pending = pendingManualMark;
       if (
         !pending
         || String(detail.assignmentId || '') !== pending.assignmentId
-        || normalizeMarkType(detail.markType) !== 'ARRIVAL'
+        || normalizeMarkType(detail.markType) !== pending.markType
         || String(detail.idempotencyKey || '') !== pending.idempotencyKey
       ) return;
-      pendingManualArrival = null;
+      pendingManualMark = null;
       renderPanel();
       setStatus(publicNativeError(String(detail.code || 'native_location_unavailable')), 'error');
       return;
@@ -1668,7 +1721,7 @@
     window.LorrenWorkerPortalOffline?.syncNow?.().catch(() => {});
   });
   window.addEventListener('offline', () => {
-    pendingManualArrival = null;
+    pendingManualMark = null;
     renderPanel();
     ensureAuxiliaryReady().catch(() => {});
   });
