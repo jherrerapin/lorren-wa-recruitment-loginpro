@@ -61,7 +61,7 @@ test('formatea teléfono colombiano sin indicativo y conserva destino canónico 
   assert.equal(programmingWorkerWhatsappUrl('300 123 4567'), 'https://wa.me/573001234567');
 });
 
-test('PDF diario añade teléfono clickeable sin alterar el detalle existente del auxiliar', () => {
+test('PDF diario añade teléfono clickeable y alinea nombre, documento, teléfono y estado por columnas', () => {
   const reportRequest = request([confirmedAssignment('1', '+57 300 123 4567')]);
   const html = buildProgrammingReportHtml({
     selectedDate: DATE_KEY,
@@ -72,8 +72,10 @@ test('PDF diario añade teléfono clickeable sin alterar el detalle existente de
     includeWorkerAbsences: false
   });
 
-  assert.match(html, /Auxiliar 1/);
-  assert.match(html, /CC 10001/);
+  assert.match(html, /class="worker-row"/);
+  assert.match(html, /grid-template-columns: minmax\(0, 2\.2fr\) 112px 130px 128px/);
+  assert.match(html, /<strong class="worker-name">Auxiliar 1<\/strong>/);
+  assert.match(html, /<span class="worker-document">CC 10001<\/span>/);
   assert.match(html, /Tel: <a class="worker-phone" href="https:\/\/wa\.me\/573001234567">3001234567<\/a>/);
   assert.match(html, /Confirmado/);
 });
