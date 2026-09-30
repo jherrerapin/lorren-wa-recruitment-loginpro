@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { CAMPAIGN_VACANCY_CONFIRMATION_MODE } from '../src/services/dataConsentGate.js';
 import { attributeCandidateCampaignFromMessage } from '../src/services/campaignAttribution.js';
 
 function createPrisma({ candidate, campaigns }) {
@@ -26,7 +25,7 @@ function createPrisma({ candidate, campaigns }) {
   };
 }
 
-test('CTWA exacto completa una atribución histórica sin vacante persistida', async () => {
+test('CTWA exacto completa una atribución histórica sin adquirir autoridad conversacional', async () => {
   const candidate = {
     id: 'candidate-history-without-vacancy',
     campaignId: 'campaign-history',
@@ -64,5 +63,5 @@ test('CTWA exacto completa una atribución histórica sin vacante persistida', a
   assert.equal(updates[0].data.campaignId, target.id);
   assert.equal(updates[0].data.vacancyId, target.vacancyId);
   assert.equal(updates[0].data.metaAdId, target.code);
-  assert.equal(updates[0].data.botResumeMode, CAMPAIGN_VACANCY_CONFIRMATION_MODE);
+  assert.equal(Object.hasOwn(updates[0].data, 'botResumeMode'), false);
 });

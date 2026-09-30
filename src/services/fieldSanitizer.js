@@ -223,8 +223,11 @@ function hasAgeEvidence(text = '') {
 }
 
 function hasNameEvidenceCue(text = '') {
-  const normalized = normalizeText(text);
-  return /\b(mi nombre es|nombre completo|me llamo)\b/.test(normalized)
+  const raw = String(text || '');
+  const normalized = normalizeText(raw);
+  const explicitLineLabel = /(?:^|\n)\s*nombre(?:\s+completo)?\s*(?:(?:es)\s+|[:\-]\s*)/i.test(raw);
+  return explicitLineLabel
+    || /\b(mi nombre es|nombre completo|me llamo)\b/.test(normalized)
     || /^nombre\s*(?:es|:)?\s+/.test(normalized);
 }
 

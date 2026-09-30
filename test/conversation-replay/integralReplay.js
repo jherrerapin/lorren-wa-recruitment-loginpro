@@ -6,6 +6,7 @@ const RESPONSE_ONLY_ACTIONS = new Set([
   'ACKNOWLEDGE_DATA',
   'ANSWER_VACANCY_QUESTION',
   'CONTINUE_DATA_COLLECTION',
+  'functional_core_attachment',
   'REJECT_PRECONSENT_ATTACHMENT',
   'RESUME_PENDING_FIELD',
   'STOP_APPLICATION'
@@ -81,6 +82,10 @@ function composeReply(planningReplay) {
   for (const action of plan.actions) {
     if (action.type === 'ASK_DATA_CONSENT') {
       appendEvidenceReply(parts, planningReplay.evidence.consentPrompt, 'consent_prompt_missing');
+      continue;
+    }
+    if (action.type === 'functional_core_attachment') {
+      appendEvidenceReply(parts, planningReplay.evidence.consentPrompt, 'attachment_consent_prompt_missing');
       continue;
     }
     if (action.type === 'REJECT_PRECONSENT_ATTACHMENT') {

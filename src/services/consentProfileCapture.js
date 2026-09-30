@@ -4,7 +4,7 @@ import {
   parseNaturalData
 } from './candidateData.js';
 import { sanitizeCandidateFieldsForConversation } from './fieldSanitizer.js';
-import { getCandidateReadiness } from './readinessGuard.js';
+import { getCandidateReadiness } from './candidateReadiness.js';
 
 const CONSENT_PREFIX_TOKEN = String.raw`(?:si|sí|sii|sip|claro|correcto|de\s+acuerdo|dale|ok|listo)`;
 const CONSENT_PREFIXES = String.raw`(?:${CONSENT_PREFIX_TOKEN}[\s,;:-]*)*`;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { normalizeCandidateFields, parseNaturalData } from '../src/services/candidateData.js';
 import { captureConsentedProfileData } from '../src/services/consentProfileCapture.js';
 import { conversationUnderstanding } from '../src/services/conversationUnderstanding.js';
-import { getCandidateReadiness } from '../src/services/readinessGuard.js';
+import { getCandidateReadiness } from '../src/services/candidateReadiness.js';
 
 const EXPERIENCE_VACANCY = Object.freeze({
   id: 'vacancy-experience-test',

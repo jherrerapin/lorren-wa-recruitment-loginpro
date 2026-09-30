@@ -2,14 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import {
-  buildVacancyResolutionText,
-  hasRecentSameBotDecision,
-  resolveVacancyFirstGate,
-  VacancyFirstGateAction
-} from '../src/services/vacancyFirstGate.js';
 import { buildProfessionalVacancyPresentation } from '../src/services/vacancyPublicInfo.js';
-import { appendUniqueReplySegment } from '../src/services/replyComposition.js';
 import { markConversationMessagesResponded } from '../src/services/conversationMessageRepository.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 import { createInMemoryReplayAdapters } from './conversation-replay/inMemoryAdapters.js';
@@ -53,48 +46,6 @@ function vacancy(overrides = {}) {
   };
 }
 
-function prismaFor(vacancies) {
-  return {
-    vacancy: {
-      async findMany() {
-        return vacancies;
-      },
-      async findUnique({ where }) {
-        return vacancies.find((item) => item.id === where.id) || null;
-      }
-    }
-  };
-}
-
-function candidate(overrides = {}) {
-  return {
-    id: 'candidate-production-edge-test',
-    status: 'EN_PROCESO',
-    currentStep: 'COLLECTING_DATA',
-    vacancyId: null,
-    botResumeMode: null,
-    reminderScheduledFor: null,
-    reminderState: 'SKIPPED',
-    ...overrides
-  };
-}
-
-async function resolveGate({ text, candidateState, currentVacancy = null, vacancies, vacancyHints = {} }) {
-  return resolveVacancyFirstGate({
-    prisma: prismaFor(vacancies),
-    candidate: candidateState,
-    currentVacancy,
-    inboundText: text,
-    currentStep: candidateState.currentStep,
-    recentMessages: [],
-    vacancyHints: {
-      allVacancies: vacancies,
-      activeVacancies: vacancies.filter((item) => item.isActive && item.acceptingApplications),
-      ...vacancyHints
-    }
-  });
-}
-
 test('el manifiesto representa los ocho bordes de producción identificados en #423', () => {
   assert.equal(manifest.schemaVersion, 1);
   assert.deepEqual(manifest.cases.map((item) => item.id), EXPECTED_CASE_IDS);
@@ -117,94 +68,6 @@ test('el manifiesto representa los ocho bordes de producción identificados en #
       }
     }
   }
-});
-
-test('una corrección actual de ciudad y cargo reemplaza el contexto histórico y ofrece la nueva vacante sin cambiarla todavía', async () => {
-  const currentVacancy = vacancy();
-  const targetVacancy = vacancy({
-    id: 'vac-medellin-lider',
-    title: 'Líder de operación Medellín',
-    role: 'Líder de operación',
-    city: 'Medellin',
-    operation: operation('medellin', 'Medellin')
-  });
-  const text = 'No, en realidad es Medellín para líder de operación';
-  const resolutionText = buildVacancyResolutionText(text, [
-    { direction: 'INBOUND', body: 'Escribo desde Neiva para auxiliar de cargue y descargue' }
-  ]);
-
-  assert.equal(resolutionText, text);
-  const decision = await resolveGate({
-    text,
-    candidateState: candidate({ vacancyId: currentVacancy.id }),
-    currentVacancy,
-    vacancies: [currentVacancy, targetVacancy]
-  });
-
-  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
-  assert.equal(decision.reason, 'ASSIGNED_VACANCY_CHANGE_OFFERED');
-  assert.equal(decision.vacancyId, targetVacancy.id);
-  assert.equal(decision.candidateUpdates.vacancyId, undefined);
-  assert.match(decision.reply, /no cambiará todavía/i);
-});
-
-test('una solicitud parcial de otra vacante no reutiliza metadata ni reemplaza la vacante actual', async () => {
-  const currentVacancy = vacancy();
-  const targetVacancy = vacancy({
-    id: 'vac-medellin-lider',
-    title: 'Líder de operación Medellín',
-    role: 'Líder de operación',
-    city: 'Medellin',
-    operation: operation('medellin', 'Medellin')
-  });
-
-  const decision = await resolveGate({
-    text: 'Quiero otra vacante en Medellín',
-    candidateState: candidate({ vacancyId: currentVacancy.id }),
-    currentVacancy,
-    vacancies: [currentVacancy, targetVacancy],
-    vacancyHints: { trustedVacancyId: currentVacancy.id, trustedVacancy: currentVacancy }
-  });
-
-  assert.equal(decision.reason, 'ASSIGNED_VACANCY_CHANGE_NEEDS_TARGET');
-  assert.equal(decision.candidateUpdates, undefined);
-  assert.equal(decision.resolution.city, 'Medellin');
-  assert.equal(decision.resolution.roleHint, null);
-  assert.match(decision.reply, /cargo exacto/i);
-});
-
-test('metadata confiable conserva autoridad frente a texto ambiguo contradictorio', async () => {
-  const trusted = vacancy({ id: 'vac-meta-neiva' });
-  const textMatch = vacancy({
-    id: 'vac-text-bogota',
-    title: 'Auxiliar de bodega Bogotá',
-    role: 'Auxiliar de bodega',
-    city: 'Bogota',
-    operation: operation('bogota', 'Bogota')
-  });
-
-  const decision = await resolveGate({
-    text: 'Vi algo de bodega en Bogotá pero no sé bien cuál era',
-    candidateState: candidate({ currentStep: 'MENU' }),
-    vacancies: [trusted, textMatch],
-    vacancyHints: { trustedVacancyId: trusted.id, trustedVacancy: trusted }
-  });
-
-  assert.equal(decision.action, VacancyFirstGateAction.REPLY);
-  assert.equal(decision.reason, 'ACTIVE_VACANCY_RESOLVED_AWAIT_INTEREST');
-  assert.equal(decision.vacancyId, trusted.id);
-  assert.equal(decision.resolution.reason, 'matched_trusted_active_vacancy');
-  assert.equal(decision.resolution.source, 'metadata_config');
-  assert.equal(decision.resolution.fallback, false);
-  assert.match(decision.reply, /Auxiliar de cargue y descargue Neiva/i);
-  assert.match(decision.reply, /te interesa continuar/i);
-});
-
-test('el compositor no duplica un seguimiento que la respuesta generada ya contiene', () => {
-  const generated = 'Estoy validando tus datos. Envíame tu HV como archivo PDF para cerrar el registro.';
-  const deterministicFollowUp = 'Para continuar necesito que adjuntes tu hoja de vida como archivo PDF, DOC o DOCX.';
-
-  assert.equal(appendUniqueReplySegment(generated, deterministicFollowUp), generated);
 });
 
 test('la entrega exige outbox persistido y respondedAt se actualiza mediante su repositorio explícito', async () => {
@@ -255,33 +118,6 @@ test('la entrega exige outbox persistido y respondedAt se actualiza mediante su 
   assert.equal(result.updated, 2);
   assert.deepEqual(updateManyArgs.where.id.in, ['test-inbound-1', 'test-inbound-2']);
   assert.equal(updateManyArgs.data.respondedAt.toISOString(), respondedAt.toISOString());
-});
-
-test('la misma decisión de vacante se suprime dentro de diez minutos y vuelve a ser elegible fuera de la ventana', () => {
-  const now = Date.now();
-  const common = {
-    direction: 'OUTBOUND',
-    rawPayload: {
-      actor: 'BOT',
-      source: 'vacancy_first_gate',
-      replyKind: 'INACTIVE_VACANCY_FUTURE_PROFILE_OFFER',
-      reason: 'INACTIVE_VACANCY'
-    }
-  };
-
-  assert.equal(hasRecentSameBotDecision({
-    recentMessages: [{ ...common, createdAt: new Date(now - 5 * 60 * 1000) }],
-    replyKind: common.rawPayload.replyKind,
-    reason: common.rawPayload.reason,
-    windowMinutes: 10
-  }), true);
-
-  assert.equal(hasRecentSameBotDecision({
-    recentMessages: [{ ...common, createdAt: new Date(now - 11 * 60 * 1000) }],
-    replyKind: common.rawPayload.replyKind,
-    reason: common.rawPayload.reason,
-    windowMinutes: 10
-  }), false);
 });
 
 test('la ficha pública de una vacante zonificada prioriza la ubicación real y no la ciudad administrativa', () => {

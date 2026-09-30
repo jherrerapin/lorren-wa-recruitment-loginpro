@@ -34,7 +34,7 @@ import {
   getManualOutboundUserMessage
 } from '../services/manualOutboundDeliveryService.js';
 import { deleteConversationMessagesForCandidate } from '../services/conversationMessageRepository.js';
-import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/replySafety.js';
+import { buildSafeFallbackReply, sanitizeOutboundReply } from '../services/outboundReplyPolicy.js';
 import { sanitizeRequiredDocumentsForBot } from '../services/naturalReply.js';
 import { ConversationStep, MessageDirection, MessageType, Gender } from '@prisma/client';
 import {
@@ -398,8 +398,10 @@ function buildVacancyDevStats(vacancies = [], candidates = [], dateFilter = {}) 
 }
 
 function isFemaleHumanReviewCandidate(candidate) {
-  if (!candidate || candidate.gender !== 'FEMALE' || !candidate.botPaused) return false;
-  return /revision humana|revisión humana|candidata femenina/i.test(candidate.botPauseReason || '');
+  if (!candidate || candidate.gender !== 'FEMALE') return false;
+  if (candidate.currentStep === 'MANUAL_REVIEW') return true;
+  return Boolean(candidate.botPaused)
+    && /revision humana|revisión humana|candidata femenina/i.test(candidate.botPauseReason || '');
 }
 
 function safeAdminReturnPath(value) {

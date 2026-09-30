@@ -7,7 +7,7 @@ import {
   inferContextualSemanticIntent,
   isManualOutboundSource
 } from '../src/services/contextualResponseGate.js';
-import { hasRecentHumanIntervention } from '../src/services/conversationEngine.js';
+import { hasRecentHumanIntervention } from '../src/services/manualSourcePolicy.js';
 
 function completeCandidate(overrides = {}) {
   return {

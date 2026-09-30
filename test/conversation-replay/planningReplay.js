@@ -1,13 +1,16 @@
 import {
   DATA_CONSENT_TEXT,
   DATA_CONSENT_VERSION,
-  buildConsentAcceptedReply,
   buildConsentPendingMode,
-  buildVacancyQuestionReply,
-  deriveConsentResumeUpdate,
-  evaluateConsentBoundary,
   parseConsentPendingMode
-} from '../../src/services/dataConsentGate.js';
+} from '../../src/core/contracts/DataConsentContract.js';
+import { CONSENT_REQUEST_TEXT } from '../../src/core/contracts/consentDefinition.js';
+import { consentPolicy } from '../../src/core/engine/policies/consentPolicy.js';
+import { buildVacancyPolicyReply } from '../../src/core/engine/policies/vacancyPolicy.js';
+import {
+  buildMissingFieldReply,
+  getCandidateReadiness
+} from '../../src/services/candidateReadiness.js';
 import {
   ContextualAllowedAction,
   evaluateContextualResponseGate
@@ -16,34 +19,11 @@ import { applyFieldPolicy } from '../../src/services/policyLayer.js';
 
 const CONSENT_SOURCE = 'WHATSAPP_CANDIDATE';
 const CONSENT_ACTOR = 'candidate_whatsapp';
-const PRE_CONSENT_CV_RESEND_MODE = 'pre_consent_cv_resend';
-const PROTECTED_ATTACHMENT_BOUNDARY_REASONS = new Set([
-  'attachment_before_consent',
-  'capture_mode_without_consent',
-  'consent_pending',
-  'consent_revoked'
-]);
 const CONSENT_REVOKED_REPLY = 'Entendido. No continuaré con la postulación ni procesaré tus datos por este medio. Si más adelante deseas autorizar el tratamiento de datos, puedes escribirnos de nuevo.';
-const PRE_CONSENT_ATTACHMENT_REPLY = 'Recibí que intentaste enviar un archivo, pero todavía no lo descargué ni lo guardé. Antes de recibir datos, hojas de vida o documentos necesito tu autorización para el tratamiento de datos.';
 const CONSENT_PROMPT = `Antes de recibir o guardar datos personales, hojas de vida o documentos, necesito tu autorización para tratarlos con fines de reclutamiento de LoginPro.\n\n${DATA_CONSENT_TEXT}\n\nPuedes responder de forma natural si autorizas o si no autorizas.`;
 
 function fixtureNow(fixture) {
   return fixture.executionContext?.now || '2026-07-14T15:00:00.000Z';
-}
-
-function buildInboundMessage(fixture) {
-  const interactiveBody = String(fixture.inbound.body || '');
-  return {
-    id: fixture.inbound.messageId,
-    from: 'TEST-PHONE-REPLAY',
-    type: fixture.inbound.type,
-    text: fixture.inbound.type === 'text' ? { body: fixture.inbound.body } : undefined,
-    interactive: fixture.inbound.type === 'interactive'
-      ? { button_reply: { id: interactiveBody, title: interactiveBody } }
-      : undefined,
-    document: fixture.inbound.type === 'document' ? structuredClone(fixture.inbound.attachment || {}) : undefined,
-    image: fixture.inbound.type === 'image' ? structuredClone(fixture.inbound.attachment || {}) : undefined
-  };
 }
 
 function clonePlanningState(fixture) {
@@ -73,8 +53,15 @@ function buildFinalState(state) {
 }
 
 function planConsentRequest(fixture, state) {
-  const boundary = evaluateConsentBoundary(state.candidate, buildInboundMessage(fixture));
-  if (!boundary.block) {
+  const consentDecision = consentPolicy({
+    turn: { rawText: String(fixture.inbound.body || '') },
+    candidate: { facts: { dataConsentStatus: state.candidate.dataConsentStatus } },
+    pending: { fields: ['dataConsent'] },
+    vacancy: state.vacancy || {},
+    interpretation: { intent: 'APPLY_INTENT' },
+    execution: { mayReply: true }
+  });
+  if (consentDecision?.mutations?.nextStep !== 'AWAITING_DATA_CONSENT') {
     throw new Error(`${fixture.id}: la autoridad de consentimiento no bloqueó un turno protegido`);
   }
 
@@ -89,8 +76,24 @@ function planConsentRequest(fixture, state) {
       nextStep: state.candidate.currentStep
     },
     finalState: buildFinalState(state),
-    evidence: { consentBoundary: boundary, consentPrompt: CONSENT_PROMPT }
+    evidence: {
+      consentBoundary: { block: true, reason: 'candidate_wants_to_continue' },
+      consentPrompt: consentDecision.reply?.text || CONSENT_PROMPT
+    }
   };
+}
+
+function deriveConsentResumeUpdate() {
+  return {
+    currentStep: 'COLLECTING_DATA',
+    botResumeMode: null
+  };
+}
+
+function buildConsentAcceptedReply(candidate = {}, vacancy = null) {
+  const readiness = getCandidateReadiness(candidate, vacancy, { requireCv: false });
+  const prompt = buildMissingFieldReply(readiness);
+  return ['Gracias, tu autorización quedó registrada.', prompt].filter(Boolean).join(' ');
 }
 
 function buildConsentCandidateUpdate(fixture, state, status) {
@@ -167,51 +170,36 @@ function planConsentDecision(fixture, state, interpretation) {
   };
 }
 
-function resolveAttachmentResumeMode(candidate = {}, pendingContext = {}) {
-  if (pendingContext.pending) return pendingContext.resumeMode;
-  const currentMode = String(candidate.botResumeMode || '').trim() || null;
-  return currentMode === PRE_CONSENT_CV_RESEND_MODE ? null : currentMode;
-}
-
-function planPreConsentAttachment(fixture, state) {
-  const boundary = evaluateConsentBoundary(state.candidate, buildInboundMessage(fixture));
-  if (!boundary.block || !PROTECTED_ATTACHMENT_BOUNDARY_REASONS.has(boundary.reason)) {
-    throw new Error(`${fixture.id}: el adjunto no quedó protegido por la frontera de consentimiento`);
-  }
-
-  const pendingContext = parseConsentPendingMode(state.candidate.botResumeMode);
-  const botResumeMode = buildConsentPendingMode({
-    resumeMode: resolveAttachmentResumeMode(state.candidate, pendingContext),
-    cvResendRequired: true
-  });
-  state.candidate.botResumeMode = botResumeMode;
+function planPreConsentAttachment(fixture, state, interpretation) {
   const attachment = fixture.inbound.attachment || {};
-  const actions = [
-    {
-      type: 'REJECT_PRECONSENT_ATTACHMENT',
-      data: {
-        attachmentKind: fixture.inbound.type,
-        fileName: attachment.fileName || null,
-        mimeType: attachment.mimeType || null
-      }
-    },
-    { type: 'ASK_DATA_CONSENT' }
-  ];
-  const allowedWrites = ['candidate.botResumeMode'];
+  const item = {
+    type: fixture.inbound.type || 'document',
+    mediaId: attachment.mediaId || attachment.id || null,
+    fileName: attachment.fileName || attachment.filename || null,
+    mimeType: attachment.mimeType || attachment.mime_type || null,
+    caption: fixture.inbound.caption || attachment.caption || null,
+    isCv: interpretation?.attachments?.hasCv === true || interpretation?.attachment?.isCv === true
+  };
+  const allowedWrites = [];
   appendOutboundWrites(allowedWrites);
 
   return {
     plan: {
-      actions,
+      actions: [{
+        type: 'functional_core_attachment',
+        payload: {
+          attachments: { items: [item], hasCv: item.isCv },
+          consentStatus: state.candidate.dataConsentStatus || 'PENDING'
+        }
+      }],
       allowedWrites,
       nextStep: state.candidate.currentStep
     },
     finalState: buildFinalState(state),
     evidence: {
-      consentBoundary: boundary,
-      attachment: structuredClone(attachment),
-      attachmentReply: PRE_CONSENT_ATTACHMENT_REPLY,
-      consentPrompt: CONSENT_PROMPT
+      attachments: { items: [item], hasCv: item.isCv },
+      consentStatus: state.candidate.dataConsentStatus || 'PENDING',
+      consentPrompt: CONSENT_REQUEST_TEXT
     }
   };
 }
@@ -229,7 +217,7 @@ function planVacancyQuestion(fixture, state) {
     throw new Error(`${fixture.id}: el gate contextual no permitió responder la pregunta dentro del flujo`);
   }
 
-  const answer = buildVacancyQuestionReply(state.vacancy, fixture.inbound.body);
+  const answer = buildVacancyPolicyReply(state.vacancy, fixture.inbound.body);
   if (!answer) {
     throw new Error(`${fixture.id}: la autoridad de vacante no produjo una respuesta sustentada`);
   }
@@ -332,7 +320,7 @@ export function replayFixturePlanning(fixture, interpretationReplay) {
   const interpretation = interpretationReplay.interpretation;
 
   if (['document', 'image'].includes(fixture.inbound.type) && state.candidate.dataConsentStatus !== 'ACCEPTED') {
-    return planPreConsentAttachment(fixture, state);
+    return planPreConsentAttachment(fixture, state, interpretation);
   }
   if (interpretation.consentDecision) {
     return planConsentDecision(fixture, state, interpretation);

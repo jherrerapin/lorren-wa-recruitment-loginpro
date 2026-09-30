@@ -61,6 +61,30 @@
       "notes": "Autoridad canónica del progreso multilinea, engine, consentimiento, vacancyFirstGate, captura silenciosa, reflejos administrativos de entrevista, pausa por revisión manual, reprogramación, cancelación y decisiones de vacante pausada mediante contratos estrechos y compare-and-set."
     },
     {
+      "path": "src/core/shell/executeConversationDecision.js",
+      "role": "direct_writer",
+      "trackedFields": [
+        "currentStep"
+      ],
+      "notes": "Envoltura imperativa del núcleo funcional; persiste el nextStep validado de ConversationDecision."
+    },
+    {
+      "path": "src/services/botAutomationPolicy.js",
+      "role": "indirect_writer",
+      "trackedFields": [
+        "currentStep"
+      ],
+      "notes": "Coordina automatizaciones usando snapshots de progreso y delega las transiciones en la autoridad de estado."
+    },
+    {
+      "path": "src/services/consentProfileCapture.js",
+      "role": "read_only_context",
+      "trackedFields": [
+        "currentStep"
+      ],
+      "notes": "Lee el paso vigente para contextualizar la captura posterior al consentimiento; no persiste progreso."
+    },
+    {
       "path": "src/services/conversationEngine.js",
       "role": "direct_writer",
       "trackedFields": [

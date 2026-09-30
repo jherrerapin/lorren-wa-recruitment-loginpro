@@ -1,6 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseConsentPendingMode } from '../src/services/dataConsentGate.js';
 import { loadConversationFixtures } from './conversation-replay/fixtureRepository.js';
 import { replayFixtureInterpretation } from './conversation-replay/interpretationReplay.js';
 import { replayFixturePlanning } from './conversation-replay/planningReplay.js';
@@ -28,7 +27,21 @@ test('un botón interactivo usa la forma real y solicita consentimiento', async 
   assert.equal(planning.evidence.consentBoundary.reason, 'candidate_wants_to_continue');
 });
 
-test('un pie de adjunto que parece autorizar no salta la protección del archivo', async () => {
+test('un adjunto previo al consentimiento entra al contrato funcional sin habilitar progresión', async () => {
+  const fixture = fixtureById('attachment-document-before-consent-v1');
+  const interpretation = await replayFixtureInterpretation(fixture);
+  const planning = replayFixturePlanning(fixture, interpretation);
+
+  assert.deepEqual(planning.plan.actions.map((action) => action.type), [
+    'functional_core_attachment'
+  ]);
+  assert.equal(planning.plan.actions[0].payload.consentStatus, 'PENDING');
+  assert.equal(planning.finalState.dataConsentStatus, 'PENDING');
+  assert.equal(planning.finalState.currentStep, 'GREETING_SENT');
+  assert.equal(planning.finalState.botResumeMode, null);
+});
+
+test('un pie de adjunto no convierte la persistencia de evidencia en progresión legal', async () => {
   const fixture = fixtureById('attachment-document-before-consent-v1');
   fixture.id = 'synthetic-captioned-document';
   fixture.inbound.caption = 'Sí, autorizo el tratamiento de mis datos';
@@ -37,57 +50,21 @@ test('un pie de adjunto que parece autorizar no salta la protección del archivo
   const planning = replayFixturePlanning(fixture, interpretation);
 
   assert.equal(interpretation.interpretation.consentDecision, 'ACCEPTED');
-  assert.deepEqual(planning.plan.actions.map((action) => action.type), [
-    'REJECT_PRECONSENT_ATTACHMENT',
-    'ASK_DATA_CONSENT'
-  ]);
+  assert.equal(planning.plan.actions[0].type, 'functional_core_attachment');
+  assert.equal(planning.plan.actions[0].payload.consentStatus, 'PENDING');
   assert.equal(planning.finalState.dataConsentStatus, 'PENDING');
-  assert.equal(planning.evidence.consentBoundary.reason, 'attachment_before_consent');
 });
 
-test('un adjunto conserva el contexto de perfil futuro y marca reenvío', async () => {
-  const fixture = fixtureById('attachment-document-before-consent-v1');
-  fixture.id = 'synthetic-future-profile-attachment';
-  fixture.initialState.candidate.botResumeMode = 'future_profile_offer';
-
-  const interpretation = await replayFixtureInterpretation(fixture);
-  const planning = replayFixturePlanning(fixture, interpretation);
-  const pending = parseConsentPendingMode(planning.finalState.botResumeMode);
-
-  assert.equal(planning.evidence.consentBoundary.reason, 'attachment_before_consent');
-  assert.equal(pending.pending, true);
-  assert.equal(pending.resumeMode, 'future_profile_offer');
-  assert.equal(pending.cvResendRequired, true);
-});
-
-test('un adjunto en modo de captura conserva ese modo al pedir autorización', async () => {
-  const fixture = fixtureById('attachment-document-before-consent-v1');
-  fixture.id = 'synthetic-capture-mode-attachment';
-  fixture.initialState.candidate.botResumeMode = 'future_profile_capture';
-
-  const interpretation = await replayFixtureInterpretation(fixture);
-  const planning = replayFixturePlanning(fixture, interpretation);
-  const pending = parseConsentPendingMode(planning.finalState.botResumeMode);
-
-  assert.equal(planning.evidence.consentBoundary.reason, 'capture_mode_without_consent');
-  assert.equal(pending.resumeMode, 'future_profile_capture');
-  assert.equal(pending.cvResendRequired, true);
-});
-
-test('un adjunto posterior a revocatoria sigue protegido y permite nueva autorización', async () => {
+test('un adjunto con consentimiento revocado conserva evidencia sin reactivar el proceso', async () => {
   const fixture = fixtureById('attachment-document-before-consent-v1');
   fixture.id = 'synthetic-revoked-consent-attachment';
   fixture.initialState.candidate.dataConsentStatus = 'REVOKED';
 
   const interpretation = await replayFixtureInterpretation(fixture);
   const planning = replayFixturePlanning(fixture, interpretation);
-  const pending = parseConsentPendingMode(planning.finalState.botResumeMode);
 
-  assert.equal(planning.evidence.consentBoundary.reason, 'consent_revoked');
-  assert.deepEqual(planning.plan.actions.map((action) => action.type), [
-    'REJECT_PRECONSENT_ATTACHMENT',
-    'ASK_DATA_CONSENT'
-  ]);
-  assert.equal(pending.pending, true);
-  assert.equal(pending.cvResendRequired, true);
+  assert.equal(planning.plan.actions[0].type, 'functional_core_attachment');
+  assert.equal(planning.plan.actions[0].payload.consentStatus, 'REVOKED');
+  assert.equal(planning.finalState.dataConsentStatus, 'REVOKED');
+  assert.equal(planning.finalState.currentStep, 'GREETING_SENT');
 });

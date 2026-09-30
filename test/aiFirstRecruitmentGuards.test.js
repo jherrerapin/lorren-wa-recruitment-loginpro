@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { analyzeAttachment } from '../src/services/attachmentAnalyzer.js';
 import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
 import { buildVacancyOptionsReply, buildUnavailableVacancyInfoReply } from '../src/services/naturalReply.js';
-import { sanitizeOutboundReply } from '../src/services/replySafety.js';
-import { getCandidateReadiness, hasValidCv } from '../src/services/readinessGuard.js';
+import { sanitizeOutboundReply } from '../src/services/outboundReplyPolicy.js';
+import { getCandidateReadiness, hasValidCv } from '../src/services/candidateReadiness.js';
 import { evaluateSchedulingGuard } from '../src/services/schedulingGuard.js';
 import { resolveVacancyFromText } from '../src/services/vacancyResolver.js';
 

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeCandidateFields, parseNaturalData } from '../src/services/candidateData.js';
-import { getCandidateReadiness } from '../src/services/readinessGuard.js';
+import { getCandidateReadiness } from '../src/services/candidateReadiness.js';
 
 const vacancy = Object.freeze({
   id: 'vacancy-replay-neiva',

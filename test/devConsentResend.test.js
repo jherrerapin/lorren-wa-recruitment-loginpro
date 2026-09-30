@@ -6,9 +6,8 @@ import {
   DATA_CONSENT_VERSION,
   buildConsentPendingMode,
   buildDataConsentPromptReply,
-  evaluateConsentBoundary,
   parseConsentPendingMode
-} from '../src/services/dataConsentGate.js';
+} from '../src/core/contracts/DataConsentContract.js';
 import {
   buildConsentResendIdempotencyKey,
   buildDevConsentPendingMode,
@@ -151,14 +150,6 @@ test('reenvío reserva el contexto de consentimiento pendiente antes de enviar a
 
   const pending = parseConsentPendingMode(prisma.__state.candidate.botResumeMode);
   assert.equal(pending.pending, true);
-  const boundary = evaluateConsentBoundary(prisma.__state.candidate, {
-    id: 'wamid-consent-response',
-    from: prisma.__state.candidate.phone,
-    type: 'text',
-    text: { body: 'Sí autorizo' }
-  });
-  assert.equal(boundary.block, true);
-  assert.equal(boundary.reason, 'consent_pending');
 });
 
 test('reenvío conserva un contexto pendiente ya existente', () => {

@@ -37,23 +37,24 @@ test('active dispatch assignment board marks same-day workers without blocking t
   assert.match(route, /serviceDate: \{ gte: selectedDateRange\.start, lt: selectedDateRange\.end \}/);
   assert.match(route, /assignedWorkerIdsOnSelectedDate/);
   assert.match(route, /res\.render\('operacionesAsignacionesConfirmacion'/);
-  assert.match(view, /assignedWorkerIdsOnSelectedDate\.has\(worker\.id\)/);
-  assert.match(view, /Ya asignado en otra solicitud este día/);
+  assert.match(view, /safeSameDaySet\.has\(worker\.id\)/);
+  assert.match(view, /Ya tiene una asignación activa en otra solicitud de esta fecha/);
   assert.match(view, /worker-card<%= hasSameDayAssignment/);
   assert.match(view, /draggable="true"/);
   assert.doesNotMatch(view, /hasSameDayAssignment[^\n]*(disabled|draggable="false")/);
 });
 
 test('dispatch bridge routes to visual assignment board and keeps boundaries', () => {
-  const bridge = readSource('src/routes/dispatchBridge.js');
+  const bridge = readSource('src/routes/dispatchBridgeCore.js');
   assert.match(bridge, /router\.get\(\s*['"]\/asignaciones['"].*res\.render\(\s*['"]operacionesAsignaciones['"]/s);
   assert.match(bridge, /prisma\.dispatchWorker\.findMany/);
 
-  const webhook = readSource('src/routes/webhook.js');
-  assert.doesNotMatch(webhook, /operacionesAsignaciones|assignmentDropZone|dispatch assignment/i);
-
-  const fsm = readSource('src/services/conversationEngine.js');
-  assert.doesNotMatch(fsm, /operacionesAsignaciones|assignmentDropZone|dispatch assignment/i);
+  const recruitmentRuntime = [
+    readSource('src/routes/webhookController.js'),
+    readSource('src/workers/jobWorker.js'),
+    readSource('src/core/engine/calculateConversationDecision.js')
+  ].join('\n');
+  assert.doesNotMatch(recruitmentRuntime, /operacionesAsignaciones|assignmentDropZone|dispatch assignment/i);
 
   const schema = readSource('prisma/schema.prisma');
   assert.doesNotMatch(schema, /operacionesAsignaciones|DispatchOperationRequest/);
@@ -62,7 +63,7 @@ test('dispatch bridge routes to visual assignment board and keeps boundaries', (
 });
 
 test('dispatch assignment transport filter uses normalized current transport data', () => {
-  const bridge = readSource('src/routes/dispatchBridge.js');
+  const bridge = readSource('src/routes/dispatchBridgeCore.js');
   const sync = readSource('src/services/dispatchWorkerSync.js');
   const transport = readSource('src/services/transportMode.js');
   const manualWorkerView = readSource('src/views/operacionesPersonalNuevo.ejs');

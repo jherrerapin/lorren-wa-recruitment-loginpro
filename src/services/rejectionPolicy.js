@@ -1,5 +1,5 @@
 import { CandidateStatus } from '@prisma/client';
-import { getCandidateReadiness } from './readinessGuard.js';
+import { getCandidateReadiness } from './candidateReadiness.js';
 import { isSubstantiallySimilarReply, normalizeReplySignature, ReplySimilarityThreshold } from './replySimilarityPolicy.js';
 
 export function buildRequirementRejectionDecision({ candidate = {}, vacancy = null } = {}) {

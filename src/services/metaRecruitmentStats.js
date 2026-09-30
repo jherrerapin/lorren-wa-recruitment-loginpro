@@ -1,4 +1,4 @@
-import { getCandidateReadiness } from './readinessGuard.js';
+import { getCandidateReadiness } from './candidateReadiness.js';
 
 const DEFAULT_TIME_ZONE = 'America/Bogota';
 

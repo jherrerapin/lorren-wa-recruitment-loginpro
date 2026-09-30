@@ -1,4 +1,4 @@
-import { getCandidateReadiness } from './readinessGuard.js';
+import { getCandidateReadiness } from './candidateReadiness.js';
 
 const BLOCKED_STATUSES = new Set(['RECHAZADO', 'PAUSADO', 'NO_INTERESADO']);
 

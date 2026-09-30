@@ -1,10 +1,7 @@
 import { analyzeConversationTurn } from '../../src/services/conversationIntent.js';
 import { conversationUnderstanding } from '../../src/services/conversationUnderstanding.js';
-import {
-  parseConsentPendingMode,
-  shouldRecordConsentAcceptance,
-  shouldRecordConsentRejection
-} from '../../src/services/dataConsentGate.js';
+import { parseConsentPendingMode } from '../../src/core/contracts/DataConsentContract.js';
+import { consentPolicy } from '../../src/core/engine/policies/consentPolicy.js';
 
 const CANONICAL_INTENT_BY_RUNTIME = Object.freeze({
   continue_application: 'CONTINUE_APPLICATION',
@@ -35,12 +32,19 @@ function inboundText(fixture) {
     : String(fixture.inbound.caption || '');
 }
 
-function resolveConsentDecision(fixture, text) {
+function resolveConsentDecision(fixture, text, intent) {
   const candidate = fixture.initialState.candidate;
   const consentPromptPending = parseConsentPendingMode(candidate.botResumeMode).pending;
-  if (shouldRecordConsentRejection(text, { consentPromptPending })) return 'REVOKED';
-  if (candidate.dataConsentStatus === 'ACCEPTED') return null;
-  if (shouldRecordConsentAcceptance(text, { consentPromptPending })) return 'ACCEPTED';
+  const decision = consentPolicy({
+    turn: { rawText: text },
+    candidate: { facts: { dataConsentStatus: candidate.dataConsentStatus } },
+    pending: { fields: consentPromptPending ? ['dataConsent'] : [] },
+    vacancy: fixture.initialState.vacancy || {},
+    interpretation: { intent },
+    execution: { mayReply: true }
+  });
+  if (decision?.transitions?.endConversation === true) return 'REVOKED';
+  if (decision?.mutations?.fieldsToPersist?.dataConsentStatus === 'ACCEPTED') return 'ACCEPTED';
   return null;
 }
 
@@ -89,7 +93,7 @@ export async function replayFixtureInterpretation(fixture) {
     interpretation: {
       intent,
       additionalIntents: deriveAdditionalIntents(intent, turn),
-      consentDecision: resolveConsentDecision(fixture, text),
+      consentDecision: resolveConsentDecision(fixture, text, intent),
       providedFields: understanding.candidateFields
     },
     evidence: {

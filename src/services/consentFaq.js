@@ -9,13 +9,19 @@ function normalize(value = '') {
     .trim();
 }
 
+function referencesConsentDomain(normalized = '') {
+  return /\b(consentimiento|consentir|autorizacion|autorizar|autorizo|tratamiento|privacidad|datos?|dato personal|datos personales|revocar|revocatoria|revocacion)\b/.test(normalized)
+    || /\b(hoja de vida|hv|documentos?)\b.*\b(tratar|tratamiento|usar|guardar|compartir|eliminar|borrar|corregir|actualizar|consultar|revocar)\b/.test(normalized)
+    || /\b(eliminar|borrar|corregir|actualizar|consultar|revocar)\b.*\b(datos?|informacion|autorizacion|consentimiento)\b/.test(normalized);
+}
+
 export function buildConsentQuestionReply(text = '') {
   const raw = String(text || '').trim();
   const normalized = normalize(raw);
-  const asksQuestion = raw.includes('?') || /\b(que|como|para que|quien|pueden|puede|obligatorio|autorizar|autorizacion|datos|privacidad|revocar|eliminar|corregir)\b/.test(normalized);
-  if (!normalized || !asksQuestion) return '';
+  const asksQuestion = raw.includes('?') || /\b(que|como|para que|quien|pueden|puede|obligatorio|necesario)\b/.test(normalized);
+  if (!normalized || !asksQuestion || !referencesConsentDomain(normalized)) return '';
 
-  if (/\b(revocar|revocatoria|retirar|eliminar|borrar|corregir|actualizar|consultar)\b/.test(normalized)) {
+  if (/\b(revocar|revocatoria|revocacion|retirar|eliminar|borrar|corregir|actualizar|consultar)\b/.test(normalized)) {
     return 'Puedes solicitar la consulta, actualización, corrección o revocatoria de la autorización sobre tus datos.';
   }
 

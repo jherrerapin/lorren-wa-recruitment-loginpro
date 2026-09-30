@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getCandidateReadiness, getMissingFieldLabels, getRequiredCandidateFieldKeys } from '../src/services/readinessGuard.js';
+import { getCandidateReadiness, getMissingFieldLabels, getRequiredCandidateFieldKeys } from '../src/services/candidateReadiness.js';
 
 const baseCandidate = {
   fullName: 'Ana Perez',
@@ -34,4 +34,19 @@ test('readiness usa localidad para vacantes de Bogota y barrio para otras ciudad
   assert.equal(getRequiredCandidateFieldKeys(bogota).includes('locality'), true);
   assert.equal(getRequiredCandidateFieldKeys(bogota).includes('neighborhood'), false);
   assert.equal(getRequiredCandidateFieldKeys(ibague).includes('neighborhood'), true);
+});
+
+test('una configuración antigua no puede convertir género en campo obligatorio', () => {
+  const vacancy = {
+    id: 'vac-gender',
+    city: 'Ibague',
+    requiredCandidateFields: ['fullName', 'gender', 'Gender', 'age']
+  };
+
+  assert.deepEqual(getRequiredCandidateFieldKeys(vacancy), ['fullName', 'age']);
+  assert.equal(
+    getCandidateReadiness({ fullName: 'Ana Pérez', age: 25 }, vacancy, { requireCv: false })
+      .missingFields.includes('gender'),
+    false
+  );
 });

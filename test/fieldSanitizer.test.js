@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sanitizeCandidateFieldsForConversation } from '../src/services/fieldSanitizer.js';
 import { parseNaturalData } from '../src/services/candidateData.js';
-import { buildCandidateDataCollectionMessage } from '../src/services/readinessGuard.js';
+import { buildCandidateDataCollectionMessage } from '../src/services/candidateReadiness.js';
 import { buildGenderEvidencePromptText, hasStrongGenderEvidence } from '../src/services/genderEvidencePolicy.js';
 
 const bogotaVacancyWithExperience = Object.freeze({

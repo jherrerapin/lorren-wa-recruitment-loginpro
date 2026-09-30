@@ -67,6 +67,16 @@ function vacancyCandidateIds(vacancy) {
   ].map((candidate) => candidate.id);
 }
 
+test('el dashboard reconoce MANUAL_REVIEW como revisión humana femenina', () => {
+  const source = readFileSync(new URL('../src/services/vacancyDashboardSearchExpansion.js', import.meta.url), 'utf8');
+  const admin = readFileSync(new URL('../src/routes/admin.js', import.meta.url), 'utf8');
+  const view = readFileSync(new URL('../src/views/list.ejs', import.meta.url), 'utf8');
+
+  assert.match(source, /currentStep === 'MANUAL_REVIEW'/);
+  assert.match(admin, /currentStep === 'MANUAL_REVIEW'/);
+  assert.match(view, /Revisión humana|Candidata femenina/);
+});
+
 test('normaliza búsquedas independientes por vacante', () => {
   const result = normalizeVacancyDashboardSearches({
     'vs_vacancy-1_field': 'phone',

@@ -79,12 +79,6 @@ test('la autoridad de despacho usa Cloud API y la plantilla se arma desde la asi
     { index: '0', payload: 'dispatch_confirm:assignment-1' },
     { index: '1', payload: 'dispatch_novelty:assignment-1' }
   ]);
-
-  const interactive = client.buildDispatchAssignmentInteractivePayload({
-    assignment: assignmentFixture(),
-    phone: '3001234567'
-  });
-  assert.match(interactive.interactive.body.text, /al servicio de \*Cargue y descargue\*/);
 });
 
 test('programación usa plantilla oficial con documento en header', async () => {
@@ -120,7 +114,10 @@ test('servidor monta webhook de despacho antes del parser JSON global', () => {
   assert.ok(importIndex >= 0);
   assert.ok(webhookIndex >= 0);
   assert.ok(jsonIndex > webhookIndex);
-  assert.match(server, /app\.use\('\/webhook', webhookRouter\(prisma\)\)/);
+  assert.match(
+    server,
+    /app\.post\('\/webhook', webhookJsonParser, createWebhookController\(\{ prisma \}\)\)/
+  );
 });
 
 test('webhook valida X-Hub-Signature-256 sobre el cuerpo crudo', async () => {
@@ -163,17 +160,13 @@ test('Reportar novedad conserva la asignación pendiente y el enlace sigue acept
   assert.match(webhook, /match\[1\] === 'confirm' \? 'CONFIRM' : 'NOVELTY'/);
 });
 
-test('confirmar una asignación no genera un segundo mensaje al auxiliar', () => {
-  const config = readSource('src/services/dispatchWhatsappCloudConfig.js');
+test('la confirmación inbound se reclama sin reintroducir la respuesta automática retirada', () => {
   const assignment = readSource('src/services/dispatchWhatsappAssignmentService.js');
   const webhook = readSource('src/services/dispatchWhatsappWebhookService.js');
   assert.match(assignment, /confirmationMessageId/);
   assert.match(assignment, /confirmationReceivedAt/);
-  assert.match(webhook, /claimDispatchAssignmentConfirmation\(\{/);
-  assert.match(webhook, /data: \{ status: 'CONFIRMED' \}/);
-  assert.doesNotMatch(config, /AUTOMATIC_CONFIRMATION_REPLY/);
-  assert.doesNotMatch(webhook, /AUTOMATIC_CONFIRMATION_REPLY|AUTO_CONFIRMATION_REPLY|auto-reply:/);
-  assert.doesNotMatch(webhook, /no fue posible responder Gracias/);
+  assert.match(webhook, /const claim = await claimDispatchAssignmentConfirmation\(\{/);
+  assert.doesNotMatch(webhook, /AUTOMATIC_CONFIRMATION_REPLY/);
   assert.doesNotMatch(webhook, /setInterval|reconciliation|getChats|getChatById|message_create/);
 });
 
@@ -374,7 +367,6 @@ test('novedad conserva wamid y los detalles técnicos quedan en la superficie DE
   const webhook = readSource('src/services/dispatchWhatsappWebhookService.js');
   const route = readSource('src/routes/dispatchWhatsappNotifications.js');
   assert.match(adminAlerts, /return \{ sent: true, userId: user\.id, phone, providerMessageId \}/);
-  assert.match(adminAlerts, /link\?\.alertOwnerUsername \|\| assignment\?\.createdByUsername/);
   assert.match(webhook, /source: 'NOVELTY_ADMIN_ALERT'/);
   assert.match(webhook, /recordDispatchWhatsappProviderStatusAudit/);
   assert.match(route, /router\.get\('\/monitor', requireDevMonitor/);

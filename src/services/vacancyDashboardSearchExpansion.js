@@ -169,8 +169,9 @@ function candidateHasUnreadInbound(candidate = {}) {
 function decorateSearchCandidate(candidate = {}) {
   const lastInboundAt = timeValue(candidate.lastInboundAt);
   const isFemaleHumanReview = candidate.gender === 'FEMALE'
-    && Boolean(candidate.botPaused)
-    && /revision humana|revisión humana|candidata femenina/i.test(candidate.botPauseReason || '');
+    && (candidate.currentStep === 'MANUAL_REVIEW'
+      || (Boolean(candidate.botPaused)
+        && /revision humana|revisión humana|candidata femenina/i.test(candidate.botPauseReason || '')));
 
   return {
     ...candidate,

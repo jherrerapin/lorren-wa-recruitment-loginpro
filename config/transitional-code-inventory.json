@@ -16,39 +16,6 @@
   },
   "featureFlags": [
     {
-      "name": "USE_CONVERSATION_ENGINE",
-      "kind": "environment_flag",
-      "status": "BLOCKED",
-      "runtimeDefault": false,
-      "definitionPaths": [
-        "src/routes/webhook.js"
-      ],
-      "consumerPaths": [
-        "src/routes/webhook.js"
-      ],
-      "configurationPaths": [
-        ".env.example",
-        ".github/workflows/ci.yml"
-      ],
-      "owner": "conversation-orchestration",
-      "purpose": "Activa tres capas sobre el flujo determinístico: previsualización de campos, respuesta primaria del chat engine y delegación de preguntas de vacante. El camino determinístico continúa como fallback y autoridad para casos no cubiertos.",
-      "retirementCondition": "Consolidar primero una sola interpretación de campos e intención y un solo plan por turno; después demostrar la misma matriz de escenarios con ambos valores, incluyendo preguntas de vacante, correcciones, consentimiento, adjuntos y agenda. Solo entonces elegir una autoridad y retirar el selector o el camino alterno en un PR independiente.",
-      "evidenceTests": [
-        "test/conversation-harness.test.js",
-        "test/lorrenRegressionFixes.test.js",
-        "test/activeVacancyQuestionIntake.test.js",
-        "test/candidateAgeHarnessIntegration.test.js",
-        "test/candidateExperienceHarnessIntegration.test.js",
-        "test/inactiveVacancySpecificity.test.js",
-        "test/conversationReplayInterpretation.test.js",
-        "test/conversationReplayPlanning.test.js",
-        "test/conversationReplayConsentAttachmentEdges.test.js",
-        "test/conversationReplayRecovery.test.js",
-        "test/conversationEngineGuardRails.test.js",
-        "test/conversationUnderstanding.test.js"
-      ]
-    },
-    {
       "name": "FF_RESPONSES_EXTRACTOR",
       "kind": "canonical_feature_flag",
       "status": "TRANSITIONAL",
@@ -79,13 +46,11 @@
       "definitionPaths": [
         "src/services/featureFlags.js"
       ],
-      "consumerPaths": [
-        "src/routes/webhook.js"
-      ],
+      "consumerPaths": [],
       "configurationPaths": [],
       "owner": "conversation-policy",
-      "purpose": "Activa una capa de política adicional durante la consolidación de decisiones del turno.",
-      "retirementCondition": "Definir si la capa será autoridad canónica o será absorbida por el orquestador; antes deben existir regresiones explícitas para ambos valores del flag.",
+      "purpose": "Conserva el default histórico mientras la política canónica ya no se selecciona desde la capa HTTP.",
+      "retirementCondition": "Retirar el flag cuando se elimine su exposición en FEATURE_FLAG_DEFAULTS y las pruebas confirmen que ninguna ruta runtime depende del selector.",
       "evidenceTests": [
         "test/featureFlagDefaults.test.js",
         "test/hardeningP0Delta.test.js",
@@ -108,8 +73,9 @@
       "purpose": "Permite migrar recordatorios desde temporizadores locales hacia una cola persistida en PostgreSQL.",
       "retirementCondition": "Hacer tenant-aware la cola, demostrar idempotencia y recuperación tras reinicio, migrar recordatorios y retirar el temporizador local.",
       "evidenceTests": [
-        "test/reminder.test.js",
-        "test/hardeningP0Delta.test.js"
+        "test/hardeningP0Delta.test.js",
+        "test/jobQueue.test.js",
+        "test/jobWorkerInboundMessage.test.js"
       ]
     },
     {
@@ -120,16 +86,13 @@
       "definitionPaths": [
         "src/services/featureFlags.js"
       ],
-      "consumerPaths": [
-        "src/routes/webhook.js"
-      ],
+      "consumerPaths": [],
       "configurationPaths": [],
       "owner": "candidate-attachments",
-      "purpose": "Habilita el análisis enriquecido de adjuntos mientras se conserva el manejo determinístico anterior.",
-      "retirementCondition": "Consolidar clasificación, almacenamiento, consentimiento y revisión manual detrás de un solo caso de uso con replays de adjuntos legibles y no legibles.",
+      "purpose": "Conserva el default histórico del analizador mientras el cutover ya no selecciona caminos alternos desde webhook.js.",
+      "retirementCondition": "Retirar el flag cuando se elimine su exposición en FEATURE_FLAG_DEFAULTS y la autoridad de adjuntos permanezca cubierta por los replays funcionales.",
       "evidenceTests": [
         "test/hardeningP0Delta.test.js",
-        "test/p9CvOnlyPdfDocx.test.js",
         "test/aiFirstRecruitmentGuards.test.js"
       ]
     },
@@ -141,16 +104,13 @@
       "definitionPaths": [
         "src/services/featureFlags.js"
       ],
-      "consumerPaths": [
-        "src/routes/webhook.js"
-      ],
+      "consumerPaths": [],
       "configurationPaths": [],
       "owner": "supervisor-media",
-      "purpose": "Alterna el reenvío administrativo de medios entre ejecución síncrona y procesamiento asíncrono.",
-      "retirementCondition": "Mover el reenvío a una cola persistida tenant-aware, demostrar entrega idempotente y retirar el camino síncrono o el asíncrono temporal.",
+      "purpose": "Conserva el default histórico mientras el reenvío administrativo ya no se alterna desde la capa HTTP del candidato.",
+      "retirementCondition": "Retirar el flag cuando se elimine su exposición en FEATURE_FLAG_DEFAULTS y la coordinación de medios tenga una única estrategia persistida.",
       "evidenceTests": [
-        "test/hardeningP0Delta.test.js",
-        "test/lorrenRegressionFixes.test.js"
+        "test/hardeningP0Delta.test.js"
       ]
     }
   ],

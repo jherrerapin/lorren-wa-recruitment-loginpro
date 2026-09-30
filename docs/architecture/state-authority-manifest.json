@@ -34,9 +34,9 @@
           "reason": "Vinculación con despacho"
         },
         {
-          "path": "src/routes/webhook.js",
-          "role": "legacy",
-          "reason": "Orquestación conversacional monolítica vigente"
+          "path": "src/core/middlewares/buildConversationTurnInput.js",
+          "role": "boundary",
+          "reason": "Crea el candidato base al normalizar el primer mensaje entrante"
         },
         {
           "path": "src/services/adminSupervisor.js",
@@ -54,11 +54,6 @@
           "reason": "Atribución de campaña y vacante"
         },
         {
-          "path": "src/services/chatEngine.js",
-          "role": "legacy",
-          "reason": "Motor conversacional alternativo"
-        },
-        {
           "path": "src/services/consentProfileCapture.js",
           "role": "boundary",
           "reason": "Captura posterior al consentimiento"
@@ -69,19 +64,14 @@
           "reason": "Mutación atómica compartida de campos y evento de consentimiento"
         },
         {
-          "path": "src/services/conversationEngine.js",
-          "role": "legacy",
-          "reason": "Motor conversacional heredado"
-        },
-        {
           "path": "src/services/cvStorage.js",
           "role": "boundary",
           "reason": "Persistencia de metadatos y contenido de CV"
         },
         {
-          "path": "src/services/dataConsentGate.js",
+          "path": "src/core/shell/executeConversationDecision.js",
           "role": "boundary",
-          "reason": "Frontera de consentimiento y reanudación; delega consentimiento y mensajes en autoridades compartidas"
+          "reason": "Ejecutor transaccional del Núcleo Funcional: aplica mutaciones directas de Candidate y delega consentimiento y agenda en sus autoridades canónicas"
         },
         {
           "path": "src/services/metaAdsInsightsSync.js",
@@ -97,6 +87,11 @@
           "path": "src/services/reminder.js",
           "role": "operational",
           "reason": "Estados y tiempos de recordatorios; delega la persistencia de mensajes"
+        },
+        {
+          "path": "src/workers/cronReminders.js",
+          "role": "operational",
+          "reason": "Reclama recordatorios durables mediante updateMany condicional y los encola dentro de la misma transacción"
         },
         {
           "path": "src/services/candidateStateService.js",
@@ -116,6 +111,11 @@
           "path": "src/services/interviewBookingStateService.js",
           "role": "canonical",
           "reason": "Creación, reemplazo, cancelación, recordatorios, respuestas, transiciones manuales y eliminaciones físicas de reservas"
+        },
+        {
+          "path": "src/workers/cronReminders.js",
+          "role": "operational",
+          "reason": "Reclama de forma atómica las citas cuyo recordatorio debe encolarse"
         }
       ]
     },
@@ -172,6 +172,11 @@
           "path": "src/services/conversationMessageRepository.js",
           "role": "canonical",
           "reason": "Entradas idempotentes, salidas, mutaciones de payload, marcado de respondedAt y eliminación por ciclo de vida del candidato"
+        },
+        {
+          "path": "src/core/shell/executeConversationDecision.js",
+          "role": "boundary",
+          "reason": "Persiste los mensajes inbound y outbound producidos por el pipeline del núcleo funcional"
         }
       ]
     },
@@ -196,11 +201,6 @@
       "targetAuthority": "AttachmentAnalysisRepository",
       "risk": "high",
       "writers": [
-        {
-          "path": "src/routes/webhook.js",
-          "role": "legacy",
-          "reason": "Clasificación inicial dentro del webhook"
-        },
         {
           "path": "src/services/cvIntelligence.js",
           "role": "boundary",

@@ -1,213 +1,420 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 import { ConversationTurnInputSchema } from '../contracts/ConversationTurnInputSchema.js';
-import { isRecruitmentWhatsappPayload } from '../../services/whatsapp.js';
-import { isSupervisorPhone } from '../../services/adminSupervisor.js';
+import { getCandidateReadiness } from '../../services/candidateReadiness.js';
+import { getResidenceFieldConfig } from '../../services/candidateData.js';
+import { detectGenderFromEvidence } from '../../services/genderEvidencePolicy.js';
+import { resolveCampaignForReferral } from '../../services/campaignAttribution.js';
 
-/** @typedef {import('express').Request} Request */
-/** @typedef {import('express').Response} Response */
-/** @typedef {import('express').NextFunction} NextFunction */
-/** @typedef {import('../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} ConversationTurnInput */
+async function resolveInboundVacancy(message, prisma) {
+  const referral = asRecord(message.referral);
+  if (!Object.values(referral).some((value) => typeof value === 'string' && value.trim())) {
+    const resolvedVacancy = asRecord(message.resolvedVacancy);
+    if (typeof resolvedVacancy.id === 'string' && resolvedVacancy.id.trim()) {
+      return { vacancy: resolvedVacancy, attribution: { source: 'ORGANIC' } };
+    }
+    return { vacancy: null, attribution: { source: 'ORGANIC' } };
+  }
+  const campaigns = await prisma.campaign.findMany({
+    where: { isActive: true }, include: { vacancy: true }
+  });
+  const resolution = resolveCampaignForReferral(campaigns, { referral });
+  let vacancy = resolution.campaign?.vacancy ?? null;
+  // An objective ad identity must never fall back to a coincidental headline.
+  if (!vacancy && !referral.ad_id && !referral.source_id
+    && typeof referral.headline === 'string' && referral.headline.trim()
+    && resolution.reason === 'no_campaign_match') {
+    const matches = await prisma.vacancy.findMany({
+      where: { title: { equals: referral.headline.trim(), mode: 'insensitive' } },
+      take: 2
+    });
+    if (matches.length === 1) vacancy = matches[0];
+  }
+  return { vacancy, attribution: { source: 'META_ADS' } };
+}
 
-/**
- * @typedef {object} BuildConversationTurnInputOptions
- * @property {{ debug?: Function, error?: Function }} [logger]
- */
+function vacancySnapshot(vacancy) {
+  if (!vacancy) return null;
+  return {
+    id: vacancy.id ?? null,
+    title: vacancy.title ?? null,
+    role: vacancy.role ?? null,
+    city: vacancy.city ?? null,
+    isActive: vacancy.isActive ?? null,
+    acceptingApplications: vacancy.acceptingApplications ?? null,
+    schedulingEnabled: vacancy.schedulingEnabled ?? null,
+    interviewSchedulingEnabled: vacancy.interviewSchedulingEnabled ?? null,
+    requirements: vacancy.requirements ?? null,
+    conditions: vacancy.conditions ?? null,
+    roleDescription: vacancy.roleDescription ?? null,
+    requiredDocuments: vacancy.requiredDocuments ?? null,
+    operationAddress: vacancy.operationAddress ?? null,
+    minAge: vacancy.minAge ?? null,
+    maxAge: vacancy.maxAge ?? null,
+    experienceRequired: ['YES', 'NO', 'INDIFFERENT'].includes(
+      String(vacancy.experienceRequired || '').toUpperCase()
+    ) ? String(vacancy.experienceRequired).toUpperCase() : null,
+    experienceTimeText: vacancy.experienceTimeText ?? null,
+    experienceTime: vacancy.experienceTime ?? vacancy.experienceTimeText ?? null,
+    locationType: getResidenceFieldConfig(vacancy).field === 'locality' ? 'localidad' : 'barrio',
+    operation: vacancy.operation
+      ? {
+          name: vacancy.operation.name ?? null,
+          city: vacancy.operation.city ? { name: vacancy.operation.city.name ?? null } : null
+        }
+      : null
+  };
+}
+
+function normalizedMessageType(value) {
+  if (['document', 'image', 'audio'].includes(value)) return value;
+  if (value === 'text' || value === 'interactive' || value === 'button') return 'text';
+  return 'unknown';
+}
+
+function currentAttachments(message) {
+  const type = normalizedMessageType(message.type);
+  if (!['document', 'image', 'audio'].includes(type)) return [];
+
+  const media = asRecord(message.media);
+  if (typeof media.mediaId !== 'string' || !media.mediaId.trim()) return [];
+  if (typeof media.mimeType !== 'string' || !media.mimeType.trim()) return [];
+
+  const allowedStatuses = new Set(['received', 'downloading', 'downloaded', 'processed', 'failed']);
+  const status = allowedStatuses.has(media.status) ? media.status : 'received';
+
+  return [{
+    providerId: media.mediaId.trim(),
+    type,
+    fileName: typeof media.fileName === 'string' && media.fileName.trim()
+      ? media.fileName.trim()
+      : null,
+    mimeType: media.mimeType.trim(),
+    extractedText: typeof media.extractedText === 'string' ? media.extractedText : null,
+    status
+  }];
+}
+
+function isProcessedCvAttachment(attachment) {
+  return attachment.type === 'document'
+    && attachment.status === 'processed'
+    && typeof attachment.extractedText === 'string'
+    && attachment.extractedText.trim().length > 0;
+}
+
+function attachmentItems(attachments) {
+  return attachments.map((attachment) => ({
+    type: attachment.type,
+    mediaId: attachment.providerId,
+    providerId: attachment.providerId,
+    fileName: attachment.fileName,
+    mimeType: attachment.mimeType,
+    caption: null,
+    isCv: isProcessedCvAttachment(attachment),
+    extractedText: attachment.extractedText,
+    status: attachment.status
+  }));
+}
+
+function turnBringsProcessedCv(attachments) {
+  return attachments.some(isProcessedCvAttachment);
+}
 
 /** @param {unknown} value */
 function asRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-/** @param {Record<string, unknown>} record @param {string} key */
-function hasOwn(record, key) {
-  return Object.prototype.hasOwnProperty.call(record, key);
-}
-
-/** Direct/enriched callers must provide explicit turn evidence. */
-function hasDirectTurnEvidence(body, turn, message) {
-  return ['id', 'receivedAt', 'rawText'].some((key) => hasOwn(turn, key))
-    || ['id', 'timestamp', 'rawText', 'content'].some((key) => hasOwn(message, key))
-    || ['turnId', 'timestamp', 'rawText', 'text', 'content'].some((key) => hasOwn(body, key));
-}
-
-/** @param {Record<string, unknown>} body */
-function findFirstMetaMessage(body) {
-  const entry = asRecord(Array.isArray(body.entry) ? body.entry[0] : undefined);
-  const change = asRecord(Array.isArray(entry.changes) ? entry.changes[0] : undefined);
-  const value = asRecord(change.value);
-  const messages = Array.isArray(value.messages) ? value.messages : [];
-  return asRecord(messages[0]);
-}
-
-/** Match the repository audit convention without exposing provider IDs. */
-function hashTurnReference(value) {
-  const digest = createHash('sha256').update(String(value || '')).digest('hex').slice(0, 10);
-  return `turn-${digest}`;
-}
-
-const SAFE_ISSUE_PATH_SEGMENTS = new Set([
-  'turn', 'id', 'receivedAt', 'rawText',
-  'candidate', 'facts', 'updatedAt',
-  'history', 'messages', 'role', 'text', 'occurredAt', 'lastBotQuestion',
-  'pending', 'fields', 'actions', 'type', 'payload',
-  'execution', 'mayReply', 'dryRun'
+const CANDIDATE_FACT_FIELDS = Object.freeze([
+  'phone',
+  'vacancyId',
+  'dataConsentStatus',
+  'fullName',
+  'documentType',
+  'documentNumber',
+  'age',
+  'gender',
+  'neighborhood',
+  'locality',
+  'experienceInfo',
+  'experienceTime',
+  'experienceSummary',
+  'medicalRestrictions',
+  'transportMode',
+  'status',
+  'currentStep',
+  'cvOriginalName',
+  'cvMimeType',
+  'cvStorageKey',
+  'inactivityReminderSent',
+  'botPaused',
+  'botResumeMode',
+  'stage',
+  'reminderState',
+  'reminderScheduledFor',
+  'lastInboundAt',
+  'lastOutboundAt'
 ]);
 
-/** Keep validation telemetry useful without echoing submitted values or keys. */
-function sanitizeValidationIssues(error) {
-  return error.issues.map((issue) => ({
-    code: issue.code,
-    path: issue.path.map((segment) => (
-      typeof segment === 'number' || SAFE_ISSUE_PATH_SEGMENTS.has(segment) ? segment : '*'
-    ))
+function requireString(value, name) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${name} must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+function requirePrisma(dependencies) {
+  const prisma = dependencies?.prisma;
+  if (typeof prisma?.candidate?.findUnique !== 'function'
+    || typeof prisma?.candidate?.create !== 'function'
+    || typeof prisma?.message?.findMany !== 'function') {
+    throw new TypeError('dependencies.prisma must expose candidate.findUnique, candidate.create and message.findMany');
+  }
+  return prisma;
+}
+
+function isoDate(value, fallback = null) {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? fallback : date.toISOString();
+}
+
+function interpretedGender(interpretation) {
+  for (const source of [
+    interpretation?.providedFields,
+    interpretation?.detectedFields,
+    interpretation?.extractedFields
+  ]) {
+    const value = asRecord(source).gender;
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function buildCandidateFacts(candidate, interpretation) {
+  const facts = Object.fromEntries(CANDIDATE_FACT_FIELDS
+    .filter((field) => candidate[field] !== undefined)
+    .map((field) => [field, candidate[field] instanceof Date
+      ? candidate[field].toISOString()
+      : candidate[field]]));
+  const vacancy = candidate.vacancy;
+
+  if (candidate.experienceTime !== undefined) {
+    facts.candidateExperienceTime = candidate.experienceTime;
+  }
+
+  facts.consentGranted = candidate.dataConsentStatus === 'ACCEPTED';
+  const detectedGender = interpretedGender(interpretation);
+  if ((!facts.gender || facts.gender === 'UNKNOWN') && detectedGender) {
+    facts.gender = detectedGender;
+  }
+
+  if (vacancy) {
+    facts.vacancyActive = vacancy.isActive;
+    facts.vacancyAcceptingApplications = vacancy.acceptingApplications;
+    facts.acceptingApplications = vacancy.acceptingApplications;
+    facts.vacancyRole = vacancy.role || vacancy.title;
+    facts.vacancyCity = vacancy.city;
+    facts.minAge = vacancy.minAge;
+    facts.maxAge = vacancy.maxAge;
+    facts.experienceRequired = vacancy.experienceRequired;
+    facts.experienceTime = vacancy.experienceTime ?? vacancy.experienceTimeText;
+    facts.schedulingEnabled = vacancy.schedulingEnabled;
+    facts.locationType = getResidenceFieldConfig(vacancy).field === 'locality'
+      ? 'localidad'
+      : 'barrio';
+  }
+
+  return Object.fromEntries(Object.entries(facts).filter(([, value]) => value !== undefined));
+}
+
+function mapHistory(messages) {
+  return [...messages].reverse().map((message) => ({
+    role: message.direction === 'INBOUND' ? 'user' : 'assistant',
+    text: typeof message.body === 'string' ? message.body : '',
+    occurredAt: isoDate(message.createdAt, new Date(0).toISOString())
   }));
 }
 
-/** Preserve the textual evidence exposed by each supported Meta message type. */
-function extractMetaRawText(message) {
-  const type = message.type;
+export function deriveCandidatePendingFields(candidate) {
+  if (candidate.dataConsentStatus !== 'ACCEPTED') return ['dataConsent'];
 
-  if (type === 'text') return asRecord(message.text).body ?? '';
-  if (type === 'button') {
-    const button = asRecord(message.button);
-    return button.text ?? button.payload ?? '';
-  }
-  if (type === 'interactive') {
-    const interactive = asRecord(message.interactive);
-    return asRecord(interactive.button_reply).title
-      ?? asRecord(interactive.list_reply).title
-      ?? '';
-  }
-  if (type === 'image') return asRecord(message.image).caption ?? '';
-  if (type === 'document') {
-    const document = asRecord(message.document);
-    return document.caption ?? document.filename ?? '';
-  }
-
-  return '';
+  const readiness = getCandidateReadiness(candidate, candidate.vacancy || null);
+  const fields = [];
+  if (!candidate.vacancyId) fields.push('vacancyId');
+  fields.push(...(readiness.missingFields || []));
+  if (!readiness.hasValidCv) fields.push('cv');
+  return [...new Set(fields)].filter((field) => field !== 'gender');
 }
 
-/** Convert Meta's epoch timestamp to the ISO timestamp required by the core. */
-function normalizeReceivedAt(value) {
-  if (value === undefined || value === null || value === '') return new Date().toISOString();
-
-  if ((typeof value === 'string' && /^\d{10,13}$/.test(value)) || typeof value === 'number') {
-    const numericValue = Number(value);
-    const milliseconds = numericValue < 1_000_000_000_000 ? numericValue * 1000 : numericValue;
-    const date = new Date(milliseconds);
-    if (!Number.isNaN(date.getTime())) return date.toISOString();
+function mapInterpretation(inboundMessage, lastBotQuestion = null) {
+  if (inboundMessage.isSystemAction === true) {
+    return { intent: requireString(inboundMessage.intent, 'inboundMessage.intent') };
   }
 
-  return value;
-}
+  const source = asRecord(inboundMessage.interpretation);
+  const interpretation = {};
+  if (typeof source.intent === 'string' && source.intent.trim()) {
+    interpretation.intent = source.intent.trim();
+  }
+  for (const key of ['providedFields', 'detectedFields', 'extractedFields']) {
+    if (Object.keys(asRecord(source[key])).length) interpretation[key] = source[key];
+  }
 
-/**
- * Build a fail-open shadow observer. Validation and logging failures always end
- * at `next()` and therefore cannot block the existing webhook controller.
- *
- * @param {BuildConversationTurnInputOptions} [options]
- * @returns {(req: Request & { conversationTurnInput?: ConversationTurnInput }, res: Response, next: NextFunction) => Promise<void>}
- */
-export function buildConversationTurnInput(options = {}) {
-  const logger = options.logger ?? console;
-
-  return async function conversationTurnInputShadow(req, _res, next) {
-    const startedAt = performance.now();
-
-    try {
-      if (req.method && req.method !== 'POST') return;
-
-      const body = asRecord(req.body);
-      const directMessage = asRecord(body.message);
-      const metaMessage = findFirstMetaMessage(body);
-      const isMetaWebhook = Array.isArray(body.entry);
-      const hasMetaEnvelope = body.object === 'whatsapp_business_account' || hasOwn(body, 'entry');
-      const sourceTurn = asRecord(body.turn);
-      const sourceCandidate = asRecord(body.candidate);
-      const sourceHistory = asRecord(body.history);
-      const sourcePending = asRecord(body.pending);
-
-      // Status callbacks and traffic owned by another WhatsApp flow are not
-      // candidate conversation turns. Keep the shadow observer aligned with
-      // the same deterministic guards used by the legacy controller.
-      if (hasMetaEnvelope) {
-        if (!isMetaWebhook
-          || Object.keys(metaMessage).length === 0
-          || !isRecruitmentWhatsappPayload(body)
-          || isSupervisorPhone(metaMessage.from)) return;
-      } else if (!hasDirectTurnEvidence(body, sourceTurn, directMessage)) return;
-
-      const rawText = sourceTurn.rawText
-        ?? (Object.keys(metaMessage).length > 0 ? extractMetaRawText(metaMessage) : undefined)
-        ?? directMessage.rawText
-        ?? directMessage.content
-        ?? body.rawText
-        ?? body.text
-        ?? body.content
-        ?? '';
-
-      const input = {
-        turn: {
-          id: sourceTurn.id ?? metaMessage.id ?? body.turnId ?? directMessage.id ?? randomUUID(),
-          receivedAt: normalizeReceivedAt(
-            sourceTurn.receivedAt ?? metaMessage.timestamp ?? directMessage.timestamp ?? body.timestamp
-          ),
-          rawText
-        },
-        candidate: {
-          id: sourceCandidate.id ?? null,
-          facts: sourceCandidate.facts ?? {},
-          updatedAt: sourceCandidate.updatedAt ?? null
-        },
-        history: {
-          messages: sourceHistory.messages ?? [],
-          lastBotQuestion: sourceHistory.lastBotQuestion ?? null
-        },
-        pending: {
-          fields: sourcePending.fields ?? [],
-          actions: sourcePending.actions ?? []
-        },
-        execution: {
-          mayReply: true,
-          dryRun: true
-        }
-      };
-
-      const result = await ConversationTurnInputSchema.safeParseAsync(input);
-      const latencyMs = Number((performance.now() - startedAt).toFixed(3));
-
-      if (result.success) {
-        req.conversationTurnInput = result.data;
-        logger.debug?.({
-          event: 'conversation_turn_input.shadow_valid',
-          turnRef: hashTurnReference(result.data.turn.id),
-          latencyMs
-        }, 'Conversation input shadow validation succeeded');
-      } else {
-        logger.error?.({
-          event: 'conversation_turn_input.shadow_invalid',
-          latencyMs,
-          issues: sanitizeValidationIssues(result.error)
-        }, 'Conversation input shadow validation failed');
-      }
-    } catch (error) {
-      const latencyMs = Number((performance.now() - startedAt).toFixed(3));
-      try {
-        logger.error?.({
-          event: 'conversation_turn_input.shadow_error',
-          latencyMs,
-          error: error instanceof Error
-            ? { name: error.name, message: error.message }
-            : String(error)
-        }, 'Conversation input shadow processing failed');
-      } catch {
-        // Logging must never interrupt the legacy request path.
-      }
-    } finally {
-      next();
-    }
+  const candidateFieldNames = new Set([
+    'fullName', 'documentType', 'documentNumber', 'age', 'gender', 'neighborhood',
+    'locality', 'medicalRestrictions', 'transportMode', 'experienceInfo',
+    'experienceTime', 'experienceSummary'
+  ]);
+  const mergedFields = {
+    ...asRecord(source.extractedFields),
+    ...asRecord(source.detectedFields),
+    ...asRecord(source.providedFields),
+    ...asRecord(source.fields)
   };
+  const fields = Object.fromEntries(
+    Object.entries(mergedFields).filter(([field]) => candidateFieldNames.has(field))
+  );
+  if (Object.keys(fields).length) interpretation.fields = fields;
+  const sourceScheduling = asRecord(source.scheduling);
+  const sourceSlot = asRecord(sourceScheduling.slot);
+  if (Object.keys(sourceSlot).length) {
+    interpretation.scheduling = {
+      slot: {
+        slotId: sourceSlot.slotId ?? null,
+        startsAt: sourceSlot.startsAt,
+        timezone: sourceSlot.timezone
+      }
+    };
+  }
+  const consentDecision = asRecord(source.consent).decision;
+  if (['ACCEPTED', 'REJECTED', 'REVOKED', 'PENDING'].includes(consentDecision)) {
+    interpretation.consent = { decision: consentDecision };
+  }
+
+  const alreadyDetected = ['providedFields', 'detectedFields', 'extractedFields']
+    .some((key) => typeof asRecord(interpretation[key]).gender === 'string');
+  const localGender = alreadyDetected
+    ? null
+    : detectGenderFromEvidence(inboundMessage.text, {
+      fullName: inboundMessage.fullName
+        || asRecord(source.providedFields).fullName
+        || asRecord(source.detectedFields).fullName
+        || asRecord(source.extractedFields).fullName
+    });
+  if (localGender) {
+    interpretation.detectedFields = {
+      ...asRecord(interpretation.detectedFields),
+      gender: localGender
+    };
+  }
+  return Object.keys(interpretation).length ? interpretation : undefined;
+}
+
+async function loadOrCreateCandidate(prisma, phone) {
+  const query = { where: { phone }, include: { vacancy: true } };
+  const existing = await prisma.candidate.findUnique(query);
+  if (existing) return existing;
+
+  try {
+    return await prisma.candidate.create({
+      data: { phone },
+      include: { vacancy: true }
+    });
+  } catch (error) {
+    if (error?.code !== 'P2002') throw error;
+    const concurrentlyCreated = await prisma.candidate.findUnique(query);
+    if (concurrentlyCreated) return concurrentlyCreated;
+    throw error;
+  }
+}
+
+export class ConversationTurnInputBuildError extends Error {
+  constructor(issues) {
+    super('Conversation turn input mapping failed strict validation');
+    this.name = 'ConversationTurnInputBuildError';
+    this.issues = issues.map((issue) => ({
+      code: issue.code,
+      path: issue.path,
+      message: issue.message
+    }));
+  }
+}
+
+/** Build one production-ready core input from one normalized Meta message. */
+export async function buildConversationTurnInput(inboundMessage, dependencies = {}) {
+  const message = asRecord(inboundMessage);
+  const prisma = requirePrisma(dependencies);
+  const phone = requireString(message.from, 'inboundMessage.from');
+  const messageId = requireString(message.messageId, 'inboundMessage.messageId');
+  const candidate = await loadOrCreateCandidate(prisma, phone);
+  const inboundContext = await resolveInboundVacancy(message, prisma);
+  const effectiveCandidate = !candidate.vacancyId && inboundContext.vacancy
+    ? { ...candidate, vacancy: inboundContext.vacancy, vacancyId: inboundContext.vacancy.id }
+    : candidate;
+  if (typeof candidate?.id !== 'string' || !candidate.id.trim()) {
+    throw new ConversationTurnInputBuildError([{
+      code: 'custom',
+      path: ['candidate', 'id'],
+      message: 'candidate.id must be loaded before entering the functional core'
+    }]);
+  }
+  const recentMessages = await prisma.message.findMany({
+    where: { candidateId: candidate.id },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: {
+      direction: true,
+      body: true,
+      createdAt: true
+    }
+  });
+  const historyMessages = mapHistory(recentMessages);
+  const lastBotQuestion = [...historyMessages]
+    .reverse()
+    .find((item) => item.role === 'assistant' && item.text.includes('?'))?.text ?? null;
+  const interpretation = mapInterpretation(message, lastBotQuestion);
+  const attachments = currentAttachments(message);
+  const pendingFields = deriveCandidatePendingFields(effectiveCandidate)
+    .filter((field) => field !== 'cv' || !turnBringsProcessedCv(attachments));
+
+  const mappedInput = {
+    vacancy: vacancySnapshot(inboundContext.vacancy),
+    attribution: inboundContext.attribution,
+    turn: {
+      id: messageId,
+      receivedAt: isoDate(message.timestamp, new Date().toISOString()),
+      rawText: message.isSystemAction === true
+        ? '[SYSTEM_EVENT]'
+        : (typeof message.text === 'string' ? message.text : ''),
+      messageType: normalizedMessageType(message.type)
+    },
+    candidate: {
+      id: candidate.id,
+      facts: buildCandidateFacts(effectiveCandidate, interpretation),
+      updatedAt: isoDate(candidate.updatedAt)
+    },
+    history: {
+      messages: historyMessages,
+      lastBotQuestion
+    },
+    pending: {
+      fields: pendingFields,
+      actions: []
+    },
+    execution: {
+      mayReply: true,
+      mayPersistCandidate: true,
+      maySendOutbound: true
+    },
+    attachments: {
+      current: attachments,
+      items: attachmentItems(attachments),
+      hasCv: turnBringsProcessedCv(attachments)
+    },
+    ...(interpretation ? { interpretation } : {})
+  };
+
+  const parsed = await ConversationTurnInputSchema.safeParseAsync(mappedInput);
+  if (!parsed.success) throw new ConversationTurnInputBuildError(parsed.error.issues);
+  return parsed.data;
 }
 
 export default buildConversationTurnInput;

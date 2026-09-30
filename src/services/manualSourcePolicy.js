@@ -48,3 +48,7 @@ export function isHumanOutboundMessage(message = {}) {
   if (message?.direction !== 'OUTBOUND') return false;
   return classifyOutboundActor(message?.rawPayload || {}).isManual;
 }
+
+export function hasRecentHumanIntervention(messages = []) {
+  return (messages || []).some((message) => isHumanOutboundMessage(message));
+}

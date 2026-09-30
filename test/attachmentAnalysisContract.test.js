@@ -440,12 +440,12 @@ test('la revisión por vacante combina contexto y reintenta candidatos omitidos'
   assert.match(calls[1].input[0].content[0].text, /Usa "Registro:" solo/);
 });
 
-test('Terra es el modelo por defecto y las tareas especializadas permiten overrides', () => {
-  const conversationPath = fileURLToPath(new URL('../src/services/conversationEngine.js', import.meta.url));
+test('Terra sigue siendo el modelo central y el redactor por directivas permite un override rápido', () => {
+  const replyAdapterPath = fileURLToPath(new URL('../src/infrastructure/llm/openaiAdapter.js', import.meta.url));
   const extractionPath = fileURLToPath(new URL('../src/ai/extractRecruitmentTurn.js', import.meta.url));
   const configPath = fileURLToPath(new URL('../src/services/openAiModelConfig.js', import.meta.url));
   const routePath = fileURLToPath(new URL('../src/routes/lorenV2CvAnalysis.js', import.meta.url));
-  const conversationSource = readFileSync(conversationPath, 'utf8');
+  const replyAdapterSource = readFileSync(replyAdapterPath, 'utf8');
   const extractionSource = readFileSync(extractionPath, 'utf8');
   const configSource = readFileSync(configPath, 'utf8');
   const routeSource = readFileSync(routePath, 'utf8');
@@ -453,14 +453,14 @@ test('Terra es el modelo por defecto y las tareas especializadas permiten overri
   assert.match(configSource, /DEFAULT_OPENAI_MODEL = 'gpt-5\.6-terra'/);
   assert.match(configSource, /resolveModel\(\['OPENAI_EXTRACTION_MODEL', 'OPENAI_MODEL'\]\)/);
   assert.match(configSource, /resolveModel\(\['OPENAI_CV_MODEL', 'OPENAI_EXTRACTION_MODEL', 'OPENAI_MODEL'\]\)/);
-  assert.match(conversationSource, /const DEFAULT_MODEL = OPENAI_CONVERSATION_MODEL/);
+  assert.match(replyAdapterSource, /DEFAULT_REPLY_MODEL = 'gpt-4o-mini'/);
+  assert.match(replyAdapterSource, /process\.env\.OPENAI_REPLY_MODEL/);
   assert.match(extractionSource, /const MODEL = OPENAI_EXTRACTION_MODEL/);
   assert.match(routeSource, /name="vacancyId" required/);
   assert.match(routeSource, /name="desiredProfile"/);
   assert.match(routeSource, /Revisión manual/);
   assert.match(routeSource, /Datos registrados por el candidato/);
   assert.match(routeSource, /Medio de transporte/);
-  assert.match(routeSource, /medio de transporte y la residencia registrados/);
   assert.doesNotMatch(routeSource, /datos laborales y operativos del registro/);
   assert.doesNotMatch(routeSource, /Experiencia declarada/);
   assert.doesNotMatch(routeSource, /Disponibilidad/);

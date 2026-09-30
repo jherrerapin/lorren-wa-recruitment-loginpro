@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hasRecentHumanIntervention } from '../src/services/conversationEngine.js';
+import { hasRecentHumanIntervention } from '../src/services/manualSourcePolicy.js';
 import { getLastOutboundContext } from '../src/services/contextualResponseGate.js';
 import { classifyOutboundActor } from '../src/services/manualSourcePolicy.js';
 

@@ -47,10 +47,12 @@ enum ConversationStep {
   GREETING_SENT
   COLLECTING_DATA
   CONFIRMING_DATA
+  AWAITING_POOL_CONSENT
   ASK_CV
   DONE
   SCHEDULING
   SCHEDULED
+  MANUAL_REVIEW
 }
 
 enum MessageDirection {
@@ -140,13 +142,13 @@ enum DispatchContractType {
 }
 
 model City {
-  id                 String           @id @default(cuid())
-  name               String           @unique
-  sourceModule       CitySourceModule @default(RECRUITMENT)
-  usedForRecruitment Boolean          @default(false)
-  usedForDispatch    Boolean          @default(false)
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  id                 String               @id @default(cuid())
+  name               String               @unique
+  sourceModule       CitySourceModule     @default(RECRUITMENT)
+  usedForRecruitment Boolean              @default(false)
+  usedForDispatch    Boolean              @default(false)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
   operations         Operation[]
   dispatchWorkers    DispatchWorkerCity[]
 
@@ -168,46 +170,46 @@ model Operation {
 }
 
 model Vacancy {
-  id                     String                @id @default(cuid())
-  title                  String
-  key                    String                @unique
-  role                   String
-  roleDescription        String?
-  city                   String
-  operationAddress       String
-  interviewAddress       String?
-  requirements           String
-  conditions             String
-  requiredDocuments      String?
-  minAge                 Int?
-  maxAge                 Int?
-  experienceRequired     ExperienceRequirement @default(INDIFFERENT)
-  experienceTimeText     String?
-  minExperienceMonths    Int?
-  maxExperienceMonths    Int?
-  imageData              Bytes?
-  imageMimeType          String?
-  zoneFilterEnabled      Boolean               @default(false)
-  zoneContext            String?
-  schedulingEnabled      Boolean               @default(false)
-  acceptingApplications  Boolean               @default(true)
-  dashboardReviewEnabled Boolean               @default(false)
-  isActive               Boolean               @default(true)
-  createdAt              DateTime              @default(now())
-  updatedAt              DateTime              @updatedAt
-  operationId            String?
-  operation              Operation?            @relation(fields: [operationId], references: [id], onDelete: SetNull)
-  candidates             Candidate[]
-  campaigns              Campaign[]
-  interviewSlots         InterviewSlot[]
-  interviewBookings      InterviewBooking[]
+  id                        String                     @id @default(cuid())
+  title                     String
+  key                       String                     @unique
+  role                      String
+  roleDescription           String?
+  city                      String
+  operationAddress          String
+  interviewAddress          String?
+  requirements              String
+  conditions                String
+  requiredDocuments         String?
+  minAge                    Int?
+  maxAge                    Int?
+  experienceRequired        ExperienceRequirement      @default(INDIFFERENT)
+  experienceTimeText        String?
+  minExperienceMonths       Int?
+  maxExperienceMonths       Int?
+  imageData                 Bytes?
+  imageMimeType             String?
+  zoneFilterEnabled         Boolean                    @default(false)
+  zoneContext               String?
+  schedulingEnabled         Boolean                    @default(false)
+  acceptingApplications     Boolean                    @default(true)
+  dashboardReviewEnabled    Boolean                    @default(false)
+  isActive                  Boolean                    @default(true)
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  operationId               String?
+  operation                 Operation?                 @relation(fields: [operationId], references: [id], onDelete: SetNull)
+  candidates                Candidate[]
+  campaigns                 Campaign[]
+  interviewSlots            InterviewSlot[]
+  interviewBookings         InterviewBooking[]
   interviewCandidateReviews InterviewCandidateReview[]
-  accessUsers            AppUser[]              @relation("AppUserVacancies")
-  scopedAccessUsers      AppUser[]              @relation("AppUserScopeVacancy")
-  dispatchWorkers        DispatchWorkerVacancy[]
-  cvReviewProfiles       CvReviewProfile[]
-  cvCandidateComparisons CvCandidateComparison[]
-  cvAnalysisUsages       CvAnalysisUsage[]
+  accessUsers               AppUser[]                  @relation("AppUserVacancies")
+  scopedAccessUsers         AppUser[]                  @relation("AppUserScopeVacancy")
+  dispatchWorkers           DispatchWorkerVacancy[]
+  cvReviewProfiles          CvReviewProfile[]
+  cvCandidateComparisons    CvCandidateComparison[]
+  cvAnalysisUsages          CvAnalysisUsage[]
 }
 
 model Campaign {
@@ -248,49 +250,52 @@ model InterviewSlot {
 }
 
 model InterviewBooking {
-  id                   String         @id @default(cuid())
-  candidateId          String
-  candidate            Candidate      @relation(fields: [candidateId], references: [id])
-  vacancyId            String
-  vacancy              Vacancy        @relation(fields: [vacancyId], references: [id])
-  slotId               String?
-  slot                 InterviewSlot? @relation(fields: [slotId], references: [id])
-  scheduledAt          DateTime
-  status               BookingStatus  @default(SCHEDULED)
-  reminderSentAt       DateTime?
-  reminderWindowClosed Boolean        @default(false)
-  reminderResponse     String?
-  notes                String?
-  createdAt             DateTime      @default(now())
-  updatedAt             DateTime      @updatedAt
+  id                    String         @id @default(cuid())
+  candidateId           String
+  candidate             Candidate      @relation(fields: [candidateId], references: [id])
+  vacancyId             String
+  vacancy               Vacancy        @relation(fields: [vacancyId], references: [id])
+  slotId                String?
+  slot                  InterviewSlot? @relation(fields: [slotId], references: [id])
+  scheduledAt           DateTime
+  status                BookingStatus  @default(SCHEDULED)
+  reminderSentAt        DateTime?
+  interviewReminderSent Boolean        @default(false)
+  reminderWindowClosed  Boolean        @default(false)
+  reminderResponse      String?
+  notes                 String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+
+  @@index([status, interviewReminderSent, scheduledAt])
 }
 
 model InterviewCandidateReview {
-  id                        String                    @id @default(cuid())
-  candidateId               String
-  candidate                 Candidate                 @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  vacancyId                 String
-  vacancy                   Vacancy                   @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
-  invitationStatusOverride  InterviewInvitationStatus?
-  invitationUpdatedByUserId String?
-  invitationUpdatedByLabel  String?
-  invitationUpdatedAt       DateTime?
-  attendanceStatus          InterviewAttendanceStatus @default(PENDING)
-  attendanceUpdatedByUserId String?
-  attendanceUpdatedByLabel  String?
-  attendanceUpdatedAt       DateTime?
+  id                          String                      @id @default(cuid())
+  candidateId                 String
+  candidate                   Candidate                   @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  vacancyId                   String
+  vacancy                     Vacancy                     @relation(fields: [vacancyId], references: [id], onDelete: Cascade)
+  invitationStatusOverride    InterviewInvitationStatus?
+  invitationUpdatedByUserId   String?
+  invitationUpdatedByLabel    String?
+  invitationUpdatedAt         DateTime?
+  attendanceStatus            InterviewAttendanceStatus   @default(PENDING)
+  attendanceUpdatedByUserId   String?
+  attendanceUpdatedByLabel    String?
+  attendanceUpdatedAt         DateTime?
   continuationStatus          InterviewContinuationStatus @default(CONTINUES)
   continuationUpdatedByUserId String?
   continuationUpdatedByLabel  String?
   continuationUpdatedAt       DateTime?
-  rating                     Decimal?                  @db.Decimal(3, 2)
-  observationEnabled         Boolean                   @default(false)
-  observation                String?
-  reviewUpdatedByUserId      String?
-  reviewUpdatedByLabel       String?
-  reviewUpdatedAt            DateTime?
-  createdAt                  DateTime                  @default(now())
-  updatedAt                  DateTime                  @updatedAt
+  rating                      Decimal?                    @db.Decimal(3, 2)
+  observationEnabled          Boolean                     @default(false)
+  observation                 String?
+  reviewUpdatedByUserId       String?
+  reviewUpdatedByLabel        String?
+  reviewUpdatedAt             DateTime?
+  createdAt                   DateTime                    @default(now())
+  updatedAt                   DateTime                    @updatedAt
 
   @@unique([candidateId, vacancyId])
   @@index([vacancyId, attendanceStatus])
@@ -299,14 +304,14 @@ model InterviewCandidateReview {
 }
 
 model InterviewComplementaryField {
-  id              String                       @id @default(cuid())
+  id              String                        @id @default(cuid())
   label           String
-  normalizedLabel String                       @unique
-  sortOrder       Int                          @default(0)
+  normalizedLabel String                        @unique
+  sortOrder       Int                           @default(0)
   createdByUserId String?
   createdByLabel  String?
-  createdAt       DateTime                     @default(now())
-  updatedAt       DateTime                     @updatedAt
+  createdAt       DateTime                      @default(now())
+  updatedAt       DateTime                      @updatedAt
   values          InterviewComplementaryValue[]
 
   @@index([sortOrder])
@@ -329,78 +334,80 @@ model InterviewComplementaryValue {
 }
 
 model Candidate {
-  id                     String              @id @default(cuid())
-  phone                  String              @unique
-  vacancyId              String?
-  vacancy                Vacancy?            @relation(fields: [vacancyId], references: [id])
-  campaignId             String?
-  campaign               Campaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  sourceType             CandidateSourceType @default(UNKNOWN)
-  campaignCodeRaw        String?
-  referrerName           String?
-  referrerPhone          String?
-  metaCtwaClid           String?
-  metaAdId               String?
-  metaCampaignId         String?
-  metaCampaignName       String?
-  dataConsentStatus      DataConsentStatus   @default(PENDING)
-  dataConsentVersion     String?
-  dataConsentText        String?
-  dataConsentSource      String?
-  dataConsentAcceptedAt  DateTime?
-  dataConsentRevokedAt   DateTime?
-  dataConsentRecordedBy  String?
-  fullName               String?
-  documentType           String?
-  documentNumber         String?
-  age                    Int?
-  gender                 Gender              @default(UNKNOWN)
-  neighborhood           String?
-  locality               String?
-  zoneViable             Boolean?
-  experienceInfo         String?
-  experienceTime         String?
-  medicalRestrictions    String?
-  transportMode          String?
-  rejectionReason        String?
-  rejectionDetails       String?
-  zone                   String?
-  experienceSummary      String?
-  availability           String?
-  status                 CandidateStatus     @default(NUEVO)
-  currentStep            ConversationStep    @default(MENU)
-  cvOriginalName         String?
-  cvMimeType             String?
-  cvStorageKey           String?
-  cvData                 Bytes?
-  multilineWindowUntil   DateTime?
-  multilineBatchVersion  Int                 @default(0)
-  lastInboundAt          DateTime?
-  lastOutboundAt         DateTime?
-  devLastSeenAt          DateTime?
-  lastReminderAt         DateTime?
-  reminderScheduledFor   DateTime?
-  reminderState          ReminderState       @default(NONE)
-  botPaused              Boolean             @default(false)
-  botPausedAt            DateTime?
-  botPausedBy            String?
-  botPauseReason         String?
-  botResumeMode          String?
-  potentialDuplicate     Boolean             @default(false)
-  potentialDuplicateAt   DateTime?
-  potentialDuplicateNote String?
-  interviewNotes         String?
-  createdAt              DateTime            @default(now())
-  updatedAt              DateTime            @updatedAt
-  messages               Message[]
-  interviewBookings      InterviewBooking[]
-  interviewCandidateReviews InterviewCandidateReview[]
+  id                           String                        @id @default(cuid())
+  phone                        String                        @unique
+  vacancyId                    String?
+  vacancy                      Vacancy?                      @relation(fields: [vacancyId], references: [id])
+  campaignId                   String?
+  campaign                     Campaign?                     @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  sourceType                   CandidateSourceType           @default(UNKNOWN)
+  campaignCodeRaw              String?
+  referrerName                 String?
+  referrerPhone                String?
+  metaCtwaClid                 String?
+  metaAdId                     String?
+  metaCampaignId               String?
+  metaCampaignName             String?
+  dataConsentStatus            DataConsentStatus             @default(PENDING)
+  dataConsentVersion           String?
+  dataConsentText              String?
+  dataConsentSource            String?
+  dataConsentAcceptedAt        DateTime?
+  dataConsentRevokedAt         DateTime?
+  dataConsentRecordedBy        String?
+  optInGeneralPool             Boolean?
+  fullName                     String?
+  documentType                 String?
+  documentNumber               String?
+  age                          Int?
+  gender                       Gender                        @default(UNKNOWN)
+  neighborhood                 String?
+  locality                     String?
+  zoneViable                   Boolean?
+  experienceInfo               String?
+  experienceTime               String?
+  medicalRestrictions          String?
+  transportMode                String?
+  rejectionReason              String?
+  rejectionDetails             String?
+  zone                         String?
+  experienceSummary            String?
+  availability                 String?
+  status                       CandidateStatus               @default(NUEVO)
+  currentStep                  ConversationStep              @default(MENU)
+  cvOriginalName               String?
+  cvMimeType                   String?
+  cvStorageKey                 String?
+  cvData                       Bytes?
+  multilineWindowUntil         DateTime?
+  multilineBatchVersion        Int                           @default(0)
+  lastInboundAt                DateTime?
+  lastOutboundAt               DateTime?
+  devLastSeenAt                DateTime?
+  lastReminderAt               DateTime?
+  inactivityReminderSent       Boolean                       @default(false)
+  reminderScheduledFor         DateTime?
+  reminderState                ReminderState                 @default(NONE)
+  botPaused                    Boolean                       @default(false)
+  botPausedAt                  DateTime?
+  botPausedBy                  String?
+  botPauseReason               String?
+  botResumeMode                String?
+  potentialDuplicate           Boolean                       @default(false)
+  potentialDuplicateAt         DateTime?
+  potentialDuplicateNote       String?
+  interviewNotes               String?
+  createdAt                    DateTime                      @default(now())
+  updatedAt                    DateTime                      @updatedAt
+  messages                     Message[]
+  interviewBookings            InterviewBooking[]
+  interviewCandidateReviews    InterviewCandidateReview[]
   interviewComplementaryValues InterviewComplementaryValue[]
-  adminEvents            CandidateAdminEvent[]
-  attachmentAnalyses     AttachmentAnalysis[]
-  dataConsentEvents      CandidateDataConsentEvent[]
-  dispatchWorker         DispatchWorker?
-  cvCandidateComparisons CvCandidateComparison[]
+  adminEvents                  CandidateAdminEvent[]
+  attachmentAnalyses           AttachmentAnalysis[]
+  dataConsentEvents            CandidateDataConsentEvent[]
+  dispatchWorker               DispatchWorker?
+  cvCandidateComparisons       CvCandidateComparison[]
 
   @@index([campaignId])
   @@index([sourceType])
@@ -408,6 +415,7 @@ model Candidate {
   @@index([status, createdAt])
   @@index([metaAdId])
   @@index([metaCampaignId])
+  @@index([botPaused, inactivityReminderSent, updatedAt])
 }
 
 model CandidateDataConsentEvent {
@@ -422,6 +430,7 @@ model CandidateDataConsentEvent {
   ipAddress     String?
   userAgent     String?
   note          String?
+  messageId     String?           @unique
   createdAt     DateTime          @default(now())
 
   @@index([candidateId, createdAt])
@@ -439,6 +448,12 @@ model Message {
   rawPayload  Json?
   respondedAt DateTime?
   createdAt   DateTime         @default(now())
+}
+
+model WebhookEvent {
+  id        String   @id @default(cuid())
+  messageId String   @unique
+  createdAt DateTime @default(now())
 }
 
 model CandidateAdminEvent {
@@ -460,18 +475,18 @@ model CandidateAdminEvent {
 }
 
 model AttachmentAnalysis {
-  id                  String                   @id @default(cuid())
-  candidateId         String
-  candidate           Candidate                @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  originalName        String?
-  mimeType             String?
-  classification      AttachmentClassification @default(OTHER)
-  extractedText       String?
-  summary             String?
-  confidence          Float?
-  analysedAt          DateTime                 @default(now())
-  modelUsed           String?
-  rawResponse         Json?
+  id             String                   @id @default(cuid())
+  candidateId    String
+  candidate      Candidate                @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  originalName   String?
+  mimeType       String?
+  classification AttachmentClassification @default(OTHER)
+  extractedText  String?
+  summary        String?
+  confidence     Float?
+  analysedAt     DateTime                 @default(now())
+  modelUsed      String?
+  rawResponse    Json?
 
   @@index([candidateId])
   @@index([classification])
@@ -519,7 +534,7 @@ model CvAnalysisUsage {
   modelUsed         String
   inputTokens       Int      @default(0)
   cachedInputTokens Int      @default(0)
-  cacheWriteTokens Int       @default(0)
+  cacheWriteTokens  Int      @default(0)
   outputTokens      Int      @default(0)
   reasoningTokens   Int      @default(0)
   totalTokens       Int      @default(0)
@@ -531,34 +546,34 @@ model CvAnalysisUsage {
 }
 
 model AppUser {
-  id                  String          @id @default(cuid())
-  username            String          @unique
-  passwordHash        String
-  displayName         String?
-  email               String?         @unique
-  identityMigratedAt  DateTime?
-  recoveryCodeHash    String?
-  role                AppUserRole     @default(ADMIN)
-  accessScope         UserAccessScope @default(ALL)
-  scopeCity           String?
-  scopeVacancyId      String?
-  scopeVacancy        Vacancy?        @relation("AppUserScopeVacancy", fields: [scopeVacancyId], references: [id], onDelete: SetNull)
-  recoveryPhone       String?
-  recoveryEmail       String?
-  dispatchAlertPhone  String?
-  dispatchWindowExpiryReminderEnabled Boolean @default(false)
-  createdByUsername   String?
-  lastPasswordResetAt DateTime?
-  canAccessDispatch   Boolean         @default(false)
-  canAccessAttendance Boolean         @default(false)
-  canAccessStatistics Boolean         @default(false)
-  canAccessMetaAds    Boolean         @default(false)
-  canAccessCvAnalysis Boolean         @default(false)
-  isActive            Boolean         @default(true)
-  createdAt           DateTime        @default(now())
-  updatedAt           DateTime        @updatedAt
-  vacancies           Vacancy[]       @relation("AppUserVacancies")
-  candidateAdminEvents CandidateAdminEvent[]
+  id                                  String                @id @default(cuid())
+  username                            String                @unique
+  passwordHash                        String
+  displayName                         String?
+  email                               String?               @unique
+  identityMigratedAt                  DateTime?
+  recoveryCodeHash                    String?
+  role                                AppUserRole           @default(ADMIN)
+  accessScope                         UserAccessScope       @default(ALL)
+  scopeCity                           String?
+  scopeVacancyId                      String?
+  scopeVacancy                        Vacancy?              @relation("AppUserScopeVacancy", fields: [scopeVacancyId], references: [id], onDelete: SetNull)
+  recoveryPhone                       String?
+  recoveryEmail                       String?
+  dispatchAlertPhone                  String?
+  dispatchWindowExpiryReminderEnabled Boolean               @default(false)
+  createdByUsername                   String?
+  lastPasswordResetAt                 DateTime?
+  canAccessDispatch                   Boolean               @default(false)
+  canAccessAttendance                 Boolean               @default(false)
+  canAccessStatistics                 Boolean               @default(false)
+  canAccessMetaAds                    Boolean               @default(false)
+  canAccessCvAnalysis                 Boolean               @default(false)
+  isActive                            Boolean               @default(true)
+  createdAt                           DateTime              @default(now())
+  updatedAt                           DateTime              @updatedAt
+  vacancies                           Vacancy[]             @relation("AppUserVacancies")
+  candidateAdminEvents                CandidateAdminEvent[]
 
   @@index([role])
   @@index([isActive])
@@ -589,7 +604,7 @@ model DevAuditEvent {
   actorRole     String?
   actorSource   String?
   ipAddress     String?
-  forwardedFor String?
+  forwardedFor  String?
   userAgent     String?
   method        String?
   path          String?
@@ -606,18 +621,22 @@ model DevAuditEvent {
 model JobQueueItem {
   id          String    @id @default(cuid())
   type        String
-  payload     Json?
+  payload     Json
   status      JobStatus @default(PENDING)
   attempts    Int       @default(0)
-  lastError   String?
-  scheduledAt DateTime  @default(now())
-  startedAt   DateTime?
-  finishedAt  DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  maxAttempts Int       @default(5) @map("max_attempts")
+  dedupeKey   String?   @map("dedupe_key")
+  lastError   String?   @map("last_error")
+  scheduledAt DateTime  @default(now()) @map("run_at")
+  startedAt   DateTime? @map("started_at")
+  finishedAt  DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
+  @@unique([type, dedupeKey])
   @@index([status, scheduledAt])
   @@index([type])
+  @@map("JobQueue")
 }
 
 model DispatchClient {
@@ -698,9 +717,9 @@ model DispatchOperationPoint {
 }
 
 model DispatchWorker {
-  id                String                  @id @default(cuid())
-  candidateId       String?                 @unique
-  candidate         Candidate?              @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  id                String                        @id @default(cuid())
+  candidateId       String?                       @unique
+  candidate         Candidate?                    @relation(fields: [candidateId], references: [id], onDelete: SetNull)
   fullName          String
   phone             String?
   documentType      String?
@@ -708,16 +727,16 @@ model DispatchWorker {
   residenceCity     String?
   residenceLocality String?
   transportMode     String?
-  contractType      DispatchContractType    @default(DIRECTO)
-  isTestProfile    Boolean                 @default(false)
+  contractType      DispatchContractType          @default(DIRECTO)
+  isTestProfile     Boolean                       @default(false)
   cvOriginalName    String?
   cvMimeType        String?
   cvData            Bytes?
-  source            String                  @default("CANDIDATE")
-  operationalStatus String                  @default("ACTIVE")
+  source            String                        @default("CANDIDATE")
+  operationalStatus String                        @default("ACTIVE")
   notes             String?
-  createdAt         DateTime                @default(now())
-  updatedAt         DateTime                @updatedAt
+  createdAt         DateTime                      @default(now())
+  updatedAt         DateTime                      @updatedAt
   cities            DispatchWorkerCity[]
   vacancies         DispatchWorkerVacancy[]
   assignments       DispatchAssignment[]
@@ -814,16 +833,16 @@ model DispatchServiceRequest {
 }
 
 model DispatchAssignment {
-  id                    String                    @id @default(cuid())
+  id                    String                         @id @default(cuid())
   serviceRequestId      String
-  serviceRequest        DispatchServiceRequest    @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
+  serviceRequest        DispatchServiceRequest         @relation(fields: [serviceRequestId], references: [id], onDelete: Cascade)
   workerId              String
-  worker                DispatchWorker            @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  status                String                    @default("ASSIGNED")
+  worker                DispatchWorker                 @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  status                String                         @default("ASSIGNED")
   notes                 String?
   createdByUsername     String?
-  createdAt             DateTime                  @default(now())
-  updatedAt             DateTime                  @updatedAt
+  createdAt             DateTime                       @default(now())
+  updatedAt             DateTime                       @updatedAt
   incidents             DispatchIncident[]
   whatsappConfirmations DispatchWhatsappConfirmation[]
   attendanceSession     DispatchAttendanceSession?
@@ -862,23 +881,23 @@ model DispatchWorkerDevice {
 }
 
 model DispatchWorkerActivation {
-  id                   String                @id @default(cuid())
-  workerId             String
-  worker               DispatchWorker        @relation(fields: [workerId], references: [id], onDelete: Restrict)
-  purpose              String
-  tokenHash            String                @unique
-  status               String                @default("PENDING")
-  expiresAt            DateTime
-  consumedAt           DateTime?
-  consumedByDeviceId   String?
-  consumedByDevice     DispatchWorkerDevice? @relation(fields: [consumedByDeviceId], references: [id], onDelete: SetNull)
-  revokedAt            DateTime?
-  revokedByUsername    String?
-  revocationReason     String?
-  createdByUsername    String?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  portalSession         DispatchWorkerPortalSession?
+  id                 String                       @id @default(cuid())
+  workerId           String
+  worker             DispatchWorker               @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  purpose            String
+  tokenHash          String                       @unique
+  status             String                       @default("PENDING")
+  expiresAt          DateTime
+  consumedAt         DateTime?
+  consumedByDeviceId String?
+  consumedByDevice   DispatchWorkerDevice?        @relation(fields: [consumedByDeviceId], references: [id], onDelete: SetNull)
+  revokedAt          DateTime?
+  revokedByUsername  String?
+  revocationReason   String?
+  createdByUsername  String?
+  createdAt          DateTime                     @default(now())
+  updatedAt          DateTime                     @updatedAt
+  portalSession      DispatchWorkerPortalSession?
 
   @@index([workerId, purpose, status])
   @@index([status, expiresAt])
@@ -887,26 +906,26 @@ model DispatchWorkerActivation {
 }
 
 model DispatchWorkerPortalSession {
-  id                  String                   @id @default(cuid())
-  workerId            String
-  worker              DispatchWorker           @relation(fields: [workerId], references: [id], onDelete: Restrict)
-  workerDeviceId      String
-  workerDevice        DispatchWorkerDevice      @relation(fields: [workerDeviceId], references: [id], onDelete: Restrict)
-  activationId        String                   @unique
-  activation          DispatchWorkerActivation @relation(fields: [activationId], references: [id], onDelete: Restrict)
-  sessionTokenHash    String                   @unique
-  status              String                   @default("ACTIVE")
-  issuedAt            DateTime                 @default(now())
-  expiresAt           DateTime
-  lastSeenAt          DateTime?
-  revokedAt           DateTime?
-  revokedByUsername   String?
-  revocationReason    String?
-  ipAddress           String?
-  userAgent           String?
-  platform            String?
-  createdAt            DateTime                 @default(now())
-  updatedAt            DateTime                 @updatedAt
+  id                String                   @id @default(cuid())
+  workerId          String
+  worker            DispatchWorker           @relation(fields: [workerId], references: [id], onDelete: Restrict)
+  workerDeviceId    String
+  workerDevice      DispatchWorkerDevice     @relation(fields: [workerDeviceId], references: [id], onDelete: Restrict)
+  activationId      String                   @unique
+  activation        DispatchWorkerActivation @relation(fields: [activationId], references: [id], onDelete: Restrict)
+  sessionTokenHash  String                   @unique
+  status            String                   @default("ACTIVE")
+  issuedAt          DateTime                 @default(now())
+  expiresAt         DateTime
+  lastSeenAt        DateTime?
+  revokedAt         DateTime?
+  revokedByUsername String?
+  revocationReason  String?
+  ipAddress         String?
+  userAgent         String?
+  platform          String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
 
   @@index([workerId, status, expiresAt])
   @@index([workerDeviceId, status, expiresAt])
@@ -987,7 +1006,7 @@ model DispatchAttendanceReview {
   actorUsername            String
   actorRole                String?
   metadata                 Json?
-  createdAt                 DateTime                  @default(now())
+  createdAt                DateTime                  @default(now())
 
   @@index([attendanceSessionId, createdAt])
   @@index([actorUsername, createdAt])
@@ -995,20 +1014,20 @@ model DispatchAttendanceReview {
 }
 
 model DispatchWhatsappConfirmation {
-  id                String             @id @default(cuid())
-  assignmentId      String
-  assignment        DispatchAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
-  serviceRequestId  String?
-  phone             String?
-  alertOwnerUsername String?
-  chatId            String?
-  providerMessageId       String?
-  confirmationMessageId String?
+  id                     String             @id @default(cuid())
+  assignmentId           String
+  assignment             DispatchAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  serviceRequestId       String?
+  phone                  String?
+  alertOwnerUsername     String?
+  chatId                 String?
+  providerMessageId      String?
+  confirmationMessageId  String?
   confirmationReceivedAt DateTime?
-  status                  String             @default("PENDING")
-  expiresAt               DateTime
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  status                 String             @default("PENDING")
+  expiresAt              DateTime
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   @@index([assignmentId])
   @@index([phone, status, expiresAt])

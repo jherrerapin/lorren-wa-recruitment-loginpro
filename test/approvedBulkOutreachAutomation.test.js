@@ -103,7 +103,7 @@ test('status y edit ejecutan en backend APROBADO -> prepare -> CONTACTADO', asyn
       assert.equal(statuses.get('candidate-test-1'), 'CONTACTADO');
       const location = response.headers.get('location') || '';
       assert.match(location, /^\/admin\/candidates\/candidate-test-1\?/);
-      assert.match(decodeURIComponent(location), /citación aceptada por Meta y movido a Contactado/);
+      assert.match(decodeURIComponent(location.replace(/\+/g, ' ')), /citación aceptada por Meta y movido a Contactado/);
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
@@ -118,8 +118,9 @@ test('si prepare falla el candidato queda APROBADO y el redirect reporta error',
     assert.equal(response.status, 302);
     assert.equal(statuses.get('candidate-test-1'), 'APROBADO');
     const location = response.headers.get('location') || '';
-    assert.match(decodeURIComponent(location), /Meta rechazó la citación de prueba/);
-    assert.match(decodeURIComponent(location), /Revisa Aprobados antes de reintentar/);
+    const decodedLocation = decodeURIComponent(location.replace(/\+/g, ' '));
+    assert.match(decodedLocation, /Meta rechazó la citación de prueba/);
+    assert.match(decodedLocation, /Revisa Aprobados antes de reintentar/);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -192,11 +193,14 @@ test('prepare conserva precondición APROBADO y finalización CONTACTADO', () =>
 test('la UI elimina Mensajes a aprobados y no introduce transporte Meta paralelo', () => {
   const html = enhanceApprovedRecruitmentUx(renderBulkHtml());
   const uxSource = readSource('src/services/approvedRecruitmentUx.js');
-  const webhookSource = readSource('src/routes/webhook.js');
+  const inboundRuntimeSource = [
+    readSource('src/routes/webhookController.js'),
+    readSource('src/workers/jobWorker.js')
+  ].join('\n');
 
   assert.doesNotMatch(html, /href=["']\/admin\/outreach\/approved["']/);
   assert.doesNotMatch(html, />Mensajes a aprobados<\/a>/);
   assert.doesNotMatch(uxSource, /graph\.facebook\.com|META_ACCESS_TOKEN|sendTemplateMessage/);
   assert.doesNotMatch(uxSource, /\b(?:alert|confirm|prompt)\s*\(/);
-  assert.doesNotMatch(webhookSource, /approvedBulkOutreachAutomation|autoOutreachOnApproval|approvalOutreachReady/);
+  assert.doesNotMatch(inboundRuntimeSource, /approvedBulkOutreachAutomation|autoOutreachOnApproval|approvalOutreachReady/);
 });
