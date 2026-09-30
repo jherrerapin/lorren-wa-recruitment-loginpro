@@ -165,10 +165,29 @@ function normalizeReplyText(value = '') {
   return String(value || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('es-CO');
 }
 
+function currentReplyIdentity(decision = {}) {
+  const directive = decision?.reply?.directive;
+  if (typeof directive === 'string' && directive.trim()) {
+    return `directive:${directive.trim()}`;
+  }
+  const text = normalizeReplyText(decision?.reply?.text);
+  return text ? `text:${text}` : null;
+}
+
 export function preventRepeatedReply(input, decision) {
-  const replyText = normalizeReplyText(decision?.reply?.text);
-  const lastBotQuestion = normalizeReplyText(input?.history?.lastBotQuestion);
-  if (!replyText || !lastBotQuestion || replyText !== lastBotQuestion) return decision;
+  const currentIdentity = currentReplyIdentity(decision);
+  const previousIdentity = typeof input?.history?.lastBotReplyIdentity === 'string'
+    ? input.history.lastBotReplyIdentity.trim()
+    : '';
+  const legacyLastQuestion = normalizeReplyText(input?.history?.lastBotQuestion);
+  const legacyCurrentText = normalizeReplyText(decision?.reply?.text);
+  const repeatsByIdentity = Boolean(
+    currentIdentity && previousIdentity && currentIdentity === previousIdentity
+  );
+  const repeatsLegacyText = Boolean(
+    !previousIdentity && legacyCurrentText && legacyLastQuestion && legacyCurrentText === legacyLastQuestion
+  );
+  if (!repeatsByIdentity && !repeatsLegacyText) return decision;
 
   return {
     ...decision,
