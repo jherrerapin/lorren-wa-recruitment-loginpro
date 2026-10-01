@@ -1,3 +1,4 @@
+import { canManageOperationalPermissions } from '../services/operationalAccess.js';
 import express from 'express';
 import ExcelJS from 'exceljs';
 import {
@@ -284,8 +285,8 @@ function requireDev(req, res, next) {
   if (userRole(req) !== 'dev') return res.status(403).json({ ok: false, message: 'Configuración disponible únicamente para DEV.' });
   return next();
 }
-function isGeneralRecruiter(req) {
-  return requestUsername(req) === 'reclutador-general';
+function canSeeProgrammingRecipientPhones(req) {
+  return userRole(req) === 'dev' || canManageOperationalPermissions(req);
 }
 export function resolveProgrammingAccess(settings = {}, source = {}) {
   const role = normalizeString(source.userRole || source.role)?.toLowerCase();
@@ -647,7 +648,7 @@ export function dispatchProgrammingNotificationsRouter(prisma) {
   router.get('/programacion/destinatarios-envio', async (req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);
     const recipients = filterProgrammingWhatsappRecipientsForRole(settings.recipients, userRole(req), settings.devContact);
-    return res.json({ ok: true, recipients, showRecipientPhones: userRole(req) === 'dev' || isGeneralRecruiter(req) });
+    return res.json({ ok: true, recipients, showRecipientPhones: canSeeProgrammingRecipientPhones(req) });
   });
   router.get('/programacion/destinatarios', requireDev, async (_req, res) => {
     const settings = await loadProgrammingWhatsappSettings(prisma);

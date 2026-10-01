@@ -381,6 +381,7 @@ function buildUserSessionPayload(user) {
     userId: user.id,
     userRole: mapDbRoleToSessionRole(user.role),
     username: user.username,
+    userDisplayName: normalizeString(user.displayName) || user.username,
     userAccessScope: user.accessScope || 'ALL',
     userAccessCity: user.scopeCity || null,
     userAccessVacancyId: user.scopeVacancyId || null,
@@ -396,6 +397,7 @@ function applySessionPayload(req, payload) {
   req.session.userId = payload.userId || null;
   req.session.userRole = payload.userRole;
   req.session.username = payload.username;
+  req.session.displayName = payload.userDisplayName || payload.username || null;
   req.session.userAccessScope = payload.userAccessScope || 'ALL';
   req.session.userAccessCity = payload.userAccessCity || null;
   req.session.userAccessVacancyId = payload.userAccessVacancyId || null;
@@ -472,6 +474,7 @@ app.use((req, res, next) => {
   req.userRole = req.session?.userRole || null;
   req.userId = req.session?.userId || null;
   req.username = req.session?.username || null;
+  req.displayName = req.session?.displayName || null;
   req.userAccessScope = req.session?.userAccessScope || 'ALL';
   req.userAccessCity = req.session?.userAccessCity || null;
   req.userAccessVacancyId = req.session?.userAccessVacancyId || null;
@@ -516,6 +519,7 @@ async function authenticateDatabaseUser(username, password) {
     select: {
       id: true,
       username: true,
+      displayName: true,
       passwordHash: true,
       role: true,
       accessScope: true,
@@ -549,6 +553,7 @@ app.post('/login', async (req, res) => {
         userId: null,
         userRole: role,
         username,
+        userDisplayName: username,
         userAccessScope: 'ALL',
         userAccessCity: null,
         userAccessVacancyId: null,
