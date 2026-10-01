@@ -17,6 +17,10 @@ import {
   resolveAttendanceBillingCycle,
   saveAttendanceBillingStartDate
 } from '../src/modules/dispatch-attendance/application/attendanceBillingCounter.js';
+import {
+  ATTENDANCE_POINT_ENABLEMENT_ACTION,
+  ATTENDANCE_POINT_ENABLEMENT_ENTITY_TYPE
+} from '../src/modules/dispatch-attendance/application/updatePointConfig.js';
 import { canConfigureAttendanceBilling } from '../src/routes/dispatchAttendanceAdmin.js';
 
 const BILLING_START = '2026-10-01';
@@ -29,6 +33,9 @@ function assignment({
   isTestProfile = false,
   status = 'CONFIRMED',
   serviceDate,
+  startTime = '08:00',
+  attendanceEnabled = true,
+  operationPointId = 'point-1',
   attendanceSession = null
 }) {
   return {
@@ -42,7 +49,12 @@ function assignment({
       documentNumber,
       isTestProfile
     },
-    serviceRequest: { serviceDate: new Date(`${serviceDate}T00:00:00.000Z`) },
+    serviceRequest: {
+      serviceDate: new Date(`${serviceDate}T00:00:00.000Z`),
+      startTime,
+      operationPointId,
+      operationPoint: { id: operationPointId, attendanceEnabled }
+    },
     attendanceSession
   };
 }
@@ -73,6 +85,7 @@ function prismaWithAssignments(assignments, { events = [] } = {}) {
           .filter((event) => (
             event.entityType === query.where.entityType
             && event.action === query.where.action
+            && (!query.where.entityId?.in || query.where.entityId.in.includes(event.entityId))
           ))
           .slice()
           .reverse()
@@ -104,13 +117,21 @@ function persistedStartEvent(dateKey) {
   };
 }
 
+function enablementEvent({ operationPointId = 'point-1', at, previous, enabled }) {
+  return {
+    id: `enablement-${at}`,
+    entityType: ATTENDANCE_POINT_ENABLEMENT_ENTITY_TYPE,
+    entityId: operationPointId,
+    action: ATTENDANCE_POINT_ENABLEMENT_ACTION,
+    createdAt: new Date(at),
+    metadata: { operationPointId, previousAttendanceEnabled: previous, attendanceEnabled: enabled }
+  };
+}
+
 test('el ciclo facturable es calendario 1 → 1 y paga el día 15', () => {
   assert.equal(ATTENDANCE_BILLING_CUT_DAY, 1);
   assert.equal(ATTENDANCE_BILLING_PAYMENT_DAY, 15);
-  const cycle = resolveAttendanceBillingCycle({
-    billingStartDate: BILLING_START,
-    now: new Date('2026-10-20T15:00:00.000Z')
-  });
+  const cycle = resolveAttendanceBillingCycle({ billingStartDate: BILLING_START, now: new Date('2026-10-20T15:00:00.000Z') });
   assert.equal(cycle.start, '2026-10-01');
   assert.equal(cycle.end, '2026-10-31');
   assert.equal(cycle.endExclusive, '2026-11-01');
@@ -122,10 +143,7 @@ test('el ciclo facturable es calendario 1 → 1 y paga el día 15', () => {
 
 test('el primero cambia al nuevo ciclo y conserva el mes anterior como cerrado', async () => {
   const prisma = prismaWithAssignments([], { events: [persistedStartEvent(BILLING_START)] });
-  const counters = await loadAttendanceBillingCounters(prisma, {
-    now: new Date('2026-11-01T15:00:00.000Z'),
-    env: {}
-  });
+  const counters = await loadAttendanceBillingCounters(prisma, { now: new Date('2026-11-01T15:00:00.000Z'), env: {} });
   assert.equal(counters.current.start, '2026-11-01');
   assert.equal(counters.current.endExclusive, '2026-12-01');
   assert.equal(counters.current.paymentDate, '2026-12-15');
@@ -136,16 +154,9 @@ test('el primero cambia al nuevo ciclo y conserva el mes anterior como cerrado',
 
 test('antes de la fecha oficial el contador queda en cero y no consulta asignaciones', async () => {
   const prisma = prismaWithAssignments([
-    assignment({
-      id: 'a1', workerId: 'w1', fullName: 'Auxiliar previo', documentNumber: 'TEST-100',
-      serviceDate: '2026-09-20', attendanceSession: { id: 's1' }
-    })
+    assignment({ id: 'a1', workerId: 'w1', fullName: 'Auxiliar previo', documentNumber: 'TEST-100', serviceDate: '2026-09-20', attendanceSession: { id: 's1' } })
   ]);
-  const counter = await loadAttendanceBillingCounter(prisma, {
-    billingStartDate: BILLING_START,
-    now: new Date('2026-09-20T20:00:00.000Z'),
-    env: {}
-  });
+  const counter = await loadAttendanceBillingCounter(prisma, { billingStartDate: BILLING_START, now: new Date('2026-09-20T20:00:00.000Z'), env: {} });
   assert.equal(counter.start, BILLING_START);
   assert.equal(counter.status, 'UPCOMING');
   assert.equal(counter.count, 0);
@@ -154,10 +165,7 @@ test('antes de la fecha oficial el contador queda en cero y no consulta asignaci
 
 test('sin fecha persistida ni variable de entorno no inventa un inicio contractual', async () => {
   const prisma = prismaWithAssignments([]);
-  const counters = await loadAttendanceBillingCounters(prisma, {
-    now: new Date('2026-09-30T20:00:00.000Z'),
-    env: {}
-  });
+  const counters = await loadAttendanceBillingCounters(prisma, { now: new Date('2026-09-30T20:00:00.000Z'), env: {} });
   assert.equal(counters.settings.configured, false);
   assert.equal(counters.settings.source, 'UNCONFIGURED');
   assert.equal(counters.current, null);
@@ -180,21 +188,12 @@ test('la configuración persistida prevalece sobre el fallback de entorno', asyn
 
 test('DEV guarda fecha oficial con auditoría e idempotencia', async () => {
   const prisma = prismaWithAssignments([]);
-  const first = await saveAttendanceBillingStartDate(prisma, {
-    billingStartDate: BILLING_START,
-    actorUsername: 'dev-prueba',
-    actorRole: 'dev'
-  });
+  const first = await saveAttendanceBillingStartDate(prisma, { billingStartDate: BILLING_START, actorUsername: 'dev-prueba', actorRole: 'dev' });
   assert.equal(first.changed, true);
   assert.equal(prisma.auditEvents.length, 1);
   assert.equal(prisma.auditEvents[0].metadata.cutDay, 1);
   assert.equal(prisma.auditEvents[0].metadata.paymentDay, 15);
-
-  const duplicate = await saveAttendanceBillingStartDate(prisma, {
-    billingStartDate: BILLING_START,
-    actorUsername: 'dev-prueba',
-    actorRole: 'dev'
-  });
+  const duplicate = await saveAttendanceBillingStartDate(prisma, { billingStartDate: BILLING_START, actorUsername: 'dev-prueba', actorRole: 'dev' });
   assert.equal(duplicate.changed, false);
   assert.equal(prisma.auditEvents.length, 1);
 });
@@ -206,21 +205,49 @@ test('solo DEV puede configurar el inicio del contador', () => {
   assert.equal(canConfigureAttendanceBilling({}), false);
 });
 
-test('cuenta una vez por auxiliar real si tuvo asistencia o ausencia confirmada', async () => {
+test('cuenta una vez por auxiliar real si tuvo asistencia o ausencia confirmada en una operación con Asistencia', async () => {
   const prisma = prismaWithAssignments([
     assignment({ id: 'a1', workerId: 'w1', fullName: 'Ana Uno', documentNumber: 'TEST-1111', serviceDate: '2026-10-03', attendanceSession: { id: 's1' } }),
     assignment({ id: 'a2', workerId: 'w1', fullName: 'Ana Uno', documentNumber: 'TEST-1111', serviceDate: '2026-10-04', attendanceSession: { id: 's2' } }),
-    assignment({ id: 'a3', workerId: 'w2', fullName: 'Bruno Dos', documentNumber: 'TEST-2222', serviceDate: '2026-10-05', status: 'CONFIRMED' })
+    assignment({ id: 'a3', workerId: 'w2', fullName: 'Bruno Dos', documentNumber: 'TEST-2222', serviceDate: '2026-10-05', status: 'CONFIRMED', attendanceEnabled: true })
   ]);
-  const counter = await loadAttendanceBillingCounter(prisma, {
-    billingStartDate: BILLING_START,
-    now: new Date('2026-10-20T15:00:00.000Z'),
-    env: {}
-  });
+  const counter = await loadAttendanceBillingCounter(prisma, { billingStartDate: BILLING_START, now: new Date('2026-10-20T15:00:00.000Z'), env: {} });
   assert.equal(counter.count, 2);
   assert.equal(counter.workers[0].serviceDays, 2);
   assert.equal(counter.workers[0].reason, 'ATTENDANCE');
   assert.equal(counter.workers[1].reason, 'CONFIRMED_ABSENCE');
+});
+
+test('Despacho sin Asistencia no convierte un CONFIRMED en facturable', async () => {
+  const prisma = prismaWithAssignments([
+    assignment({ id: 'dispatch-only', workerId: 'w1', fullName: 'Solo Despacho', documentNumber: 'TEST-500', serviceDate: '2026-10-05', status: 'CONFIRMED', attendanceEnabled: false })
+  ]);
+  const counter = await loadAttendanceBillingCounter(prisma, { billingStartDate: BILLING_START, now: new Date('2026-10-20T15:00:00.000Z'), env: {} });
+  assert.equal(counter.count, 0);
+});
+
+test('la ausencia usa el estado de Asistencia vigente a la hora del servicio, no el valor actual', async () => {
+  const disabledAfterFirstService = enablementEvent({
+    at: '2026-10-10T15:00:00.000Z',
+    previous: true,
+    enabled: false
+  });
+  const prisma = prismaWithAssignments([
+    assignment({ id: 'before-disable', workerId: 'w1', fullName: 'Antes del cambio', documentNumber: 'TEST-501', serviceDate: '2026-10-05', status: 'CONFIRMED', attendanceEnabled: false }),
+    assignment({ id: 'after-disable', workerId: 'w2', fullName: 'Después del cambio', documentNumber: 'TEST-502', serviceDate: '2026-10-15', status: 'CONFIRMED', attendanceEnabled: false })
+  ], { events: [disabledAfterFirstService] });
+  const counter = await loadAttendanceBillingCounter(prisma, { billingStartDate: BILLING_START, now: new Date('2026-10-20T15:00:00.000Z'), env: {} });
+  assert.equal(counter.count, 1);
+  assert.equal(counter.workers[0].documentNumber, 'TEST-501');
+});
+
+test('una sesión real de Asistencia conserva la facturabilidad aunque el punto luego quede deshabilitado', async () => {
+  const prisma = prismaWithAssignments([
+    assignment({ id: 'marked', workerId: 'w1', fullName: 'Marcó asistencia', documentNumber: 'TEST-503', serviceDate: '2026-10-05', attendanceEnabled: false, attendanceSession: { id: 'session-1' } })
+  ]);
+  const counter = await loadAttendanceBillingCounter(prisma, { billingStartDate: BILLING_START, now: new Date('2026-10-20T15:00:00.000Z'), env: {} });
+  assert.equal(counter.count, 1);
+  assert.equal(counter.workers[0].reason, 'ATTENDANCE');
 });
 
 test('excluye perfiles de prueba, pendientes y servicios futuros', async () => {
@@ -229,11 +256,7 @@ test('excluye perfiles de prueba, pendientes y servicios futuros', async () => {
     assignment({ id: 'assigned', workerId: 'wa', fullName: 'Asignado', documentNumber: 'TEST-333', status: 'ASSIGNED', serviceDate: '2026-10-10' }),
     assignment({ id: 'future', workerId: 'wf', fullName: 'Futuro', documentNumber: 'TEST-777', serviceDate: '2026-10-30', status: 'CONFIRMED' })
   ]);
-  const counter = await loadAttendanceBillingCounter(prisma, {
-    billingStartDate: BILLING_START,
-    now: new Date('2026-10-20T15:00:00.000Z'),
-    env: {}
-  });
+  const counter = await loadAttendanceBillingCounter(prisma, { billingStartDate: BILLING_START, now: new Date('2026-10-20T15:00:00.000Z'), env: {} });
   assert.equal(counter.count, 0);
 });
 
@@ -276,7 +299,6 @@ test('el primero genera una factura persistente e idempotente del mes cerrado', 
 test('la UI muestra ciclo 1→1 y facturas históricas sin diálogos bloqueantes', () => {
   const ui = fs.readFileSync(new URL('../src/public/attendance-admin-billing-counter.js', import.meta.url), 'utf8');
   const route = fs.readFileSync(new URL('../src/routes/dispatchAttendanceAdmin.js', import.meta.url), 'utf8');
-
   assert.match(ui, /Contador del ciclo 1 → 1/);
   assert.match(ui, /Día 1 · ciclo 1 → 1/);
   assert.match(ui, /Facturas del módulo/);
@@ -285,7 +307,6 @@ test('la UI muestra ciclo 1→1 y facturas históricas sin diálogos bloqueantes
   assert.match(ui, /START_DATE_ENDPOINT = '\/admin\/operaciones\/asistencia\/billing-counter\/start-date'/);
   assert.match(ui, /window\.setInterval\(refreshCounter, AUTO_REFRESH_MS\)/);
   assert.doesNotMatch(ui, /\b(?:window\.)?(?:alert|confirm|prompt)\s*\(/);
-
   assert.match(route, /router\.post\('\/billing-counter\/start-date', formParser/);
   assert.match(route, /if \(!canConfigureAttendanceBilling\(req\)\)/);
 });
