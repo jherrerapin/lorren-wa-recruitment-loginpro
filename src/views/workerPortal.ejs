@@ -292,18 +292,20 @@
                   <div class="assignment-mark-history-item <%= assignment.departureReportedLabel ? '' : 'pending' %>" data-assignment-history-mark="DEPARTURE"><span>Salida</span><strong><%= assignment.departureReportedLabel || 'Sin registrar' %></strong></div>
                 </div>
               </div>
-              <div class="action-grid" <%= assignment.crewAvailable && assignment.isCrewLeader ? 'data-crew-standard-actions' : '' %>>
-                <% if (!assignment.arrivalReported && !assignment.departureReported) { %>
-                  <button type="button" class="mark-button" data-assignment-id="<%= assignment.id %>" data-mark-type="ARRIVAL" <%= assignment.canRegisterArrival ? '' : 'disabled' %>><%= assignment.actionLabel %></button>
-                <% } else if (!assignment.departureReported) { %>
-                  <% if (assignment.breakActionType) { %>
-                    <button type="button" class="mark-button break" data-assignment-id="<%= assignment.id %>" data-mark-type="<%= assignment.breakActionType %>"><%= assignment.breakActionType === 'BREAK_START' ? 'Iniciar almuerzo' : 'Finalizar almuerzo' %></button>
+              <% if (!(assignment.crewAvailable && !assignment.isCrewLeader)) { %>
+                <div class="action-grid" <%= assignment.crewAvailable && assignment.isCrewLeader ? 'data-crew-standard-actions' : '' %>>
+                  <% if (!assignment.arrivalReported && !assignment.departureReported) { %>
+                    <button type="button" class="mark-button" data-assignment-id="<%= assignment.id %>" data-mark-type="ARRIVAL" <%= assignment.canRegisterArrival ? '' : 'disabled' %>><%= assignment.actionLabel %></button>
+                  <% } else if (!assignment.departureReported) { %>
+                    <% if (assignment.breakActionType) { %>
+                      <button type="button" class="mark-button break" data-assignment-id="<%= assignment.id %>" data-mark-type="<%= assignment.breakActionType %>"><%= assignment.breakActionType === 'BREAK_START' ? 'Iniciar almuerzo' : 'Finalizar almuerzo' %></button>
+                    <% } %>
+                    <button type="button" class="mark-button departure" data-assignment-id="<%= assignment.id %>" data-mark-type="DEPARTURE" <%= assignment.canRegisterDeparture ? '' : 'disabled' %>>Registrar salida</button>
+                  <% } else { %>
+                    <button type="button" class="mark-button" disabled>Jornada finalizada</button>
                   <% } %>
-                  <button type="button" class="mark-button departure" data-assignment-id="<%= assignment.id %>" data-mark-type="DEPARTURE" <%= assignment.canRegisterDeparture ? '' : 'disabled' %>>Registrar salida</button>
-                <% } else { %>
-                  <button type="button" class="mark-button" disabled>Jornada finalizada</button>
-                <% } %>
-              </div>
+                </div>
+              <% } %>
               <% if (assignment.crewAvailable && assignment.isCrewLeader && !assignment.departureReported) { %>
                 <% const crewMembers = (assignment.crewMembers || []).filter((member) => !member.isLeader); %>
                 <section class="crew-manual" data-crew-manual="<%= assignment.id %>" aria-label="Marcación manual de cuadrilla">
