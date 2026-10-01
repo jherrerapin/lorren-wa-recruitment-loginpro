@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { once } from 'node:events';
+import express from 'express';
 import vm from 'node:vm';
 import ejs from 'ejs';
+import { workerPortalRouter, WORKER_PORTAL_INSTALLATION_COOKIE_NAME } from '../src/routes/workerPortal.js';
+import { WORKER_PORTAL_SESSION_COOKIE_NAME } from '../src/modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
 import {
   loadWorkerPortalAssignmentForMark,
   loadWorkerPortalAssignments
 } from '../src/modules/dispatch-attendance/application/workerPortalAssignments.js';
-import { registerCrewMarkForLeader } from '../src/modules/dispatch-attendance/application/registerCrewArrival.js';
+import { registerCrewArrivalForLeader, registerCrewMarkForLeader } from '../src/modules/dispatch-attendance/application/registerCrewArrival.js';
 
 const NOW = new Date('2026-08-21T17:00:00.000Z');
 
@@ -296,6 +300,134 @@ test('router deriva fan-out desde la asignación CREW del encargado y no desde u
   assert.match(source, /crewMarkPublicResult\(crewResult, markType\)/);
 });
 
+test('la PWA solo marca al encargado cuando fue seleccionado, aunque llegue primero y salga último', async () => {
+  const arrivalCalls = [];
+  const reviewCalls = [];
+  const arrivalInput = (selected) => ({
+    leaderWorkerId: 'TEST-WORKER-LEADER',
+    assignmentId: 'TEST-ASSIGNMENT-LEADER',
+    manualAssignmentIds: selected,
+    idempotencyKey: `TEST-CREW-ARRIVAL-${selected.join('-')}`,
+    now: NOW,
+    captureMode: 'ONLINE_WEB',
+    latitude: 4.6,
+    longitude: -74.1,
+    accuracyMeters: 10
+  });
+  const arrivalOptions = {
+    loadCrewContextsFn: loadLeaderContext,
+    registerArrivalFn: async (_prisma, input) => {
+      arrivalCalls.push(input.assignmentId);
+      return {
+        recorded: true,
+        attendanceSession: { id: `session-${input.assignmentId}`, validationStatus: 'PENDING' },
+        validation: { validationStatus: 'PENDING' }
+      };
+    },
+    reviewAttendanceFn: async (_prisma, input) => { reviewCalls.push(input); }
+  };
+  const leaderArrival = await registerCrewArrivalForLeader(crewMembersPrisma(),
+    arrivalInput(['TEST-ASSIGNMENT-LEADER']), arrivalOptions);
+  assert.deepEqual(arrivalCalls, ['TEST-ASSIGNMENT-LEADER']);
+  assert.equal(leaderArrival.summary.results.length, 1);
+  arrivalCalls.length = 0;
+  const memberArrival = await registerCrewArrivalForLeader(crewMembersPrisma(),
+    arrivalInput(['TEST-ASSIGNMENT-A']), arrivalOptions);
+  assert.deepEqual(arrivalCalls, ['TEST-ASSIGNMENT-A']);
+  assert.equal(memberArrival.leaderResult, null);
+  assert.equal(memberArrival.summary.results.length, 1);
+  assert.ok(reviewCalls.every((call) => call.notes.includes('Marcación manual PWA:')));
+
+  const departureCalls = [];
+  const departureOptions = {
+    loadCrewContextsFn: loadLeaderContext,
+    registerDepartureFn: async (_prisma, input) => {
+      departureCalls.push(input.assignmentId);
+      return recordedMark();
+    }
+  };
+  const departureInput = (selected) => ({
+    ...arrivalInput(selected),
+    idempotencyKey: `TEST-CREW-DEPARTURE-${selected.join('-')}`,
+    markType: 'DEPARTURE'
+  });
+  await registerCrewMarkForLeader(crewMembersPrisma(), departureInput(['TEST-ASSIGNMENT-A']), departureOptions);
+  assert.deepEqual(departureCalls, ['TEST-ASSIGNMENT-A']);
+  departureCalls.length = 0;
+  await registerCrewMarkForLeader(crewMembersPrisma(), departureInput(['TEST-ASSIGNMENT-LEADER']), departureOptions);
+  assert.deepEqual(departureCalls, ['TEST-ASSIGNMENT-LEADER']);
+});
+
+test('la ruta PWA admite seleccionar al encargado y rechaza una asignación ajena', async () => {
+  const operationPoint = {
+    id: 'TEST-OP-CREW-MARKS',
+    attendanceEnabled: true,
+    attendanceLatitude: 4.6,
+    attendanceLongitude: -74.08,
+    geofenceRadiusMeters: 100,
+    maxLocationAccuracyMeters: 50
+  };
+  const calls = [];
+  const app = express();
+  app.use('/operaciones/portal', workerPortalRouter({ devAuditEvent: { create: async () => ({}) } }, {
+    repository: {},
+    nowFn: () => NOW,
+    resolveSessionFn: async () => ({ workerId: 'TEST-WORKER-LEADER', deviceId: 'TEST-DEVICE', sessionId: 'TEST-SESSION', expiresAt: new Date(NOW.getTime() + 60_000) }),
+    loadAssignmentsFn: async () => [],
+    loadBiometricAssignmentFn: async () => ({
+      id: 'TEST-ASSIGNMENT-LEADER',
+      serviceRequest: { id: 'TEST-SERVICE-CREW-MARKS', operationPoint }
+    }),
+    loadCrewPortalContextsFn: async () => [{
+      ...context({ assignmentId: 'TEST-ASSIGNMENT-LEADER', isCrewLeader: true }),
+      operationPointId: operationPoint.id,
+      members: [
+        { assignmentId: 'TEST-ASSIGNMENT-LEADER' },
+        { assignmentId: 'TEST-ASSIGNMENT-A' }
+      ]
+    }],
+    registerCrewPresenceArrivalFn: async (input) => {
+      calls.push(input);
+      return { applied: true, summary: { newlyRecordedCount: 1, results: [{ assignmentId: input.manualAssignmentIds[0], status: 'RECORDED' }] } };
+    }
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    const request = (selectedAssignmentIds, latitude = 4.6) => fetch(`${origin}/operaciones/portal/cuadrillas/marcacion-manual`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'worker-portal',
+        Cookie: `${WORKER_PORTAL_SESSION_COOKIE_NAME}=${'B'.repeat(43)}; ${WORKER_PORTAL_INSTALLATION_COOKIE_NAME}=123e4567-e89b-42d3-a456-426614174000`
+      },
+      body: JSON.stringify({
+        assignmentId: 'TEST-ASSIGNMENT-LEADER',
+        selectedAssignmentIds,
+        markType: 'ARRIVAL',
+        idempotencyKey: 'TEST-LEADER-ARRIVAL-001',
+        latitude,
+        longitude: -74.08,
+        accuracyMeters: 10
+      })
+    });
+    const own = await request(['TEST-ASSIGNMENT-LEADER']);
+    assert.equal(own.status, 200);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].manualAssignmentIds, ['TEST-ASSIGNMENT-LEADER']);
+    const foreign = await request(['TEST-ASSIGNMENT-FOREIGN']);
+    assert.equal(foreign.status, 409);
+    assert.equal(calls.length, 1);
+    const outside = await request(['TEST-ASSIGNMENT-LEADER'], 5.6);
+    assert.equal(outside.status, 409);
+    assert.equal(calls.length, 1);
+  } finally {
+    server.close();
+    await once(server, 'close');
+  }
+});
+
 test('la PWA muestra la lista autorizada y acciones secuenciales sin pedir cargar auxiliares', async () => {
   const record = assignmentRecord({ workerId: 'TEST-WORKER-LEADER', assignmentId: 'TEST-ASSIGNMENT-LEADER' });
   const [projection] = await loadWorkerPortalAssignments(portalPrisma(record), {
@@ -313,6 +445,9 @@ test('la PWA muestra la lista autorizada y acciones secuenciales sin pedir carga
   assert.equal(projection.crewMembers.length, 3);
   const template = await readFile(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
   const html = ejs.render(template, { mode: 'active', nonce: 'test', assignments: [projection], expiresAt: null });
+  assert.match(html, /Encargado Prueba/);
+  assert.match(html, /Tú · Encargado/);
+  assert.match(html, /value="TEST-ASSIGNMENT-LEADER" data-crew-member/);
   assert.match(html, /Auxiliar Prueba A/);
   assert.match(html, /Auxiliar Prueba B/);
   assert.match(html, /Pendiente de entrada/);
@@ -337,7 +472,7 @@ test('la selección PWA ofrece salida sin exigir almuerzo y respeta cada etapa',
   }));
   const actions = { hidden: true };
   const status = { textContent: '' };
-  const selectAll = { checked: false, addEventListener() {} };
+  const selectAll = { checked: false, addEventListener(_name, callback) { this.onChange = callback; } };
   const panel = {
     dataset: { crewManual: 'TEST-ASSIGNMENT-LEADER' },
     closest: () => ({ querySelector: () => ({ setAttribute() {} }) }),
@@ -370,4 +505,8 @@ test('la selección PWA ofrece salida sin exigir almuerzo y respeta cada etapa',
   arrived.dataset.breakEnd = NOW.toISOString();
   arrived.onChange();
   assert.deepEqual(visible(), ['DEPARTURE']);
+  selectAll.checked = true;
+  selectAll.onChange();
+  assert.equal(pending.checked, true);
+  assert.equal(arrived.checked, true);
 });

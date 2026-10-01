@@ -84,8 +84,8 @@
         selectAll.checked = enabled.length > 0 && enabled.every((input) => input.checked);
       }
       status.textContent = !chosen.length
-        ? 'Selecciona uno o varios auxiliares para ver su siguiente marcación.'
-        : allowed.length ? `${chosen.length} seleccionados. Elige la marcación que corresponde.`
+        ? 'Selecciona a quien vas a marcar, incluido tú si corresponde.'
+        : allowed.length ? `${chosen.length} personas seleccionadas. Elige la marcación que corresponde.`
           : 'Los seleccionados están en etapas distintas. Elige auxiliares con la misma marcación pendiente.';
     }
 
