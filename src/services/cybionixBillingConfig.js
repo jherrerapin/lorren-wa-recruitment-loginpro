@@ -30,14 +30,10 @@ function asArray(value) {
   return [value];
 }
 
-function explicitActive(value) {
-  return !['false', '0', 'off', 'inactive'].includes(String(value ?? 'true').trim().toLowerCase());
-}
-
 function normalizeModules(input = {}) {
   const names = asArray(input.moduleName);
   const values = asArray(input.moduleValue);
-  const actives = asArray(input.moduleActive);
+  const actives = new Set(asArray(input.moduleActive).map(String));
   const rows = [];
   for (let index = 0; index < Math.min(MAX_MODULES, Math.max(names.length, values.length)); index += 1) {
     const name = text(names[index], 160);
@@ -47,7 +43,7 @@ function normalizeModules(input = {}) {
       id: `fixed-${index + 1}`,
       name,
       value,
-      active: explicitActive(actives[index]),
+      active: actives.has(String(index)),
       source: 'FIXED'
     });
   }
