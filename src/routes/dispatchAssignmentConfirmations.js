@@ -1,7 +1,6 @@
 import express from 'express';
 import { prisma } from '../lib/prisma.js';
 import { buildDispatchServiceDateWhere, dispatchServiceDateKey, normalizeDispatchDateParam } from '../services/dispatchDate.js';
-import { loadUnifiedCityOptions, resolveEquivalentCityIds } from '../services/cityOptions.js';
 
 const ACTIVE_ASSIGNMENT_STATUSES = ['ASSIGNED', 'CONFIRMATION_PENDING', 'CONFIRMED'];
 const WHATSAPP_ICON_SVG = '<svg class="official-whatsapp-icon" viewBox="0 0 448 512" aria-hidden="true" focusable="false"><path fill="currentColor" d="M380.9 97.1C339 55.1 283.2 32 223.9 32 101 32 1 132 1 255c0 39.2 10.2 77.4 29.6 111L0 480l116.7-30.6c32.4 17.7 68.9 27 106.1 27h.1c122.9 0 222.9-100 222.9-223 0-59.3-23.1-115.1-65-157.3zM223 438.7h-.1c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.2 18.2 18.5-67.5-4.4-6.9c-18.5-29.4-28.3-63.3-28.3-98.1 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 54 81.2 53.9 130.5 0 101.8-82.8 184.6-184.7 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.5-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.5-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z"/></svg>';
@@ -90,6 +89,15 @@ function normalizeString(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function normalizeText(value) {
+  return normalizeString(value)?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() || '';
+}
+
+function isBogotaSiberiaName(cityName) {
+  const normalized = normalizeText(cityName);
+  return normalized === 'bogota' || normalized === 'bogota d.c.' || normalized === 'bogota dc' || normalized === 'siberia';
+}
+
 function isOpsUser(req) {
   const username = normalizeString(req.session?.username || req.username);
   return Boolean(username?.startsWith('operaciones-despacho'));
@@ -133,7 +141,13 @@ function keepServiceRequestForBoard(request, selectedDate, selectedServiceReques
 }
 
 async function resolveCompatibleOperationalCityIds(operationalCityId) {
-  return resolveEquivalentCityIds(prisma, operationalCityId);
+  if (!operationalCityId) return [];
+  const selectedCity = await prisma.city.findFirst({ where: { id: operationalCityId, usedForDispatch: true }, select: { id: true, name: true } });
+  if (!selectedCity) return [operationalCityId];
+  if (!isBogotaSiberiaName(selectedCity.name)) return [selectedCity.id];
+  const cities = await prisma.city.findMany({ where: { usedForDispatch: true }, select: { id: true, name: true } });
+  const compatibleIds = cities.filter((city) => isBogotaSiberiaName(city.name)).map((city) => city.id);
+  return compatibleIds.length ? compatibleIds : [selectedCity.id];
 }
 
 function buildOperationalCityFilter(compatibleOperationalCityIds) {
@@ -142,7 +156,7 @@ function buildOperationalCityFilter(compatibleOperationalCityIds) {
 }
 
 async function loadDispatchCities() {
-  return loadUnifiedCityOptions(prisma);
+  return prisma.city.findMany({ where: { usedForDispatch: true }, orderBy: { name: 'asc' } });
 }
 
 function compactFinalizedAssignmentCard(cardHtml) {
