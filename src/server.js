@@ -24,8 +24,8 @@ import { workerPortalRouter } from './routes/workerPortal.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 import { lorenV2Router } from './routes/lorenV2.js';
 import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
-import { cybionixBillingAdminRouter } from './routes/cybionixBillingAdmin.js';
-import { cybionixWhatsappWebhookRouter } from './routes/cybionixWhatsappWebhook.js';
+import { lorrenBillingAdminRouter } from './routes/lorrenBillingAdmin.js';
+import { lorrenWhatsappWebhookRouter } from './routes/lorrenWhatsappWebhook.js';
 import { adminHtmlBridgeMiddleware, dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { attendanceBillingMutationGuard } from './modules/dispatch-attendance/application/attendanceBillingEligibility.js';
 import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
@@ -353,11 +353,11 @@ function injectLorenV2NavbarLink(html, req) {
   );
 }
 
-function injectCybionixBillingNavbarLink(html, req) {
+function injectLorrenBillingNavbarLink(html, req) {
   if (typeof html !== 'string') return html;
   if ((req.session?.userRole || req.userRole) !== 'dev') return html;
-  if (html.includes('href="/admin/cybionix-billing"')) return html;
-  const styledLink = '<a class="admin-module-standalone-link" href="/admin/cybionix-billing" data-standalone-link="cybionix-billing"><span>Facturación Cybionix</span></a>';
+  if (html.includes('href="/admin/lorren-billing"')) return html;
+  const styledLink = '<a class="admin-module-standalone-link" href="/admin/lorren-billing" data-standalone-link="lorren-billing"><span>Facturación Lórren</span></a>';
   const moduleNavMarker = '</div>\n    <span class="spacer"></span>';
   if (html.includes('data-primary-nav-group="true"') && html.includes(moduleNavMarker)) {
     return html.replace(moduleNavMarker, `      ${styledLink}\n    </div>\n    <span class="spacer"></span>`);
@@ -410,7 +410,7 @@ app.use((req, res, next) => {
     let output = body;
     if (shouldReplaceLorenV2UiLabel(output, res)) {
       output = replaceLorenV2UiLabel(output);
-      output = injectCybionixBillingNavbarLink(output, req);
+      output = injectLorrenBillingNavbarLink(output, req);
     }
     return originalSend(output);
   };
@@ -438,7 +438,7 @@ app.use((req, res, next) => {
 app.use(morgan('combined'));
 app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
 app.use('/webhook/dispatch', dispatchWhatsappWebhookRouter(prisma));
-app.use('/webhook/cybionix', cybionixWhatsappWebhookRouter(prisma));
+app.use('/webhook/lorren', lorrenWhatsappWebhookRouter(prisma));
 
 const webhookJsonParser = createWebhookJsonParser();
 
@@ -708,7 +708,7 @@ app.use('/admin', (req, res, next) => {
   }
   return next();
 });
-app.use('/admin/cybionix-billing', wrapAsyncRouter(cybionixBillingAdminRouter(prisma)));
+app.use('/admin/lorren-billing', wrapAsyncRouter(lorrenBillingAdminRouter(prisma)));
 app.use('/admin', wrapAsyncRouter(adminCandidateGlobalExportRouter(prisma)));
 app.use('/admin', wrapAsyncRouter(interviewOutreachManagementRouter(prisma)));
 app.use('/admin', adminRouter(prisma));
