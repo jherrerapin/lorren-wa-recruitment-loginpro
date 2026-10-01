@@ -27,6 +27,7 @@ import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
 import { cybionixBillingAdminRouter } from './routes/cybionixBillingAdmin.js';
 import { cybionixWhatsappWebhookRouter } from './routes/cybionixWhatsappWebhook.js';
 import { adminHtmlBridgeMiddleware, dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
+import { attendanceBillingMutationGuard } from './modules/dispatch-attendance/application/attendanceBillingEligibility.js';
 import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
@@ -356,11 +357,13 @@ function injectCybionixBillingNavbarLink(html, req) {
   if (typeof html !== 'string') return html;
   if ((req.session?.userRole || req.userRole) !== 'dev') return html;
   if (html.includes('href="/admin/cybionix-billing"')) return html;
+  const styledLink = '<a class="admin-module-standalone-link" href="/admin/cybionix-billing" data-standalone-link="cybionix-billing"><span>Facturación Cybionix</span></a>';
+  const moduleNavMarker = '</div>\n    <span class="spacer"></span>';
+  if (html.includes('data-primary-nav-group="true"') && html.includes(moduleNavMarker)) {
+    return html.replace(moduleNavMarker, `      ${styledLink}\n    </div>\n    <span class="spacer"></span>`);
+  }
   if (!html.includes('<span class="spacer"></span>')) return html;
-  return html.replace(
-    '<span class="spacer"></span>',
-    '  <a href="/admin/cybionix-billing">Facturación Cybionix</a>\n  <span class="spacer"></span>'
-  );
+  return html.replace('<span class="spacer"></span>', `  ${styledLink}\n  <span class="spacer"></span>`);
 }
 
 function mapDbRoleToSessionRole(role) {
@@ -451,6 +454,7 @@ app.use(adminHtmlBridgeMiddleware);
 app.use(adminSessionMiddleware);
 
 app.use(dispatchAuditMiddleware(prisma));
+app.use(attendanceBillingMutationGuard(prisma));
 
 app.use((req, res, next) => {
   req.userRole = req.session?.userRole || null;
