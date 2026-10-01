@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
+  DEV_ATTENDANCE_LOCATION_BYPASS_MARKER,
   assertAttendanceOperationGeofence,
   resolveAttendanceOperationGeofence
 } from '../src/modules/dispatch-attendance/application/attendanceGeofenceResolver.js';
@@ -28,6 +29,28 @@ function prismaWithOperations(operations = []) {
       async findMany(query) {
         queries.push(query);
         return operations.map((item) => ({ ...item }));
+      }
+    }
+  };
+}
+
+function prismaWithDevRequest({ role = 'DEV', source = 'INTERNAL' } = {}) {
+  return {
+    dispatchAssignment: {
+      async findUnique() {
+        return {
+          serviceRequest: {
+            id: 'request-dev',
+            source,
+            notes: `Prueba fuera de sede\n${DEV_ATTENDANCE_LOCATION_BYPASS_MARKER}`,
+            createdByUsername: 'dev-user'
+          }
+        };
+      }
+    },
+    appUser: {
+      async findUnique() {
+        return { role };
       }
     }
   };
@@ -124,6 +147,45 @@ test('la operación asignada conserva prioridad aunque la precisión reportada s
   assert.equal(prisma.queries.length, 0);
 });
 
+test('DEV puede desactivar la validación geográfica solo para una solicitud marcada explícitamente', async () => {
+  const prisma = prismaWithDevRequest();
+  const result = await resolveAttendanceOperationGeofence(
+    prisma,
+    source,
+    { assignmentId: 'assignment-dev', latitude: 9, longitude: 9, accuracyMeters: 15 }
+  );
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.errorCode, null);
+  assert.equal(result.locationValidationBypassed, true);
+  assert.equal(result.operationPointId, 'operation-source');
+});
+
+test('el marcador de bypass no funciona si la solicitud fue creada por un usuario que no es DEV', async () => {
+  const prisma = prismaWithDevRequest({ role: 'ADMIN' });
+  const result = await resolveAttendanceOperationGeofence(
+    prisma,
+    source,
+    { assignmentId: 'assignment-admin', latitude: 9, longitude: 9, accuracyMeters: 15 }
+  );
+
+  assert.equal(result.accepted, false);
+  assert.equal(result.errorCode, 'attendance_outside_operation_range');
+  assert.equal(result.locationValidationBypassed, undefined);
+});
+
+test('solicitudes DEV_TEST aceptan el bypass porque su ruta de creación ya está restringida a DEV', async () => {
+  const prisma = prismaWithDevRequest({ role: 'ADMIN', source: 'DEV_TEST' });
+  const result = await resolveAttendanceOperationGeofence(
+    prisma,
+    source,
+    { assignmentId: 'assignment-dev-test', latitude: 9, longitude: 9, accuracyMeters: 15 }
+  );
+
+  assert.equal(result.accepted, true);
+  assert.equal(result.locationValidationBypassed, true);
+});
+
 test('la marcación grupal puede desactivar explícitamente la excepción entre operaciones', async () => {
   const prisma = prismaWithOperations([target]);
   const result = await resolveAttendanceOperationGeofence(
@@ -156,6 +218,14 @@ test('el Portal usa la misma autoridad y mantiene cuadrillas restringidas a su o
   assert.match(portal, /allowCrossOperation:\s*!requestedCrewGroup/);
   assert.match(portal, /allowCrossOperation:\s*false/);
   assert.match(portal, /Debes estar dentro del rango de una operación registrada para marcar asistencia/);
+});
+
+test('la creación de solicitudes muestra a DEV el control explícito de ubicación', () => {
+  const view = fs.readFileSync('src/views/operacionesSolicitudes.ejs', 'utf8');
+  assert.match(view, /id="requireAttendanceLocation"/);
+  assert.match(view, /Validar ubicación al marcar asistencia/);
+  assert.match(view, /DEV:ATTENDANCE_LOCATION_BYPASS/);
+  assert.match(view, /role === 'dev'/);
 });
 
 test('Prisma y la migración conservan flag por operación y trazabilidad de la ubicación usada', () => {
