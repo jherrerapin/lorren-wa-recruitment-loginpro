@@ -37,6 +37,7 @@ jobs:
 
           replace('src/routes/admin.js', 'La administración de usuarios solo está disponible para reclutador-general y DEV.', 'La administración de usuarios solo está disponible para DEV.')
           replace('src/routes/admin.js', "return user.username === 'reclutador-general' || isEnvironmentAdminProfile(user);", 'return isEnvironmentAdminProfile(user);')
+          replace('src/routes/admin.js', "  const hiddenUsernames = ['reclutador-general'];\n  const visibilityWhere = accessContext.isDev\n    ? {}\n    : { username: { notIn: [...new Set(hiddenUsernames)] } };", "  const visibilityWhere = {};")
 
           replace('src/routes/locations.js', "function isProtectedRecruiterProfile(user = {}) {\n  return user.username === 'reclutador-general';\n}\n\n", '')
           replace('src/routes/locations.js', '  return !isProtectedRecruiterProfile(user);', '  return true;')
@@ -58,6 +59,7 @@ jobs:
 
           replace('src/views/users.ejs', 'Los permisos adicionales solo pueden ser concedidos por DEV o reclutador-general.', 'Los permisos generales de cuenta solo pueden ser administrados por DEV.')
           replace('src/views/users.ejs', 'Puedes crear usuarios dentro de tu alcance. Los permisos adicionales del panel los asigna DEV o reclutador-general.', 'Los permisos operativos se administran mediante el rol Supervisor y sus capacidades asignadas.')
+          replace('src/views/users.ejs', 'Solo DEV y reclutador-general pueden modificar estos permisos.', 'Solo DEV puede modificar estos permisos generales de cuenta.')
 
           replace('src/services/dispatchAuditMiddleware.js', 'Los permisos adicionales solo pueden ser concedidos por DEV o reclutador-general.', 'Los permisos generales de cuenta solo pueden ser administrados por DEV.')
           replace('src/services/dispatchAuditMiddleware.js', 'Puedes crear usuarios dentro de tu alcance. Los permisos adicionales del panel los asigna DEV o reclutador-general.', 'Los permisos operativos se administran mediante el rol Supervisor y sus capacidades asignadas.')
