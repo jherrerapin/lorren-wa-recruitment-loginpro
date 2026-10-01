@@ -31,6 +31,12 @@ export function isBogotaSiberiaCityName(value) {
   return ['bogota', 'bogota d.c.', 'bogota dc', 'siberia'].includes(normalizeCityKey(value));
 }
 
+export function canonicalOperationalBranchName(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) return null;
+  return isBogotaSiberiaCityName(normalized) ? 'Bogotá' : normalized;
+}
+
 export function operationalCityNamesEquivalent(left, right) {
   const leftKey = normalizeCityKey(left);
   const rightKey = normalizeCityKey(right);
@@ -107,6 +113,19 @@ function preferCanonicalCity(current, candidate) {
   return current;
 }
 
+function preferOperationalBranchCity(current, candidate) {
+  if (isBogotaSiberiaCityName(current?.name) && isBogotaSiberiaCityName(candidate?.name)) {
+    const currentIsSiberia = normalizeCityKey(current?.name) === 'siberia';
+    const candidateIsSiberia = normalizeCityKey(candidate?.name) === 'siberia';
+    if (currentIsSiberia !== candidateIsSiberia) return currentIsSiberia ? candidate : current;
+  }
+  return preferCanonicalCity(current, candidate);
+}
+
+function cityEquivalentIds(city) {
+  return normalizeStringList(city?.equivalentCityIds?.length ? city.equivalentCityIds : city?.id);
+}
+
 export function dedupeCitiesByNormalizedName(cities = []) {
   const byNormalizedName = new Map();
 
@@ -122,12 +141,40 @@ export function dedupeCitiesByNormalizedName(cities = []) {
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
 }
 
+export function projectOperationalBranchOptions(cities = []) {
+  const byBranch = new Map();
+
+  for (const city of dedupeCitiesByNormalizedName(cities)) {
+    const branchName = canonicalOperationalBranchName(city?.name);
+    const branchKey = normalizeCityKey(branchName);
+    if (!branchKey) continue;
+    const current = byBranch.get(branchKey);
+    if (!current) {
+      byBranch.set(branchKey, {
+        ...city,
+        name: branchName,
+        equivalentCityIds: cityEquivalentIds(city)
+      });
+      continue;
+    }
+    const preferred = preferOperationalBranchCity(current, city);
+    byBranch.set(branchKey, {
+      ...preferred,
+      name: branchName,
+      equivalentCityIds: [...new Set([...cityEquivalentIds(current), ...cityEquivalentIds(city)])]
+    });
+  }
+
+  return [...byBranch.values()]
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+}
+
 export async function loadUnifiedCityOptions(prisma) {
   const cities = await prisma.city.findMany({
     where: { NOT: { id: { startsWith: 'city_' } } },
     orderBy: { name: 'asc' }
   });
-  return dedupeCitiesByNormalizedName(cities);
+  return projectOperationalBranchOptions(cities);
 }
 
 async function loadUserTerritorialAccess(prisma, source = {}) {
@@ -175,6 +222,14 @@ async function configuredCityNamesForAccess(prisma, territorialAccess, accessSco
   return vacancyCity ? [vacancyCity] : configuredCityNames;
 }
 
+function optionContainsRequestedId(city, requestedCityIds) {
+  return cityEquivalentIds(city).some((id) => requestedCityIds.includes(id));
+}
+
+function flattenedCityIds(cities = []) {
+  return [...new Set(cities.flatMap((city) => cityEquivalentIds(city)))];
+}
+
 /**
  * Única proyección territorial para módulos operativos.
  *
@@ -185,13 +240,14 @@ async function configuredCityNamesForAccess(prisma, territorialAccess, accessSco
  */
 export async function resolveUserCityScope(prisma, source = {}, options = {}) {
   const allCities = await loadUnifiedCityOptions(prisma);
+  const allCityIds = flattenedCityIds(allCities);
   const appRole = normalizeString(sourceValue(source, 'userRole') || sourceValue(source, 'role'))?.toLowerCase();
   const requestedCityIds = normalizeStringList(options.requestedCityIds);
   const selectionExplicit = options.selectionExplicit === true;
 
   if (appRole === 'dev') {
     const selectedCities = selectionExplicit
-      ? allCities.filter((city) => requestedCityIds.includes(city.id))
+      ? allCities.filter((city) => optionContainsRequestedId(city, requestedCityIds))
       : allCities;
     return {
       restricted: false,
@@ -199,11 +255,11 @@ export async function resolveUserCityScope(prisma, source = {}, options = {}) {
       accessScope: 'ALL',
       configuredCityNames: [],
       allowedCities: allCities,
-      allowedCityIds: allCities.map((city) => city.id),
+      allowedCityIds: allCityIds,
       selectedCities,
-      selectedCityIds: selectedCities.map((city) => city.id),
+      selectedCityIds: flattenedCityIds(selectedCities),
       selectedCityNames: selectedCities.map((city) => city.name),
-      unauthorizedRequestedCityIds: requestedCityIds.filter((id) => !allCities.some((city) => city.id === id))
+      unauthorizedRequestedCityIds: requestedCityIds.filter((id) => !allCityIds.includes(id))
     };
   }
 
@@ -229,10 +285,10 @@ export async function resolveUserCityScope(prisma, source = {}, options = {}) {
   const allowedCities = restricted
     ? allCities.filter((city) => configuredCityNames.some((name) => operationalCityNamesEquivalent(name, city.name)))
     : allCities;
-  const allowedCityIds = allowedCities.map((city) => city.id);
+  const allowedCityIds = flattenedCityIds(allowedCities);
   const allowedIdSet = new Set(allowedCityIds);
   const selectedCities = selectionExplicit
-    ? allowedCities.filter((city) => requestedCityIds.includes(city.id))
+    ? allowedCities.filter((city) => optionContainsRequestedId(city, requestedCityIds))
     : allowedCities;
 
   return {
@@ -243,7 +299,7 @@ export async function resolveUserCityScope(prisma, source = {}, options = {}) {
     allowedCities,
     allowedCityIds,
     selectedCities,
-    selectedCityIds: selectedCities.map((city) => city.id),
+    selectedCityIds: flattenedCityIds(selectedCities),
     selectedCityNames: selectedCities.map((city) => city.name),
     unauthorizedRequestedCityIds: requestedCityIds.filter((id) => !allowedIdSet.has(id))
   };
@@ -258,14 +314,13 @@ export async function resolveEquivalentCityIds(prisma, cityId) {
   });
   if (!selectedCity) return [cityId];
 
-  const selectedKey = normalizeCityKey(selectedCity.name);
   const cities = await prisma.city.findMany({
     where: { NOT: { id: { startsWith: 'city_' } } },
     select: { id: true, name: true }
   });
 
   const equivalentIds = cities
-    .filter((city) => normalizeCityKey(city.name) === selectedKey)
+    .filter((city) => operationalCityNamesEquivalent(city.name, selectedCity.name))
     .map((city) => city.id);
 
   return equivalentIds.length ? equivalentIds : [selectedCity.id];
