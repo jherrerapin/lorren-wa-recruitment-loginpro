@@ -3,10 +3,18 @@ import {
   isAttendanceInsideGeofence
 } from '../domain/attendanceDistance.js';
 
+export const DEV_ATTENDANCE_LOCATION_BYPASS_MARKER = '[DEV:ATTENDANCE_LOCATION_BYPASS]';
+
 function finiteNumber(value, { min = -Infinity, max = Infinity } = {}) {
   if (value === undefined || value === null || value === '' || typeof value === 'boolean') return null;
   const number = Number(value);
   return Number.isFinite(number) && number >= min && number <= max ? number : null;
+}
+
+function normalizeString(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized.length ? normalized : null;
 }
 
 function operationId(point) {
@@ -66,6 +74,45 @@ function acceptance(signals, sourceOperationPointId) {
   };
 }
 
+async function loadServiceRequestForLocationPolicy(prisma, input = {}) {
+  const serviceRequestId = normalizeString(input.serviceRequestId);
+  if (serviceRequestId && prisma?.dispatchServiceRequest?.findUnique) {
+    return prisma.dispatchServiceRequest.findUnique({
+      where: { id: serviceRequestId },
+      select: { id: true, source: true, notes: true, createdByUsername: true }
+    });
+  }
+
+  const assignmentId = normalizeString(input.assignmentId);
+  if (!assignmentId || !prisma?.dispatchAssignment?.findUnique) return null;
+  const assignment = await prisma.dispatchAssignment.findUnique({
+    where: { id: assignmentId },
+    select: {
+      serviceRequest: {
+        select: { id: true, source: true, notes: true, createdByUsername: true }
+      }
+    }
+  });
+  return assignment?.serviceRequest || null;
+}
+
+async function devLocationBypassEnabled(prisma, input = {}) {
+  const request = await loadServiceRequestForLocationPolicy(prisma, input);
+  const notes = String(request?.notes || '');
+  if (!notes.includes(DEV_ATTENDANCE_LOCATION_BYPASS_MARKER)) return false;
+
+  // DEV_TEST solo puede nacer desde rutas protegidas para DEV.
+  if (request?.source === 'DEV_TEST') return true;
+
+  const username = normalizeString(request?.createdByUsername);
+  if (!username || !prisma?.appUser?.findUnique) return false;
+  const creator = await prisma.appUser.findUnique({
+    where: { username },
+    select: { role: true }
+  });
+  return String(creator?.role || '').toUpperCase() === 'DEV';
+}
+
 function requireOperationLookup(prisma) {
   if (!prisma?.dispatchOperationPoint || typeof prisma.dispatchOperationPoint.findMany !== 'function') {
     throw new Error('attendance_geofence_operation_lookup_contract_invalid');
@@ -81,6 +128,17 @@ export async function resolveAttendanceOperationGeofence(
 ) {
   const sourceOperationPointId = operationId(sourceOperationPoint);
   const sourceSignals = evaluatePoint(sourceOperationPoint, input);
+
+  if (await devLocationBypassEnabled(prisma, input)) {
+    return {
+      ...sourceSignals,
+      accepted: true,
+      errorCode: null,
+      crossOperation: false,
+      locationValidationBypassed: true
+    };
+  }
+
   const sourceAcceptance = acceptance(sourceSignals, sourceOperationPointId);
 
   // La operación de la asignación siempre tiene prioridad si la ubicación cae dentro de ella.
