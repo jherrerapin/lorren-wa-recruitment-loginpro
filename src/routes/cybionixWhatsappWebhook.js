@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import express from 'express';
-import { cybionixWebhookVerification, getCybionixWhatsappConfig } from '../services/cybionixWhatsappClient.js';
-import { resolveCybionixAttendanceApproval } from '../services/cybionixBillingWorkflow.js';
+import { lorrenWebhookVerification, getLorrenWhatsappConfig } from '../services/cybionixWhatsappClient.js';
+import { resolveLorrenAttendanceApproval } from '../services/cybionixBillingWorkflow.js';
 
-const DECISION_PATTERN = /^cybionix_billing:(approve|reject):(ASIS-\d{6})$/i;
+const DECISION_PATTERN = /^lorren_billing:(approve|reject):(ASIS-\d{6})$/i;
 
 function secureEqual(left, right) {
   const a = Buffer.from(String(left || ''), 'utf8');
@@ -36,13 +36,13 @@ function replyPayload(message = {}) {
     || null;
 }
 
-export function cybionixWhatsappWebhookRouter(prisma) {
+export function lorrenWhatsappWebhookRouter(prisma) {
   const router = express.Router();
   const parser = express.raw({ type: 'application/json', limit: '256kb' });
 
-  router.get('/', cybionixWebhookVerification);
+  router.get('/', lorrenWebhookVerification);
   router.post('/', parser, async (req, res) => {
-    const config = getCybionixWhatsappConfig();
+    const config = getLorrenWhatsappConfig();
     const payload = verifiedPayload(req, config);
     if (!payload || !config.phoneNumberId) return res.sendStatus(401);
     res.sendStatus(200);
@@ -51,13 +51,13 @@ export function cybionixWhatsappWebhookRouter(prisma) {
       const match = DECISION_PATTERN.exec(String(replyPayload(message) || '').trim());
       if (!match) continue;
       try {
-        await resolveCybionixAttendanceApproval(prisma, {
+        await resolveLorrenAttendanceApproval(prisma, {
           invoiceNumber: match[2].toUpperCase(),
           decision: match[1].toLowerCase() === 'approve' ? 'APPROVE' : 'REJECT',
           supervisorPhone: message.from || null
         });
       } catch (error) {
-        console.error('[CYBIONIX_BILLING_WEBHOOK_FAILED]', {
+        console.error('[LORREN_BILLING_WEBHOOK_FAILED]', {
           invoiceNumber: match[2],
           code: error?.message || 'unknown'
         });
