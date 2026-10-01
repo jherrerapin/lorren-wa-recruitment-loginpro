@@ -1,5 +1,8 @@
 import { prisma } from '../lib/prisma.js';
-import { ensureAttendanceBillingInvoice } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
+import {
+  ensureAttendanceBillingInvoice,
+  loadAttendanceBillingCounter
+} from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
 import {
   deliverCybionixAccountCharge,
   deliverCybionixAttendanceApproval,
@@ -8,7 +11,7 @@ import {
   loadCybionixApprovalState
 } from '../services/cybionixBillingWorkflow.js';
 
-const DEFAULT_POLL_MS = 60 * 60 * 1000;
+const DEFAULT_POLL_MS = 60 * 1000;
 
 function pollMs(env = process.env) {
   const raw = Number(env.ATTENDANCE_BILLING_WORKER_POLL_MS);
@@ -17,7 +20,13 @@ function pollMs(env = process.env) {
 
 export async function runAttendanceBillingInvoiceSweep(options = {}) {
   const prismaClient = options.prismaClient || prisma;
-  const invoiceResult = await ensureAttendanceBillingInvoice(prismaClient, { now: options.now || new Date() });
+  const now = options.now || new Date();
+
+  // Mantiene congelada la elegibilidad del ciclo vigente aunque nadie tenga abierto el panel.
+  // La hora exacta del servicio es el punto de no retorno comercial.
+  await loadAttendanceBillingCounter(prismaClient, { now });
+
+  const invoiceResult = await ensureAttendanceBillingInvoice(prismaClient, { now });
   if (!invoiceResult.invoice) {
     return { invoice: invoiceResult, approval: null, accountDelivery: null };
   }
