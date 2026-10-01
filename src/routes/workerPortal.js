@@ -563,6 +563,8 @@ function crewPresencePublicError(error) {
     || code === 'crew_group_arrival_manual_leader_arrival_required'
     || code === 'crew_group_mark_leader_presence_required'
     || code === 'crew_group_mark_leader_not_assigned'
+    || code === 'crew_group_mark_manual_target_invalid'
+    || code === 'crew_group_mark_manual_target_not_assigned'
   ) return [409, code];
   return [400, code];
 }
@@ -1035,6 +1037,103 @@ export function workerPortalRouter(prisma, options = {}) {
       const [status, code] = crewPresencePublicError(error);
       if (status >= 500) console.error('[WORKER_PORTAL_CREW_PRESENCE_CREDENTIAL_FAILED]', { code });
       return strictError(res, status, code, 'No fue posible preparar este teléfono para asistencia.');
+    }
+  });
+
+  // Contingencia web: el encargado elige integrantes asignados; el servidor
+  // comprueba sesión, configuración y geocerca antes de delegar cada marca.
+  router.post('/cuadrillas/marcacion-manual', biometricJson, async (req, res) => {
+    if (!requirePortalRequest(req, res)) return;
+    try {
+      const now = nowFn();
+      const portalSession = await resolvePortalSession(req, now);
+      if (!portalSession) return strictError(res, 401, 'portal_session_required', 'Tu sesión del portal venció.');
+      const assignmentId = normalizedString(req.body?.assignmentId, 160);
+      const markType = normalizedString(req.body?.markType, 20);
+      const idempotencyKey = normalizedString(req.body?.idempotencyKey, 100);
+      const selected = req.body?.selectedAssignmentIds;
+      if (!assignmentId || !BIOMETRIC_MARK_TYPES.has(markType) || !/^[A-Za-z0-9:_-]{8,100}$/.test(idempotencyKey)
+        || !Array.isArray(selected) || selected.length < 1 || selected.length > 100
+        || selected.some((id) => typeof id !== 'string' || !id || id.length > 160)
+        || new Set(selected).size !== selected.length) {
+        return strictError(res, 400, 'crew_manual_mark_invalid', 'Selecciona al menos un auxiliar válido.');
+      }
+      const assignment = await loadBiometricAssignmentFn(portalSession.workerId, assignmentId, now);
+      if (!assignment || assignment.serviceRequest?.operationPoint?.attendanceEnabled !== true) {
+        return strictError(res, 409, 'assignment_not_available', 'La operación no está disponible para marcar.');
+      }
+      const contexts = await loadCrewPortalContextsFn({ workerId: portalSession.workerId });
+      const context = (Array.isArray(contexts) ? contexts : []).find((item) => item?.assignmentId === assignmentId);
+      if (!context || context.mode !== 'CREW' || context.isCrewLeader !== true || context.crewAvailable !== true
+        || context.serviceRequestId !== assignment.serviceRequest?.id
+        || context.operationPointId !== assignment.serviceRequest?.operationPoint?.id) {
+        return strictError(res, 409, 'crew_group_not_available', 'La cuadrilla no está habilitada para esta operación.');
+      }
+      const validIds = new Set((context.members || []).map((member) => member.assignmentId));
+      if (selected.some((id) => !validIds.has(id) || id === assignmentId)) {
+        return strictError(res, 409, 'crew_manual_member_not_assigned', 'La selección contiene un auxiliar ajeno a esta cuadrilla.');
+      }
+      const location = await requireStrictAttendanceLocation(
+        prisma, res, assignment.serviceRequest.operationPoint, req.body, { allowCrossOperation: true }
+      );
+      if (!location) return;
+      const common = {
+        leaderWorkerId: portalSession.workerId,
+        assignmentId,
+        manualAssignmentIds: selected,
+        idempotencyKey,
+        now,
+        captureMode: ONLINE_WEB_CAPTURE_MODE,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        accuracyMeters: location.accuracyMeters,
+        persistentStorageAvailable: true,
+        presenceValidated: false,
+        ipAddress: normalizedString(req.ip, 120),
+        userAgent: normalizedString(req.get?.('user-agent'), 500)
+      };
+      const result = markType === 'ARRIVAL'
+        ? await registerCrewPresenceArrivalFn(common)
+        : await registerCrewPresenceMarkFn({ ...common, markType });
+      if (!result?.applied || !result.summary) {
+        return strictError(res, 409, 'crew_manual_mark_not_available', 'No fue posible completar la marcación de la cuadrilla.');
+      }
+      let auditRecorded = true;
+      try {
+        await prisma.devAuditEvent.create({
+          data: {
+            entityType: 'DISPATCH_CREW_MANUAL_MARK',
+            entityId: idempotencyKey,
+            entityLabel: `service:${context.serviceRequestId}`,
+            action: 'CREW_MANUAL_MARK_RECORDED',
+            actorUsername: `worker-portal:${portalSession.workerId}`,
+            actorRole: 'crew-leader',
+            actorSource: 'worker-portal-pwa',
+            ipAddress: normalizedString(req.ip, 120),
+            userAgent: normalizedString(req.get?.('user-agent'), 500),
+            metadata: {
+              assignmentId,
+              serviceRequestId: context.serviceRequestId,
+              markType,
+              capturedOperationPointId: location.operationPointId,
+              crossOperation: location.crossOperation,
+              selectedAssignmentIds: selected,
+              results: (result.summary.results || []).map((item) => ({
+                assignmentId: item.assignmentId,
+                status: item.status
+              }))
+            }
+          }
+        });
+      } catch {
+        auditRecorded = false;
+        console.error('[WORKER_PORTAL_CREW_WEB_MANUAL_AUDIT_FAILED]');
+      }
+      return res.status(200).json({ ok: true, markType, summary: result.summary, auditRecorded });
+    } catch (error) {
+      const [status, code] = crewPresencePublicError(error);
+      if (status >= 500) console.error('[WORKER_PORTAL_CREW_WEB_MANUAL_FAILED]', { code });
+      return strictError(res, status, code, 'No fue posible registrar la marcación manual.');
     }
   });
 
