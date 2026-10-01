@@ -97,10 +97,10 @@ function browserExecutable() {
   return candidates.find((candidate) => existsSync(candidate)) || null;
 }
 
-export async function cybionixHtmlToPdfBuffer(html) {
+export async function lorrenHtmlToPdfBuffer(html) {
   const executablePath = browserExecutable();
-  if (!executablePath) throw new Error('cybionix_billing_pdf_browser_unavailable');
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cybionix-billing-'));
+  if (!executablePath) throw new Error('lorren_billing_pdf_browser_unavailable');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'lorren-billing-'));
   const htmlPath = path.join(dir, 'document.html');
   const pdfPath = path.join(dir, 'document.pdf');
   await fs.writeFile(htmlPath, html, 'utf8');
@@ -127,7 +127,7 @@ export function buildAttendanceInvoiceHtml(invoice = {}) {
 }
 
 export async function buildAttendanceInvoicePdfBuffer(invoice) {
-  return cybionixHtmlToPdfBuffer(buildAttendanceInvoiceHtml(invoice));
+  return lorrenHtmlToPdfBuffer(buildAttendanceInvoiceHtml(invoice));
 }
 
 export function buildAccountChargeHtml(account = {}) {
@@ -151,5 +151,5 @@ export function buildAccountChargeHtml(account = {}) {
 }
 
 export async function buildAccountChargePdfBuffer(account) {
-  return cybionixHtmlToPdfBuffer(buildAccountChargeHtml(account));
+  return lorrenHtmlToPdfBuffer(buildAccountChargeHtml(account));
 }
