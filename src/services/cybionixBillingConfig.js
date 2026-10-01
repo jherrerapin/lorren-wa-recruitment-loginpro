@@ -1,6 +1,6 @@
-export const CYBIONIX_BILLING_CONFIG_ENTITY_TYPE = 'CYBIONIX_BILLING_CONFIG';
-export const CYBIONIX_BILLING_CONFIG_ENTITY_ID = 'GLOBAL';
-export const CYBIONIX_BILLING_CONFIG_ACTION = 'CYBIONIX_BILLING_CONFIG_UPDATED';
+export const LORREN_BILLING_CONFIG_ENTITY_TYPE = 'LORREN_BILLING_CONFIG';
+export const LORREN_BILLING_CONFIG_ENTITY_ID = 'GLOBAL';
+export const LORREN_BILLING_CONFIG_ACTION = 'LORREN_BILLING_CONFIG_UPDATED';
 
 const MAX_MODULES = 24;
 const MAX_RECIPIENTS = 24;
@@ -11,7 +11,7 @@ function text(value, maxLength = 240) {
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
-export function normalizeCybionixPhone(value) {
+export function normalizeLorrenPhone(value) {
   const digits = String(value || '').replace(/\D+/g, '');
   if (/^57[3]\d{9}$/.test(digits)) return digits;
   if (/^3\d{9}$/.test(digits)) return `57${digits}`;
@@ -56,9 +56,9 @@ function normalizeRecipients(input = {}) {
   const rows = [];
   for (let index = 0; index < Math.min(MAX_RECIPIENTS, Math.max(names.length, phones.length)); index += 1) {
     const name = text(names[index], 160);
-    const phone = normalizeCybionixPhone(phones[index]);
+    const phone = normalizeLorrenPhone(phones[index]);
     if (!name && !phone) continue;
-    if (!name || !phone) throw new Error('cybionix_billing_recipient_invalid');
+    if (!name || !phone) throw new Error('lorren_billing_recipient_invalid');
     rows.push({ id: `recipient-${index + 1}`, name, phone, active: true });
   }
   const seen = new Set();
@@ -69,12 +69,12 @@ function normalizeRecipients(input = {}) {
   });
 }
 
-export function normalizeCybionixBillingConfigInput(input = {}) {
+export function normalizeLorrenBillingConfigInput(input = {}) {
   const supervisorName = text(input.supervisorName, 160);
-  const supervisorPhone = normalizeCybionixPhone(input.supervisorPhone);
-  const devAlertPhone = normalizeCybionixPhone(input.devAlertPhone);
+  const supervisorPhone = normalizeLorrenPhone(input.supervisorPhone);
+  const devAlertPhone = normalizeLorrenPhone(input.devAlertPhone);
   if ((supervisorName && !supervisorPhone) || (!supervisorName && supervisorPhone)) {
-    throw new Error('cybionix_billing_supervisor_invalid');
+    throw new Error('lorren_billing_supervisor_invalid');
   }
   return {
     enabled: input.enabled === true || input.enabled === 'true' || input.enabled === 'on',
@@ -96,41 +96,41 @@ function configFromEvent(event) {
     modules: Array.isArray(source.modules) ? source.modules : [],
     recipients: Array.isArray(source.recipients) ? source.recipients : [],
     supervisor: source.supervisor && typeof source.supervisor === 'object' ? source.supervisor : null,
-    devAlertPhone: normalizeCybionixPhone(source.devAlertPhone) || null,
+    devAlertPhone: normalizeLorrenPhone(source.devAlertPhone) || null,
     accountHeading: text(source.accountHeading, 160),
     configured: Boolean(event),
     configuredAt: event?.createdAt || null
   };
 }
 
-export async function loadCybionixBillingConfig(prisma) {
-  if (!prisma?.devAuditEvent?.findFirst) throw new Error('cybionix_billing_config_prisma_contract_invalid');
+export async function loadLorrenBillingConfig(prisma) {
+  if (!prisma?.devAuditEvent?.findFirst) throw new Error('lorren_billing_config_prisma_contract_invalid');
   const event = await prisma.devAuditEvent.findFirst({
     where: {
-      entityType: CYBIONIX_BILLING_CONFIG_ENTITY_TYPE,
-      entityId: CYBIONIX_BILLING_CONFIG_ENTITY_ID,
-      action: CYBIONIX_BILLING_CONFIG_ACTION
+      entityType: LORREN_BILLING_CONFIG_ENTITY_TYPE,
+      entityId: LORREN_BILLING_CONFIG_ENTITY_ID,
+      action: LORREN_BILLING_CONFIG_ACTION
     },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
   });
   return configFromEvent(event);
 }
 
-export async function saveCybionixBillingConfig(prisma, input = {}) {
+export async function saveLorrenBillingConfig(prisma, input = {}) {
   if (!prisma?.devAuditEvent?.create || !prisma?.devAuditEvent?.findFirst) {
-    throw new Error('cybionix_billing_config_prisma_contract_invalid');
+    throw new Error('lorren_billing_config_prisma_contract_invalid');
   }
-  const config = normalizeCybionixBillingConfigInput(input);
-  const previous = await loadCybionixBillingConfig(prisma);
+  const config = normalizeLorrenBillingConfigInput(input);
+  const previous = await loadLorrenBillingConfig(prisma);
   const event = await prisma.devAuditEvent.create({
     data: {
-      entityType: CYBIONIX_BILLING_CONFIG_ENTITY_TYPE,
-      entityId: CYBIONIX_BILLING_CONFIG_ENTITY_ID,
-      entityLabel: 'Configuración de facturación Cybionix',
-      action: CYBIONIX_BILLING_CONFIG_ACTION,
+      entityType: LORREN_BILLING_CONFIG_ENTITY_TYPE,
+      entityId: LORREN_BILLING_CONFIG_ENTITY_ID,
+      entityLabel: 'Configuración de facturación Lórren',
+      action: LORREN_BILLING_CONFIG_ACTION,
       actorUsername: text(input.actorUsername, 160),
       actorRole: text(input.actorRole, 80),
-      actorSource: 'cybionix-billing-admin',
+      actorSource: 'lorren-billing-admin',
       ipAddress: text(input.ipAddress, 120),
       userAgent: text(input.userAgent, 500),
       fromValue: previous.configured ? previous : undefined,
@@ -141,7 +141,7 @@ export async function saveCybionixBillingConfig(prisma, input = {}) {
   return { ...configFromEvent(event), changed: true };
 }
 
-export function cybionixBillingReadiness(config = {}, channel = {}) {
+export function lorrenBillingReadiness(config = {}, channel = {}) {
   const missing = [];
   if (!config.enabled) missing.push('billing_disabled');
   if (!config.supervisor?.phone) missing.push('supervisor_missing');
