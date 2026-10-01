@@ -1074,7 +1074,7 @@ export function workerPortalRouter(prisma, options = {}) {
         return strictError(res, 409, 'crew_manual_member_not_assigned', 'La selección contiene un auxiliar ajeno a esta cuadrilla.');
       }
       const location = await requireStrictAttendanceLocation(
-        prisma, res, assignment.serviceRequest.operationPoint, req.body, { allowCrossOperation: false }
+        prisma, res, assignment.serviceRequest.operationPoint, req.body, { allowCrossOperation: true }
       );
       if (!location) return;
       const common = {
@@ -1115,6 +1115,8 @@ export function workerPortalRouter(prisma, options = {}) {
               assignmentId,
               serviceRequestId: context.serviceRequestId,
               markType,
+              capturedOperationPointId: location.operationPointId,
+              crossOperation: location.crossOperation,
               selectedAssignmentIds: selected,
               results: (result.summary.results || []).map((item) => ({
                 assignmentId: item.assignmentId,

@@ -292,7 +292,7 @@
               <% if (assignment.crewAvailable && assignment.isCrewLeader && !assignment.departureReported) { %>
                 <section class="assignment-mark-history" data-crew-manual="<%= assignment.id %>" aria-label="Marcación manual de cuadrilla">
                   <strong class="assignment-mark-history-title">Marcación manual de cuadrilla</strong>
-                  <p>Selecciona los auxiliares presentes. Se validará la ubicación de esta operación.</p>
+                  <p>Selecciona los auxiliares presentes. Se validará la ubicación en una operación autorizada.</p>
                   <button type="button" class="secondary-button" data-crew-load="<%= assignment.id %>">Elegir auxiliares</button>
                   <div data-crew-controls hidden>
                     <label><input type="checkbox" data-crew-all> Seleccionar todos</label>
