@@ -101,7 +101,7 @@ function canManageRecruiterUsers(req) {
 function ensureRecruiterUserManagementAccess(req, res) {
   if (canManageRecruiterUsers(req)) return true;
   if (res) {
-    return res.redirect('/admin?error=' + encodeURIComponent('La administración de usuarios solo está disponible para reclutador-general y DEV.'));
+    return res.redirect('/admin?error=' + encodeURIComponent('La administración de usuarios solo está disponible para DEV.'));
   }
   return false;
 }
@@ -124,7 +124,7 @@ function isEnvironmentAdminProfile(user = {}) {
 }
 
 function isProtectedRecruiterProfile(user = {}) {
-  return user.username === 'reclutador-general' || isEnvironmentAdminProfile(user);
+  return isEnvironmentAdminProfile(user);
 }
 
 function normalizeString(value) {
@@ -626,10 +626,7 @@ async function ensureVacancyIdAccess(prisma, req, vacancyId, res, returnTo = '/a
 }
 
 function buildManageableUsersWhere(accessContext = {}) {
-  const hiddenUsernames = ['reclutador-general'];
-  const visibilityWhere = accessContext.isDev
-    ? {}
-    : { username: { notIn: [...new Set(hiddenUsernames)] } };
+  const visibilityWhere = {};
 
   if (accessContext.isDev || accessContext.scope === 'ALL') {
     return { role: 'ADMIN', ...visibilityWhere };

@@ -884,9 +884,9 @@ function renderAdminAccessDenied(message) {
 export function sanitizeUsersPermissionCopy(html) {
   if (typeof html !== 'string') return html;
   return html
-    .replaceAll('Los permisos adicionales solo pueden ser concedidos por DEV o reclutador-general.', '')
-    .replaceAll('Puedes crear usuarios dentro de tu alcance. Los permisos adicionales del panel los asigna DEV o reclutador-general.', '')
-    .replaceAll('Solo DEV y reclutador-general pueden modificar estos permisos.', '');
+    .replaceAll('Los permisos generales de cuenta solo pueden ser administrados por DEV.', '')
+    .replaceAll('Los permisos operativos se administran mediante el rol Supervisor y sus capacidades asignadas.', '')
+    .replaceAll('Solo DEV puede modificar estos permisos generales de cuenta.', '');
 }
 
 function injectPayrollUsersScript(html, req) {
