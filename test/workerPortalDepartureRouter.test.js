@@ -186,6 +186,7 @@ test('bloquea salida cuando no existe llegada', async () => {
 
 test('bloquea una segunda salida antes de almacenar otra evidencia', async () => {
   let evidenceCalls = 0;
+  let registerCalls = 0;
   await withServer({
     loadAssignmentForDepartureFn: async () => ({
       id: 'assignment-1',
@@ -194,7 +195,8 @@ test('bloquea una segunda salida antes de almacenar otra evidencia', async () =>
       departureReported: true,
       photoRequired: true
     }),
-    storeDepartureEvidenceFn: async () => { evidenceCalls += 1; }
+    storeDepartureEvidenceFn: async () => { evidenceCalls += 1; },
+    registerDepartureFn: async () => { registerCalls += 1; }
   }, async (origin) => {
     const response = await fetch(`${origin}/operaciones/portal/asignaciones/assignment-1/salida`, {
       method: 'POST',
@@ -205,4 +207,5 @@ test('bloquea una segunda salida antes de almacenar otra evidencia', async () =>
     assert.deepEqual(await response.json(), { ok: false, error: 'departure_already_registered' });
   });
   assert.equal(evidenceCalls, 0);
+  assert.equal(registerCalls, 0);
 });

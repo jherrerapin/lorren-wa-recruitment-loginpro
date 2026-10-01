@@ -393,7 +393,7 @@ test('el cliente nativo obtiene proof firmado antes del desafío y conserva fall
   assert.match(flow, /Android detectó una ubicación simulada/);
 
   const requestLocationBlock = flow.match(
-    /function requestLocation\(localRunToken\) \{([\s\S]*?)\n  \}\n\n  function handleNativeAttendanceLocation/
+    /function requestLocation\(localRunToken\) \{([\s\S]*?)\r?\n  \}\r?\n\r?\n  function handleNativeAttendanceLocation/
   );
   assert.ok(requestLocationBlock, 'falta autoridad requestLocation');
   assert.match(
