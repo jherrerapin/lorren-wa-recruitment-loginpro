@@ -30,10 +30,14 @@ function asArray(value) {
   return [value];
 }
 
+function explicitActive(value) {
+  return !['false', '0', 'off', 'inactive'].includes(String(value ?? 'true').trim().toLowerCase());
+}
+
 function normalizeModules(input = {}) {
   const names = asArray(input.moduleName);
   const values = asArray(input.moduleValue);
-  const actives = new Set(asArray(input.moduleActive).map(String));
+  const actives = asArray(input.moduleActive);
   const rows = [];
   for (let index = 0; index < Math.min(MAX_MODULES, Math.max(names.length, values.length)); index += 1) {
     const name = text(names[index], 160);
@@ -43,7 +47,7 @@ function normalizeModules(input = {}) {
       id: `fixed-${index + 1}`,
       name,
       value,
-      active: actives.size ? actives.has(String(index)) : true,
+      active: explicitActive(actives[index]),
       source: 'FIXED'
     });
   }
@@ -148,6 +152,8 @@ export function cybionixBillingReadiness(config = {}, channel = {}) {
   if (!config.recipients?.length) missing.push('recipients_missing');
   if (!channel.accessToken) missing.push('access_token_missing');
   if (!channel.phoneNumberId) missing.push('phone_number_id_missing');
+  if (!channel.verifyToken) missing.push('verify_token_missing');
+  if (!channel.appSecret) missing.push('app_secret_missing');
   if (!channel.approvalTemplateName) missing.push('approval_template_missing');
   if (!channel.accountTemplateName) missing.push('account_template_missing');
   return { ready: missing.length === 0, missing };
