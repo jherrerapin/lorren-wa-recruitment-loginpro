@@ -1,0 +1,155 @@
+import { execFile } from 'node:child_process';
+import { existsSync, promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { CYBIONIX_BILLING_SIGNATURE_DATA_URI } from '../assets/cybionixBillingSignature.js';
+
+const execFileAsync = promisify(execFile);
+
+const PROVIDER = Object.freeze({
+  name: 'Jhon Alexander Herrera Pineda',
+  document: '1063812583',
+  address: 'Calle 25 sur #51F - 35',
+  phone: '3052982551',
+  account: '3052982551',
+  accountType: 'Billetera Virtual',
+  bank: 'Nequi'
+});
+
+const ACCOUNT_NOTE = 'En mi calidad de profesional prestadora de servicios sin vínculo laboral y en cumplimiento de lo establecido en el artículo 9 del decreto 2231 dl 23 de diciembre de 2023, certifico bajo la gravedad de juramento que en mi declaración de renta, no tomaré costos o deducciones asociados a las rentas de trabajo por la prestación de servicios con OPERA LOGISTICA INTEGRAL DE PROCESOS S.A.S.; por lo anterior me permito solicitar afectar la base de retención con el cálculo de la renta exenta del 25% y aplicar la retención en la fuente establecida en el artículo 383 del estatuto tributario';
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function money(value) {
+  return new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.max(0, Number(value) || 0));
+}
+
+function dateParts(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('es-CO', {
+    timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date);
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return { day: byType.day, month: byType.month, year: byType.year };
+}
+
+function longDate(value) {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))
+    ? new Date(`${value}T12:00:00.000Z`)
+    : new Date(value || Date.now());
+  return new Intl.DateTimeFormat('es-CO', {
+    timeZone: /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) ? 'UTC' : 'America/Bogota',
+    day: '2-digit', month: 'long', year: 'numeric'
+  }).format(date);
+}
+
+function wordsUnder1000(number) {
+  const units = ['', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve'];
+  const teens = { 10: 'diez', 11: 'once', 12: 'doce', 13: 'trece', 14: 'catorce', 15: 'quince', 16: 'dieciséis', 17: 'diecisiete', 18: 'dieciocho', 19: 'diecinueve', 20: 'veinte', 21: 'veintiún', 22: 'veintidós', 23: 'veintitrés', 24: 'veinticuatro', 25: 'veinticinco', 26: 'veintiséis', 27: 'veintisiete', 28: 'veintiocho', 29: 'veintinueve' };
+  const tens = ['', '', 'veinte', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+  const hundreds = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos'];
+  const n = Math.floor(number);
+  if (!n) return '';
+  if (n === 100) return 'cien';
+  const h = Math.floor(n / 100);
+  const rest = n % 100;
+  let tail = '';
+  if (rest < 10) tail = units[rest];
+  else if (rest <= 29) tail = teens[rest];
+  else {
+    const t = Math.floor(rest / 10);
+    const u = rest % 10;
+    tail = tens[t] + (u ? ` y ${units[u]}` : '');
+  }
+  return [hundreds[h], tail].filter(Boolean).join(' ');
+}
+
+export function amountToSpanishWords(value) {
+  let n = Math.max(0, Math.floor(Number(value) || 0));
+  if (n === 0) return 'Cero pesos MCTE';
+  const chunks = [];
+  const billions = Math.floor(n / 1_000_000_000); n %= 1_000_000_000;
+  const millions = Math.floor(n / 1_000_000); n %= 1_000_000;
+  const thousands = Math.floor(n / 1000); n %= 1000;
+  if (billions) chunks.push(`${wordsUnder1000(billions)} mil millones`);
+  if (millions) chunks.push(millions === 1 ? 'un millón' : `${wordsUnder1000(millions)} millones`);
+  if (thousands) chunks.push(thousands === 1 ? 'mil' : `${wordsUnder1000(thousands)} mil`);
+  if (n) chunks.push(wordsUnder1000(n));
+  const sentence = chunks.join(' ').replace(/\buno (?=(mil|millones|pesos))/g, 'un $1');
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)} pesos MCTE`;
+}
+
+function browserExecutable() {
+  const candidates = [
+    process.env.DISPATCH_BROWSER_EXECUTABLE_PATH,
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    process.env.CHROME_BIN,
+    process.env.GOOGLE_CHROME_BIN,
+    '/usr/bin/chromium-browser', '/usr/bin/chromium', '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'
+  ].filter(Boolean);
+  return candidates.find((candidate) => existsSync(candidate)) || null;
+}
+
+export async function cybionixHtmlToPdfBuffer(html) {
+  const executablePath = browserExecutable();
+  if (!executablePath) throw new Error('cybionix_billing_pdf_browser_unavailable');
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cybionix-billing-'));
+  const htmlPath = path.join(dir, 'document.html');
+  const pdfPath = path.join(dir, 'document.pdf');
+  await fs.writeFile(htmlPath, html, 'utf8');
+  try {
+    await execFileAsync(executablePath, [
+      '--headless', '--disable-gpu', '--no-sandbox', '--disable-setuid-sandbox', '--no-pdf-header-footer',
+      `--print-to-pdf=${pdfPath}`, `file://${htmlPath}`
+    ], { timeout: 45000 });
+    return await fs.readFile(pdfPath);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+export function buildAttendanceInvoiceHtml(invoice = {}) {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><style>
+  @page{size:A4;margin:18mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#172033;font-size:12px;margin:0}.header{padding:20px;border-radius:16px;background:#172033;color:white}.header small{letter-spacing:.12em;text-transform:uppercase;color:#bff8ef;font-weight:700}.header h1{margin:7px 0 3px;font-size:24px}.meta{display:grid;grid-template-columns:1fr 1fr 1fr;gap:9px;margin:16px 0}.box{border:1px solid #d8e0ea;border-radius:10px;padding:10px}.box span{display:block;color:#64748b;font-size:9px;text-transform:uppercase;font-weight:700}.box strong{display:block;margin-top:4px;font-size:13px}.parties{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}.card{border:1px solid #d8e0ea;border-radius:12px;padding:12px}.card h2{font-size:11px;text-transform:uppercase;margin:0 0 7px;color:#64748b}.table{width:100%;border-collapse:collapse;margin-top:14px}.table th,.table td{border:1px solid #cad2dc;padding:9px;text-align:left}.table th{background:#f1f5f9;font-size:10px}.right{text-align:right!important}.total{font-size:17px;font-weight:800}.rule{margin-top:15px;padding:12px;border-left:5px solid #0d7a6b;background:#eefcf8}.footer{margin-top:18px;padding-top:10px;border-top:1px solid #d8e0ea;color:#64748b;font-size:9px}</style></head><body>
+  <header class="header"><small>Módulo de Asistencia y Gestión de Tiempo · Ecosistema Lórren</small><h1>FACTURA DEL MÓDULO</h1><div>${escapeHtml(invoice.invoiceNumber || 'Asistencia')}</div></header>
+  <section class="parties"><div class="card"><h2>Cliente</h2><strong>Loginpro - Service</strong></div><div class="card"><h2>Proveedor</h2><strong>${PROVIDER.name}</strong></div></section>
+  <section class="meta"><div class="box"><span>Periodo</span><strong>${escapeHtml(longDate(invoice.cycleStart))} - ${escapeHtml(longDate(invoice.cycleEnd))}</strong></div><div class="box"><span>Corte</span><strong>${escapeHtml(longDate(invoice.cutDate))}</strong></div><div class="box"><span>Pago</span><strong>${escapeHtml(longDate(invoice.paymentDate))}</strong></div></section>
+  <table class="table"><thead><tr><th>Concepto</th><th>Rango</th><th class="right">Cantidad</th><th class="right">Valor unitario</th><th class="right">Total</th></tr></thead><tbody><tr><td>Auxiliar único facturable por ciclo</td><td>${Number(invoice.count||0)<=50?'1-50':Number(invoice.count||0)<=100?'51-100':Number(invoice.count||0)<=200?'101-200':'201+'}</td><td class="right">${Number(invoice.count||0)}</td><td class="right">$${money(invoice.unitPrice)} COP</td><td class="right total">$${money(invoice.total)} COP</td></tr></tbody></table>
+  <div class="rule"><strong>Criterio de facturación</strong><br>Un auxiliar cuenta una sola vez por ciclo. Se incluyen únicamente los auxiliares que cumplan la regla facturable del módulo. El rango alcanzado aplica a todos los auxiliares facturables del ciclo.</div>
+  <footer class="footer">Documento generado por el Módulo de Asistencia y Gestión de Tiempo de Lórren.</footer></body></html>`;
+}
+
+export async function buildAttendanceInvoicePdfBuffer(invoice) {
+  return cybionixHtmlToPdfBuffer(buildAttendanceInvoiceHtml(invoice));
+}
+
+export function buildAccountChargeHtml(account = {}) {
+  const generated = account.generatedAt ? new Date(account.generatedAt) : new Date();
+  const parts = dateParts(generated);
+  const heading = escapeHtml(account.accountHeading || account.recipients?.[0]?.name || 'LOGINPRO - SERVICE').toUpperCase();
+  const conceptText = (account.items || []).map((item) => `${item.name} $${money(item.value)}`).join(' + ');
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><style>
+  @page{size:A4;margin:12mm 14mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;font-size:11px;margin:0}.heading{text-align:center;font-size:20px;margin:3px 0 56px}.info{width:100%;border-collapse:collapse}.info td{border:1px solid #111;padding:6px}.concept-title{text-align:center;margin:55px 0 28px;font-size:12px}.period{display:flex;align-items:end;gap:22px;margin:0 4px 34px}.period .label{font-family:serif;font-size:9px}.period .value{min-width:90px;border-bottom:1px solid #111;text-align:center;padding:0 8px 3px}.period .short{min-width:55px}.operation{margin:0 4px 46px;display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:end}.operation span:first-child{font-family:serif;font-size:9px}.operation .line{border-bottom:1px solid #111;padding:0 5px 3px}.amount{width:100%;border-collapse:collapse;margin-bottom:30px}.amount td{border:1px solid #111;padding:7px}.amount .label{text-align:center;width:50%}.words{height:64px;vertical-align:top}.bank{display:grid;grid-template-columns:auto 1fr;gap:7px 16px;align-items:end;margin:0 4px}.bank div{padding:4px 0}.bank .line{border-bottom:1px solid #111}.signature{width:245px;height:auto;margin:5px 0 0 0;display:block}.cc{margin:2px 0 56px 4px}.note{font-size:9px;line-height:1.45;margin:0 4px}.protected{display:none}</style></head><body>
+  <div class="heading">${heading}</div>
+  <table class="info"><tr><td>FECHA: ${escapeHtml(longDate(generated))}</td></tr><tr><td>CIUDAD: Bogotá</td></tr><tr><td>NOMBRE: ${PROVIDER.name}</td></tr><tr><td>CEDULA: ${PROVIDER.document}</td></tr><tr><td>DIRECCION: ${PROVIDER.address}</td></tr><tr><td>TELEFONO:${PROVIDER.phone}</td></tr></table>
+  <div class="concept-title">Debe por Concepto de:</div>
+  <div class="period"><span class="label">SERVICIOS PRESTADOS DEL DIA</span><span class="value">${parts.day}</span><span>MES</span><span class="value short">${parts.month}</span><span>AÑO</span><span class="value short">${parts.year}</span></div>
+  <div class="operation"><span>EN LA OPERACIÓN DE:</span><div class="line">${escapeHtml(conceptText)}</div></div>
+  <table class="amount"><tr><td class="label">VALOR TOTAL</td><td>$${money(account.total)}</td></tr><tr><td class="words" colspan="2">VALOR EN LETRAS: ${escapeHtml(amountToSpanishWords(account.total))}</td></tr></table>
+  <div class="bank"><div>FAVOR CONSIGNAR EN LA CUENTA No.</div><div class="line">${PROVIDER.account}</div><div>TIPO DE CUENTA: ${PROVIDER.accountType}</div><div class="line"></div><div>DEL BANCO ${PROVIDER.bank}</div><div class="line"></div></div>
+  <img class="signature" src="${CYBIONIX_BILLING_SIGNATURE_DATA_URI}" alt="Firma" />
+  <div class="cc">C.C: ${PROVIDER.document}</div>
+  <div class="note">NOTA: ${escapeHtml(ACCOUNT_NOTE)}</div>
+  </body></html>`;
+}
+
+export async function buildAccountChargePdfBuffer(account) {
+  return cybionixHtmlToPdfBuffer(buildAccountChargeHtml(account));
+}

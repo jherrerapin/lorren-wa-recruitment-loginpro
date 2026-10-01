@@ -50,7 +50,11 @@ export function dispatchAttendancePointConfigRouter(prisma) {
         attendanceTimezone: req.body.attendanceTimezone,
         attendancePhotoPolicy: req.body.attendancePhotoPolicy,
         manualAttendanceAllowed: explicitAttendanceCheckbox(req.body, 'manualAttendanceAllowed'),
-        crossOperationAttendanceAllowed: explicitAttendanceCheckbox(req.body, 'crossOperationAttendanceAllowed')
+        crossOperationAttendanceAllowed: explicitAttendanceCheckbox(req.body, 'crossOperationAttendanceAllowed'),
+        actorUsername: req.session?.username || req.username || null,
+        actorRole: req.session?.userRole || req.userRole || null,
+        ipAddress: req.ip || null,
+        userAgent: req.get('user-agent') || null
       });
       const message = attendanceEnabled === 'true'
         ? 'Configuración de asistencia guardada.'
