@@ -130,7 +130,7 @@
                       <input type="hidden" name="attendanceLatitude" value="<%= op.attendanceLatitude == null ? '' : op.attendanceLatitude %>" />
                       <input type="hidden" name="attendanceLongitude" value="<%= op.attendanceLongitude == null ? '' : op.attendanceLongitude %>" />
                       <div class="field full">
-                        <label><input type="checkbox" name="attendanceEnabled" value="true" <%= op.attendanceEnabled || op.attendanceLatitude == null || op.attendanceLongitude == null ? 'checked' : '' %> /> Habilitar control de asistencia al guardar</label>
+                        <label><input type="checkbox" name="attendanceEnabled" value="true" <%= op.attendanceEnabled ? 'checked' : '' %> /> Habilitar control de asistencia al guardar</label>
                         <small class="muted">Selecciona el punto exacto en el mapa. Lórren aplicará automáticamente una geocerca de 100 metros y exigirá una precisión GPS de 50 metros o mejor.</small>
                       </div>
                       <div class="field full">
