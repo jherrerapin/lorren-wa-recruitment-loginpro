@@ -436,7 +436,7 @@ async function requireStrictAttendanceLocation(prisma, res, point, input = {}, o
   const resolved = await resolveAttendanceOperationGeofence(
     prisma,
     point,
-    { latitude, longitude, accuracyMeters },
+    { ...input, latitude, longitude, accuracyMeters },
     options
   );
   if (resolved.accepted !== true) {
@@ -663,7 +663,7 @@ export function workerPortalRouter(prisma, options = {}) {
         const proofCapturedAt = new Date(Number(proof?.capturedAt));
         if (!Number.isNaN(proofCapturedAt.getTime())) verificationAt = proofCapturedAt;
       }
-      return verifyNativeAttendanceLocationProofFn({
+      const verified = verifyNativeAttendanceLocationProofFn({
         workerId: portalSession.workerId,
         deviceId: portalSession.deviceId,
         assignmentId: expected.assignmentId,
@@ -675,6 +675,7 @@ export function workerPortalRouter(prisma, options = {}) {
         env: options.env || process.env,
         secret: options.crewPresenceSecret
       });
+      return { ...verified, assignmentId: expected.assignmentId };
     } catch (error) {
       const [status, code, message] = nativeAttendanceLocationPublicError(error);
       strictError(res, status, code, message);
@@ -1368,7 +1369,7 @@ export function workerPortalRouter(prisma, options = {}) {
         prisma,
         res,
         assignment.serviceRequest.operationPoint,
-        verified.leaderLocation,
+        { ...verified.leaderLocation, assignmentId },
         { allowCrossOperation: false }
       );
       if (!location) return;
