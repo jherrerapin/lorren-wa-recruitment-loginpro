@@ -9,7 +9,7 @@ import {
   ensureLorrenAccountCharge,
   loadLorrenAccountForInvoice,
   loadLorrenApprovalState
-} from '../services/cybionixBillingWorkflow.js';
+} from '../services/lorrenBillingWorkflow.js';
 
 const DEFAULT_POLL_MS = 60 * 1000;
 
