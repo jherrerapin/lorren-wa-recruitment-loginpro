@@ -1,11 +1,26 @@
 'use strict';
 
 (() => {
-  const panels = document.querySelectorAll('[data-crew-manual]');
+  const panels = [...document.querySelectorAll('[data-crew-manual]')];
   if (!panels.length) return;
-  const contextsPath = '/operaciones/portal/cuadrillas/proximidad/contexto';
+  if (window.LorrenAndroidPresence || /LorrenNative\/1/.test(navigator.userAgent || '')) {
+    panels.forEach((panel) => { panel.hidden = true; });
+    return;
+  }
+
   const markPath = '/operaciones/portal/cuadrillas/marcacion-manual';
   const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'worker-portal' };
+  const labels = {
+    ARRIVAL: 'entrada',
+    BREAK_START: 'inicio de almuerzo',
+    BREAK_END: 'fin de almuerzo',
+    DEPARTURE: 'salida'
+  };
+
+  function markKey() {
+    if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+    return `crew_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+  }
 
   function location() {
     return new Promise((resolve, reject) => {
@@ -22,122 +37,103 @@
     });
   }
 
+  function availableMarks(input) {
+    if (input.dataset.departure) return [];
+    if (!input.dataset.arrival) return ['ARRIVAL'];
+    if (!input.dataset.breakStart) return ['BREAK_START', 'DEPARTURE'];
+    if (!input.dataset.breakEnd) return ['BREAK_END'];
+    return ['DEPARTURE'];
+  }
+
+  function memberState(input) {
+    if (input.dataset.departure) return 'Salida registrada';
+    if (!input.dataset.arrival) return 'Pendiente de entrada';
+    if (input.dataset.breakStart && !input.dataset.breakEnd) return 'En almuerzo';
+    if (input.dataset.breakEnd) return 'Almuerzo terminado';
+    return 'Entrada registrada';
+  }
+
   for (const panel of panels) {
+    panel.closest('[data-assignment-card]')?.querySelector('[data-crew-standard-actions]')?.setAttribute('hidden', '');
     const assignmentId = panel.dataset.crewManual;
     const status = panel.querySelector('[data-crew-status]');
-    const controls = panel.querySelector('[data-crew-controls]');
-    const members = panel.querySelector('[data-crew-members]');
     const selectAll = panel.querySelector('[data-crew-all]');
-    const submit = panel.querySelector('[data-crew-submit]');
-    const load = panel.querySelector('[data-crew-load]');
-    const markType = panel.querySelector('[data-crew-mark-type]');
-    let context = null;
+    const inputs = [...panel.querySelectorAll('[data-crew-member]')];
+    const actions = panel.querySelector('[data-crew-actions]');
+    const buttons = [...panel.querySelectorAll('[data-crew-action]')];
     let busy = false;
 
-    function eligible(member) {
-      const attendance = member.attendance || {};
-      if (markType.value === 'ARRIVAL') return !attendance.arrivalAt;
-      if (markType.value === 'BREAK_START') return Boolean(attendance.arrivalAt) && !attendance.breakStartAt && !attendance.departureAt;
-      if (markType.value === 'BREAK_END') return Boolean(attendance.breakStartAt) && !attendance.breakEndAt && !attendance.departureAt;
-      return Boolean(attendance.arrivalAt) && !attendance.departureAt;
+    for (const input of inputs) {
+      input.disabled = Boolean(input.dataset.departure);
+      input.closest('label')?.querySelector('[data-crew-member-state]')?.replaceChildren(memberState(input));
     }
 
     function selected() {
-      return [...members.querySelectorAll('input[type="checkbox"]:checked')].map((input) => input.value);
+      return inputs.filter((input) => input.checked && !input.disabled);
     }
 
-    function renderMembers() {
-      members.replaceChildren();
-      for (const member of context.members || []) {
-        if (member.isLeader || !eligible(member)) continue;
-        const label = document.createElement('label');
-        label.style.display = 'block';
-        const checkbox = document.createElement('input');
-        checkbox.type = 'checkbox';
-        checkbox.value = member.assignmentId;
-        const name = document.createTextNode(` ${member.displayName || 'Auxiliar'}`);
-        label.append(checkbox, name);
-        members.append(label);
+    function updateActions() {
+      const chosen = selected();
+      const allowed = chosen.length
+        ? availableMarks(chosen[0]).filter((mark) => chosen.every((input) => availableMarks(input).includes(mark)))
+        : [];
+      for (const button of buttons) button.hidden = !allowed.includes(button.dataset.crewAction);
+      if (actions) actions.hidden = allowed.length === 0;
+      if (selectAll) {
+        const enabled = inputs.filter((input) => !input.disabled);
+        selectAll.checked = enabled.length > 0 && enabled.every((input) => input.checked);
       }
-      controls.hidden = false;
-      selectAll.checked = false;
-      status.textContent = members.children.length
-        ? 'El encargado también quedará incluido cuando corresponda a esta marcación.'
-        : 'No hay auxiliares pendientes para esta marcación.';
+      status.textContent = !chosen.length
+        ? 'Selecciona uno o varios auxiliares para ver su siguiente marcación.'
+        : allowed.length ? `${chosen.length} seleccionados. Elige la marcación que corresponde.`
+          : 'Los seleccionados están en etapas distintas. Elige auxiliares con la misma marcación pendiente.';
     }
 
-    load.addEventListener('click', async () => {
-      if (busy) return;
-      busy = true;
-      load.disabled = true;
-      status.textContent = 'Cargando cuadrilla…';
-      try {
-        const response = await fetch(contextsPath, {
-          method: 'POST', credentials: 'include', cache: 'no-store', headers, body: '{}'
-        });
-        const payload = await response.json().catch(() => ({}));
-        context = (payload.assignments || []).find((item) => item.assignmentId === assignmentId);
-        if (!response.ok || !context?.crewAvailable || !context.isCrewLeader) {
-          throw new Error('Esta cuadrilla ya no está disponible para marcar.');
-        }
-        renderMembers();
-      } catch (error) {
-        status.textContent = error.message || 'No se pudo cargar la cuadrilla.';
-      } finally {
-        busy = false;
-        load.disabled = false;
-      }
+    selectAll?.addEventListener('change', () => {
+      for (const input of inputs) if (!input.disabled) input.checked = selectAll.checked;
+      updateActions();
     });
+    for (const input of inputs) input.addEventListener('change', updateActions);
 
-    selectAll.addEventListener('change', () => {
-      for (const checkbox of members.querySelectorAll('input[type="checkbox"]')) checkbox.checked = selectAll.checked;
-    });
-    markType.addEventListener('change', () => {
-      if (context) renderMembers();
-    });
-    members.addEventListener('change', () => {
-      const boxes = [...members.querySelectorAll('input[type="checkbox"]')];
-      selectAll.checked = boxes.length > 0 && boxes.every((box) => box.checked);
-    });
-
-    submit.addEventListener('click', async () => {
+    for (const button of buttons) button.addEventListener('click', async () => {
       if (busy) return;
-      const selectedAssignmentIds = selected();
-      if (!selectedAssignmentIds.length) {
-        status.textContent = 'Selecciona al menos un auxiliar.';
+      const chosen = selected();
+      const markType = button.dataset.crewAction;
+      if (!chosen.length || !chosen.every((input) => availableMarks(input).includes(markType))) {
+        updateActions();
         return;
       }
       busy = true;
-      submit.disabled = true;
+      buttons.forEach((item) => { item.disabled = true; });
       status.textContent = 'Validando ubicación…';
       try {
         const coordinates = await location();
-        status.textContent = 'Registrando marcaciones…';
+        status.textContent = `Registrando ${labels[markType]}…`;
         const response = await fetch(markPath, {
           method: 'POST', credentials: 'include', cache: 'no-store', headers,
           body: JSON.stringify({
             assignmentId,
-            selectedAssignmentIds,
-            markType: markType.value,
-            idempotencyKey: crypto.randomUUID(),
+            selectedAssignmentIds: chosen.map((input) => input.value),
+            markType,
+            idempotencyKey: markKey(),
             ...coordinates
           })
         });
         const payload = await response.json().catch(() => ({}));
-        if (!response.ok || payload.ok !== true) {
-          throw new Error(payload.message || 'No se pudo registrar la marcación.');
-        }
+        if (!response.ok || payload.ok !== true) throw new Error(payload.message || 'No se pudo registrar la marcación.');
         const summary = payload.summary || {};
-        status.textContent = `${summary.newlyRecordedCount || 0} registradas, ${summary.alreadyRecordedCount || 0} ya registradas, ${summary.failedCount || 0} pendientes. Actualiza la página para ver el estado.`;
-        if (payload.auditRecorded === false) {
-          status.textContent += ' La trazabilidad adicional no se guardó; informa al coordinador.';
-        }
+        status.textContent = `${summary.newlyRecordedCount || 0} registradas, ${summary.alreadyRecordedCount || 0} ya registradas, ${summary.failedCount || 0} pendientes.`;
+        if (payload.auditRecorded === false) status.textContent += ' La trazabilidad adicional no se guardó; informa al coordinador.';
+        if (!summary.failedCount) window.setTimeout(() => window.location.reload(), 1500);
+        else status.textContent += ' Actualiza la página para revisar cada estado.';
       } catch (error) {
         status.textContent = error.message || 'No se pudo registrar la marcación.';
       } finally {
         busy = false;
-        submit.disabled = false;
+        buttons.forEach((item) => { item.disabled = false; });
       }
     });
+
+    if (inputs.length) updateActions();
   }
 })();
