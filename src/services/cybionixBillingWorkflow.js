@@ -1,8 +1,4 @@
-import {
-  ATTENDANCE_BILLING_INVOICE_ACTION,
-  ATTENDANCE_BILLING_INVOICE_ENTITY_TYPE,
-  loadAttendanceBillingInvoices
-} from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
+import { loadAttendanceBillingInvoices } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
 import { loadCybionixBillingConfig } from './cybionixBillingConfig.js';
 import { buildAccountChargePdfBuffer, buildAttendanceInvoicePdfBuffer } from './cybionixBillingPdf.js';
 import {
@@ -29,6 +25,16 @@ function eventMetadata(event) {
   return event?.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata) ? event.metadata : {};
 }
 
+function billingSnapshot(config = {}) {
+  return {
+    modules: Array.isArray(config.modules) ? config.modules.map((item) => ({ ...item })) : [],
+    recipients: Array.isArray(config.recipients) ? config.recipients.map((item) => ({ ...item })) : [],
+    supervisor: config.supervisor ? { ...config.supervisor } : null,
+    devAlertPhone: text(config.devAlertPhone, 32),
+    accountHeading: text(config.accountHeading, 160)
+  };
+}
+
 async function invoiceByNumber(prisma, invoiceNumber) {
   const target = text(invoiceNumber, 80);
   if (!target) return null;
@@ -49,31 +55,60 @@ export async function loadCybionixApprovalState(prisma, invoiceNumber) {
     supervisorPhone: text(metadata.supervisorPhone, 32),
     reason: text(metadata.reason, 500),
     providerMessageId: text(metadata.providerMessageId, 240),
+    billingSnapshot: metadata.billingSnapshot && typeof metadata.billingSnapshot === 'object'
+      ? metadata.billingSnapshot
+      : null,
     updatedAt: event?.createdAt || null
   };
 }
 
-async function recordApprovalState(prisma, invoice, status, input = {}) {
+async function recordPendingApproval(prisma, invoice, input = {}) {
   return prisma.devAuditEvent.create({
     data: {
       entityType: CYBIONIX_APPROVAL_ENTITY_TYPE,
       entityId: invoice.invoiceNumber,
       entityLabel: `Aprobación ${invoice.invoiceNumber}`,
       action: CYBIONIX_APPROVAL_ACTION,
-      actorUsername: text(input.actorUsername, 160),
-      actorRole: text(input.actorRole, 80),
-      actorSource: text(input.actorSource, 120) || 'cybionix-billing',
+      actorSource: 'cybionix-billing-worker',
       metadata: {
-        status,
+        status: 'PENDING',
         invoiceNumber: invoice.invoiceNumber,
         cycleStart: invoice.cycleStart,
         supervisorName: text(input.supervisorName, 160),
         supervisorPhone: text(input.supervisorPhone, 32),
-        providerMessageId: text(input.providerMessageId, 240),
-        reason: text(input.reason, 500)
+        providerMessageId: text(input.providerMessageId, 240)
       }
     }
   });
+}
+
+async function claimTerminalDecision(prisma, invoice, status, config, input = {}) {
+  const id = `cybionix-billing-decision:${invoice.invoiceNumber}`;
+  try {
+    const event = await prisma.devAuditEvent.create({
+      data: {
+        id,
+        entityType: CYBIONIX_APPROVAL_ENTITY_TYPE,
+        entityId: invoice.invoiceNumber,
+        entityLabel: `Aprobación ${invoice.invoiceNumber}`,
+        action: CYBIONIX_APPROVAL_ACTION,
+        actorSource: 'cybionix-whatsapp-webhook',
+        metadata: {
+          status,
+          invoiceNumber: invoice.invoiceNumber,
+          cycleStart: invoice.cycleStart,
+          supervisorName: text(input.supervisorName, 160),
+          supervisorPhone: text(input.supervisorPhone, 32),
+          reason: text(input.reason, 500),
+          billingSnapshot: billingSnapshot(config)
+        }
+      }
+    });
+    return { claimed: true, state: { ...eventMetadata(event), updatedAt: event.createdAt || null } };
+  } catch (error) {
+    if (error?.code !== 'P2002') throw error;
+    return { claimed: false, state: await loadCybionixApprovalState(prisma, invoice.invoiceNumber) };
+  }
 }
 
 function accountFromEvent(event) {
@@ -111,7 +146,7 @@ export async function ensureCybionixAccountCharge(prisma, invoice, config, input
     items,
     total,
     currency: 'COP',
-    recipients: (config.recipients || []).filter((item) => item?.active !== false),
+    recipients: (config.recipients || []).filter((item) => item?.active !== false).map((item) => ({ ...item })),
     accountHeading: config.accountHeading || config.recipients?.[0]?.name || null,
     approvedBy: {
       name: text(input.supervisorName, 160) || config.supervisor?.name || null,
@@ -119,17 +154,23 @@ export async function ensureCybionixAccountCharge(prisma, invoice, config, input
       approvedAt: generatedAt
     }
   };
-  const event = await prisma.devAuditEvent.create({
-    data: {
-      entityType: CYBIONIX_ACCOUNT_ENTITY_TYPE,
-      entityId: invoice.invoiceNumber,
-      entityLabel: `Cuenta de cobro ${account.accountNumber}`,
-      action: CYBIONIX_ACCOUNT_ACTION,
-      actorSource: 'cybionix-billing-approval',
-      metadata: account
-    }
-  });
-  return { created: true, account: accountFromEvent(event), reason: 'created' };
+  try {
+    const event = await prisma.devAuditEvent.create({
+      data: {
+        id: `cybionix-billing-account:${invoice.invoiceNumber}`,
+        entityType: CYBIONIX_ACCOUNT_ENTITY_TYPE,
+        entityId: invoice.invoiceNumber,
+        entityLabel: `Cuenta de cobro ${account.accountNumber}`,
+        action: CYBIONIX_ACCOUNT_ACTION,
+        actorSource: 'cybionix-billing-approval',
+        metadata: account
+      }
+    });
+    return { created: true, account: accountFromEvent(event), reason: 'created' };
+  } catch (error) {
+    if (error?.code !== 'P2002') throw error;
+    return { created: false, account: await loadCybionixAccountForInvoice(prisma, invoice.invoiceNumber), reason: 'already_created' };
+  }
 }
 
 async function deliveryAlreadySent(prisma, key) {
@@ -141,16 +182,23 @@ async function deliveryAlreadySent(prisma, key) {
 }
 
 async function recordDelivery(prisma, key, metadata) {
-  return prisma.devAuditEvent.create({
-    data: {
-      entityType: CYBIONIX_DELIVERY_ENTITY_TYPE,
-      entityId: key,
-      entityLabel: key,
-      action: CYBIONIX_DELIVERY_ACTION,
-      actorSource: 'cybionix-billing-whatsapp',
-      metadata
-    }
-  });
+  try {
+    await prisma.devAuditEvent.create({
+      data: {
+        id: `cybionix-billing-delivery:${key}`,
+        entityType: CYBIONIX_DELIVERY_ENTITY_TYPE,
+        entityId: key,
+        entityLabel: key,
+        action: CYBIONIX_DELIVERY_ACTION,
+        actorSource: 'cybionix-billing-whatsapp',
+        metadata
+      }
+    });
+    return true;
+  } catch (error) {
+    if (error?.code === 'P2002') return false;
+    throw error;
+  }
 }
 
 export async function deliverCybionixAttendanceApproval(prisma, invoice, options = {}) {
@@ -158,7 +206,7 @@ export async function deliverCybionixAttendanceApproval(prisma, invoice, options
   const channel = getCybionixWhatsappConfig(options.env || process.env);
   if (!config.enabled) return { sent: false, skipped: true, reason: 'billing_disabled' };
   if (!config.supervisor?.phone) return { sent: false, skipped: true, reason: 'supervisor_missing' };
-  if (!channel.accessToken || !channel.phoneNumberId || !channel.approvalTemplateName) {
+  if (!channel.accessToken || !channel.phoneNumberId || !channel.verifyToken || !channel.appSecret || !channel.approvalTemplateName) {
     return { sent: false, skipped: true, reason: 'cybionix_channel_unconfigured' };
   }
   const state = await loadCybionixApprovalState(prisma, invoice.invoiceNumber);
@@ -171,11 +219,10 @@ export async function deliverCybionixAttendanceApproval(prisma, invoice, options
     pdfBuffer,
     env: options.env || process.env
   });
-  await recordApprovalState(prisma, invoice, 'PENDING', {
+  await recordPendingApproval(prisma, invoice, {
     supervisorName: config.supervisor.name,
     supervisorPhone: config.supervisor.phone,
-    providerMessageId,
-    actorSource: 'cybionix-billing-worker'
+    providerMessageId
   });
   return { sent: true, skipped: false, providerMessageId };
 }
@@ -233,42 +280,49 @@ export async function resolveCybionixAttendanceApproval(prisma, input = {}, opti
     return { ok: false, reason: 'supervisor_phone_mismatch' };
   }
   const decision = String(input.decision || '').toUpperCase();
+  if (!['APPROVE', 'REJECT'].includes(decision)) return { ok: false, reason: 'decision_invalid' };
+  const terminalStatus = decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
+  const claimed = await claimTerminalDecision(prisma, invoice, terminalStatus, config, {
+    supervisorName: config.supervisor?.name,
+    supervisorPhone,
+    reason: decision === 'REJECT' ? (text(input.reason, 500) || 'No aprobada por el supervisor') : null
+  });
+  if (!claimed.claimed) {
+    return {
+      ok: true,
+      idempotent: true,
+      status: claimed.state.status,
+      invoice,
+      account: await loadCybionixAccountForInvoice(prisma, invoice.invoiceNumber)
+    };
+  }
+
   if (decision === 'APPROVE') {
-    await recordApprovalState(prisma, invoice, 'APPROVED', {
-      supervisorName: config.supervisor?.name,
-      supervisorPhone,
-      actorSource: 'cybionix-whatsapp-webhook'
-    });
-    const accountResult = await ensureCybionixAccountCharge(prisma, invoice, config, {
+    const snapshot = claimed.state.billingSnapshot || billingSnapshot(config);
+    const accountResult = await ensureCybionixAccountCharge(prisma, invoice, snapshot, {
       supervisorName: config.supervisor?.name,
       supervisorPhone
     });
-    const delivery = await deliverCybionixAccountCharge(prisma, accountResult.account, options);
+    const delivery = accountResult.created
+      ? await deliverCybionixAccountCharge(prisma, accountResult.account, options)
+      : { attempted: 0, sent: 0, skipped: 1, failed: 0, results: [{ skipped: true, reason: 'account_already_created' }] };
     return { ok: true, idempotent: false, status: 'APPROVED', invoice, account: accountResult.account, delivery };
   }
-  if (decision === 'REJECT') {
-    await recordApprovalState(prisma, invoice, 'REJECTED', {
-      supervisorName: config.supervisor?.name,
-      supervisorPhone,
-      reason: text(input.reason, 500) || 'No aprobada por el supervisor',
-      actorSource: 'cybionix-whatsapp-webhook'
-    });
-    let alert = { skipped: true, reason: 'dev_alert_phone_missing' };
-    if (config.devAlertPhone) {
-      try {
-        alert = await (options.sendAlert || sendCybionixDevAlert)({
-          phone: config.devAlertPhone,
-          invoiceNumber: invoice.invoiceNumber,
-          reason: 'No aprobada por el supervisor',
-          env: options.env || process.env
-        });
-      } catch (error) {
-        alert = { skipped: false, failed: true, reason: String(error?.message || error).slice(0, 240) };
-      }
+
+  let alert = { skipped: true, reason: 'dev_alert_phone_missing' };
+  if (config.devAlertPhone) {
+    try {
+      alert = await (options.sendAlert || sendCybionixDevAlert)({
+        phone: config.devAlertPhone,
+        invoiceNumber: invoice.invoiceNumber,
+        reason: 'No aprobada por el supervisor',
+        env: options.env || process.env
+      });
+    } catch (error) {
+      alert = { skipped: false, failed: true, reason: String(error?.message || error).slice(0, 240) };
     }
-    return { ok: true, idempotent: false, status: 'REJECTED', invoice, account: null, alert };
   }
-  return { ok: false, reason: 'decision_invalid' };
+  return { ok: true, idempotent: false, status: 'REJECTED', invoice, account: null, alert };
 }
 
 export async function loadCybionixBillingDashboard(prisma) {
@@ -283,14 +337,4 @@ export async function loadCybionixBillingDashboard(prisma) {
     });
   }
   return { config, rows };
-}
-
-export async function loadAttendanceInvoiceEventByNumber(prisma, invoiceNumber) {
-  const event = await prisma.devAuditEvent.findFirst({
-    where: { entityType: ATTENDANCE_BILLING_INVOICE_ENTITY_TYPE, action: ATTENDANCE_BILLING_INVOICE_ACTION },
-    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
-  });
-  if (!event) return null;
-  const invoice = await invoiceByNumber(prisma, invoiceNumber);
-  return invoice;
 }
