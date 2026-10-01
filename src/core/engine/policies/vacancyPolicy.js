@@ -11,11 +11,17 @@ const VACANCY_QUESTION_INTENTS = new Set([
   'ASK_VACANCY_SCHEDULE'
 ]);
 const AWAITING_POOL_CONSENT = 'AWAITING_POOL_CONSENT';
+const AWAITING_VACANCY_INTEREST = 'awaiting_vacancy_interest';
+const AWAITING_DATA_CONSENT = 'awaiting_data_consent';
 const POOL_DECLINED_REPLY =
   'Entendido. Si más adelante deseas continuar con la postulación, puedes volver a escribirme y con gusto retomamos el proceso.';
 const POOL_OPTIONS = Object.freeze([
   Object.freeze({ id: 'pool_consent:accept', label: 'Sí, de acuerdo' }),
   Object.freeze({ id: 'pool_consent:reject', label: 'No, gracias' })
+]);
+const INTEREST_OPTIONS = Object.freeze([
+  Object.freeze({ id: 'vacancy_interest:accept', label: 'Sí, me interesa' }),
+  Object.freeze({ id: 'vacancy_interest:reject', label: 'No, gracias' })
 ]);
 
 function normalize(value = '') {
@@ -90,6 +96,37 @@ function vacancyLocation(vacancy = {}) {
     || '';
 }
 
+function candidateResumeMode(input = {}) {
+  return String(input?.candidate?.facts?.botResumeMode || '').trim().toLowerCase();
+}
+
+function consentIsPending(input = {}) {
+  const status = String(input?.candidate?.facts?.dataConsentStatus || '').trim().toUpperCase();
+  return !['ACCEPTED', 'REVOKED', 'REJECTED'].includes(status);
+}
+
+function buildVacancyOverview(vacancy = {}) {
+  const parts = [];
+  const title = vacancyTitle(vacancy);
+  const city = vacancyCity(vacancy);
+  parts.push(`La vacante es ${title}${city ? ` en ${city}` : ''}.`);
+
+  const description = cleanConfiguredFragment(vacancy.roleDescription);
+  if (description) parts.push(`Funciones: ${description}.`);
+
+  const requirements = cleanConfiguredFragment(vacancy.requirements);
+  if (requirements) parts.push(`Requisitos: ${requirements}.`);
+
+  const conditions = cleanConfiguredFragment(vacancy.conditions);
+  if (conditions) parts.push(`Condiciones: ${conditions}.`);
+
+  const location = cleanConfiguredFragment(vacancy.operationAddress);
+  if (location) parts.push(`Lugar de trabajo: ${location}.`);
+
+  parts.push('¿Te interesa continuar con la postulación?');
+  return parts.join('\n');
+}
+
 function getConfiguredAgeRequirementText(vacancy = {}) {
   const minAge = configuredInteger(vacancy?.minAge);
   const maxAge = configuredInteger(vacancy?.maxAge);
@@ -150,6 +187,53 @@ function isVacancyQuestionIntent(interpretation = {}) {
   return VACANCY_QUESTION_INTENTS.has(intent) || intent.startsWith('ASK_VACANCY_');
 }
 
+function firstNonEmptyString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function unresolvedRecruitmentContext(input = {}) {
+  const facts = input?.candidate?.facts || {};
+  const interpretation = input?.interpretation || {};
+  const detected = interpretation.detectedFields || {};
+  const extracted = interpretation.extractedFields || {};
+  const provided = interpretation.providedFields || {};
+  const fields = interpretation.fields || {};
+
+  return {
+    city: firstNonEmptyString(
+      facts.recruitmentCity,
+      fields.recruitmentCity,
+      provided.recruitmentCity,
+      extracted.recruitmentCity,
+      detected.recruitmentCity,
+      provided.cityHint,
+      extracted.cityHint,
+      detected.cityHint,
+      fields.city,
+      provided.city,
+      extracted.city,
+      detected.city
+    ),
+    role: firstNonEmptyString(
+      facts.recruitmentRole,
+      fields.recruitmentRole,
+      provided.recruitmentRole,
+      extracted.recruitmentRole,
+      detected.recruitmentRole,
+      provided.roleHint,
+      extracted.roleHint,
+      detected.roleHint,
+      fields.role,
+      provided.role,
+      extracted.role,
+      detected.role
+    )
+  };
+}
+
 export function buildVacancyPolicyReply(vacancy = {}, rawText = '') {
   if (!vacancy) return '';
 
@@ -195,7 +279,7 @@ export function buildVacancyPolicyReply(vacancy = {}, rawText = '') {
       : 'La información disponible de esta vacante no especifica un requisito adicional de experiencia.';
   }
 
-  if (/\b(requisito|perfil|estudio|formacion|documento|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
+  if (/\b(requisitos?|perfil|estudios?|formacion|documentos?|moto|carro|transporte|vehiculo)\b/.test(normalized)) {
     const parts = [];
     if (vacancy.requirements) parts.push(vacancy.requirements);
 
@@ -260,20 +344,36 @@ export function vacancyPolicy(input) {
   }
 
   if (input?.vacancy === null && !input?.candidate?.facts?.vacancyId) {
-    const detected = input?.interpretation?.detectedFields || {};
-    const roleHint = typeof detected.roleHint === 'string' ? detected.roleHint.trim() : '';
-    const cityHint = typeof detected.cityHint === 'string' ? detected.cityHint.trim() : '';
-    if (roleHint && cityHint) {
+    const context = unresolvedRecruitmentContext(input);
+    if (!context.city && !context.role) {
+      return {
+        reply: { directive: 'ASK_CITY_AND_VACANCY' },
+        transitions: { keepCurrentStep: true }
+      };
+    }
+    if (context.city && !context.role) {
       return {
         reply: {
-          directive: 'CLARIFY_VACANCY_SELECTION',
-          parameters: { roleHint, cityHint }
+          directive: 'ASK_VACANCY_FOR_CITY',
+          parameters: { city: context.city }
+        },
+        transitions: { keepCurrentStep: true }
+      };
+    }
+    if (!context.city && context.role) {
+      return {
+        reply: {
+          directive: 'ASK_CITY_FOR_ROLE',
+          parameters: { role: context.role }
         },
         transitions: { keepCurrentStep: true }
       };
     }
     return {
-      reply: { directive: 'ASK_WHICH_FLYER_SEEN' },
+      reply: {
+        directive: 'CLARIFY_VACANCY_SELECTION',
+        parameters: { roleHint: context.role, cityHint: context.city }
+      },
       transitions: { keepCurrentStep: true }
     };
   }
@@ -293,10 +393,55 @@ export function vacancyPolicy(input) {
     };
   }
 
-  if (!isVacancyQuestionIntent(input?.interpretation)) return {};
-  if (!input?.vacancy) return {};
-  if (input?.execution?.mayReply !== true) return {};
+  if (!input?.vacancy || input?.execution?.mayReply !== true) return {};
 
+  const mode = candidateResumeMode(input);
+  const vacancyQuestion = isVacancyQuestionIntent(input?.interpretation);
+
+  if (consentIsPending(input) && mode !== AWAITING_DATA_CONSENT) {
+    if (mode === AWAITING_VACANCY_INTEREST) {
+      if (!vacancyQuestion) return {};
+      const answer = buildVacancyPolicyReply(input.vacancy, input?.turn?.rawText || '');
+      return answer
+        ? {
+            reply: {
+              text: `${answer}\n\n¿Te interesa continuar con la postulación?`,
+              interactiveOptions: INTEREST_OPTIONS
+            },
+            transitions: { keepCurrentStep: true }
+          }
+        : {};
+    }
+
+    if (vacancyQuestion) {
+      const answer = buildVacancyPolicyReply(input.vacancy, input?.turn?.rawText || '');
+      return answer
+        ? {
+            reply: {
+              text: `${answer}\n\n¿Te interesa continuar con la postulación?`,
+              interactiveOptions: INTEREST_OPTIONS
+            },
+            mutations: {
+              fieldsToPersist: { botResumeMode: AWAITING_VACANCY_INTEREST }
+            },
+            transitions: { keepCurrentStep: true }
+          }
+        : {};
+    }
+
+    return {
+      reply: {
+        text: buildVacancyOverview(input.vacancy),
+        interactiveOptions: INTEREST_OPTIONS
+      },
+      mutations: {
+        fieldsToPersist: { botResumeMode: AWAITING_VACANCY_INTEREST }
+      },
+      transitions: { keepCurrentStep: true }
+    };
+  }
+
+  if (!vacancyQuestion) return {};
   const text = buildVacancyPolicyReply(input.vacancy, input?.turn?.rawText || '');
   return text ? { reply: { text } } : {};
 }

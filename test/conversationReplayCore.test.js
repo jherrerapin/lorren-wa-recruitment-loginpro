@@ -22,6 +22,7 @@ test('un fixture legacy de revocación atraviesa el nuevo núcleo funcional', as
 for (const entry of fixtureEntries) {
   test(`fixture funcional: ${entry.fixture.id}`, async () => {
     const { input, decision } = await executeReplayTurn(entry.fixture);
+    assert.deepEqual(decision, entry.fixture.expectedDecision, entry.relativePath);
     const actions = new Set((entry.fixture.expected?.plan?.actions || []).map((action) => action.type));
     const parsedFields = entry.fixture.providerStubs?.aiResult?.parsedFields || {};
 
@@ -30,7 +31,8 @@ for (const entry of fixtureEntries) {
 
     if (actions.has('ASK_DATA_CONSENT')) {
       assert.match(decision.reply?.text || '', /datos personales/);
-      assert.equal(decision.mutations.nextStep, 'AWAITING_DATA_CONSENT');
+      assert.equal(decision.mutations.fieldsToPersist.botResumeMode, 'awaiting_data_consent');
+      assert.equal(decision.mutations.fieldsToPersist.dataConsentStatus, undefined);
     }
     if (actions.has('STOP_APPLICATION')) {
       assert.equal(decision.transitions.endConversation, true);
@@ -44,10 +46,15 @@ for (const entry of fixtureEntries) {
       }
     }
     const expectedPending = entry.fixture.expected?.finalState?.pendingFields;
-    if (Array.isArray(expectedPending) && expectedPending.length) {
+    if (Array.isArray(expectedPending) && expectedPending.length && !actions.has('ANSWER_VACANCY_QUESTION')) {
       assert.equal(decision.reply?.directive, 'ASK_MISSING_FIELDS');
       assert.deepEqual(decision.reply.parameters.missingFields, expectedPending);
       assert.equal(decision.transitions.keepCurrentStep, true);
+    }
+    if (actions.has('ANSWER_VACANCY_QUESTION')) {
+      assert.deepEqual(input.pending.fields, expectedPending);
+      assert.match(decision.reply.text, /turnos rotativos/i);
+      assert.equal(decision.mutations.fieldsToPersist.locality, undefined);
     }
   });
 }

@@ -361,6 +361,8 @@ model Candidate {
   documentNumber               String?
   age                          Int?
   gender                       Gender                        @default(UNKNOWN)
+  recruitmentCity              String?
+  recruitmentRole              String?
   neighborhood                 String?
   locality                     String?
   zoneViable                   Boolean?
@@ -927,9 +929,9 @@ model DispatchWorkerPortalSession {
   activationId      String                   @unique
   activation        DispatchWorkerActivation @relation(fields: [activationId], references: [id], onDelete: Restrict)
   sessionTokenHash  String                   @unique
-  status            String                   @default("ACTIVE")
-  issuedAt          DateTime                 @default(now())
-  expiresAt         DateTime
+  status             String                   @default("ACTIVE")
+  issuedAt           DateTime                 @default(now())
+  expiresAt          DateTime
   lastSeenAt        DateTime?
   revokedAt         DateTime?
   revokedByUsername String?

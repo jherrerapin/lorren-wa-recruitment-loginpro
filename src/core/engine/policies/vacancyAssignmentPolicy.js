@@ -1,6 +1,8 @@
 const ASSIGNMENT_INTENTS = new Set([
   'APPLY_INTENT',
-  'PROVIDE_DATA'
+  'PROVIDE_DATA',
+  'PROVIDE_CANDIDATE_DATA',
+  'CONTINUE_APPLICATION'
 ]);
 
 const TOKEN_STOPWORDS = new Set([
@@ -60,7 +62,8 @@ function textSupportsResolvedVacancy(input = {}) {
   const roleHints = [
     interpretation?.providedFields?.roleHint,
     interpretation?.detectedFields?.roleHint,
-    interpretation?.extractedFields?.roleHint
+    interpretation?.extractedFields?.roleHint,
+    interpretation?.fields?.recruitmentRole
   ]
     .map(normalize)
     .filter(Boolean);
@@ -71,13 +74,26 @@ function textSupportsResolvedVacancy(input = {}) {
   ));
 }
 
+function resolvedVacancyFields(input = {}) {
+  const vacancy = input?.vacancy || {};
+  const fields = {
+    vacancyId: String(vacancy.id || '').trim()
+  };
+  const city = String(vacancy.city || vacancy?.operation?.city?.name || '').trim();
+  const role = String(vacancy.role || vacancy.title || '').trim();
+  if (city) fields.recruitmentCity = city;
+  if (role) fields.recruitmentRole = role;
+  return fields;
+}
+
 /**
  * Pure vacancy-assignment policy.
  *
  * The imperative shell/NLU remains responsible for resolving a candidate's
  * text/city/role evidence to one concrete vacancy snapshot. This policy only
- * decides whether that already-resolved vacancy id should become candidate
- * state, preventing the Functional Core from querying vacancy catalogs.
+ * decides whether that already-resolved vacancy should become candidate state.
+ * Objective Meta attribution can be persisted without depending on text intent;
+ * organic assignment still requires semantic evidence from the candidate turn.
  *
  * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
  * @returns {Promise<object>} Partial<ConversationDecision>
@@ -94,13 +110,14 @@ export async function vacancyAssignmentPolicy(input) {
     return {};
   }
 
+  const objectiveMetaAttribution = input?.attribution?.source === 'META_ADS';
   const intent = interpretationIntent(input);
-  if (!ASSIGNMENT_INTENTS.has(intent)) {
-    return {};
-  }
-
-  const hasAssignmentEvidence = intent === 'APPLY_INTENT'
-    || textSupportsResolvedVacancy(input);
+  const hasAssignmentEvidence = objectiveMetaAttribution
+    || ASSIGNMENT_INTENTS.has(intent) && (
+      intent === 'APPLY_INTENT'
+      || intent === 'CONTINUE_APPLICATION'
+      || textSupportsResolvedVacancy(input)
+    );
 
   if (!hasAssignmentEvidence) {
     return {};
@@ -108,9 +125,7 @@ export async function vacancyAssignmentPolicy(input) {
 
   return {
     mutations: {
-      fieldsToPersist: {
-        vacancyId: resolvedVacancyId
-      }
+      fieldsToPersist: resolvedVacancyFields(input)
     }
   };
 }

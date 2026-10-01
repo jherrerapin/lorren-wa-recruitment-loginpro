@@ -37,7 +37,8 @@ export const HistoryMessageSchema = z.object({
 
 export const HistorySchema = z.object({
   messages: z.array(HistoryMessageSchema).readonly(),
-  lastBotQuestion: z.string().nullable()
+  lastBotQuestion: z.string().nullable(),
+  lastBotReplyIdentity: z.string().nullable().optional()
 }).strict().readonly();
 
 /** Canonical scheduling slot understood by the functional core. */
@@ -171,6 +172,8 @@ export const InterpretationCandidateFieldsSchema = z.object({
   documentNumber: z.string().trim().min(1).nullable().optional(),
   age: z.number().int().nullable().optional(),
   gender: z.string().trim().min(1).nullable().optional(),
+  recruitmentCity: z.string().trim().min(1).nullable().optional(),
+  recruitmentRole: z.string().trim().min(1).nullable().optional(),
   neighborhood: z.string().trim().min(1).nullable().optional(),
   locality: z.string().trim().min(1).nullable().optional(),
   medicalRestrictions: z.string().trim().min(1).nullable().optional(),

@@ -38,7 +38,9 @@
       "cvData": null,
       "cvStorageKey": null,
       "cvOriginalName": null,
-      "cvMimeType": null
+      "cvMimeType": null,
+      "recruitmentCity": "Bogotá",
+      "recruitmentRole": "Auxiliar de bodega"
     },
     "vacancy": {
       "vacancyId": "vacancy-test-bogota-attachment",
@@ -109,8 +111,12 @@
       "forbiddenClaims": [
         "La postulación puede avanzar sin autorización"
       ],
-      "requiredText": ["autoriz"],
-      "forbiddenText": ["puedes continuar sin autorizar"]
+      "requiredText": [
+        "autoriz"
+      ],
+      "forbiddenText": [
+        "puedes continuar sin autorizar"
+      ]
     },
     "finalState": {
       "dataConsentStatus": "PENDING",
@@ -121,5 +127,33 @@
       "cvOriginalName": null,
       "cvMimeType": null
     }
+  },
+  "expectedDecision": {
+    "reply": {
+      "text": "La vacante es Auxiliar de bodega en Bogotá.\n¿Te interesa continuar con la postulación?",
+      "interactiveOptions": [
+        {
+          "id": "vacancy_interest:accept",
+          "label": "Sí, me interesa"
+        },
+        {
+          "id": "vacancy_interest:reject",
+          "label": "No, gracias"
+        }
+      ]
+    },
+    "mutations": {
+      "fieldsToPersist": {
+        "botResumeMode": "awaiting_vacancy_interest"
+      },
+      "nextStep": null,
+      "nextStage": null
+    },
+    "transitions": {
+      "keepCurrentStep": true,
+      "handoffToHuman": false,
+      "endConversation": false
+    },
+    "scheduling": null
   }
 }

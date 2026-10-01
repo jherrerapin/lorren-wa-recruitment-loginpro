@@ -20,7 +20,11 @@ function input(overrides = {}) {
 test('interés explícito asigna la vacante ya resuelta por la envoltura', async () => {
   assert.deepEqual(await vacancyAssignmentPolicy(input()), {
     mutations: {
-      fieldsToPersist: { vacancyId: 'vacancy-bodega-bogota' }
+      fieldsToPersist: {
+        vacancyId: 'vacancy-bodega-bogota',
+        recruitmentCity: 'Bogotá',
+        recruitmentRole: 'Cargue y descargue'
+      }
     }
   });
 });
@@ -38,7 +42,11 @@ test('datos con evidencia del cargo permiten materializar la resolución previa'
     interpretation: { intent: 'PROVIDE_DATA' }
   })), {
     mutations: {
-      fieldsToPersist: { vacancyId: 'vacancy-bodega-bogota' }
+      fieldsToPersist: {
+        vacancyId: 'vacancy-bodega-bogota',
+        recruitmentCity: 'Bogotá',
+        recruitmentRole: 'Cargue y descargue'
+      }
     }
   });
 });

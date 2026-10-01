@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { runJob } from '../src/workers/jobWorker.js';
 import { JOB_TYPES } from '../src/services/jobQueue.js';
 
-function harness({ acquired = true, recentMessages = [] } = {}) {
+function harness({ acquired = true, candidateOverrides = {} } = {}) {
   const calls = [];
   const prisma = {
     name: 'prisma',
@@ -13,9 +13,13 @@ function harness({ acquired = true, recentMessages = [] } = {}) {
         return {
           id: 'candidate-1',
           dataConsentStatus: 'PENDING',
+          recruitmentCity: null,
+          recruitmentRole: null,
           locality: 'Ibagué',
           neighborhood: 'El Salado',
-          vacancyId: null
+          vacancyId: null,
+          vacancy: null,
+          ...candidateOverrides
         };
       }
     },
@@ -26,12 +30,6 @@ function harness({ acquired = true, recentMessages = [] } = {}) {
           id: 'vac-1', role: 'Cargue y Descargue', title: 'Auxiliar de bodega',
           city: 'Ibagué', isActive: true, acceptingApplications: true
         }];
-      }
-    },
-    message: {
-      async findMany(query) {
-        calls.push(['loadRecentInbound', query]);
-        return recentMessages;
       }
     }
   };
@@ -51,7 +49,11 @@ function harness({ acquired = true, recentMessages = [] } = {}) {
       calls.push(['extract', text, pendingFields, context]);
       return {
         intent: 'PROVIDE_CANDIDATE_DATA',
-        extractedFields: { gender: 'FEMALE', vacancyId: 'vac-1' }
+        extractedFields: {
+          recruitmentCity: context.candidateCity || 'Ibagué',
+          recruitmentRole: context.candidateRole || 'Cargue y Descargue',
+          vacancyId: 'vac-1'
+        }
       };
     },
     async buildConversationTurnInput(payload, receivedDependencies) {
@@ -67,26 +69,28 @@ function harness({ acquired = true, recentMessages = [] } = {}) {
   return { calls, dependencies, prisma, llmService, whatsappClient, input, decision };
 }
 
-test('el worker procesa un mensaje entrante mediante el pipeline completo', async () => {
+test('el worker procesa un mensaje entrante mediante el pipeline completo sin releer historial', async () => {
   const h = harness();
   const payload = { messageId: 'wamid.1', from: '573001112233', type: 'text', text: 'Hola' };
   await runJob({ type: JOB_TYPES.WHATSAPP_INBOUND_MESSAGE, payload }, h.dependencies);
   assert.deepEqual(h.calls.map((entry) => entry[0]), [
-    'acquire', 'loadPending', 'loadVacancies', 'loadRecentInbound',
+    'acquire', 'loadPending', 'loadVacancies',
     'extract', 'build', 'calculate', 'execute'
   ]);
   assert.deepEqual(h.calls[0].slice(1), ['wamid.1', { prisma: h.prisma }]);
-  assert.deepEqual(h.calls[4][1], 'Hola');
-  assert.deepEqual(h.calls[4][2], ['dataConsent']);
-  assert.deepEqual(h.calls[4][3].candidateSummary, {
+  assert.deepEqual(h.calls[3][1], 'Hola');
+  assert.deepEqual(h.calls[3][2], ['recruitmentCity', 'recruitmentRole', 'vacancyId']);
+  assert.deepEqual(h.calls[3][3].candidateSummary, {
     city: null,
+    role: null,
     locality: 'Ibagué',
     neighborhood: 'El Salado',
     vacancyId: null
   });
-  assert.equal(h.calls[4][3].candidateCity, null);
-  assert.equal(h.calls[4][3].activeVacancies[0].id, 'vac-1');
-  assert.deepEqual(h.calls[5].slice(1), [{
+  assert.equal(h.calls[3][3].candidateCity, null);
+  assert.equal(h.calls[3][3].candidateRole, null);
+  assert.equal(h.calls[3][3].activeVacancies[0].id, 'vac-1');
+  assert.deepEqual(h.calls[4].slice(1), [{
     ...payload,
     resolvedVacancy: {
       id: 'vac-1', role: 'Cargue y Descargue', title: 'Auxiliar de bodega',
@@ -94,17 +98,21 @@ test('el worker procesa un mensaje entrante mediante el pipeline completo', asyn
     },
     interpretation: {
       intent: 'PROVIDE_CANDIDATE_DATA',
-      extractedFields: { gender: 'FEMALE', vacancyId: 'vac-1' }
+      extractedFields: {
+        recruitmentCity: 'Ibagué',
+        recruitmentRole: 'Cargue y Descargue',
+        vacancyId: 'vac-1'
+      }
     }
   }, { prisma: h.prisma }]);
-  assert.equal(h.calls[6][1], h.input);
-  assert.deepEqual(h.calls[7].slice(1), [h.input, h.decision, {
+  assert.equal(h.calls[5][1], h.input);
+  assert.deepEqual(h.calls[6].slice(1), [h.input, h.decision, {
     prisma: h.prisma, llmService: h.llmService, whatsappClient: h.whatsappClient
   }]);
 });
 
-test('conserva la ciudad explícita de un turno reciente para resolver el cargo siguiente', async () => {
-  const h = harness({ recentMessages: [{ body: 'Estoy en Ibagué' }] });
+test('usa la ciudad persistida del candidato para resolver el cargo siguiente', async () => {
+  const h = harness({ candidateOverrides: { recruitmentCity: 'Ibagué' } });
   const payload = {
     messageId: 'wamid.role-after-city',
     from: '573001112233',
@@ -116,11 +124,29 @@ test('conserva la ciudad explícita de un turno reciente para resolver el cargo 
 
   const extraction = h.calls.find(([name]) => name === 'extract');
   assert.equal(extraction[3].candidateCity, 'Ibagué');
+  assert.equal(extraction[3].candidateRole, null);
   const build = h.calls.find(([name]) => name === 'build');
   assert.equal(build[1].resolvedVacancy.id, 'vac-1');
 });
 
-test('una localidad no se reutiliza como si fuera la ciudad de la vacante', async () => {
+test('usa el cargo persistido del candidato para resolver la ciudad siguiente', async () => {
+  const h = harness({ candidateOverrides: { recruitmentRole: 'Cargue y Descargue' } });
+  await runJob({
+    type: JOB_TYPES.WHATSAPP_INBOUND_MESSAGE,
+    payload: {
+      messageId: 'wamid.city-after-role',
+      from: '573001112233',
+      type: 'text',
+      text: 'Estoy en Ibagué'
+    }
+  }, h.dependencies);
+
+  const extraction = h.calls.find(([name]) => name === 'extract');
+  assert.equal(extraction[3].candidateCity, null);
+  assert.equal(extraction[3].candidateRole, 'Cargue y Descargue');
+});
+
+test('una localidad no se reutiliza como si fuera la ciudad de reclutamiento', async () => {
   const h = harness();
   await runJob({
     type: JOB_TYPES.WHATSAPP_INBOUND_MESSAGE,

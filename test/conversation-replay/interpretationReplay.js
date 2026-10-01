@@ -37,9 +37,9 @@ function resolveConsentDecision(fixture, text, intent) {
   const consentPromptPending = parseConsentPendingMode(candidate.botResumeMode).pending;
   const decision = consentPolicy({
     turn: { rawText: text },
-    candidate: { facts: { dataConsentStatus: candidate.dataConsentStatus } },
+    candidate: { facts: candidate },
     pending: { fields: consentPromptPending ? ['dataConsent'] : [] },
-    vacancy: fixture.initialState.vacancy || {},
+    vacancy: { ...fixture.initialState.vacancy, id: fixture.initialState.vacancy.vacancyId },
     interpretation: { intent },
     execution: { mayReply: true }
   });
