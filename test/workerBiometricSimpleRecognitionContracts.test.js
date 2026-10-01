@@ -251,6 +251,6 @@ test('el servidor limita la comparación no bloqueante al modo estricto de una m
 
 test('no encadena reinicios automáticos y conserva la estrategia network-first vigente', () => {
   assert.match(flow, /MAX_AUTOMATIC_ATTEMPTS = 1/);
-  assert.match(loader, /20260811-worker-portal-biometric-v9/);
-  assert.match(serviceWorker, /lorren-worker-portal-shell-v14/);
+  assert.match(loader, /20260814-worker-portal-biometric-v10/);
+  assert.match(serviceWorker, /lorren-worker-portal-shell-v17/);
 });
