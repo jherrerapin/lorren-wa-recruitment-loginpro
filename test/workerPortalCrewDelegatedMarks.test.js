@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import vm from 'node:vm';
+import ejs from 'ejs';
 import {
   loadWorkerPortalAssignmentForMark,
   loadWorkerPortalAssignments
@@ -84,6 +86,7 @@ test('auxiliar CREW disponible no recibe ninguna marcación individual y el POST
   assert.equal(assignments.length, 1);
   const [projection] = assignments;
   assert.equal(projection.markDelegatedToCrewLeader, true);
+  assert.deepEqual(projection.crewMembers, []);
   assert.equal(projection.canRegisterArrival, false);
   assert.equal(projection.canStartBreak, false);
   assert.equal(projection.canEndBreak, false);
@@ -291,4 +294,80 @@ test('router deriva fan-out desde la asignación CREW del encargado y no desde u
   assert.match(source, /registerCrewMarkFn\(prisma,[\s\S]{0,260}leaderWorkerId: portalSession\.workerId/);
   assert.doesNotMatch(source, /x-lorren-crew-(?:mark|break|departure)/i);
   assert.match(source, /crewMarkPublicResult\(crewResult, markType\)/);
+});
+
+test('la PWA muestra la lista autorizada y acciones secuenciales sin pedir cargar auxiliares', async () => {
+  const record = assignmentRecord({ workerId: 'TEST-WORKER-LEADER', assignmentId: 'TEST-ASSIGNMENT-LEADER' });
+  const [projection] = await loadWorkerPortalAssignments(portalPrisma(record), {
+    workerId: record.workerId,
+    now: NOW,
+    loadCrewContextsFn: async () => [{
+      ...context({ assignmentId: record.id, isCrewLeader: true }),
+      members: [
+        { assignmentId: record.id, displayName: 'Encargado Prueba', isLeader: true, attendance: {} },
+        { assignmentId: 'TEST-ASSIGNMENT-A', displayName: 'Auxiliar Prueba A', isLeader: false, attendance: {} },
+        { assignmentId: 'TEST-ASSIGNMENT-B', displayName: 'Auxiliar Prueba B', isLeader: false, attendance: { arrivalAt: NOW.toISOString() } }
+      ]
+    }]
+  });
+  assert.equal(projection.crewMembers.length, 3);
+  const template = await readFile(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
+  const html = ejs.render(template, { mode: 'active', nonce: 'test', assignments: [projection], expiresAt: null });
+  assert.match(html, /Auxiliar Prueba A/);
+  assert.match(html, /Auxiliar Prueba B/);
+  assert.match(html, /Pendiente de entrada/);
+  assert.match(html, /Entrada registrada/);
+  assert.match(html, /data-crew-action="BREAK_START"/);
+  assert.match(html, /data-crew-action="DEPARTURE"/);
+  assert.doesNotMatch(html, /data-crew-load|data-crew-mark-type|Fuerza mayor/);
+});
+
+test('la selección PWA ofrece salida sin exigir almuerzo y respeta cada etapa', async () => {
+  const member = (attendance = {}) => ({
+    dataset: { arrival: '', breakStart: '', breakEnd: '', departure: '', ...attendance },
+    checked: false,
+    disabled: false,
+    addEventListener(_name, callback) { this.onChange = callback; },
+    closest() { return { querySelector: () => ({ replaceChildren() {} }) }; }
+  });
+  const pending = member();
+  const arrived = member({ arrival: NOW.toISOString() });
+  const buttons = ['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE'].map((mark) => ({
+    dataset: { crewAction: mark }, hidden: true, addEventListener() {}
+  }));
+  const actions = { hidden: true };
+  const status = { textContent: '' };
+  const selectAll = { checked: false, addEventListener() {} };
+  const panel = {
+    dataset: { crewManual: 'TEST-ASSIGNMENT-LEADER' },
+    closest: () => ({ querySelector: () => ({ setAttribute() {} }) }),
+    querySelector(selector) {
+      return ({ '[data-crew-status]': status, '[data-crew-all]': selectAll, '[data-crew-actions]': actions })[selector];
+    },
+    querySelectorAll(selector) {
+      return selector === '[data-crew-member]' ? [pending, arrived] : buttons;
+    }
+  };
+  const source = await readFile(new URL('../src/public/worker-portal-crew-manual.js', import.meta.url), 'utf8');
+  vm.runInNewContext(source, {
+    document: { querySelectorAll: () => [panel] },
+    navigator: { userAgent: 'PWA' },
+    window: {}
+  });
+  const visible = () => buttons.filter((button) => !button.hidden).map((button) => button.dataset.crewAction);
+  pending.checked = true;
+  pending.onChange();
+  assert.deepEqual(visible(), ['ARRIVAL']);
+  arrived.checked = true;
+  arrived.onChange();
+  assert.deepEqual(visible(), []);
+  pending.checked = false;
+  pending.onChange();
+  assert.deepEqual(visible(), ['BREAK_START', 'DEPARTURE']);
+  arrived.dataset.breakStart = NOW.toISOString();
+  arrived.onChange();
+  assert.deepEqual(visible(), ['BREAK_END']);
+  arrived.dataset.breakEnd = NOW.toISOString();
+  arrived.onChange();
+  assert.deepEqual(visible(), ['DEPARTURE']);
 });

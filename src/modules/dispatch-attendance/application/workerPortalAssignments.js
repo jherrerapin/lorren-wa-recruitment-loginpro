@@ -296,6 +296,14 @@ function buildPortalAssignment(assignment, now, crewContext = null) {
     attendanceEnabled,
     crewAvailable,
     isCrewLeader,
+    crewMembers: isCrewLeader && Array.isArray(crewContext?.members)
+      ? crewContext.members.map((member) => ({
+          assignmentId: member.assignmentId,
+          displayName: member.displayName,
+          isLeader: member.isLeader === true,
+          attendance: member.attendance || {}
+        }))
+      : [],
     markDelegatedToCrewLeader,
     arrivalReported,
     arrivalReportedAt: optionalIsoDate(session?.arrivalReportedAt),

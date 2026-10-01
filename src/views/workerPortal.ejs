@@ -76,11 +76,26 @@
     .assignment-mark-history-item strong { display: block; margin-top: 3px; color: #176c36; font-size: 12px; line-height: 1.3; }
     .assignment-mark-history-item.pending strong { color: #76838c; }
     .action-grid { display: grid; gap: 9px; }
+    .action-grid[hidden] { display: none; }
     .mark-button, .primary-button, .secondary-button { width: 100%; min-height: 52px; border: 0; border-radius: 12px; padding: 14px 16px; font-weight: 800; cursor: pointer; }
     .mark-button, .primary-button { background: #176c36; color: #fff; }
     .mark-button.break { background: #a16610; }
     .mark-button.departure { background: #1f5b8f; }
     .secondary-button { background: #edf1f4; color: #263645; }
+    .crew-manual { margin-top: 16px; padding: 18px; border: 1px solid #b8d9c3; border-radius: 18px; background: linear-gradient(180deg, #f4fbf6 0%, #fff 100%); }
+    .crew-manual[hidden], .crew-manual-actions button[hidden], .crew-manual-actions[hidden] { display: none; }
+    .crew-manual-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .crew-manual-head strong { display: block; color: #174b2a; font-size: 17px; line-height: 1.25; }
+    .crew-manual-head p { margin-top: 5px; font-size: 13px; }
+    .crew-manual-count { flex: 0 0 auto; padding: 6px 9px; border-radius: 999px; background: #e0f2e5; color: #176c36; font-size: 11px; font-weight: 850; }
+    .crew-manual-select-all { display: flex; align-items: center; gap: 10px; margin-top: 16px; padding: 11px 12px; border-radius: 11px; background: #eaf5ee; color: #174b2a; font-size: 13px; font-weight: 800; }
+    .crew-manual input[type="checkbox"] { width: 20px; height: 20px; margin: 0; flex: 0 0 auto; accent-color: #176c36; }
+    .crew-manual-members { display: grid; gap: 8px; margin-top: 9px; }
+    .crew-manual-member { display: flex; align-items: center; gap: 11px; min-height: 54px; padding: 10px 12px; border: 1px solid #dce8df; border-radius: 12px; background: #fff; }
+    .crew-manual-member-name { flex: 1; min-width: 0; color: #263645; font-size: 14px; font-weight: 750; overflow-wrap: anywhere; }
+    .crew-manual-member-state { color: #63756b; font-size: 11px; font-weight: 750; text-align: right; }
+    .crew-manual-actions { display: grid; gap: 9px; margin-top: 16px; }
+    .crew-manual-status { margin-top: 10px; font-size: 13px; font-weight: 700; }
     button:disabled { cursor: not-allowed; opacity: .55; }
     .empty-state { padding: 24px; border: 1px dashed #cfd7df; border-radius: 16px; text-align: center; background: #fff; }
 
@@ -277,7 +292,7 @@
                   <div class="assignment-mark-history-item <%= assignment.departureReportedLabel ? '' : 'pending' %>" data-assignment-history-mark="DEPARTURE"><span>Salida</span><strong><%= assignment.departureReportedLabel || 'Sin registrar' %></strong></div>
                 </div>
               </div>
-              <div class="action-grid">
+              <div class="action-grid" <%= assignment.crewAvailable && assignment.isCrewLeader ? 'data-crew-standard-actions' : '' %>>
                 <% if (!assignment.arrivalReported && !assignment.departureReported) { %>
                   <button type="button" class="mark-button" data-assignment-id="<%= assignment.id %>" data-mark-type="ARRIVAL" <%= assignment.canRegisterArrival ? '' : 'disabled' %>><%= assignment.actionLabel %></button>
                 <% } else if (!assignment.departureReported) { %>
@@ -290,24 +305,24 @@
                 <% } %>
               </div>
               <% if (assignment.crewAvailable && assignment.isCrewLeader && !assignment.departureReported) { %>
-                <section class="assignment-mark-history" data-crew-manual="<%= assignment.id %>" aria-label="Marcación manual de cuadrilla">
-                  <strong class="assignment-mark-history-title">Marcación manual de cuadrilla</strong>
-                  <p>Selecciona los auxiliares presentes. Se validará la ubicación en una operación autorizada.</p>
-                  <button type="button" class="secondary-button" data-crew-load="<%= assignment.id %>">Elegir auxiliares</button>
-                  <div data-crew-controls hidden>
-                    <label><input type="checkbox" data-crew-all> Seleccionar todos</label>
-                    <div data-crew-members></div>
-                    <label>Marcación
-                      <select data-crew-mark-type>
-                        <option value="ARRIVAL">Entrada</option>
-                        <option value="BREAK_START">Inicio de almuerzo</option>
-                        <option value="BREAK_END">Fin de almuerzo</option>
-                        <option value="DEPARTURE">Salida</option>
-                      </select>
-                    </label>
-                    <button type="button" class="mark-button" data-crew-submit>Registrar seleccionados</button>
-                  </div>
-                  <p data-crew-status role="status" aria-live="polite"></p>
+                <% const crewMembers = (assignment.crewMembers || []).filter((member) => !member.isLeader); %>
+                <section class="crew-manual" data-crew-manual="<%= assignment.id %>" aria-label="Marcación manual de cuadrilla">
+                  <div class="crew-manual-head"><div><strong>Marcación de cuadrilla</strong><p>Elige a quienes están presentes y registra su siguiente paso.</p></div><span class="crew-manual-count"><%= crewMembers.length %> auxiliares</span></div>
+                  <% if (crewMembers.length) { %>
+                    <label class="crew-manual-select-all"><input type="checkbox" data-crew-all> Seleccionar todos</label>
+                    <div class="crew-manual-members" data-crew-members>
+                      <% crewMembers.forEach((member) => { const attendance = member.attendance || {}; %>
+                        <label class="crew-manual-member"><input type="checkbox" value="<%= member.assignmentId %>" data-crew-member data-arrival="<%= attendance.arrivalAt || '' %>" data-break-start="<%= attendance.breakStartAt || '' %>" data-break-end="<%= attendance.breakEndAt || '' %>" data-departure="<%= attendance.departureAt || '' %>"><span class="crew-manual-member-name"><%= member.displayName || 'Auxiliar' %></span><span class="crew-manual-member-state" data-crew-member-state><%= attendance.departureAt ? 'Salida registrada' : !attendance.arrivalAt ? 'Pendiente de entrada' : attendance.breakStartAt && !attendance.breakEndAt ? 'En almuerzo' : attendance.breakEndAt ? 'Almuerzo terminado' : 'Entrada registrada' %></span></label>
+                      <% }); %>
+                    </div>
+                    <div class="crew-manual-actions" data-crew-actions hidden>
+                      <button type="button" class="mark-button" data-crew-action="ARRIVAL" hidden>Registrar entrada</button>
+                      <button type="button" class="mark-button break" data-crew-action="BREAK_START" hidden>Iniciar almuerzo</button>
+                      <button type="button" class="mark-button break" data-crew-action="BREAK_END" hidden>Finalizar almuerzo</button>
+                      <button type="button" class="mark-button departure" data-crew-action="DEPARTURE" hidden>Registrar salida</button>
+                    </div>
+                  <% } else { %><p class="crew-manual-status">No hay auxiliares asignados a esta cuadrilla.</p><% } %>
+                  <p class="crew-manual-status" data-crew-status role="status" aria-live="polite"></p>
                 </section>
               <% } %>
             </article>

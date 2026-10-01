@@ -154,6 +154,8 @@ if ('serviceWorker' in navigator) {
   const CREW_FORCE_MAJEURE_PREFIX = 'lorren-crew-force-majeure:';
   if (!PORTAL_PATH_PATTERN.test(window.location.pathname)) return;
   if (window.LorrenAndroidPresence || /LorrenNative\/1/.test(WORKER_PORTAL_USER_AGENT)) return;
+  // La PWA usa la selección visible de auxiliares; este flujo Bluetooth queda solo como legado.
+  if (document.querySelector('[data-crew-manual]')) return;
 
   let contextReady = false;
   let contextLoadPromise = null;
