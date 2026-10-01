@@ -12,8 +12,8 @@ test('el worker conserva una autoridad de barrido exportada', () => {
 test('la facturación no usa la línea operativa de Despacho', () => {
   assert.doesNotMatch(source, /dispatchWhatsappCloudClient/);
   assert.doesNotMatch(source, /sendDispatchWhatsappTextMessage/);
-  assert.match(source, /deliverCybionixAttendanceApproval/);
-  assert.match(source, /deliverCybionixAccountCharge/);
+  assert.match(source, /deliverLorrenAttendanceApproval/);
+  assert.match(source, /deliverLorrenAccountCharge/);
 });
 
 test('si el supervisor ya rechazó no se reenvía la solicitud de aprobación', () => {
