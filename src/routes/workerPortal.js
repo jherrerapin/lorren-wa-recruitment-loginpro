@@ -1071,7 +1071,7 @@ export function workerPortalRouter(prisma, options = {}) {
         return strictError(res, 409, 'crew_group_not_available', 'La cuadrilla no está habilitada para esta operación.');
       }
       const validIds = new Set((context.members || []).map((member) => member.assignmentId));
-      if (selected.some((id) => !validIds.has(id) || id === assignmentId)) {
+      if (selected.some((id) => !validIds.has(id))) {
         return strictError(res, 409, 'crew_manual_member_not_assigned', 'La selección contiene un auxiliar ajeno a esta cuadrilla.');
       }
       const location = await requireStrictAttendanceLocation(

@@ -92,6 +92,9 @@
     .crew-manual input[type="checkbox"] { width: 20px; height: 20px; margin: 0; flex: 0 0 auto; accent-color: #176c36; }
     .crew-manual-members { display: grid; gap: 8px; margin-top: 9px; }
     .crew-manual-member { display: flex; align-items: center; gap: 11px; min-height: 54px; padding: 10px 12px; border: 1px solid #dce8df; border-radius: 12px; background: #fff; }
+    .crew-manual-member.leader { border-color: #8acba1; background: #f0faf3; }
+    .crew-manual-member-identity { display: grid; gap: 3px; flex: 1; min-width: 0; }
+    .crew-manual-role { color: #176c36; font-size: 11px; font-weight: 850; }
     .crew-manual-member-name { flex: 1; min-width: 0; color: #263645; font-size: 14px; font-weight: 750; overflow-wrap: anywhere; }
     .crew-manual-member-state { color: #63756b; font-size: 11px; font-weight: 750; text-align: right; }
     .crew-manual-actions { display: grid; gap: 9px; margin-top: 16px; }
@@ -307,14 +310,14 @@
                 </div>
               <% } %>
               <% if (assignment.crewAvailable && assignment.isCrewLeader && !assignment.departureReported) { %>
-                <% const crewMembers = (assignment.crewMembers || []).filter((member) => !member.isLeader); %>
+                <% const crewMembers = assignment.crewMembers || []; %>
                 <section class="crew-manual" data-crew-manual="<%= assignment.id %>" aria-label="Marcación manual de cuadrilla">
-                  <div class="crew-manual-head"><div><strong>Marcación de cuadrilla</strong><p>Elige a quienes están presentes y registra su siguiente paso.</p></div><span class="crew-manual-count"><%= crewMembers.length %> auxiliares</span></div>
+                  <div class="crew-manual-head"><div><strong>Marcación de cuadrilla</strong><p>Selecciona a cada persona que vas a marcar, incluido tú cuando corresponda.</p></div><span class="crew-manual-count"><%= crewMembers.length %> integrantes</span></div>
                   <% if (crewMembers.length) { %>
                     <label class="crew-manual-select-all"><input type="checkbox" data-crew-all> Seleccionar todos</label>
                     <div class="crew-manual-members" data-crew-members>
                       <% crewMembers.forEach((member) => { const attendance = member.attendance || {}; %>
-                        <label class="crew-manual-member"><input type="checkbox" value="<%= member.assignmentId %>" data-crew-member data-arrival="<%= attendance.arrivalAt || '' %>" data-break-start="<%= attendance.breakStartAt || '' %>" data-break-end="<%= attendance.breakEndAt || '' %>" data-departure="<%= attendance.departureAt || '' %>"><span class="crew-manual-member-name"><%= member.displayName || 'Auxiliar' %></span><span class="crew-manual-member-state" data-crew-member-state><%= attendance.departureAt ? 'Salida registrada' : !attendance.arrivalAt ? 'Pendiente de entrada' : attendance.breakStartAt && !attendance.breakEndAt ? 'En almuerzo' : attendance.breakEndAt ? 'Almuerzo terminado' : 'Entrada registrada' %></span></label>
+                        <label class="crew-manual-member <%= member.isLeader ? 'leader' : '' %>"><input type="checkbox" value="<%= member.assignmentId %>" data-crew-member data-arrival="<%= attendance.arrivalAt || '' %>" data-break-start="<%= attendance.breakStartAt || '' %>" data-break-end="<%= attendance.breakEndAt || '' %>" data-departure="<%= attendance.departureAt || '' %>"><span class="crew-manual-member-identity"><span class="crew-manual-member-name"><%= member.displayName || 'Auxiliar' %></span><% if (member.isLeader) { %><span class="crew-manual-role">Tú · Encargado</span><% } %></span><span class="crew-manual-member-state" data-crew-member-state><%= attendance.departureAt ? 'Salida registrada' : !attendance.arrivalAt ? 'Pendiente de entrada' : attendance.breakStartAt && !attendance.breakEndAt ? 'En almuerzo' : attendance.breakEndAt ? 'Almuerzo terminado' : 'Entrada registrada' %></span></label>
                       <% }); %>
                     </div>
                     <div class="crew-manual-actions" data-crew-actions hidden>

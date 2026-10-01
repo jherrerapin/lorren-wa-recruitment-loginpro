@@ -100,6 +100,11 @@ function reviewReason(input, isLeader) {
   if (input.manualTargetArrival && !isLeader) {
     return 'Llegada tardía delegada y confirmada por responsable de cuadrilla.';
   }
+  if (input.manualPwaSelection) {
+    return isLeader
+      ? 'Llegada manual del encargado desde el portal PWA.'
+      : 'Llegada manual del auxiliar seleccionado por el encargado desde el portal PWA.';
+  }
   return input.forceMajeure
     ? 'Fuerza mayor: uno o más auxiliares estaban sin celular; llegada delegada por responsable de cuadrilla.'
     : 'Llegada delegada y confirmada por responsable de cuadrilla.';
@@ -114,6 +119,9 @@ function reviewNotes(input, isLeader) {
   }
   if (input.manualTargetArrival && !isLeader) {
     return 'Llegada manual tardía desde la app Android: el servidor validó la sesión activa del encargado, su ubicación nativa firmada, la geocerca y la pertenencia del auxiliar al mismo servicio. El dispositivo del encargado no se atribuyó al auxiliar.';
+  }
+  if (input.manualPwaSelection) {
+    return 'Marcación manual PWA: el servidor validó la sesión del encargado, la geocerca y la pertenencia del integrante seleccionado a la cuadrilla. No se atribuyó prueba Bluetooth ni ubicación nativa al integrante.';
   }
   const base = 'Marcación grupal: la sesión y ubicación del responsable fueron validadas por el servidor y el flujo reportó una lectura Bluetooth consistente con la operación. No se solicitó reconocimiento facial para esta acción grupal.';
   return input.forceMajeure
@@ -278,7 +286,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     if (manualSelection.some((id) => !members.some((member) => member.id === id))) {
       throw new Error('crew_group_arrival_manual_target_not_assigned');
     }
-    selectedMembers = [leaderMember, ...members.filter((member) => member.id !== leaderAssignmentId && selectedIds.has(member.id))];
+    selectedMembers = members.filter((member) => selectedIds.has(member.id));
   }
 
   const selectedAssignmentIds = new Set(selectedMembers.map((member) => member.id));
@@ -351,7 +359,8 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
           leaderWorkerId,
           forceMajeure,
           presenceValidated,
-          manualTargetArrival: targetedManualArrival || Boolean(manualSelection),
+          manualTargetArrival: targetedManualArrival,
+          manualPwaSelection: Boolean(manualSelection),
           isLeader: true,
           now
         }, options);
@@ -390,7 +399,8 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       leaderWorkerId,
       forceMajeure,
       presenceValidated,
-      manualTargetArrival: targetedManualArrival || Boolean(manualSelection),
+      manualTargetArrival: targetedManualArrival,
+      manualPwaSelection: Boolean(manualSelection),
       isLeader: false,
       now
     }, options);
@@ -517,7 +527,7 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
     }
     selectedMembers = [targetMember];
   } else if (manualSelection) {
-    const selectedAssignmentSet = new Set([...manualSelection, leaderAssignmentId]);
+    const selectedAssignmentSet = new Set(manualSelection);
     selectedMembers = members.filter((member) => selectedAssignmentSet.has(member.id));
   }
   const registerMarkFn = markType === 'DEPARTURE'
