@@ -1,13 +1,12 @@
 import { dispatchServiceDateKey } from '../../../services/dispatchDate.js';
 import {
-  ATTENDANCE_POINT_ENABLEMENT_ACTION,
-  ATTENDANCE_POINT_ENABLEMENT_ENTITY_TYPE
-} from './updatePointConfig.js';
+  ensureAttendanceBillingEligibilitySnapshots,
+  loadAttendanceBillingEligibilitySnapshots
+} from './attendanceBillingEligibility.js';
 
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 export const ATTENDANCE_BILLING_CUT_DAY = 1;
 export const ATTENDANCE_BILLING_PAYMENT_DAY = 15;
-const CONFIRMED_ASSIGNMENT_STATUS = 'CONFIRMED';
 
 export const ATTENDANCE_BILLING_CONFIG_ENTITY_TYPE = 'DISPATCH_ATTENDANCE_BILLING_CONFIG';
 export const ATTENDANCE_BILLING_CONFIG_ENTITY_ID = 'GLOBAL';
@@ -296,80 +295,28 @@ function requireInvoicePrisma(prisma) {
   return prisma;
 }
 
-function enablementMetadata(event) {
-  return event?.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata)
-    ? event.metadata
-    : {};
-}
-
-function eventMoment(event) {
-  const value = event?.createdAt instanceof Date ? event.createdAt : new Date(event?.createdAt);
-  return Number.isNaN(value.getTime()) ? null : value;
-}
-
-function serviceMoment(serviceRequest) {
-  const dateKey = dispatchServiceDateKey(serviceRequest?.serviceDate);
-  if (!dateKey) return null;
-  const time = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(serviceRequest?.startTime || '').trim());
-  const hour = time ? time[1] : '23';
-  const minute = time ? time[2] : '59';
-  const value = new Date(`${dateKey}T${hour}:${minute}:00-05:00`);
-  return Number.isNaN(value.getTime()) ? null : value;
-}
-
-function enablementAtService(events = [], serviceRequest = {}) {
-  const pointId = serviceRequest?.operationPointId || serviceRequest?.operationPoint?.id || null;
-  const moment = serviceMoment(serviceRequest);
-  if (!pointId || !moment) return serviceRequest?.operationPoint?.attendanceEnabled === true;
-  const pointEvents = events.filter((event) => event?.entityId === pointId && eventMoment(event));
-  if (!pointEvents.length) return serviceRequest?.operationPoint?.attendanceEnabled === true;
-  let latestBefore = null;
-  let latestBeforeTime = Number.NEGATIVE_INFINITY;
-  let firstAfter = null;
-  let firstAfterTime = Number.POSITIVE_INFINITY;
-  for (const event of pointEvents) {
-    const at = eventMoment(event).getTime();
-    if (at <= moment.getTime() && at > latestBeforeTime) {
-      latestBefore = event;
-      latestBeforeTime = at;
-    }
-    if (at > moment.getTime() && at < firstAfterTime) {
-      firstAfter = event;
-      firstAfterTime = at;
-    }
-  }
-  if (latestBefore) return enablementMetadata(latestBefore).attendanceEnabled === true;
-  const previous = enablementMetadata(firstAfter).previousAttendanceEnabled;
-  if (previous === true || previous === false) return previous;
-  return serviceRequest?.operationPoint?.attendanceEnabled === true;
-}
-
-function createWorkerSummary(assignment, serviceDateKey, confirmedAbsenceManaged) {
-  const worker = assignment.worker || {};
+function createWorkerSummary(snapshot) {
   return {
-    identityKey: workerIdentityKey(worker, assignment.workerId),
-    workerIds: new Set([worker.id || assignment.workerId].filter(Boolean)),
-    fullName: normalizeString(worker.fullName, 240) || 'Auxiliar sin nombre',
-    documentType: normalizeString(worker.documentType, 40),
-    documentNumber: normalizeString(worker.documentNumber, 120),
-    firstServiceDate: serviceDateKey,
-    lastServiceDate: serviceDateKey,
-    serviceDays: new Set([serviceDateKey]),
+    identityKey: workerIdentityKey({ id: snapshot.workerId, documentNumber: snapshot.documentNumber }, snapshot.workerId),
+    workerIds: new Set([snapshot.workerId].filter(Boolean)),
+    fullName: snapshot.fullName || 'Auxiliar sin nombre',
+    documentType: snapshot.documentType || null,
+    documentNumber: snapshot.documentNumber || null,
+    firstServiceDate: snapshot.serviceDate,
+    lastServiceDate: snapshot.serviceDate,
+    serviceDays: new Set([snapshot.serviceDate]),
     assignments: 1,
-    attendanceManaged: Boolean(assignment.attendanceSession),
-    confirmedAbsenceManaged: Boolean(confirmedAbsenceManaged)
+    lockedAtServiceStart: true
   };
 }
 
-function mergeWorkerSummary(target, assignment, serviceDateKey, confirmedAbsenceManaged) {
-  const workerId = assignment.worker?.id || assignment.workerId;
-  if (workerId) target.workerIds.add(workerId);
-  if (serviceDateKey < target.firstServiceDate) target.firstServiceDate = serviceDateKey;
-  if (serviceDateKey > target.lastServiceDate) target.lastServiceDate = serviceDateKey;
-  target.serviceDays.add(serviceDateKey);
+function mergeWorkerSummary(target, snapshot) {
+  if (snapshot.workerId) target.workerIds.add(snapshot.workerId);
+  if (snapshot.serviceDate < target.firstServiceDate) target.firstServiceDate = snapshot.serviceDate;
+  if (snapshot.serviceDate > target.lastServiceDate) target.lastServiceDate = snapshot.serviceDate;
+  target.serviceDays.add(snapshot.serviceDate);
   target.assignments += 1;
-  target.attendanceManaged = target.attendanceManaged || Boolean(assignment.attendanceSession);
-  target.confirmedAbsenceManaged = target.confirmedAbsenceManaged || Boolean(confirmedAbsenceManaged);
+  target.lockedAtServiceStart = true;
 }
 
 function publicWorkerSummary(summary) {
@@ -381,8 +328,8 @@ function publicWorkerSummary(summary) {
     lastServiceDate: summary.lastServiceDate,
     serviceDays: summary.serviceDays.size,
     assignments: summary.assignments,
-    reason: summary.attendanceManaged ? 'ATTENDANCE' : 'CONFIRMED_ABSENCE',
-    reasonLabel: summary.attendanceManaged ? 'Asistencia gestionada' : 'Ausencia programada',
+    reason: 'SERVICE_START_LOCKED',
+    reasonLabel: 'Facturable desde hora de inicio',
     duplicateWorkerRecords: summary.workerIds.size > 1
   };
 }
@@ -410,6 +357,7 @@ export async function loadAttendanceBillingCounter(prisma, input = {}) {
     select: {
       id: true,
       workerId: true,
+      serviceRequestId: true,
       status: true,
       worker: {
         select: {
@@ -422,45 +370,42 @@ export async function loadAttendanceBillingCounter(prisma, input = {}) {
       },
       serviceRequest: {
         select: {
+          id: true,
           serviceDate: true,
           startTime: true,
           operationPointId: true,
-          operationPoint: { select: { id: true, attendanceEnabled: true } }
+          operationPointName: true,
+          operationPoint: { select: { id: true, name: true, attendanceEnabled: true } }
         }
       },
       attendanceSession: { select: { id: true } }
     }
   });
 
-  const operationPointIds = [...new Set(assignments.map((assignment) => assignment.serviceRequest?.operationPointId).filter(Boolean))];
-  const enablementEvents = operationPointIds.length && prisma?.devAuditEvent?.findMany
-    ? await prisma.devAuditEvent.findMany({
-      where: {
-        entityType: ATTENDANCE_POINT_ENABLEMENT_ENTITY_TYPE,
-        entityId: { in: operationPointIds },
-        action: ATTENDANCE_POINT_ENABLEMENT_ACTION
-      },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }]
-    })
-    : [];
+  const relevantAssignments = assignments.filter((assignment) => {
+    if (!assignment?.worker || assignment.worker.isTestProfile === true) return false;
+    const serviceDate = dispatchServiceDateKey(assignment.serviceRequest?.serviceDate);
+    return Boolean(serviceDate && serviceDate >= cycle.start && serviceDate <= cycle.effectiveTo);
+  });
+
+  await ensureAttendanceBillingEligibilitySnapshots(prisma, relevantAssignments, {
+    now: input.now || new Date(),
+    actorSource: 'attendance-billing-counter'
+  });
+
+  const snapshots = await loadAttendanceBillingEligibilitySnapshots(prisma, {
+    cycleStart: cycle.start,
+    cycleEndExclusive: cycle.endExclusive
+  });
 
   const byIdentity = new Map();
-  for (const assignment of assignments) {
-    if (!assignment?.worker || assignment.worker.isTestProfile === true) continue;
-    const serviceDateKey = dispatchServiceDateKey(assignment.serviceRequest?.serviceDate);
-    if (!serviceDateKey || serviceDateKey < cycle.start || serviceDateKey > cycle.effectiveTo) continue;
-
-    const wasManagedByAttendance = Boolean(assignment.attendanceSession);
-    const confirmedAbsenceManaged = !wasManagedByAttendance
-      && assignment.status === CONFIRMED_ASSIGNMENT_STATUS
-      && enablementAtService(enablementEvents, assignment.serviceRequest);
-    if (!wasManagedByAttendance && !confirmedAbsenceManaged) continue;
-
-    const identityKey = workerIdentityKey(assignment.worker, assignment.workerId);
+  for (const snapshot of snapshots) {
+    if (!snapshot.serviceDate || snapshot.serviceDate < cycle.start || snapshot.serviceDate > cycle.effectiveTo) continue;
+    const identityKey = workerIdentityKey({ id: snapshot.workerId, documentNumber: snapshot.documentNumber }, snapshot.workerId);
     if (!identityKey) continue;
     const existing = byIdentity.get(identityKey);
-    if (existing) mergeWorkerSummary(existing, assignment, serviceDateKey, confirmedAbsenceManaged);
-    else byIdentity.set(identityKey, createWorkerSummary(assignment, serviceDateKey, confirmedAbsenceManaged));
+    if (existing) mergeWorkerSummary(existing, snapshot);
+    else byIdentity.set(identityKey, createWorkerSummary(snapshot));
   }
 
   const workers = [...byIdentity.values()]

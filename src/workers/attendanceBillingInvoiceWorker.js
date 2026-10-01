@@ -1,14 +1,17 @@
 import { prisma } from '../lib/prisma.js';
-import { ensureAttendanceBillingInvoice } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
 import {
-  deliverCybionixAccountCharge,
-  deliverCybionixAttendanceApproval,
-  ensureCybionixAccountCharge,
-  loadCybionixAccountForInvoice,
-  loadCybionixApprovalState
-} from '../services/cybionixBillingWorkflow.js';
+  ensureAttendanceBillingInvoice,
+  loadAttendanceBillingCounter
+} from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
+import {
+  deliverLorrenAccountCharge,
+  deliverLorrenAttendanceApproval,
+  ensureLorrenAccountCharge,
+  loadLorrenAccountForInvoice,
+  loadLorrenApprovalState
+} from '../services/lorrenBillingWorkflow.js';
 
-const DEFAULT_POLL_MS = 60 * 60 * 1000;
+const DEFAULT_POLL_MS = 60 * 1000;
 
 function pollMs(env = process.env) {
   const raw = Number(env.ATTENDANCE_BILLING_WORKER_POLL_MS);
@@ -17,20 +20,26 @@ function pollMs(env = process.env) {
 
 export async function runAttendanceBillingInvoiceSweep(options = {}) {
   const prismaClient = options.prismaClient || prisma;
-  const invoiceResult = await ensureAttendanceBillingInvoice(prismaClient, { now: options.now || new Date() });
+  const now = options.now || new Date();
+
+  // Mantiene congelada la elegibilidad del ciclo vigente aunque nadie tenga abierto el panel.
+  // La hora exacta del servicio es el punto de no retorno comercial.
+  await loadAttendanceBillingCounter(prismaClient, { now });
+
+  const invoiceResult = await ensureAttendanceBillingInvoice(prismaClient, { now });
   if (!invoiceResult.invoice) {
     return { invoice: invoiceResult, approval: null, accountDelivery: null };
   }
 
   const invoice = invoiceResult.invoice;
-  const approvalState = await loadCybionixApprovalState(prismaClient, invoice.invoiceNumber);
+  const approvalState = await loadLorrenApprovalState(prismaClient, invoice.invoiceNumber);
   let approval = null;
   let accountDelivery = null;
 
   if (approvalState.status === 'APPROVED') {
-    let account = await loadCybionixAccountForInvoice(prismaClient, invoice.invoiceNumber);
+    let account = await loadLorrenAccountForInvoice(prismaClient, invoice.invoiceNumber);
     if (!account && approvalState.billingSnapshot) {
-      const accountResult = await ensureCybionixAccountCharge(
+      const accountResult = await ensureLorrenAccountCharge(
         prismaClient,
         invoice,
         approvalState.billingSnapshot,
@@ -38,9 +47,9 @@ export async function runAttendanceBillingInvoiceSweep(options = {}) {
       );
       account = accountResult.account;
     }
-    if (account) accountDelivery = await deliverCybionixAccountCharge(prismaClient, account, options);
+    if (account) accountDelivery = await deliverLorrenAccountCharge(prismaClient, account, options);
   } else if (approvalState.status !== 'REJECTED') {
-    approval = await deliverCybionixAttendanceApproval(prismaClient, invoice, options);
+    approval = await deliverLorrenAttendanceApproval(prismaClient, invoice, options);
   }
 
   return { invoice: invoiceResult, approval, accountDelivery };
