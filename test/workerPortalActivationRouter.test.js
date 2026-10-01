@@ -402,8 +402,11 @@ test('las cabeceras permiten cámara local y bloquean framing', () => {
 
 test('server monta el portal antes de los parsers globales', () => {
   const server = fs.readFileSync('src/server.js', 'utf8');
-  const mountStatement = "app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));";
-  assert.match(server, new RegExp(mountStatement.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.ok(server.indexOf(mountStatement) < server.indexOf("app.use(express.json({ limit: '2mb' }));"));
-  assert.equal(server.split(mountStatement).length - 1, 1);
+  const mountPattern = /app\.use\('\/operaciones\/portal', wrapAsyncRouter\(workerPortalRouter\(prisma,\s*workerPortalFacePresenceOptions\)\)\);/;
+  const mountMatch = server.match(mountPattern);
+  assert.ok(mountMatch);
+  const mountIndex = server.indexOf(mountMatch[0]);
+  assert.ok(mountIndex >= 0);
+  assert.ok(mountIndex < server.indexOf("app.use(express.json({ limit: '2mb' }));"));
+  assert.equal(server.match(new RegExp(mountPattern.source, 'g'))?.length, 1);
 });

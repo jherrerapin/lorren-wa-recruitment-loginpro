@@ -33,6 +33,12 @@ import { getMetaAdsConfig } from './services/metaAdsClient.js';
 import { syncMetaAdsInsights } from './services/metaAdsInsightsSync.js';
 import { getOpenAiModelConfig } from './services/openAiModelConfig.js';
 import { createAdminLogoutHandler, createAdminSessionMiddleware } from './services/adminSession.js';
+import {
+  assessWorkerFacePresence,
+  assertWorkerFacePresenceAttemptAllowed,
+  issueWorkerFacePresenceChallenge,
+  workerFacePresenceStatus
+} from './services/workerFacePresenceService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -436,7 +442,13 @@ app.use((req, res, next) => {
   next();
 });
 app.use(morgan('combined'));
-app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
+const workerPortalFacePresenceOptions = {
+  getEnrollmentFn: async () => workerFacePresenceStatus(),
+  assessBiometricFn: (input, assessmentOptions) => assessWorkerFacePresence(prisma, input, assessmentOptions),
+  issueChallengeFn: issueWorkerFacePresenceChallenge,
+  assertAttemptAllowedFn: assertWorkerFacePresenceAttemptAllowed
+};
+app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma, workerPortalFacePresenceOptions)));
 app.use('/webhook/dispatch', dispatchWhatsappWebhookRouter(prisma));
 app.use('/webhook/lorren', lorrenWhatsappWebhookRouter(prisma));
 
