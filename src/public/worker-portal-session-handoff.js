@@ -76,23 +76,9 @@
   }
 
   function ensureNativeOpenButton() {
-    if (isNativeAndroidApp()) return null;
-    const actions = document.querySelector('#portal-install-dialog .portal-install-actions');
-    if (!actions) return null;
-
-    let button = document.getElementById(NATIVE_OPEN_BUTTON_ID);
-    if (button) return button;
-
-    button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'portal-install-secondary';
-    button.id = NATIVE_OPEN_BUTTON_ID;
-    button.textContent = 'Ya instalé Lórren · abrir app';
-
-    const closeButton = actions.querySelector('#dismiss-worker-portal-install');
-    if (closeButton) actions.insertBefore(button, closeButton);
-    else actions.appendChild(button);
-    return button;
+    // La apertura de la APK queda oculta durante la contingencia web.
+    document.getElementById(NATIVE_OPEN_BUTTON_ID)?.remove();
+    return null;
   }
 
   function prepareInstallButtons() {

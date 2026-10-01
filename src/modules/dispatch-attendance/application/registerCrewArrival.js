@@ -197,12 +197,19 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
     ? input.manualTargetAssignmentId.trim().slice(0, 160)
     : null;
   const targetedManualArrival = Boolean(manualTargetAssignmentId);
+  const manualSelection = Array.isArray(input.manualAssignmentIds)
+    ? [...new Set(input.manualAssignmentIds)]
+    : null;
+  if (manualSelection && (manualSelection.length === 0 || manualSelection.length > 100
+    || manualSelection.some((id) => typeof id !== 'string' || !id || id.length > 160))) {
+    throw new Error('crew_group_arrival_manual_target_invalid');
+  }
   const forceMajeure = presenceValidated ? false : input.forceMajeure === true;
   const validatedWorkerIds = presenceValidated
     ? normalizeValidatedWorkerIds(input.validatedWorkerIds)
     : null;
 
-  if (presenceValidated && targetedManualArrival) {
+  if ((presenceValidated && (targetedManualArrival || manualSelection)) || (targetedManualArrival && manualSelection)) {
     throw new Error('crew_group_arrival_manual_target_conflict');
   }
   if (
@@ -266,6 +273,12 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       throw new Error('crew_group_arrival_manual_leader_arrival_required');
     }
     selectedMembers = [leaderMember, targetMember];
+  } else if (manualSelection) {
+    const selectedIds = new Set(manualSelection);
+    if (manualSelection.some((id) => !members.some((member) => member.id === id))) {
+      throw new Error('crew_group_arrival_manual_target_not_assigned');
+    }
+    selectedMembers = [leaderMember, ...members.filter((member) => member.id !== leaderAssignmentId && selectedIds.has(member.id))];
   }
 
   const selectedAssignmentIds = new Set(selectedMembers.map((member) => member.id));
@@ -284,7 +297,9 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
 
   for (const member of orderedMembers) {
     const isLeader = member.id === leaderAssignmentId;
-    const memberResult = await options.registerArrivalFn(prisma, {
+    let memberResult;
+    try {
+      memberResult = await options.registerArrivalFn(prisma, {
       assignmentId: member.id,
       expectedWorkerId: member.workerId,
       idempotencyKey: isLeader ? idempotencyKey : memberIdempotencyKey(idempotencyKey, member.id),
@@ -294,7 +309,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       latitude: input.latitude,
       longitude: input.longitude,
       accuracyMeters: input.accuracyMeters,
-      installationIdHash: isLeader || (!presenceValidated && !targetedManualArrival)
+      installationIdHash: isLeader || (!presenceValidated && !targetedManualArrival && !manualSelection)
         ? (input.installationIdHash ?? null)
         : null,
       persistentStorageAvailable: true,
@@ -303,14 +318,19 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       evidenceMimeType: null,
       ipAddress: input.ipAddress ?? null,
       userAgent: input.userAgent ?? null
-    });
+      });
+    } catch (error) {
+      if (!manualSelection || isLeader) throw error;
+      results.push({ assignmentId: member.id, isLeader: false, status: 'NOT_RECORDED', error: publicErrorCode(error) });
+      continue;
+    }
 
     if (isLeader) {
       leaderResult = memberResult;
       if (!memberResult.recorded) {
         // En presencia verificable y en una llegada tardía dirigida, una llegada previa
         // del encargado no impide completar al auxiliar seleccionado.
-        const canContinueAfterLeaderDuplicate = (presenceValidated || targetedManualArrival)
+        const canContinueAfterLeaderDuplicate = (presenceValidated || targetedManualArrival || manualSelection)
           && duplicateArrival(memberResult);
         if (!canContinueAfterLeaderDuplicate) {
           return {
@@ -320,7 +340,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
           };
         }
       } else if (!arrivalValidated(memberResult)) {
-        if (!presenceValidated) {
+        if (!presenceValidated && !manualSelection) {
           return {
             applied: true,
             leaderResult,
@@ -331,7 +351,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
           leaderWorkerId,
           forceMajeure,
           presenceValidated,
-          manualTargetArrival: targetedManualArrival,
+          manualTargetArrival: targetedManualArrival || Boolean(manualSelection),
           isLeader: true,
           now
         }, options);
@@ -370,7 +390,7 @@ export async function registerCrewArrivalForLeader(prisma, input = {}, injected 
       leaderWorkerId,
       forceMajeure,
       presenceValidated,
-      manualTargetArrival: targetedManualArrival,
+      manualTargetArrival: targetedManualArrival || Boolean(manualSelection),
       isLeader: false,
       now
     }, options);
@@ -428,6 +448,13 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
   const captureMode = normalizeCaptureMode(input.captureMode);
   const now = requireDate(input.now ?? new Date(), 'crew_group_mark_now');
   const presenceValidated = input.presenceValidated === true;
+  const manualSelection = Array.isArray(input.manualAssignmentIds)
+    ? [...new Set(input.manualAssignmentIds)]
+    : null;
+  if (manualSelection && (presenceValidated || manualSelection.length === 0 || manualSelection.length > 100
+    || manualSelection.some((id) => typeof id !== 'string' || !id || id.length > 160))) {
+    throw new Error('crew_group_mark_manual_target_invalid');
+  }
   const validatedWorkerIds = presenceValidated
     ? normalizeValidatedWorkerIds(input.validatedWorkerIds, 'crew_group_mark')
     : null;
@@ -465,9 +492,15 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
   if (!members.some((member) => member.id === leaderAssignmentId && member.workerId === leaderWorkerId)) {
     throw new Error('crew_group_mark_leader_not_assigned');
   }
+  if (manualSelection?.some((id) => !members.some((member) => member.id === id))) {
+    throw new Error('crew_group_mark_manual_target_not_assigned');
+  }
 
   const selectedWorkerSet = presenceValidated ? new Set(validatedWorkerIds) : null;
-  const selectedMembers = presenceValidated
+  const selectedAssignmentSet = manualSelection ? new Set([...manualSelection, leaderAssignmentId]) : null;
+  const selectedMembers = manualSelection
+    ? members.filter((member) => selectedAssignmentSet.has(member.id))
+    : presenceValidated
     ? members.filter((member) => selectedWorkerSet.has(member.workerId))
     : members;
   const registerMarkFn = markType === 'DEPARTURE'
@@ -519,7 +552,7 @@ export async function registerCrewMarkForLeader(prisma, input = {}, injected = {
         pendingReview: validationStatus === 'REVIEW_REQUIRED'
       });
     } catch (error) {
-      if (presenceValidated && isCurrentCrewMarkAlreadyRecorded(markType, error)) {
+      if ((presenceValidated || manualSelection) && isCurrentCrewMarkAlreadyRecorded(markType, error)) {
         if (isLeader) {
           leaderResult = {
             recorded: true,

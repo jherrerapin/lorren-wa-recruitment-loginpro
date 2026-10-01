@@ -289,6 +289,27 @@
                   <button type="button" class="mark-button" disabled>Jornada finalizada</button>
                 <% } %>
               </div>
+              <% if (assignment.crewAvailable && assignment.isCrewLeader && !assignment.departureReported) { %>
+                <section class="assignment-mark-history" data-crew-manual="<%= assignment.id %>" aria-label="Marcación manual de cuadrilla">
+                  <strong class="assignment-mark-history-title">Marcación manual de cuadrilla</strong>
+                  <p>Selecciona los auxiliares presentes. Se validará la ubicación de esta operación.</p>
+                  <button type="button" class="secondary-button" data-crew-load="<%= assignment.id %>">Elegir auxiliares</button>
+                  <div data-crew-controls hidden>
+                    <label><input type="checkbox" data-crew-all> Seleccionar todos</label>
+                    <div data-crew-members></div>
+                    <label>Marcación
+                      <select data-crew-mark-type>
+                        <option value="ARRIVAL">Entrada</option>
+                        <option value="BREAK_START">Inicio de almuerzo</option>
+                        <option value="BREAK_END">Fin de almuerzo</option>
+                        <option value="DEPARTURE">Salida</option>
+                      </select>
+                    </label>
+                    <button type="button" class="mark-button" data-crew-submit>Registrar seleccionados</button>
+                  </div>
+                  <p data-crew-status role="status" aria-live="polite"></p>
+                </section>
+              <% } %>
             </article>
           <% }); %>
         </section>
@@ -373,6 +394,7 @@
         // arrival-time-notice:end
       </script>
       <script src="/public/worker-biometric.js?v=20260804-worker-portal-biometric-v8"></script>
+      <script src="/public/worker-portal-crew-manual.js?v=20260930"></script>
     <% } else if (mode === 'unavailable') { %>
       <section class="shell"><p class="brand">Lórren · Operaciones</p><h1>Portal temporalmente no disponible</h1></section>
     <% } else { %>
