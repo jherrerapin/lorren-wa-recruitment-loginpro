@@ -52,7 +52,8 @@ export function buildDevTestTimeBlocks(body = {}) {
   const starts = asArray(body.startTime);
   const ends = asArray(body.endTime);
   const dates = asArray(body.serviceDateBlock ?? body.serviceDate);
-  const count = Math.max(quantities.length, starts.length, ends.length, dates.length, 1);
+  const services = asArray(body.serviceId);
+  const count = Math.max(quantities.length, starts.length, ends.length, dates.length, services.length, 1);
   const blocks = [];
   for (let index = 0; index < count; index += 1) {
     const requiredWorkers = positiveInteger(quantities[index] ?? quantities[0]);
@@ -61,7 +62,8 @@ export function buildDevTestTimeBlocks(body = {}) {
       serviceDate: requiredDate(dates[index] ?? dates[0]),
       startTime: requiredTime(starts[index] ?? starts[0], 'dev_test_start_time_invalid'),
       endTime: optionalTime(ends[index] ?? null, 'dev_test_end_time_invalid'),
-      requiredWorkers
+      requiredWorkers,
+      requestedServiceId: normalizeString(services[index] ?? services[0], 120)
     });
   }
   return blocks;
@@ -108,7 +110,6 @@ function actorRole(actor) {
 export async function createDevTestServiceRequests(prisma, body = {}, actor = {}) {
   const clientId = normalizeString(body.clientId, 120);
   const operationPointId = normalizeString(body.operationPointId, 120);
-  const serviceId = normalizeString(body.serviceId, 120);
   if (!clientId || !operationPointId) throw new Error('dev_test_client_operation_required');
 
   const blocks = buildDevTestTimeBlocks(body);
@@ -122,24 +123,25 @@ export async function createDevTestServiceRequests(prisma, body = {}, actor = {}
   if (!client) throw new Error('dev_test_client_not_found');
   const operationPoint = client.operationPoints.find((item) => item.id === operationPointId);
   if (!operationPoint) throw new Error('dev_test_operation_not_found');
-  const service = serviceId ? client.services.find((item) => item.id === serviceId) || null : null;
-  if (serviceId && !service) throw new Error('dev_test_service_not_found');
-
   const groupCode = requestGroupCode(blocks.length);
+  const resolvedBlocks = blocks.map(({ requestedServiceId, ...block }) => {
+    const service = client.services.find((item) => item.id === requestedServiceId) || null;
+    if (requestedServiceId && !service) throw new Error('dev_test_service_not_found');
+    return { ...block, serviceId: service?.id || null, serviceName: testServiceName(service, groupCode) };
+  });
+
   const baseData = {
     operationPointId: operationPoint.id,
     clientName: client.name,
     operationPointName: operationPoint.name,
     cityName: operationPoint.cityName || client.cityName,
     address: operationPoint.address || normalizeString(body.address),
-    serviceId: service?.id || null,
-    serviceName: testServiceName(service, groupCode),
     notes: normalizeString(body.notes),
     status: 'DEV_TEST_PENDING',
     source: DEV_TEST_REQUEST_SOURCE,
     createdByUsername: normalizeString(actor.actorUsername, 160) || 'TEST-WORKSPACE'
   };
-  const created = await prisma.$transaction(blocks.map((block) => prisma.dispatchServiceRequest.create({
+  const created = await prisma.$transaction(resolvedBlocks.map((block) => prisma.dispatchServiceRequest.create({
     data: { ...baseData, ...block }
   })));
 
