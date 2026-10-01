@@ -10,6 +10,8 @@ export const SUPPORTED_ATTENDANCE_TIMEZONES = Object.freeze([
 
 export const DEFAULT_ATTENDANCE_GEOFENCE_RADIUS_METERS = 100;
 export const DEFAULT_ATTENDANCE_MAX_LOCATION_ACCURACY_METERS = 50;
+export const ATTENDANCE_POINT_ENABLEMENT_ENTITY_TYPE = 'DISPATCH_ATTENDANCE_POINT_ENABLEMENT';
+export const ATTENDANCE_POINT_ENABLEMENT_ACTION = 'ATTENDANCE_POINT_ENABLEMENT_CHANGED';
 
 const PHOTO_POLICIES = new Set(Object.values(ATTENDANCE_PHOTO_POLICY));
 const TIMEZONES = new Set(SUPPORTED_ATTENDANCE_TIMEZONES);
@@ -24,6 +26,12 @@ function requireInputObject(input, label) {
 function requireNonEmptyString(value, label) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`${label}_required`);
   return value.trim();
+}
+
+function normalizeOptionalString(value, maxLength = 240) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim();
+  return normalized ? normalized.slice(0, maxLength) : null;
 }
 
 function parseExplicitBoolean(value, label, fallback) {
@@ -125,6 +133,57 @@ function normalizedConfig(existing, input) {
   };
 }
 
+const POINT_SELECT = {
+  id: true,
+  clientId: true,
+  isActive: true,
+  attendanceEnabled: true,
+  attendanceLatitude: true,
+  attendanceLongitude: true,
+  geofenceRadiusMeters: true,
+  maxLocationAccuracyMeters: true,
+  attendanceTimezone: true,
+  attendancePhotoPolicy: true,
+  manualAttendanceAllowed: true,
+  crossOperationAttendanceAllowed: true,
+  updatedAt: true
+};
+
+async function updateAndAudit(client, existing, config, input) {
+  const updated = await client.dispatchOperationPoint.update({
+    where: { id: existing.id },
+    data: config,
+    select: POINT_SELECT
+  });
+  if (
+    existing.attendanceEnabled !== updated.attendanceEnabled
+    && client?.devAuditEvent
+    && typeof client.devAuditEvent.create === 'function'
+  ) {
+    await client.devAuditEvent.create({
+      data: {
+        entityType: ATTENDANCE_POINT_ENABLEMENT_ENTITY_TYPE,
+        entityId: existing.id,
+        entityLabel: `Asistencia operación ${existing.id}`,
+        action: ATTENDANCE_POINT_ENABLEMENT_ACTION,
+        actorUsername: normalizeOptionalString(input.actorUsername, 160),
+        actorRole: normalizeOptionalString(input.actorRole, 80),
+        actorSource: 'attendance-point-config',
+        ipAddress: normalizeOptionalString(input.ipAddress, 120),
+        userAgent: normalizeOptionalString(input.userAgent, 500),
+        fromValue: { attendanceEnabled: existing.attendanceEnabled === true },
+        toValue: { attendanceEnabled: updated.attendanceEnabled === true },
+        metadata: {
+          operationPointId: existing.id,
+          previousAttendanceEnabled: existing.attendanceEnabled === true,
+          attendanceEnabled: updated.attendanceEnabled === true
+        }
+      }
+    });
+  }
+  return updated;
+}
+
 export async function updateDispatchAttendancePointConfig(prisma, input = {}) {
   requirePrismaContract(prisma);
   const configInput = requireInputObject(input, 'attendance_point_config_input');
@@ -133,40 +192,16 @@ export async function updateDispatchAttendancePointConfig(prisma, input = {}) {
 
   const existing = await prisma.dispatchOperationPoint.findFirst({
     where: { id: operationPointId, clientId },
-    select: {
-      id: true,
-      clientId: true,
-      isActive: true,
-      attendanceEnabled: true,
-      attendanceLatitude: true,
-      attendanceLongitude: true,
-      geofenceRadiusMeters: true,
-      maxLocationAccuracyMeters: true,
-      attendanceTimezone: true,
-      attendancePhotoPolicy: true,
-      manualAttendanceAllowed: true,
-      crossOperationAttendanceAllowed: true
-    }
+    select: POINT_SELECT
   });
   if (!existing) throw new Error('attendance_operation_point_not_found');
+  const config = normalizedConfig(existing, configInput);
 
-  return prisma.dispatchOperationPoint.update({
-    where: { id: existing.id },
-    data: normalizedConfig(existing, configInput),
-    select: {
-      id: true,
-      clientId: true,
-      isActive: true,
-      attendanceEnabled: true,
-      attendanceLatitude: true,
-      attendanceLongitude: true,
-      geofenceRadiusMeters: true,
-      maxLocationAccuracyMeters: true,
-      attendanceTimezone: true,
-      attendancePhotoPolicy: true,
-      manualAttendanceAllowed: true,
-      crossOperationAttendanceAllowed: true,
-      updatedAt: true
-    }
-  });
+  const supportsAuditedTransaction = typeof prisma.$transaction === 'function'
+    && prisma?.devAuditEvent
+    && typeof prisma.devAuditEvent.create === 'function';
+  if (supportsAuditedTransaction) {
+    return prisma.$transaction((tx) => updateAndAudit(tx, existing, config, configInput));
+  }
+  return updateAndAudit(prisma, existing, config, configInput);
 }
