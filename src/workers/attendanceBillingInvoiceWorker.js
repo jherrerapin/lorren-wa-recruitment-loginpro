@@ -3,6 +3,7 @@ import { ensureAttendanceBillingInvoice } from '../modules/dispatch-attendance/a
 import {
   deliverCybionixAccountCharge,
   deliverCybionixAttendanceApproval,
+  ensureCybionixAccountCharge,
   loadCybionixAccountForInvoice,
   loadCybionixApprovalState
 } from '../services/cybionixBillingWorkflow.js';
@@ -27,10 +28,17 @@ export async function runAttendanceBillingInvoiceSweep(options = {}) {
   let accountDelivery = null;
 
   if (approvalState.status === 'APPROVED') {
-    const account = await loadCybionixAccountForInvoice(prismaClient, invoice.invoiceNumber);
-    if (account) {
-      accountDelivery = await deliverCybionixAccountCharge(prismaClient, account, options);
+    let account = await loadCybionixAccountForInvoice(prismaClient, invoice.invoiceNumber);
+    if (!account && approvalState.billingSnapshot) {
+      const accountResult = await ensureCybionixAccountCharge(
+        prismaClient,
+        invoice,
+        approvalState.billingSnapshot,
+        { supervisorName: approvalState.supervisorName, supervisorPhone: approvalState.supervisorPhone }
+      );
+      account = accountResult.account;
     }
+    if (account) accountDelivery = await deliverCybionixAccountCharge(prismaClient, account, options);
   } else if (approvalState.status !== 'REJECTED') {
     approval = await deliverCybionixAttendanceApproval(prismaClient, invoice, options);
   }
