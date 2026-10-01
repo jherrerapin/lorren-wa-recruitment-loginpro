@@ -7,6 +7,7 @@ export function getCybionixWhatsappConfig(env = process.env) {
     accessToken: String(env.CYBIONIX_WHATSAPP_ACCESS_TOKEN || '').trim() || null,
     phoneNumberId: String(env.CYBIONIX_WHATSAPP_PHONE_NUMBER_ID || '').trim() || null,
     verifyToken: String(env.CYBIONIX_WHATSAPP_VERIFY_TOKEN || '').trim() || null,
+    appSecret: String(env.CYBIONIX_WHATSAPP_APP_SECRET || '').trim() || null,
     approvalTemplateName: String(env.CYBIONIX_WHATSAPP_APPROVAL_TEMPLATE_NAME || '').trim() || null,
     accountTemplateName: String(env.CYBIONIX_WHATSAPP_ACCOUNT_TEMPLATE_NAME || '').trim() || null,
     alertTemplateName: String(env.CYBIONIX_WHATSAPP_ALERT_TEMPLATE_NAME || '').trim() || null,
