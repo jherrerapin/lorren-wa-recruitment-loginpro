@@ -78,7 +78,7 @@
         select.appendChild(option);
       });
 
-      select.disabled = clientSelect.value === 'ALL';
+      select.disabled = false;
       select.value = requestedCity === 'ALL' || normalizedCities.includes(requestedCity)
         ? requestedCity
         : 'ALL';
@@ -86,12 +86,6 @@
     };
 
     const loadCities = async (requestedCity = 'ALL') => {
-      const client = clientSelect.value || 'ALL';
-      if (client === 'ALL') {
-        renderCities([], 'ALL');
-        return;
-      }
-
       select.disabled = true;
       select.replaceChildren();
       const loading = document.createElement('option');
@@ -100,7 +94,6 @@
       select.appendChild(loading);
 
       const params = new URLSearchParams();
-      params.set('client', client);
       const from = form.querySelector('input[name="from"]')?.value;
       const to = form.querySelector('input[name="to"]')?.value;
       if (from) params.set('from', from);
@@ -120,7 +113,6 @@
       }
     };
 
-    clientSelect.addEventListener('change', () => loadCities('ALL'));
     select.addEventListener('change', () => syncCityIntoPostForms(select.value));
 
     loadCities(selectedCityFromLocation());
