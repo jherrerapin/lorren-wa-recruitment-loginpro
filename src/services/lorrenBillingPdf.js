@@ -3,9 +3,10 @@ import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { LORREN_BILLING_SIGNATURE_DATA_URI } from '../assets/lorrenBillingSignature.js';
+import * as lorrenBillingSignatureAsset from '../assets/lorrenBillingSignature.js';
 
 const execFileAsync = promisify(execFile);
+const LORREN_BILLING_SIGNATURE_DATA_URI = Object.values(lorrenBillingSignatureAsset).find((value) => typeof value === 'string' && value.startsWith('data:image/'));
 const PROVIDER = Object.freeze({ name: 'Jhon Alexander Herrera Pineda', document: '1063812583', address: 'Calle 25 sur #51F - 35', phone: '3052982551', account: '3052982551', accountType: 'Billetera Virtual', bank: 'Nequi' });
 const ACCOUNT_NOTE = 'En mi calidad de profesional prestadora de servicios sin vínculo laboral y en cumplimiento de lo establecido en el artículo 9 del decreto 2231 dl 23 de diciembre de 2023, certifico bajo la gravedad de juramento que en mi declaración de renta, no tomaré costos o deducciones asociados a las rentas de trabajo por la prestación de servicios con OPERA LOGISTICA INTEGRAL DE PROCESOS S.A.S.; por lo anterior me permito solicitar afectar la base de retención con el cálculo de la renta exenta del 25% y aplicar la retención en la fuente establecida en el artículo 383 del estatuto tributario';
 function escapeHtml(value) { return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
