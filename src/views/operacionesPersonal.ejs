@@ -77,7 +77,11 @@
   </style>
 </head>
 <body>
-  <% const inactiveView = filters.status === 'DISABLED'; %>
+  <%
+    const inactiveView = filters.status === 'DISABLED';
+    const branchNameByCityId = new Map();
+    cities.forEach((city) => (city.equivalentCityIds || [city.id]).forEach((id) => branchNameByCityId.set(id, city.name)));
+  %>
   <nav class="navbar">
     <a class="brand" href="/admin" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <a href="/admin">Panel</a>
@@ -114,7 +118,7 @@
           <label for="operationalCityId">Sucursal</label>
           <select id="operationalCityId" name="operationalCityId">
             <option value="">Todas las sucursales</option>
-            <% cities.forEach((city) => { %><option value="<%= city.id %>" <%= filters.operationalCityId===city.id?'selected':'' %>><%= city.name %></option><% }) %>
+            <% cities.forEach((city) => { const selected = (city.equivalentCityIds || [city.id]).includes(filters.operationalCityId); %><option value="<%= city.id %>" <%= selected ? 'selected' : '' %>><%= city.name %></option><% }) %>
           </select>
         </div>
         <div class="field">
@@ -139,7 +143,7 @@
             <thead><tr><% if (!inactiveView) { %><th class="check-col"><input type="checkbox" id="check-all" title="Seleccionar todos" /></th><% } %><th>Nombre</th><th>Contrato</th><th>Teléfono</th><th>Documento</th><th>Ciudad residencia</th><th>Sucursales</th><th>Origen</th><th>Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               <% workers.forEach((w) => { %>
-                <% const sourceMap = { CANDIDATE:'Bot', MANUAL:'Manual', EXCEL_IMPORT:'Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; const workerActive = w.operationalStatus === 'CONTRATADO'; %>
+                <% const sourceMap = { CANDIDATE:'Bot', MANUAL:'Manual', EXCEL_IMPORT:'Excel masivo' }; const sourceLabel = sourceMap[w.source] || w.source; const sourcePillClass = w.source === 'CANDIDATE' ? 'pill-green' : w.source === 'EXCEL_IMPORT' ? 'pill-purple' : 'pill-blue'; const workerActive = w.operationalStatus === 'CONTRATADO'; const workerBranches = [...new Set((w.cities || []).map((entry) => branchNameByCityId.get(entry.city?.id || entry.cityId) || entry.city?.name).filter(Boolean))]; %>
                 <tr data-id="<%= w.id %>" class="<%= workerActive ? '' : 'row-inactive' %>">
                   <% if (!inactiveView) { %><td class="check-col"><input type="checkbox" class="row-check" value="<%= w.id %>" /></td><% } %>
                   <td><span class="worker-name"><%= w.fullName %></span></td>
@@ -147,7 +151,7 @@
                   <td><%= w.phone || '-' %></td>
                   <td><%= [w.documentType,w.documentNumber].filter(Boolean).join(' ') || '-' %></td>
                   <td><%= w.residenceCity || w.residenceLocality || '-' %></td>
-                  <td><% if (w.cities.length) { %><% w.cities.forEach((entry) => { %><span class="pill pill-blue"><%= entry.city.name %></span><% }) %><% } else { %><span class="muted">Sin sucursal habilitada</span><% } %></td>
+                  <td><% if (workerBranches.length) { %><% workerBranches.forEach((branchName) => { %><span class="pill pill-blue"><%= branchName %></span><% }) %><% } else { %><span class="muted">Sin sucursal habilitada</span><% } %></td>
                   <td><span class="pill <%= sourcePillClass %>"><%= sourceLabel %></span></td>
                   <td><span class="pill <%= workerActive ? 'pill-green' : 'pill-red' %>"><%= workerActive ? 'Activo' : 'Desactivado' %></span></td>
                   <td class="actions-cell"><div class="row-actions"><a class="btn btn-secondary" href="/admin/operaciones/personal/<%= w.id %>/historial">Historial</a><a class="btn btn-secondary" href="/operaciones/admin-worker/<%= w.id %>/editar">Editar</a><form method="post" action="/admin/operaciones/personal/<%= w.id %>/toggle" style="display:inline"><button class="btn <%= workerActive ? 'btn-danger-outline' : 'btn-success' %>" type="submit"><%= workerActive ? 'Desactivar' : 'Reactivar' %></button></form><% if (!inactiveView) { %><button type="button" class="btn btn-danger-outline btn-single-delete" data-id="<%= w.id %>" data-name="<%= w.fullName %>">Eliminar</button><% } %></div></td>
