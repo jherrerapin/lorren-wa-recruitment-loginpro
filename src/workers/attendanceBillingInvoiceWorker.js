@@ -4,11 +4,11 @@ import {
   loadAttendanceBillingCounter
 } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
 import {
-  deliverCybionixAccountCharge,
-  deliverCybionixAttendanceApproval,
-  ensureCybionixAccountCharge,
-  loadCybionixAccountForInvoice,
-  loadCybionixApprovalState
+  deliverLorrenAccountCharge,
+  deliverLorrenAttendanceApproval,
+  ensureLorrenAccountCharge,
+  loadLorrenAccountForInvoice,
+  loadLorrenApprovalState
 } from '../services/cybionixBillingWorkflow.js';
 
 const DEFAULT_POLL_MS = 60 * 1000;
@@ -32,14 +32,14 @@ export async function runAttendanceBillingInvoiceSweep(options = {}) {
   }
 
   const invoice = invoiceResult.invoice;
-  const approvalState = await loadCybionixApprovalState(prismaClient, invoice.invoiceNumber);
+  const approvalState = await loadLorrenApprovalState(prismaClient, invoice.invoiceNumber);
   let approval = null;
   let accountDelivery = null;
 
   if (approvalState.status === 'APPROVED') {
-    let account = await loadCybionixAccountForInvoice(prismaClient, invoice.invoiceNumber);
+    let account = await loadLorrenAccountForInvoice(prismaClient, invoice.invoiceNumber);
     if (!account && approvalState.billingSnapshot) {
-      const accountResult = await ensureCybionixAccountCharge(
+      const accountResult = await ensureLorrenAccountCharge(
         prismaClient,
         invoice,
         approvalState.billingSnapshot,
@@ -47,9 +47,9 @@ export async function runAttendanceBillingInvoiceSweep(options = {}) {
       );
       account = accountResult.account;
     }
-    if (account) accountDelivery = await deliverCybionixAccountCharge(prismaClient, account, options);
+    if (account) accountDelivery = await deliverLorrenAccountCharge(prismaClient, account, options);
   } else if (approvalState.status !== 'REJECTED') {
-    approval = await deliverCybionixAttendanceApproval(prismaClient, invoice, options);
+    approval = await deliverLorrenAttendanceApproval(prismaClient, invoice, options);
   }
 
   return { invoice: invoiceResult, approval, accountDelivery };
