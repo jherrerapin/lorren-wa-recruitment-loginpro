@@ -78,12 +78,14 @@ test('PDF de programación agrupa Siberia bajo Bogotá pero conserva ciudad y di
   assert.match(html, /<b>Dirección:<\/b> Dirección original Siberia/);
 });
 
-test('selectores operativos usan la autoridad consolidada de sucursales', () => {
-  const assignments = fs.readFileSync('src/routes/dispatchAssignmentConfirmations.js', 'utf8');
+test('selectores y filtros operativos reales usan la autoridad consolidada de sucursales', () => {
+  const ops = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
   const locationsView = fs.readFileSync('src/views/locations.ejs', 'utf8');
-  assert.match(assignments, /loadUnifiedCityOptions/);
-  assert.match(assignments, /resolveEquivalentCityIds/);
-  assert.doesNotMatch(assignments, /prisma\.city\.findMany\(\{ where: \{ usedForDispatch: true \}/);
+  assert.match(ops, /loadUnifiedCityOptions/);
+  assert.match(ops, /resolveEquivalentCityIds/);
+  assert.match(ops, /const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds\(prisma, operationalCityId\)/);
+  assert.match(ops, /\.\.\.operationalCityFilter/);
+  assert.doesNotMatch(ops, /function isBogotaSiberiaName/);
   assert.match(locationsView, /const branchCities/);
   assert.match(locationsView, /name: 'Bogotá', operations: mergedBogotaOperations/);
 });
