@@ -80,7 +80,7 @@
             <div class="field full">
               <label for="cityIds">Sucursales habilitadas <span class="muted">* obligatorio</span></label>
               <select id="cityIds" name="cityIds" multiple size="7" required>
-                <% cities.forEach((c)=>{ %><option value="<%= c.id %>" <%= selectedCityIds.has(c.id) ? 'selected' : '' %>><%= c.name %></option><% }) %>
+                <% cities.forEach((c)=>{ const equivalentIds = c.equivalentCityIds || [c.id]; const selectedEquivalentId = equivalentIds.find((id) => selectedCityIds.has(id)); %><option value="<%= selectedEquivalentId || c.id %>" <%= selectedEquivalentId ? 'selected' : '' %>><%= c.name %></option><% }) %>
               </select>
               <small class="muted">Selecciona únicamente las sucursales donde el auxiliar puede ser despachado. Siberia se gestiona dentro de Bogotá.</small>
             </div>
