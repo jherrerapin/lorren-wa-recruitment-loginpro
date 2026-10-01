@@ -1,19 +1,19 @@
 import { loadAttendanceBillingInvoices } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
-import { loadCybionixBillingConfig } from './cybionixBillingConfig.js';
+import { loadLorrenBillingConfig } from './cybionixBillingConfig.js';
 import { buildAccountChargePdfBuffer, buildAttendanceInvoicePdfBuffer } from './cybionixBillingPdf.js';
 import {
-  getCybionixWhatsappConfig,
-  sendCybionixAccountCharge,
-  sendCybionixAttendanceApproval,
-  sendCybionixDevAlert
+  getLorrenWhatsappConfig,
+  sendLorrenAccountCharge,
+  sendLorrenAttendanceApproval,
+  sendLorrenDevAlert
 } from './cybionixWhatsappClient.js';
 
-export const CYBIONIX_APPROVAL_ENTITY_TYPE = 'CYBIONIX_ATTENDANCE_INVOICE_APPROVAL';
-export const CYBIONIX_APPROVAL_ACTION = 'CYBIONIX_ATTENDANCE_APPROVAL_STATE';
-export const CYBIONIX_ACCOUNT_ENTITY_TYPE = 'CYBIONIX_ACCOUNT_CHARGE';
-export const CYBIONIX_ACCOUNT_ACTION = 'CYBIONIX_ACCOUNT_CHARGE_CREATED';
-export const CYBIONIX_DELIVERY_ENTITY_TYPE = 'CYBIONIX_BILLING_DELIVERY';
-export const CYBIONIX_DELIVERY_ACTION = 'CYBIONIX_BILLING_DELIVERY_SENT';
+export const LORREN_APPROVAL_ENTITY_TYPE = 'LORREN_ATTENDANCE_INVOICE_APPROVAL';
+export const LORREN_APPROVAL_ACTION = 'LORREN_ATTENDANCE_APPROVAL_STATE';
+export const LORREN_ACCOUNT_ENTITY_TYPE = 'LORREN_ACCOUNT_CHARGE';
+export const LORREN_ACCOUNT_ACTION = 'LORREN_ACCOUNT_CHARGE_CREATED';
+export const LORREN_DELIVERY_ENTITY_TYPE = 'LORREN_BILLING_DELIVERY';
+export const LORREN_DELIVERY_ACTION = 'LORREN_BILLING_DELIVERY_SENT';
 
 function text(value, maxLength = 240) {
   if (typeof value !== 'string') return null;
@@ -42,9 +42,9 @@ async function invoiceByNumber(prisma, invoiceNumber) {
   return invoices.find((invoice) => invoice.invoiceNumber === target) || null;
 }
 
-export async function loadCybionixApprovalState(prisma, invoiceNumber) {
+export async function loadLorrenApprovalState(prisma, invoiceNumber) {
   const event = await prisma.devAuditEvent.findFirst({
-    where: { entityType: CYBIONIX_APPROVAL_ENTITY_TYPE, entityId: invoiceNumber, action: CYBIONIX_APPROVAL_ACTION },
+    where: { entityType: LORREN_APPROVAL_ENTITY_TYPE, entityId: invoiceNumber, action: LORREN_APPROVAL_ACTION },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
   });
   const metadata = eventMetadata(event);
@@ -65,11 +65,11 @@ export async function loadCybionixApprovalState(prisma, invoiceNumber) {
 async function recordPendingApproval(prisma, invoice, input = {}) {
   return prisma.devAuditEvent.create({
     data: {
-      entityType: CYBIONIX_APPROVAL_ENTITY_TYPE,
+      entityType: LORREN_APPROVAL_ENTITY_TYPE,
       entityId: invoice.invoiceNumber,
       entityLabel: `Aprobación ${invoice.invoiceNumber}`,
-      action: CYBIONIX_APPROVAL_ACTION,
-      actorSource: 'cybionix-billing-worker',
+      action: LORREN_APPROVAL_ACTION,
+      actorSource: 'lorren-billing-worker',
       metadata: {
         status: 'PENDING',
         invoiceNumber: invoice.invoiceNumber,
@@ -83,16 +83,16 @@ async function recordPendingApproval(prisma, invoice, input = {}) {
 }
 
 async function claimTerminalDecision(prisma, invoice, status, config, input = {}) {
-  const id = `cybionix-billing-decision:${invoice.invoiceNumber}`;
+  const id = `lorren-billing-decision:${invoice.invoiceNumber}`;
   try {
     const event = await prisma.devAuditEvent.create({
       data: {
         id,
-        entityType: CYBIONIX_APPROVAL_ENTITY_TYPE,
+        entityType: LORREN_APPROVAL_ENTITY_TYPE,
         entityId: invoice.invoiceNumber,
         entityLabel: `Aprobación ${invoice.invoiceNumber}`,
-        action: CYBIONIX_APPROVAL_ACTION,
-        actorSource: 'cybionix-whatsapp-webhook',
+        action: LORREN_APPROVAL_ACTION,
+        actorSource: 'lorren-whatsapp-webhook',
         metadata: {
           status,
           invoiceNumber: invoice.invoiceNumber,
@@ -107,7 +107,7 @@ async function claimTerminalDecision(prisma, invoice, status, config, input = {}
     return { claimed: true, state: { ...eventMetadata(event), updatedAt: event.createdAt || null } };
   } catch (error) {
     if (error?.code !== 'P2002') throw error;
-    return { claimed: false, state: await loadCybionixApprovalState(prisma, invoice.invoiceNumber) };
+    return { claimed: false, state: await loadLorrenApprovalState(prisma, invoice.invoiceNumber) };
   }
 }
 
@@ -117,16 +117,16 @@ function accountFromEvent(event) {
   return { id: event.id, createdAt: event.createdAt || null, ...metadata };
 }
 
-export async function loadCybionixAccountForInvoice(prisma, invoiceNumber) {
+export async function loadLorrenAccountForInvoice(prisma, invoiceNumber) {
   const event = await prisma.devAuditEvent.findFirst({
-    where: { entityType: CYBIONIX_ACCOUNT_ENTITY_TYPE, entityId: invoiceNumber, action: CYBIONIX_ACCOUNT_ACTION },
+    where: { entityType: LORREN_ACCOUNT_ENTITY_TYPE, entityId: invoiceNumber, action: LORREN_ACCOUNT_ACTION },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
   });
   return event ? accountFromEvent(event) : null;
 }
 
-export async function ensureCybionixAccountCharge(prisma, invoice, config, input = {}) {
-  const existing = await loadCybionixAccountForInvoice(prisma, invoice.invoiceNumber);
+export async function ensureLorrenAccountCharge(prisma, invoice, config, input = {}) {
+  const existing = await loadLorrenAccountForInvoice(prisma, invoice.invoiceNumber);
   if (existing) return { created: false, account: existing, reason: 'already_created' };
   const fixedItems = (config.modules || [])
     .filter((item) => item?.active !== false && Number(item?.value) >= 0)
@@ -157,25 +157,25 @@ export async function ensureCybionixAccountCharge(prisma, invoice, config, input
   try {
     const event = await prisma.devAuditEvent.create({
       data: {
-        id: `cybionix-billing-account:${invoice.invoiceNumber}`,
-        entityType: CYBIONIX_ACCOUNT_ENTITY_TYPE,
+        id: `lorren-billing-account:${invoice.invoiceNumber}`,
+        entityType: LORREN_ACCOUNT_ENTITY_TYPE,
         entityId: invoice.invoiceNumber,
         entityLabel: `Cuenta de cobro ${account.accountNumber}`,
-        action: CYBIONIX_ACCOUNT_ACTION,
-        actorSource: 'cybionix-billing-approval',
+        action: LORREN_ACCOUNT_ACTION,
+        actorSource: 'lorren-billing-approval',
         metadata: account
       }
     });
     return { created: true, account: accountFromEvent(event), reason: 'created' };
   } catch (error) {
     if (error?.code !== 'P2002') throw error;
-    return { created: false, account: await loadCybionixAccountForInvoice(prisma, invoice.invoiceNumber), reason: 'already_created' };
+    return { created: false, account: await loadLorrenAccountForInvoice(prisma, invoice.invoiceNumber), reason: 'already_created' };
   }
 }
 
 async function deliveryAlreadySent(prisma, key) {
   const event = await prisma.devAuditEvent.findFirst({
-    where: { entityType: CYBIONIX_DELIVERY_ENTITY_TYPE, entityId: key, action: CYBIONIX_DELIVERY_ACTION },
+    where: { entityType: LORREN_DELIVERY_ENTITY_TYPE, entityId: key, action: LORREN_DELIVERY_ACTION },
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
   });
   return Boolean(event);
@@ -185,12 +185,12 @@ async function recordDelivery(prisma, key, metadata) {
   try {
     await prisma.devAuditEvent.create({
       data: {
-        id: `cybionix-billing-delivery:${key}`,
-        entityType: CYBIONIX_DELIVERY_ENTITY_TYPE,
+        id: `lorren-billing-delivery:${key}`,
+        entityType: LORREN_DELIVERY_ENTITY_TYPE,
         entityId: key,
         entityLabel: key,
-        action: CYBIONIX_DELIVERY_ACTION,
-        actorSource: 'cybionix-billing-whatsapp',
+        action: LORREN_DELIVERY_ACTION,
+        actorSource: 'lorren-billing-whatsapp',
         metadata
       }
     });
@@ -201,18 +201,18 @@ async function recordDelivery(prisma, key, metadata) {
   }
 }
 
-export async function deliverCybionixAttendanceApproval(prisma, invoice, options = {}) {
-  const config = options.config || await loadCybionixBillingConfig(prisma);
-  const channel = getCybionixWhatsappConfig(options.env || process.env);
+export async function deliverLorrenAttendanceApproval(prisma, invoice, options = {}) {
+  const config = options.config || await loadLorrenBillingConfig(prisma);
+  const channel = getLorrenWhatsappConfig(options.env || process.env);
   if (!config.enabled) return { sent: false, skipped: true, reason: 'billing_disabled' };
   if (!config.supervisor?.phone) return { sent: false, skipped: true, reason: 'supervisor_missing' };
   if (!channel.accessToken || !channel.phoneNumberId || !channel.verifyToken || !channel.appSecret || !channel.approvalTemplateName) {
-    return { sent: false, skipped: true, reason: 'cybionix_channel_unconfigured' };
+    return { sent: false, skipped: true, reason: 'lorren_channel_unconfigured' };
   }
-  const state = await loadCybionixApprovalState(prisma, invoice.invoiceNumber);
+  const state = await loadLorrenApprovalState(prisma, invoice.invoiceNumber);
   if (['PENDING', 'APPROVED', 'REJECTED'].includes(state.status)) return { sent: false, skipped: true, reason: `already_${state.status.toLowerCase()}` };
   const pdfBuffer = await buildAttendanceInvoicePdfBuffer(invoice);
-  const providerMessageId = await (options.sendApproval || sendCybionixAttendanceApproval)({
+  const providerMessageId = await (options.sendApproval || sendLorrenAttendanceApproval)({
     phone: config.supervisor.phone,
     supervisorName: config.supervisor.name,
     invoice,
@@ -227,11 +227,11 @@ export async function deliverCybionixAttendanceApproval(prisma, invoice, options
   return { sent: true, skipped: false, providerMessageId };
 }
 
-export async function deliverCybionixAccountCharge(prisma, account, options = {}) {
+export async function deliverLorrenAccountCharge(prisma, account, options = {}) {
   if (!account) return { attempted: 0, sent: 0, skipped: 0, failed: 0, results: [] };
-  const channel = getCybionixWhatsappConfig(options.env || process.env);
+  const channel = getLorrenWhatsappConfig(options.env || process.env);
   if (!channel.accessToken || !channel.phoneNumberId || !channel.accountTemplateName) {
-    return { attempted: 0, sent: 0, skipped: 1, failed: 0, results: [{ skipped: true, reason: 'cybionix_channel_unconfigured' }] };
+    return { attempted: 0, sent: 0, skipped: 1, failed: 0, results: [{ skipped: true, reason: 'lorren_channel_unconfigured' }] };
   }
   const pdfBuffer = await buildAccountChargePdfBuffer(account);
   const results = [];
@@ -242,7 +242,7 @@ export async function deliverCybionixAccountCharge(prisma, account, options = {}
       continue;
     }
     try {
-      const providerMessageId = await (options.sendAccount || sendCybionixAccountCharge)({
+      const providerMessageId = await (options.sendAccount || sendLorrenAccountCharge)({
         phone: recipient.phone,
         recipientName: recipient.name,
         account,
@@ -267,13 +267,13 @@ export async function deliverCybionixAccountCharge(prisma, account, options = {}
   };
 }
 
-export async function resolveCybionixAttendanceApproval(prisma, input = {}, options = {}) {
+export async function resolveLorrenAttendanceApproval(prisma, input = {}, options = {}) {
   const invoice = await invoiceByNumber(prisma, input.invoiceNumber);
   if (!invoice) return { ok: false, reason: 'invoice_not_found' };
-  const config = await loadCybionixBillingConfig(prisma);
-  const current = await loadCybionixApprovalState(prisma, invoice.invoiceNumber);
+  const config = await loadLorrenBillingConfig(prisma);
+  const current = await loadLorrenApprovalState(prisma, invoice.invoiceNumber);
   if (['APPROVED', 'REJECTED'].includes(current.status)) {
-    return { ok: true, idempotent: true, status: current.status, invoice, account: await loadCybionixAccountForInvoice(prisma, invoice.invoiceNumber) };
+    return { ok: true, idempotent: true, status: current.status, invoice, account: await loadLorrenAccountForInvoice(prisma, invoice.invoiceNumber) };
   }
   const supervisorPhone = text(input.supervisorPhone, 32) || config.supervisor?.phone || null;
   if (config.supervisor?.phone && supervisorPhone !== config.supervisor.phone) {
@@ -293,18 +293,18 @@ export async function resolveCybionixAttendanceApproval(prisma, input = {}, opti
       idempotent: true,
       status: claimed.state.status,
       invoice,
-      account: await loadCybionixAccountForInvoice(prisma, invoice.invoiceNumber)
+      account: await loadLorrenAccountForInvoice(prisma, invoice.invoiceNumber)
     };
   }
 
   if (decision === 'APPROVE') {
     const snapshot = claimed.state.billingSnapshot || billingSnapshot(config);
-    const accountResult = await ensureCybionixAccountCharge(prisma, invoice, snapshot, {
+    const accountResult = await ensureLorrenAccountCharge(prisma, invoice, snapshot, {
       supervisorName: config.supervisor?.name,
       supervisorPhone
     });
     const delivery = accountResult.created
-      ? await deliverCybionixAccountCharge(prisma, accountResult.account, options)
+      ? await deliverLorrenAccountCharge(prisma, accountResult.account, options)
       : { attempted: 0, sent: 0, skipped: 1, failed: 0, results: [{ skipped: true, reason: 'account_already_created' }] };
     return { ok: true, idempotent: false, status: 'APPROVED', invoice, account: accountResult.account, delivery };
   }
@@ -312,7 +312,7 @@ export async function resolveCybionixAttendanceApproval(prisma, input = {}, opti
   let alert = { skipped: true, reason: 'dev_alert_phone_missing' };
   if (config.devAlertPhone) {
     try {
-      alert = await (options.sendAlert || sendCybionixDevAlert)({
+      alert = await (options.sendAlert || sendLorrenDevAlert)({
         phone: config.devAlertPhone,
         invoiceNumber: invoice.invoiceNumber,
         reason: 'No aprobada por el supervisor',
@@ -325,15 +325,15 @@ export async function resolveCybionixAttendanceApproval(prisma, input = {}, opti
   return { ok: true, idempotent: false, status: 'REJECTED', invoice, account: null, alert };
 }
 
-export async function loadCybionixBillingDashboard(prisma) {
-  const config = await loadCybionixBillingConfig(prisma);
+export async function loadLorrenBillingDashboard(prisma) {
+  const config = await loadLorrenBillingConfig(prisma);
   const invoices = await loadAttendanceBillingInvoices(prisma, { take: 12 });
   const rows = [];
   for (const invoice of invoices) {
     rows.push({
       invoice,
-      approval: await loadCybionixApprovalState(prisma, invoice.invoiceNumber),
-      account: await loadCybionixAccountForInvoice(prisma, invoice.invoiceNumber)
+      approval: await loadLorrenApprovalState(prisma, invoice.invoiceNumber),
+      account: await loadLorrenAccountForInvoice(prisma, invoice.invoiceNumber)
     });
   }
   return { config, rows };
