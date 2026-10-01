@@ -64,7 +64,8 @@ function sanitizeBoardFilterState(board) {
 
 function actorFromRequest(req) {
   return {
-    actorUsername: normalizeString(req.session?.username || req.username) || 'operaciones',
+    actorUserId: normalizeString(req.session?.userId || req.userId),
+    actorUsername: normalizeString(req.session?.displayName || req.displayName || req.session?.username || req.username) || 'operaciones',
     actorRole: normalizeString(req.session?.userRole || req.userRole)
   };
 }

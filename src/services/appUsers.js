@@ -61,14 +61,6 @@ function parseUserAccessMetadata(value) {
   };
 }
 
-/**
- * Convierte el valor histórico de scopeCity en una lista de ciudades.
- *
- * Compatibilidad:
- * - Usuarios antiguos: "Bogotá"
- * - Usuarios con acceso territorial anterior: '["Bogotá","Ibagué"]'
- * - Usuarios con vacantes seleccionadas: '{"cities":["Bogotá"],"vacancyIds":["vac-1"]}'
- */
 export function normalizeUserAccessCities(value) {
   return parseUserAccessMetadata(value).cities;
 }
@@ -121,16 +113,19 @@ export function normalizeUserAccessScope(value) {
   return USER_ACCESS_SCOPES.includes(normalized) ? normalized : 'ALL';
 }
 
-export function buildRecruiterUsernameBase({ accessScope, scopeCity, vacancyTitle } = {}) {
+export function buildRecruiterUsernameBase({ accessScope, scopeCity, vacancyTitle, displayName, email } = {}) {
+  const personalBase = toSlug(displayName) || toSlug(normalizeAppUserEmail(email)?.split('@')[0]);
+  if (personalBase) return personalBase;
+
   const scope = normalizeUserAccessScope(accessScope);
   if (scope === 'CITY') {
     const [firstCity] = normalizeUserAccessCities(scopeCity);
-    return `reclutador-${toSlug(firstCity) || 'ciudad'}`;
+    return `usuario-${toSlug(firstCity) || 'ciudad'}`;
   }
   if (scope === 'VACANCY') {
-    return `reclutador-${toSlug(vacancyTitle) || 'vacante'}`;
+    return `usuario-${toSlug(vacancyTitle) || 'vacante'}`;
   }
-  return 'reclutador-general';
+  return 'usuario';
 }
 
 export async function buildUniqueRecruiterUsername(prisma, options = {}) {
@@ -156,12 +151,6 @@ export function generateRecoveryCode() {
   return String(randomInt(0, 1_000_000)).padStart(6, '0');
 }
 
-/**
- * Crear cuentas, recuperar credenciales y cambiar permisos generales de cuenta
- * son responsabilidades exclusivas de DEV. Los Supervisores administran módulos
- * y funciones operativas mediante operationalAccess.js, sin heredar autoridad
- * por username, alcance o nombre visible.
- */
 export function canCreateRecruiterUsers(source = {}) {
   const role = sourceValue(source, 'userRole') || sourceValue(source, 'role');
   return role === 'dev';

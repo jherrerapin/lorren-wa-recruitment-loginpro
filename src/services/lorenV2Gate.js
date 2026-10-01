@@ -15,6 +15,22 @@ function rejectPanelAccess(req, res, message) {
   );
 }
 
+function panelRole(source = {}) {
+  return String(source.userRole || source.role || source.session?.userRole || '').trim().toLowerCase();
+}
+
+function operationalRole(source = {}) {
+  return String(source.operationalRole || source.session?.operationalRole || '').trim().toUpperCase();
+}
+
+function metaAdsAllowed(source = {}) {
+  return Boolean(source.canAccessMetaAds ?? source.session?.canAccessMetaAds);
+}
+
+function cvAnalysisAllowed(source = {}) {
+  return Boolean(source.canAccessCvAnalysis ?? source.session?.canAccessCvAnalysis);
+}
+
 export function isLorenV2Released(now = new Date()) {
   if (process.env.LOREN_V2_ENABLED === 'false') return false;
   const releaseDate = new Date(`${getReleaseDate()}T00:00:00-05:00`);
@@ -22,45 +38,28 @@ export function isLorenV2Released(now = new Date()) {
 }
 
 export function canSeeLorenV2(source = {}, now = new Date()) {
-  const role = source.userRole || source.role || null;
-  const username = source.username || null;
-  const scope = source.userAccessScope || source.accessScope || null;
-  const canAccessMetaAds = Boolean(
-    source.canAccessMetaAds ?? source.session?.canAccessMetaAds
-  );
-  const canAccessCvAnalysis = Boolean(
-    source.canAccessCvAnalysis ?? source.session?.canAccessCvAnalysis
-  );
-
+  const role = panelRole(source);
   if (role === 'dev') return true;
-  if (role !== 'admin') return false;
-  if (username === 'reclutador-general' && scope === 'ALL') {
-    return isLorenV2Released(now);
-  }
-  return (canAccessMetaAds || canAccessCvAnalysis) && isLorenV2Released(now);
+  if (role !== 'admin' || !isLorenV2Released(now)) return false;
+  return metaAdsAllowed(source) || cvAnalysisAllowed(source);
 }
 
 export function canSeeMetaAds(source = {}, now = new Date()) {
-  if (!canSeeLorenV2(source, now)) return false;
-  if (canManageLorenV2(source, now)) return true;
-  return Boolean(source.canAccessMetaAds ?? source.session?.canAccessMetaAds);
+  if (panelRole(source) === 'dev') return true;
+  return canSeeLorenV2(source, now) && metaAdsAllowed(source);
 }
 
 export function canSeeCvAnalysis(source = {}, now = new Date()) {
-  if (!canSeeLorenV2(source, now)) return false;
-  if (canManageLorenV2(source, now)) return true;
-  return Boolean(source.canAccessCvAnalysis ?? source.session?.canAccessCvAnalysis);
+  if (panelRole(source) === 'dev') return true;
+  return canSeeLorenV2(source, now) && cvAnalysisAllowed(source);
 }
 
 export function canManageLorenV2(source = {}, now = new Date()) {
-  const role = source.userRole || source.role || null;
-  const username = source.username || null;
-  const scope = source.userAccessScope || source.accessScope || null;
-
+  const role = panelRole(source);
   if (role === 'dev') return true;
   return role === 'admin'
-    && username === 'reclutador-general'
-    && scope === 'ALL'
+    && operationalRole(source) === 'SUPERVISOR'
+    && (metaAdsAllowed(source) || cvAnalysisAllowed(source))
     && isLorenV2Released(now);
 }
 

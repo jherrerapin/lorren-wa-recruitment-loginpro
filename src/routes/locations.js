@@ -42,10 +42,6 @@ function canManageRecruiterUsers(req) {
   return canCreateRecruiterUsers(req);
 }
 
-function isProtectedRecruiterProfile(user = {}) {
-  return user.username === 'reclutador-general';
-}
-
 function operationalAccessActor(req) {
   return {
     actorUserId: req.userId || req.session?.userId || null,
@@ -94,7 +90,7 @@ async function loadPayrollPermissionTarget(prisma, userId) {
 function canEditPayrollPermissionTarget(req, user) {
   if (!user || user.role !== 'ADMIN') return false;
   if (req.userRole === 'dev') return true;
-  return !isProtectedRecruiterProfile(user);
+  return true;
 }
 
 function canEditOperationalTarget(req, access) {

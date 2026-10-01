@@ -234,10 +234,10 @@
                   <label class="dispatch-row"><input name="canAccessCvAnalysis" type="checkbox" value="true" /><span><strong>Análisis de hojas de vida</strong><small>Organiza candidatos según la vacante.</small></span></label>
                 </div>
               </div>
-              <p class="hint" style="margin-top:10px;">Los permisos adicionales solo pueden ser concedidos por DEV o reclutador-general.</p>
+              <p class="hint" style="margin-top:10px;">Los permisos generales de cuenta solo pueden ser administrados por DEV.</p>
             </div>
           <% } else { %>
-            <div class="alert alert-info" style="margin-top:16px;">Puedes crear usuarios dentro de tu alcance. Los permisos adicionales del panel los asigna DEV o reclutador-general.</div>
+            <div class="alert alert-info" style="margin-top:16px;">Los permisos operativos se administran mediante el rol Supervisor y sus capacidades asignadas.</div>
           <% } %>
           <div class="form-actions"><button class="btn btn-primary" type="submit">Crear usuario</button></div>
         </form>
@@ -343,7 +343,7 @@
                               <label class="dispatch-row"><input id="edit-canAccessDispatch-<%= user.id %>" type="checkbox" name="canAccessDispatch" value="true" <%= user.canAccessDispatch ? 'checked' : '' %> />Acceso a Operaciones / Despacho</label>
                               <label class="dispatch-row"><input id="edit-canAccessAttendance-<%= user.id %>" type="checkbox" name="canAccessAttendance" value="true" <%= user.canAccessAttendance ? 'checked' : '' %> /><span><strong>Asistencia operativa</strong><small>Panel, revisión, geocerca, evidencia y configuración de puntos.</small></span></label>
                               <div class="statistics-permissions"><strong>Estadísticas</strong><small>Selecciona por separado las herramientas que podrá abrir.</small><label class="dispatch-row"><input type="checkbox" name="canAccessMetaAds" value="true" <%= user.canAccessMetaAds ? 'checked' : '' %> /><span><strong>Meta Ads</strong><small>Inversión, resultados y costos.</small></span></label><label class="dispatch-row"><input type="checkbox" name="canAccessCvAnalysis" value="true" <%= user.canAccessCvAnalysis ? 'checked' : '' %> /><span><strong>Análisis de hojas de vida</strong><small>Revisión y organización de candidatos.</small></span></label></div>
-                              <span class="hint">Solo DEV y reclutador-general pueden modificar estos permisos.</span>
+                              <span class="hint">Solo DEV puede modificar estos permisos generales de cuenta.</span>
                             </div>
                           <% } %>
                         </div>
