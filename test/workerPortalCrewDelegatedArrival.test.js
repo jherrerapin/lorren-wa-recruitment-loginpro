@@ -124,6 +124,16 @@ test('consulta puntual bloquea cualquier marcación individual del auxiliar crew
   assert.equal(genericMark, null);
 });
 
+test('la vista no genera botones de marcación para un auxiliar crew que no es encargado', async () => {
+  const view = await readFile(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
+  const actionSection = view.match(/<% if \(!\(assignment\.crewAvailable && !assignment\.isCrewLeader\)\) \{ %>[\s\S]*?<% if \(assignment\.crewAvailable && assignment\.isCrewLeader && !assignment\.departureReported\) \{ %>/)?.[0] || '';
+
+  assert.ok(actionSection);
+  assert.match(actionSection, /<div class="action-grid"/);
+  assert.match(actionSection, /data-assignment-id="<%= assignment\.id %>"/);
+  assert.match(actionSection, /<% \} %>\s*<% if \(assignment\.crewAvailable && assignment\.isCrewLeader/);
+});
+
 test('la vista consume la proyección server-side y no inventa otra regla de cuadrilla', async () => {
   const view = await readFile(new URL('../src/views/workerPortal.ejs', import.meta.url), 'utf8');
   const arrivalBranch = view.match(/<% if \(!assignment\.arrivalReported && !assignment\.departureReported\) \{ %>[\s\S]*?<% \} else if \(!assignment\.departureReported\) \{ %>/)?.[0] || '';
