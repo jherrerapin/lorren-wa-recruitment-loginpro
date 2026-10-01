@@ -6,7 +6,7 @@ const eligibility = fs.readFileSync(new URL('../src/modules/dispatch-attendance/
 const counter = fs.readFileSync(new URL('../src/modules/dispatch-attendance/application/attendanceBillingCounter.js', import.meta.url), 'utf8');
 const operationView = fs.readFileSync(new URL('../src/views/operacionesClienteOperaciones.ejs', import.meta.url), 'utf8');
 const server = fs.readFileSync(new URL('../src/server.js', import.meta.url), 'utf8');
-const devBilling = fs.readFileSync(new URL('../src/routes/cybionixBillingAdmin.js', import.meta.url), 'utf8');
+const devBilling = fs.readFileSync(new URL('../src/routes/lorrenBillingAdmin.js', import.meta.url), 'utf8');
 const worker = fs.readFileSync(new URL('../src/workers/attendanceBillingInvoiceWorker.js', import.meta.url), 'utf8');
 
 test('la facturabilidad se congela desde la hora exacta y no usa tolerancia de ausencia', () => {
@@ -38,8 +38,8 @@ test('el check de Asistencia llega al primer render con el estado real, sin parp
   assert.doesNotMatch(operationView, /op\.attendanceEnabled \|\| op\.attendanceLatitude == null \|\| op\.attendanceLongitude == null/);
 });
 
-test('DEV tiene acceso visible a Facturación Cybionix desde la navegación', () => {
+test('DEV tiene acceso visible a Facturación Lórren desde la navegación', () => {
   assert.match(server, /admin-module-standalone-link/);
-  assert.match(server, /href="\/admin\/cybionix-billing"/);
-  assert.match(server, /Facturación Cybionix/);
+  assert.match(server, /href="\/admin\/lorren-billing"/);
+  assert.match(server, /Facturación Lórren/);
 });
