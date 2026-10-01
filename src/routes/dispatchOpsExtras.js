@@ -6,6 +6,7 @@ import {
   loadUnifiedCityOptions,
   operationalCityIdsAllowed,
   operationalCityScopeAllowsName,
+  resolveEquivalentCityIds,
   workerMatchesOperationalCityScope
 } from '../services/cityOptions.js';
 import { normalizeTransportMode } from '../services/transportMode.js';
@@ -80,8 +81,6 @@ function normalizeStringList(value) {
   const single = normalizeString(value);
   return single ? [single] : [];
 }
-function normalizeText(value) { return normalizeString(value)?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase() || ''; }
-function isBogotaSiberiaName(cityName) { const normalized = normalizeText(cityName); return normalized === 'bogota' || normalized === 'bogota d.c.' || normalized === 'bogota dc' || normalized === 'siberia'; }
 function setNoStore(res) { res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate'); res.set('Pragma', 'no-cache'); res.set('Expires', '0'); }
 function isOpsUser(req) { const username = normalizeString(req.session?.username || req.username); return Boolean(username?.startsWith('operaciones-despacho')); }
 function canUseOps(req) { const role = req.session?.userRole || req.userRole; const canAccessDispatch = Boolean(req.session?.canAccessDispatch || req.canAccessDispatch); return role === 'dev' || canAccessDispatch || isOpsUser(req); }
@@ -250,13 +249,8 @@ async function importBatchWithinCityScope(prisma, req, batchId, selectedItemIds 
 async function resolveDispatchService(prisma, serviceId) { const normalizedServiceId = normalizeString(serviceId); if (!normalizedServiceId) return null; return prisma.dispatchClientService.findFirst({ where: { id: normalizedServiceId, isActive: true }, include: { client: true } }); }
 async function loadDispatchCities(prisma) { return loadUnifiedCityOptions(prisma); }
 async function resolveCompatibleOperationalCityIds(prisma, operationalCityId) {
-  if (!operationalCityId) return [];
-  const selectedCity = await prisma.city.findFirst({ where: { id: operationalCityId, usedForDispatch: true }, select: { id: true, name: true } });
-  if (!selectedCity) return [operationalCityId];
-  if (!isBogotaSiberiaName(selectedCity.name)) return [selectedCity.id];
-  const cities = await loadDispatchCities(prisma);
-  const compatibleIds = cities.filter((city) => isBogotaSiberiaName(city.name)).map((city) => city.id);
-  return compatibleIds.length ? compatibleIds : [selectedCity.id];
+  if (!operationalCityId || operationalCityId === 'ALL') return [];
+  return resolveEquivalentCityIds(prisma, operationalCityId);
 }
 async function loadActiveClientsForServiceRequestForm(prisma) {
   return prisma.dispatchClient.findMany({
@@ -640,11 +634,13 @@ export function dispatchOpsExtrasRouter(prisma) {
     const requestedStatus = normalizeString(req.query.status)?.toUpperCase();
     const inactiveView = DISABLED_OPERATIONAL_STATUSES.includes(requestedStatus);
     const eligibilityFilter = buildDispatchEligibilityFilter(requestedStatus);
+    const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds(prisma, operationalCityId);
+    const operationalCityFilter = buildOperationalCityFilter(compatibleOperationalCityIds);
     const [workers, cities, vacancies] = await Promise.all([
       prisma.dispatchWorker.findMany({
         where: {
           ...eligibilityFilter,
-          ...(operationalCityId ? { cities: { some: { cityId: operationalCityId } } } : {}),
+          ...operationalCityFilter,
           ...(vacancyId ? { vacancies: { some: { vacancyId } } } : {})
         },
         include: { candidate: true, cities: { include: { city: true } }, vacancies: { include: { vacancy: true } } },
