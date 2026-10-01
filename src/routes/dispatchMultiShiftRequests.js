@@ -47,13 +47,14 @@ function normalizePositiveInt(value) {
   return Math.max(1, Math.trunc(parsed));
 }
 
-function buildTimeBlocks(body = {}) {
+export function buildTimeBlocks(body = {}) {
   const quantities = asArray(body.requiredWorkers);
   const starts = asArray(body.startTime);
   const ends = asArray(body.endTime);
   const rowDates = asArray(body.serviceDateBlock);
   const fallbackDates = asArray(body.serviceDate);
-  const count = Math.max(quantities.length, starts.length, ends.length, rowDates.length, fallbackDates.length, 1);
+  const services = asArray(body.serviceId);
+  const count = Math.max(quantities.length, starts.length, ends.length, rowDates.length, fallbackDates.length, services.length, 1);
   const blocks = [];
 
   for (let index = 0; index < count; index += 1) {
@@ -64,7 +65,7 @@ function buildTimeBlocks(body = {}) {
     const endTime = normalizeOptionalTime(ends[index] ?? null, 'Hora fin');
 
     if (!requiredWorkers) throw new Error('Debes ingresar una cantidad valida de auxiliares en cada horario.');
-    blocks.push({ requiredWorkers, serviceDate: new Date(`${serviceDate}T00:00:00-05:00`), startTime, endTime });
+    blocks.push({ requiredWorkers, serviceDate: new Date(`${serviceDate}T00:00:00-05:00`), startTime, endTime, requestedServiceId: normalizeString(services[index] ?? services[0]) });
   }
 
   if (!blocks.length) throw new Error('Debes ingresar al menos un día/horario con cantidad valida de auxiliares.');
@@ -163,8 +164,16 @@ function getRequestEditLock(requests = []) {
   return { editable: true, reason: null };
 }
 
+export function resolveBlockServices(blocks, services, groupCode) {
+  return blocks.map(({ requestedServiceId, ...block }) => {
+    const service = services.find((item) => item.id === requestedServiceId) || null;
+    if ((requestedServiceId || services.length) && !service) throw new Error('Debes seleccionar un servicio válido del cliente en cada horario.');
+    return { ...block, ...serviceData(service, groupCode) };
+  });
+}
+
 async function createRequests(baseData, blocks) {
-  const createdRequests = await prisma.$transaction(blocks.map((block) => prisma.dispatchServiceRequest.create({
+  const createdRequests = await prisma.$transaction(blocks.map(({ requestedServiceId, ...block }) => prisma.dispatchServiceRequest.create({
     data: { ...baseData, ...block }
   })));
   await autoAssignServiceRequests(prisma, createdRequests, {
@@ -284,9 +293,11 @@ async function updatePublicRequests(client, currentRequests, body) {
     for (const [index, block] of blocks.entries()) {
       const existing = existingRequests[index];
       if (existing) {
-        await tx.dispatchServiceRequest.update({ where: { id: existing.id }, data: { ...baseData, ...block } });
+        const { requestedServiceId, ...requestBlock } = block;
+        await tx.dispatchServiceRequest.update({ where: { id: existing.id }, data: { ...baseData, ...requestBlock } });
       } else {
-        const created = await tx.dispatchServiceRequest.create({ data: { ...baseData, ...block } });
+        const { requestedServiceId, ...requestBlock } = block;
+        const created = await tx.dispatchServiceRequest.create({ data: { ...baseData, ...requestBlock } });
         createdRequestIds.push(created.id);
       }
     }
@@ -319,7 +330,6 @@ export function dispatchMultiShiftRequestsRouter() {
   router.post('/admin/operaciones/solicitudes', requireOps, async (req, res) => {
     const clientId = normalizeString(req.body.clientId);
     const operationPointId = normalizeString(req.body.operationPointId);
-    const serviceId = normalizeString(req.body.serviceId);
     if (!clientId || !operationPointId) return res.status(400).send('Selecciona cliente y punto de operación.');
 
     let blocks;
@@ -332,22 +342,20 @@ export function dispatchMultiShiftRequestsRouter() {
     if (!client) return res.status(404).send('Cliente no encontrado o inactivo.');
     const operationPoint = client.operationPoints.find((item) => item.id === operationPointId);
     if (!operationPoint) return res.status(400).send('Debes seleccionar una operación válida para el cliente.');
-    const selectedService = serviceId ? client.services.find((item) => item.id === serviceId) || null : null;
-    if (client.services.length && !selectedService) return res.status(400).send('Debes seleccionar un servicio válido para el cliente.');
-
     const groupCode = buildRequestGroupCode(blocks);
+    let resolvedBlocks;
+    try { resolvedBlocks = resolveBlockServices(blocks, client.services, groupCode); } catch (error) { return res.status(400).send(error.message); }
     await createRequests({
       operationPointId: operationPoint.id,
       clientName: client.name,
       operationPointName: operationPoint.name,
       cityName: operationPoint.cityName || client.cityName,
       address: operationPoint.address || normalizeString(req.body.address),
-      ...serviceData(selectedService, groupCode),
       notes: normalizeString(req.body.notes),
       status: 'PENDING_ASSIGNMENT',
       source: 'INTERNAL',
       createdByUsername: req.session?.username || req.username || null
-    }, blocks);
+    }, resolvedBlocks);
 
     return res.redirect(`/admin/operaciones/solicitudes?message=${encodeURIComponent(`Solicitud creada: ${createdSummary(blocks, groupCode)}.`)}`);
   });

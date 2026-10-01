@@ -59,6 +59,37 @@ test('crea solicitudes DEV_TEST usando un cliente y operación reales solo como 
   assert.equal(auditData.metadata.operationalRecordsChanged, false);
 });
 
+test('crea una solicitud independiente por servicio aunque comparta fecha y horario', async () => {
+  const saved = [];
+  const prisma = {
+    dispatchClient: { findFirst: async () => ({
+      id: 'client', name: 'Cliente', cityName: 'Bogotá',
+      operationPoints: [{ id: 'point', name: 'Operación', cityName: 'Bogotá' }],
+      services: [{ id: 'service-a', name: 'Cargue' }, { id: 'service-b', name: 'Inventario' }]
+    }) },
+    dispatchServiceRequest: { create: ({ data }) => ({ data }) },
+    devAuditEvent: { create: async () => ({}) },
+    $transaction: async (operations) => operations.map(({ data }, index) => {
+      saved.push(data);
+      return { id: `request-${index + 1}`, ...data };
+    })
+  };
+
+  const result = await createDevTestServiceRequests(prisma, {
+    clientId: 'client', operationPointId: 'point',
+    serviceDateBlock: ['2026-10-02', '2026-10-02'],
+    startTime: ['08:00', '08:00'], endTime: ['16:00', '16:00'],
+    requiredWorkers: ['2', '3'], serviceId: ['service-a', 'service-b']
+  });
+
+  assert.equal(result.created.length, 2);
+  assert.deepEqual(saved.map(({ serviceId, requiredWorkers }) => [serviceId, requiredWorkers]), [
+    ['service-a', 2], ['service-b', 3]
+  ]);
+  assert.equal(saved[0].startTime, saved[1].startTime);
+  assert.equal(saved[0].serviceDate.getTime(), saved[1].serviceDate.getTime());
+});
+
 test('el entorno consulta todos los clientes activos y auxiliares no eliminados', async () => {
   let clientWhere = null;
   let workerWhere = null;

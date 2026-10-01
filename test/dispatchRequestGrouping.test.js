@@ -5,6 +5,27 @@ import {
   extractRequestGroupCode,
   resolveRequestServiceName
 } from '../src/services/dispatchRequestGrouping.js';
+import { buildTimeBlocks, resolveBlockServices } from '../src/routes/dispatchMultiShiftRequests.js';
+
+test('cada fila conserva servicio y auxiliares propios aunque comparta fecha y horario', () => {
+  const blocks = buildTimeBlocks({
+    serviceDateBlock: ['2026-10-02', '2026-10-02'],
+    requiredWorkers: ['2', '3'],
+    serviceId: ['service-a', 'service-b'],
+    startTime: ['08:00', '08:00'],
+    endTime: ['16:00', '16:00']
+  });
+  const services = [{ id: 'service-a', name: 'Cargue' }, { id: 'service-b', name: 'Inventario' }];
+  const resolved = resolveBlockServices(blocks, services, 'GRP-TEST');
+
+  assert.deepEqual(resolved.map(({ serviceId, requiredWorkers }) => [serviceId, requiredWorkers]), [
+    ['service-a', 2], ['service-b', 3]
+  ]);
+  assert.equal(resolved[0].serviceDate.getTime(), resolved[1].serviceDate.getTime());
+  assert.equal(resolved[0].startTime, resolved[1].startTime);
+  assert.match(resolved[0].serviceName, /Grupo GRP-TEST/);
+  assert.throws(() => resolveBlockServices(blocks, services.slice(0, 1), null), /servicio válido del cliente/);
+});
 
 function assignment(status) {
   return { status, workerId: `worker-${status}`, worker: { fullName: `Auxiliar ${status}` } };
