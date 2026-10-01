@@ -1,17 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  CYBIONIX_ACCOUNT_ENTITY_TYPE,
-  ensureCybionixAccountCharge,
-  loadCybionixAccountForInvoice,
-  loadCybionixApprovalState,
-  resolveCybionixAttendanceApproval
+  LORREN_ACCOUNT_ENTITY_TYPE,
+  ensureLorrenAccountCharge,
+  loadLorrenAccountForInvoice,
+  loadLorrenApprovalState,
+  resolveLorrenAttendanceApproval
 } from '../src/services/cybionixBillingWorkflow.js';
 import {
-  CYBIONIX_BILLING_CONFIG_ACTION,
-  CYBIONIX_BILLING_CONFIG_ENTITY_ID,
-  CYBIONIX_BILLING_CONFIG_ENTITY_TYPE,
-  normalizeCybionixBillingConfigInput
+  LORREN_BILLING_CONFIG_ACTION,
+  LORREN_BILLING_CONFIG_ENTITY_ID,
+  LORREN_BILLING_CONFIG_ENTITY_TYPE,
+  normalizeLorrenBillingConfigInput
 } from '../src/services/cybionixBillingConfig.js';
 import {
   ATTENDANCE_BILLING_INVOICE_ACTION,
@@ -60,9 +60,9 @@ function makePrisma() {
     {
       id: 'config-1',
       createdAt: new Date('2026-09-30T22:00:00.000Z'),
-      entityType: CYBIONIX_BILLING_CONFIG_ENTITY_TYPE,
-      entityId: CYBIONIX_BILLING_CONFIG_ENTITY_ID,
-      action: CYBIONIX_BILLING_CONFIG_ACTION,
+      entityType: LORREN_BILLING_CONFIG_ENTITY_TYPE,
+      entityId: LORREN_BILLING_CONFIG_ENTITY_ID,
+      action: LORREN_BILLING_CONFIG_ACTION,
       metadata: configMetadata()
     },
     {
@@ -99,7 +99,7 @@ function makePrisma() {
 }
 
 test('la configuración DEV normaliza módulos, destinatarios y teléfonos colombianos', () => {
-  const normalized = normalizeCybionixBillingConfigInput({
+  const normalized = normalizeLorrenBillingConfigInput({
     enabled: 'true',
     moduleName: ['Bot', 'Despacho'],
     moduleValue: ['1.000.000', '400000'],
@@ -117,7 +117,7 @@ test('la configuración DEV normaliza módulos, destinatarios y teléfonos colom
 
 test('una aprobación crea una sola cuenta con Bot + Despacho + Asistencia', async () => {
   const prisma = makePrisma();
-  const first = await resolveCybionixAttendanceApproval(prisma, {
+  const first = await resolveLorrenAttendanceApproval(prisma, {
     invoiceNumber: 'ASIS-202610',
     decision: 'APPROVE',
     supervisorPhone: '573004445566'
@@ -129,43 +129,43 @@ test('una aprobación crea una sola cuenta con Bot + Despacho + Asistencia', asy
   assert.deepEqual(first.account.items.map((item) => item.name), ['Bot', 'Despacho', 'Módulo de Asistencia y Gestión de Tiempo']);
   assert.equal(first.account.recipients[0].phone, '573001112233');
 
-  const second = await resolveCybionixAttendanceApproval(prisma, {
+  const second = await resolveLorrenAttendanceApproval(prisma, {
     invoiceNumber: 'ASIS-202610',
     decision: 'APPROVE',
     supervisorPhone: '573004445566'
   }, { env: {} });
   assert.equal(second.idempotent, true);
-  assert.equal(prisma.events.filter((event) => event.entityType === CYBIONIX_ACCOUNT_ENTITY_TYPE).length, 1);
+  assert.equal(prisma.events.filter((event) => event.entityType === LORREN_ACCOUNT_ENTITY_TYPE).length, 1);
 });
 
 test('la primera decisión terminal gana: rechazo impide crear la cuenta aunque llegue un approve duplicado', async () => {
   const prisma = makePrisma();
-  const rejected = await resolveCybionixAttendanceApproval(prisma, {
+  const rejected = await resolveLorrenAttendanceApproval(prisma, {
     invoiceNumber: 'ASIS-202610',
     decision: 'REJECT',
     supervisorPhone: '573004445566'
   }, { env: {} });
   assert.equal(rejected.status, 'REJECTED');
-  assert.equal(await loadCybionixAccountForInvoice(prisma, 'ASIS-202610'), null);
+  assert.equal(await loadLorrenAccountForInvoice(prisma, 'ASIS-202610'), null);
 
-  const lateApprove = await resolveCybionixAttendanceApproval(prisma, {
+  const lateApprove = await resolveLorrenAttendanceApproval(prisma, {
     invoiceNumber: 'ASIS-202610',
     decision: 'APPROVE',
     supervisorPhone: '573004445566'
   }, { env: {} });
   assert.equal(lateApprove.idempotent, true);
   assert.equal(lateApprove.status, 'REJECTED');
-  assert.equal(await loadCybionixAccountForInvoice(prisma, 'ASIS-202610'), null);
+  assert.equal(await loadLorrenAccountForInvoice(prisma, 'ASIS-202610'), null);
 });
 
 test('ensure de cuenta usa snapshot y es idempotente por factura', async () => {
   const prisma = makePrisma();
   const invoice = invoiceMetadata();
-  const first = await ensureCybionixAccountCharge(prisma, invoice, configMetadata(), { supervisorName: 'Supervisor', supervisorPhone: '573004445566' });
-  const second = await ensureCybionixAccountCharge(prisma, invoice, configMetadata(), { supervisorName: 'Supervisor', supervisorPhone: '573004445566' });
+  const first = await ensureLorrenAccountCharge(prisma, invoice, configMetadata(), { supervisorName: 'Supervisor', supervisorPhone: '573004445566' });
+  const second = await ensureLorrenAccountCharge(prisma, invoice, configMetadata(), { supervisorName: 'Supervisor', supervisorPhone: '573004445566' });
   assert.equal(first.created, true);
   assert.equal(second.created, false);
   assert.equal(second.account.total, 1715000);
-  const state = await loadCybionixApprovalState(prisma, 'ASIS-202610');
+  const state = await loadLorrenApprovalState(prisma, 'ASIS-202610');
   assert.equal(state.status, 'UNSENT');
 });
