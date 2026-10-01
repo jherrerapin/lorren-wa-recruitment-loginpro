@@ -24,6 +24,8 @@ import { workerPortalRouter } from './routes/workerPortal.js';
 import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftRequests.js';
 import { lorenV2Router } from './routes/lorenV2.js';
 import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
+import { cybionixBillingAdminRouter } from './routes/cybionixBillingAdmin.js';
+import { cybionixWhatsappWebhookRouter } from './routes/cybionixWhatsappWebhook.js';
 import { adminHtmlBridgeMiddleware, dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { canManageLorenV2, canSeeLorenV2 } from './services/lorenV2Gate.js';
 import { getMetaAdsConfig } from './services/metaAdsClient.js';
@@ -350,6 +352,17 @@ function injectLorenV2NavbarLink(html, req) {
   );
 }
 
+function injectCybionixBillingNavbarLink(html, req) {
+  if (typeof html !== 'string') return html;
+  if ((req.session?.userRole || req.userRole) !== 'dev') return html;
+  if (html.includes('href="/admin/cybionix-billing"')) return html;
+  if (!html.includes('<span class="spacer"></span>')) return html;
+  return html.replace(
+    '<span class="spacer"></span>',
+    '  <a href="/admin/cybionix-billing">Facturación Cybionix</a>\n  <span class="spacer"></span>'
+  );
+}
+
 function mapDbRoleToSessionRole(role) {
   return role === 'DEV' ? 'dev' : 'admin';
 }
@@ -394,6 +407,7 @@ app.use((req, res, next) => {
     let output = body;
     if (shouldReplaceLorenV2UiLabel(output, res)) {
       output = replaceLorenV2UiLabel(output);
+      output = injectCybionixBillingNavbarLink(output, req);
     }
     return originalSend(output);
   };
@@ -421,6 +435,7 @@ app.use((req, res, next) => {
 app.use(morgan('combined'));
 app.use('/operaciones/portal', wrapAsyncRouter(workerPortalRouter(prisma)));
 app.use('/webhook/dispatch', dispatchWhatsappWebhookRouter(prisma));
+app.use('/webhook/cybionix', cybionixWhatsappWebhookRouter(prisma));
 
 const webhookJsonParser = createWebhookJsonParser();
 
@@ -689,6 +704,7 @@ app.use('/admin', (req, res, next) => {
   }
   return next();
 });
+app.use('/admin/cybionix-billing', wrapAsyncRouter(cybionixBillingAdminRouter(prisma)));
 app.use('/admin', wrapAsyncRouter(adminCandidateGlobalExportRouter(prisma)));
 app.use('/admin', wrapAsyncRouter(interviewOutreachManagementRouter(prisma)));
 app.use('/admin', adminRouter(prisma));
