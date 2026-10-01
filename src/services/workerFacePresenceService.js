@@ -9,7 +9,6 @@ import {
   WORKER_BIOMETRIC_ACTION,
   WORKER_BIOMETRIC_EVIDENCE_VERSION,
   WORKER_BIOMETRIC_MODEL_VERSION,
-  assertWorkerBiometricAttemptAllowed,
   normalizeWorkerBiometricDescriptor
 } from './workerBiometricService.js';
 
@@ -229,9 +228,9 @@ export function workerFacePresenceStatus() {
   };
 }
 
-export async function assertWorkerFacePresenceAttemptAllowed(prisma, input = {}, options = {}) {
-  return assertWorkerBiometricAttemptAllowed(prisma, input, options);
-}
+// No se reemplaza el limitador canónico del portal; un valor falsy hace que
+// workerPortalRouter conserve assertWorkerBiometricAttemptAllowed con Prisma.
+export const assertWorkerFacePresenceAttemptAllowed = null;
 
 export function issueWorkerFacePresenceChallenge(input = {}, options = {}) {
   const workerId = normalizeString(input.workerId, 120);
