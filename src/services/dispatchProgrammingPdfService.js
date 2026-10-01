@@ -8,6 +8,7 @@ import {
   filterDispatchServiceRequestsByDate,
   normalizeDispatchDateParam
 } from './dispatchDate.js';
+import { canonicalOperationalBranchName } from './cityOptions.js';
 import { deriveDispatchRequestOperationalState, operationalAssignments } from './dispatchOperationalCoverage.js';
 import { normalizeDispatchWhatsappPhone } from './dispatchWhatsappCloudConfig.js';
 import {
@@ -141,7 +142,7 @@ function requestStatusClass(value) {
 function groupByCityAndClient(requests = []) {
   const cities = new Map();
   for (const request of requests) {
-    const cityName = request.cityName || 'Sin ciudad';
+    const cityName = canonicalOperationalBranchName(request.cityName) || 'Sin ciudad';
     const clientName = request.clientName || 'Sin cliente';
     if (!cities.has(cityName)) cities.set(cityName, new Map());
     const clients = cities.get(cityName);
