@@ -9,11 +9,14 @@ import {
   WORKER_BIOMETRIC_ACTION,
   WORKER_BIOMETRIC_EVIDENCE_VERSION,
   WORKER_BIOMETRIC_MODEL_VERSION,
+  assertWorkerBiometricAttemptAllowed,
   normalizeWorkerBiometricDescriptor
 } from './workerBiometricService.js';
 
 const FACE_PRESENCE_CHALLENGE_TTL_MS = 3 * 60 * 1000;
 const FACE_PRESENCE_VERIFICATION_TTL_MS = 90 * 1000;
+const FACE_PRESENCE_REAL_THRESHOLD = 0.55;
+const FACE_PRESENCE_LIVE_THRESHOLD = 0.55;
 const FACE_PRESENCE_MARK_TYPES = new Set(['ARRIVAL', 'BREAK_START', 'BREAK_END', 'DEPARTURE']);
 const FACE_PRESENCE_ACTIONS = Object.freeze(['TURN_SIDE', 'MOVE_CLOSER']);
 
@@ -80,6 +83,38 @@ function captureHash(descriptors) {
   return createHash('sha256').update(JSON.stringify(descriptors)).digest('hex');
 }
 
+function descriptorHash(descriptor) {
+  return createHash('sha256').update(JSON.stringify(descriptor)).digest('hex');
+}
+
+async function captureWasReplayed(prisma, captureHashValue, descriptorHashValue, idempotencyKey) {
+  if (!captureHashValue && !descriptorHashValue) return false;
+  const common = {
+    entityType: ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
+    entityId: { not: idempotencyKey },
+    action: WORKER_BIOMETRIC_ACTION.ASSESSED
+  };
+  try {
+    if (captureHashValue) {
+      const event = await prisma.devAuditEvent.findFirst({
+        where: { ...common, metadata: { path: ['captureHash'], equals: captureHashValue } },
+        orderBy: { createdAt: 'desc' }
+      });
+      if (event) return true;
+    }
+    if (descriptorHashValue) {
+      const event = await prisma.devAuditEvent.findFirst({
+        where: { ...common, metadata: { path: ['descriptorHash'], equals: descriptorHashValue } },
+        orderBy: { createdAt: 'desc' }
+      });
+      if (event) return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 function verifyChallenge(token, expected = {}, options = {}) {
   const normalized = normalizeString(token, 8192);
   if (!normalized || !normalized.includes('.')) throw new Error('attendance_biometric_challenge_invalid');
@@ -129,6 +164,61 @@ function validatePresenceChallengeEvidence(value, challenge) {
   };
 }
 
+function presenceAssessmentBase({ samples, descriptor, challenge, challengeEvidence, idempotencyKey, now }) {
+  return {
+    facePresent: true,
+    similarity: null,
+    baseSimilarity: null,
+    enrollmentReferenceSimilarity: null,
+    enrollmentReferenceCount: 0,
+    sessionSimilarity: null,
+    referenceSource: 'FACE_PRESENCE',
+    identityConfidence: null,
+    identityMatchEnforced: false,
+    matchThreshold: null,
+    attendanceIdentityThreshold: null,
+    sessionIdentityThreshold: null,
+    minimumSampleSimilarity: null,
+    sampleConsistencyThreshold: null,
+    actionIdentitySimilarity: null,
+    actionIdentityThreshold: null,
+    sampleCount: samples.descriptors.length,
+    realScore: Math.min(...samples.realScores),
+    liveScore: Math.min(...samples.liveScores),
+    challengeAction: challenge.action,
+    challengeCompleted: true,
+    challengeEvidence,
+    descriptorHash: descriptorHash(descriptor),
+    captureHash: captureHash(samples.descriptors),
+    evidenceVersion: WORKER_BIOMETRIC_EVIDENCE_VERSION,
+    modelVersion: WORKER_BIOMETRIC_MODEL_VERSION,
+    idempotencyKey,
+    assessedAt: now.toISOString(),
+    consumedAt: null
+  };
+}
+
+async function persistAssessment(prisma, input, assessment, now) {
+  await prisma.devAuditEvent.create({
+    data: {
+      entityType: ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
+      entityId: input.idempotencyKey,
+      entityLabel: input.assignmentId,
+      action: WORKER_BIOMETRIC_ACTION.ASSESSED,
+      actorSource: 'worker-portal',
+      ipAddress: normalizeString(input.ipAddress, 120),
+      userAgent: normalizeString(input.userAgent, 500),
+      metadata: {
+        ...assessment,
+        workerId: input.workerId,
+        assignmentId: input.assignmentId,
+        markType: input.markType
+      },
+      createdAt: now
+    }
+  });
+}
+
 export function workerFacePresenceStatus() {
   return {
     enrolled: true,
@@ -139,8 +229,8 @@ export function workerFacePresenceStatus() {
   };
 }
 
-export async function assertWorkerFacePresenceAttemptAllowed() {
-  return { allowed: true, consecutiveFailures: 0, retryAfterMs: 0 };
+export async function assertWorkerFacePresenceAttemptAllowed(prisma, input = {}, options = {}) {
+  return assertWorkerBiometricAttemptAllowed(prisma, input, options);
 }
 
 export function issueWorkerFacePresenceChallenge(input = {}, options = {}) {
@@ -218,56 +308,24 @@ export async function assessWorkerFacePresence(prisma, input = {}, options = {})
     throw new Error('attendance_face_presence_samples_invalid');
   }
 
+  const base = presenceAssessmentBase({ samples, descriptor, challenge, challengeEvidence, idempotencyKey, now });
+  const riskFlags = [];
+  if (base.realScore < FACE_PRESENCE_REAL_THRESHOLD) riskFlags.push('BIOMETRIC_ANTISPOOF_LOW');
+  if (base.liveScore < FACE_PRESENCE_LIVE_THRESHOLD) riskFlags.push('BIOMETRIC_LIVENESS_LOW');
+  if (await captureWasReplayed(prisma, base.captureHash, base.descriptorHash, idempotencyKey)) {
+    riskFlags.push('BIOMETRIC_DESCRIPTOR_REPLAY');
+  }
+
+  const verified = riskFlags.length === 0;
   const assessment = {
-    decision: 'VERIFIED',
-    verified: true,
-    facePresent: true,
-    riskScore: 0,
-    riskFlags: [],
-    similarity: null,
-    baseSimilarity: null,
-    enrollmentReferenceSimilarity: null,
-    enrollmentReferenceCount: 0,
-    sessionSimilarity: null,
-    referenceSource: 'FACE_PRESENCE',
-    identityConfidence: null,
-    identityMatchEnforced: false,
-    matchThreshold: null,
-    attendanceIdentityThreshold: null,
-    sessionIdentityThreshold: null,
-    minimumSampleSimilarity: null,
-    sampleConsistencyThreshold: null,
-    actionIdentitySimilarity: null,
-    actionIdentityThreshold: null,
-    sampleCount: samples.descriptors.length,
-    realScore: Math.min(...samples.realScores),
-    liveScore: Math.min(...samples.liveScores),
-    challengeAction: challenge.action,
-    challengeCompleted: true,
-    challengeEvidence,
-    descriptorHash: createHash('sha256').update(JSON.stringify(descriptor)).digest('hex'),
-    captureHash: captureHash(samples.descriptors),
-    evidenceVersion: WORKER_BIOMETRIC_EVIDENCE_VERSION,
-    modelVersion: WORKER_BIOMETRIC_MODEL_VERSION,
-    idempotencyKey,
-    assessedAt: now.toISOString(),
-    validUntil: new Date(now.getTime() + FACE_PRESENCE_VERIFICATION_TTL_MS).toISOString(),
-    consumedAt: null
+    ...base,
+    decision: verified ? 'VERIFIED' : 'REJECTED',
+    verified,
+    riskScore: verified ? 0 : 80,
+    riskFlags,
+    validUntil: verified ? new Date(now.getTime() + FACE_PRESENCE_VERIFICATION_TTL_MS).toISOString() : null
   };
 
-  await prisma.devAuditEvent.create({
-    data: {
-      entityType: ATTENDANCE_BIOMETRIC_ENTITY_TYPE,
-      entityId: idempotencyKey,
-      entityLabel: assignmentId,
-      action: WORKER_BIOMETRIC_ACTION.ASSESSED,
-      actorSource: 'worker-portal',
-      ipAddress: normalizeString(input.ipAddress, 120),
-      userAgent: normalizeString(input.userAgent, 500),
-      metadata: { ...assessment, workerId, assignmentId, markType },
-      createdAt: now
-    }
-  });
-
+  await persistAssessment(prisma, { ...input, workerId, assignmentId, idempotencyKey, markType }, assessment, now);
   return assessment;
 }
