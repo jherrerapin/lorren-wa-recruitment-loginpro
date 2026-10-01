@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { normalizeCityKey, dedupeCitiesByNormalizedName } from '../src/services/cityOptions.js';
+import {
+  normalizeCityKey,
+  dedupeCitiesByNormalizedName,
+  projectOperationalBranchOptions
+} from '../src/services/cityOptions.js';
+import {
+  applyAttendanceCityFilter,
+  attendanceCitiesForRows
+} from '../src/modules/dispatch-attendance/application/attendanceBoardCityFilter.js';
+import { buildProgrammingReportHtml } from '../src/services/dispatchProgrammingPdfService.js';
 import { normalizeTransportMode } from '../src/services/transportMode.js';
 
 test('city options are deduplicated ignoring accents and case', () => {
@@ -14,6 +23,71 @@ test('city options are deduplicated ignoring accents and case', () => {
     ]).map((city) => city.name),
     ['Bogotá', 'Buenaventura']
   );
+});
+
+test('Siberia se proyecta como parte de la sucursal Bogotá sin perder sus IDs históricos', () => {
+  const projected = projectOperationalBranchOptions([
+    { id: 'bogota-id', name: 'Bogotá' },
+    { id: 'siberia-id', name: 'Siberia' },
+    { id: 'cali-id', name: 'Cali' }
+  ]);
+  assert.deepEqual(projected.map((city) => city.name), ['Bogotá', 'Cali']);
+  const bogota = projected.find((city) => city.name === 'Bogotá');
+  assert.equal(bogota.id, 'bogota-id');
+  assert.deepEqual(new Set(bogota.equivalentCityIds), new Set(['bogota-id', 'siberia-id']));
+});
+
+test('filtro de Asistencia muestra Bogotá una sola vez e incluye filas descriptivas de Siberia', () => {
+  const board = {
+    rows: [
+      { id: 'bog', cityName: 'Bogotá' },
+      { id: 'sib', cityName: 'Siberia' },
+      { id: 'cal', cityName: 'Cali' }
+    ]
+  };
+  assert.deepEqual(attendanceCitiesForRows(board.rows), ['Bogotá', 'Cali']);
+  const filtered = applyAttendanceCityFilter(board, 'Bogotá');
+  assert.deepEqual(filtered.rows.map((row) => row.id), ['bog', 'sib']);
+});
+
+test('PDF de programación agrupa Siberia bajo Bogotá pero conserva ciudad y dirección del servicio', () => {
+  const request = {
+    id: 'req-siberia',
+    cityName: 'Siberia',
+    clientName: 'Cliente',
+    operationPointName: 'Operación Siberia',
+    address: 'Dirección original Siberia',
+    serviceName: 'Servicio',
+    requiredWorkers: 0,
+    startTime: '08:00',
+    endTime: '17:00',
+    assignments: []
+  };
+  const html = buildProgrammingReportHtml({
+    selectedDate: '2026-10-01',
+    requests: [request],
+    managedBy: 'DEV',
+    includePending: true,
+    overallSummary: { totalRequests: 1, completedRequests: 0 },
+    workerAbsences: [],
+    includeWorkerAbsences: false
+  });
+  assert.match(html, /<h2>Bogotá<\/h2>/);
+  assert.doesNotMatch(html, /<h2>Siberia<\/h2>/);
+  assert.match(html, /<b>Ciudad:<\/b> Siberia/);
+  assert.match(html, /<b>Dirección:<\/b> Dirección original Siberia/);
+});
+
+test('selectores y filtros operativos reales usan la autoridad consolidada de sucursales', () => {
+  const ops = fs.readFileSync('src/routes/dispatchOpsExtras.js', 'utf8');
+  const locationsView = fs.readFileSync('src/views/locations.ejs', 'utf8');
+  assert.match(ops, /loadUnifiedCityOptions/);
+  assert.match(ops, /resolveEquivalentCityIds/);
+  assert.match(ops, /const compatibleOperationalCityIds = await resolveCompatibleOperationalCityIds\(prisma, operationalCityId\)/);
+  assert.match(ops, /\.\.\.operationalCityFilter/);
+  assert.doesNotMatch(ops, /function isBogotaSiberiaName/);
+  assert.match(locationsView, /const branchCities/);
+  assert.match(locationsView, /name: 'Bogotá', operations: mergedBogotaOperations/);
 });
 
 test('urban transport variants are normalized as Publico', () => {
@@ -40,6 +114,7 @@ test('dispatch sync contracts keep operational data derived from candidates upda
 
   assert.match(cityOptions, /normalizeCityKey/);
   assert.match(cityOptions, /dedupeCitiesByNormalizedName/);
+  assert.match(cityOptions, /projectOperationalBranchOptions/);
 
   assert.match(syncMigration, /CREATE TRIGGER trg_sync_dispatch_worker_from_candidate/);
   assert.match(syncMigration, /AFTER UPDATE OF/);

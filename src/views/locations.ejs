@@ -105,9 +105,24 @@
   <% if (successMsg) { %><div class="alert alert-success"><%= successMsg %></div><% } %>
   <% if (errorMsg) { %><div class="alert alert-error"><%= errorMsg %></div><% } %>
 
+  <%
+    const branchKey = (value) => String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const isBogotaBranch = (value) => ['bogota', 'bogota d.c.', 'bogota dc'].includes(branchKey(value));
+    const isBogotaFamily = (value) => isBogotaBranch(value) || branchKey(value) === 'siberia';
+    const bogotaFamily = cities.filter((city) => isBogotaFamily(city?.name));
+    const persistedBogota = bogotaFamily.find((city) => isBogotaBranch(city?.name)) || bogotaFamily[0] || null;
+    const mergedBogotaOperations = [...new Map(
+      bogotaFamily.flatMap((city) => city.operations || []).map((operation) => [operation.id, operation])
+    ).values()].sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'es'));
+    const branchCities = [
+      ...cities.filter((city) => !isBogotaFamily(city?.name)),
+      ...(persistedBogota ? [{ ...persistedBogota, name: 'Bogotá', operations: mergedBogotaOperations }] : [])
+    ].sort((left, right) => String(left.name || '').localeCompare(String(right.name || ''), 'es'));
+  %>
+
   <section class="branch-list">
-    <% if (!cities.length) { %><div class="empty">No hay sucursales registradas.</div><% } %>
-    <% for (const city of cities) { %>
+    <% if (!branchCities.length) { %><div class="empty">No hay sucursales registradas.</div><% } %>
+    <% for (const city of branchCities) { %>
       <% const vacancyCount = city.operations.reduce((total, op) => total + (op.vacancies?.length || 0), 0); %>
       <article class="branch-card">
         <div class="branch-header">
@@ -238,6 +253,7 @@
     </form>
   </section>
 </main>
+
 <script src="/public/lorren-dialog.js"></script>
 <script>
   document.querySelectorAll('[data-toggle-target]').forEach((button) => {
