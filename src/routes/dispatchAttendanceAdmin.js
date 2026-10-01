@@ -419,23 +419,21 @@ export function dispatchAttendanceAdminRouter(prisma) {
   router.get('/filter-options', async (req, res) => {
     applyNoStore(res);
     try {
-      const client = normalizeString(req.query?.client) || 'ALL';
-      if (client === 'ALL') return res.status(200).json({ ok: true, client, cities: [] });
       const board = await loadAttendanceAdminBoard(prisma, {
         from: req.query?.from,
         to: req.query?.to,
         status: 'ALL',
-        client,
+        client: 'ALL',
         q: ''
       });
       return res.status(200).json({
         ok: true,
-        client,
+        client: 'ALL',
         cities: attendanceCitiesForRows(board.rows)
       });
     } catch (error) {
       console.warn('[ATTENDANCE_FILTER_OPTIONS_FAILED]', { code: error?.message });
-      return res.status(500).json({ ok: false, client: normalizeString(req.query?.client) || 'ALL', cities: [] });
+      return res.status(500).json({ ok: false, client: 'ALL', cities: [] });
     }
   });
 
