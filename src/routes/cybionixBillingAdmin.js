@@ -1,5 +1,5 @@
 import express from 'express';
-import { loadCybionixBillingConfig, saveCybionixBillingConfig, cybionixBillingReadiness } from '../services/cybionixBillingConfig.js';
+import { saveCybionixBillingConfig, cybionixBillingReadiness } from '../services/cybionixBillingConfig.js';
 import { getCybionixWhatsappConfig } from '../services/cybionixWhatsappClient.js';
 import { loadCybionixBillingDashboard } from '../services/cybionixBillingWorkflow.js';
 import { buildAccountChargePdfBuffer, buildAttendanceInvoicePdfBuffer } from '../services/cybionixBillingPdf.js';
@@ -46,15 +46,17 @@ function renderPage({ dashboard, channel, readiness, message, error }) {
   <section class="hero"><div><div class="eyebrow">DEV · Cybionix</div><h1>Facturación y cuentas de cobro</h1><p>Configuración financiera independiente de las líneas operativas de LoginPro.</p></div><a class="btn" href="/admin">Volver al panel</a></section>
   ${message ? `<div class="notice ok">${escapeHtml(message)}</div>` : ''}${error ? `<div class="notice bad">${escapeHtml(error)}</div>` : ''}
   <section class="card"><h2>Canal WhatsApp Cybionix</h2><div class="status">${escapeHtml(missingText)}</div><p>La SIM/WABA puede configurarse después. Mientras falten credenciales o plantillas, el worker no enviará facturas ni cuentas de cobro.</p><div class="grid"><div><strong>Phone Number ID</strong><div>${channel.phoneNumberId ? 'Configurado' : 'Pendiente'}</div></div><div><strong>Plantilla aprobación</strong><div>${escapeHtml(channel.approvalTemplateName || 'Pendiente')}</div></div><div><strong>Plantilla cuenta de cobro</strong><div>${escapeHtml(channel.accountTemplateName || 'Pendiente')}</div></div><div><strong>Plantilla alerta DEV</strong><div>${escapeHtml(channel.alertTemplateName || 'Opcional / pendiente')}</div></div></div></section>
-  <form class="card" method="post" action="/admin/cybionix-billing/config"><h2>Configuración mensual</h2><label class="check"><input type="checkbox" name="enabled" value="true" ${config.enabled ? 'checked' : ''}> Habilitar flujo automático cuando el canal esté listo</label><div class="grid"><div><div class="field"><label>Supervisor aprobador</label><input name="supervisorName" value="${escapeHtml(config.supervisor?.name || '')}" placeholder="Nombre"></div><div class="field"><label>WhatsApp supervisor</label><input name="supervisorPhone" value="${escapeHtml(config.supervisor?.phone || '')}" placeholder="3001234567"></div></div><div><div class="field"><label>WhatsApp DEV para alertas</label><input name="devAlertPhone" value="${escapeHtml(config.devAlertPhone || '')}" placeholder="3001234567"></div><div class="field"><label>Encabezado cuenta de cobro</label><input name="accountHeading" value="${escapeHtml(config.accountHeading || '')}" placeholder="Ej. MILTON PEREZ"></div></div></div>
+  <form id="cybionixBillingConfigForm" class="card" method="post" action="/admin/cybionix-billing/config"><h2>Configuración mensual</h2><label class="check"><input type="checkbox" name="enabled" value="true" ${config.enabled ? 'checked' : ''}> Habilitar flujo automático cuando el canal esté listo</label><div class="grid"><div><div class="field"><label>Supervisor aprobador</label><input name="supervisorName" value="${escapeHtml(config.supervisor?.name || '')}" placeholder="Nombre"></div><div class="field"><label>WhatsApp supervisor</label><input name="supervisorPhone" value="${escapeHtml(config.supervisor?.phone || '')}" placeholder="3001234567"></div></div><div><div class="field"><label>WhatsApp DEV para alertas</label><input name="devAlertPhone" value="${escapeHtml(config.devAlertPhone || '')}" placeholder="3001234567"></div><div class="field"><label>Encabezado cuenta de cobro</label><input name="accountHeading" value="${escapeHtml(config.accountHeading || '')}" placeholder="Ej. MILTON PEREZ"></div></div></div>
   <h3>Módulos de valor fijo</h3><p>Asistencia no se agrega aquí: su valor se toma automáticamente de la factura aprobada.</p><div id="modules">${moduleRows}</div><button class="btn add" type="button" id="addModule">+ Agregar módulo</button>
   <h3>Destinatarios de la cuenta de cobro</h3><div id="recipients">${recipientRows}</div><button class="btn add" type="button" id="addRecipient">+ Agregar destinatario</button><div style="margin-top:16px"><button class="btn btn-primary" type="submit">Guardar configuración</button></div></form>
   <section class="card"><h2>Historial y aprobaciones</h2><table><thead><tr><th>Factura</th><th>Periodo</th><th>Aux.</th><th>Asistencia</th><th>Aprobación</th><th>Cuenta de cobro</th><th>PDF</th></tr></thead><tbody>${history}</tbody></table></section>
   </main><script>
-  function bindRemove(root){root.querySelectorAll('.remove').forEach(function(button){button.onclick=function(){var rows=root.querySelectorAll('.row');if(rows.length>1)button.closest('.row').remove();};});}
-  var modules=document.getElementById('modules');var recipients=document.getElementById('recipients');bindRemove(modules);bindRemove(recipients);
-  document.getElementById('addModule').onclick=function(){var i=modules.querySelectorAll('.row').length;modules.insertAdjacentHTML('beforeend','<div class="row module-row"><input name="moduleName" placeholder="Nombre del módulo" required><input name="moduleValue" inputmode="numeric" placeholder="Valor COP" required><label class="check"><input type="checkbox" name="moduleActive" value="'+i+'" checked> Activo</label><button type="button" class="remove">Quitar</button></div>');bindRemove(modules);};
+  function reindexModules(){document.querySelectorAll('#modules .module-row').forEach(function(row,index){var checkbox=row.querySelector('[name="moduleActive"]');if(checkbox)checkbox.value=String(index);});}
+  function bindRemove(root){root.querySelectorAll('.remove').forEach(function(button){button.onclick=function(){var rows=root.querySelectorAll('.row');if(rows.length>1){button.closest('.row').remove();reindexModules();}};});}
+  var modules=document.getElementById('modules');var recipients=document.getElementById('recipients');bindRemove(modules);bindRemove(recipients);reindexModules();
+  document.getElementById('addModule').onclick=function(){var i=modules.querySelectorAll('.row').length;modules.insertAdjacentHTML('beforeend','<div class="row module-row"><input name="moduleName" placeholder="Nombre del módulo" required><input name="moduleValue" inputmode="numeric" placeholder="Valor COP" required><label class="check"><input type="checkbox" name="moduleActive" value="'+i+'" checked> Activo</label><button type="button" class="remove">Quitar</button></div>');bindRemove(modules);reindexModules();};
   document.getElementById('addRecipient').onclick=function(){recipients.insertAdjacentHTML('beforeend','<div class="row recipient-row"><input name="recipientName" placeholder="Nombre de la persona" required><input name="recipientPhone" placeholder="3001234567" required><button type="button" class="remove">Quitar</button></div>');bindRemove(recipients);};
+  document.getElementById('cybionixBillingConfigForm').addEventListener('submit',reindexModules);
   </script></body></html>`;
 }
 
@@ -68,6 +70,12 @@ export function cybionixBillingAdminRouter(prisma) {
     const channel = getCybionixWhatsappConfig();
     const readiness = cybionixBillingReadiness(dashboard.config, channel);
     res.send(renderPage({ dashboard, channel, readiness, message: req.query.message, error: req.query.error }));
+  });
+
+  router.get('/status', async (_req, res) => {
+    const dashboard = await loadCybionixBillingDashboard(prisma);
+    const rejected = dashboard.rows.filter((row) => row.approval.status === 'REJECTED').length;
+    res.json({ ok: true, rejected, pending: dashboard.rows.filter((row) => row.approval.status === 'PENDING').length });
   });
 
   router.post('/config', formParser, async (req, res) => {
