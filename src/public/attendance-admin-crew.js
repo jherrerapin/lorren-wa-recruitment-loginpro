@@ -100,6 +100,9 @@
   function renderCapability(panel, operation, reload) {
     const checkbox = panel.querySelector('[data-crew-operation-allowed]');
     const warning = panel.querySelector('[data-crew-operation-warning]');
+    const attendanceCheckbox = panel.closest('details.attendance-config')
+      ?.querySelector('form.attendance-map-form input[name="attendanceEnabled"]');
+    if (attendanceCheckbox) attendanceCheckbox.checked = operation?.attendanceEnabled === true;
     if (!checkbox || !warning) return;
 
     if (!operation) {
