@@ -52,7 +52,7 @@ jobs:
         uses: openai/codex-action@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          model: gpt-5.1-codex-mini
+          model: codex-mini-latest
           permission-profile: ':workspace'
           prompt: |
             You are implementing one explicitly DEV-approved internal ticket for the Lórren repository.
