@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { lorrenWebhookVerification, getLorrenWhatsappConfig } from '../services/lorrenWhatsappClient.js';
 import { resolveLorrenAttendanceApproval } from '../services/lorrenBillingWorkflow.js';
+import { createLorrenSupportTicketFromWhatsapp } from '../services/lorrenSupportTickets.js';
 
 const DECISION_PATTERN = /^lorren_billing:(approve|reject):(ASIS-\d{6})$/i;
 
@@ -28,6 +29,36 @@ function inboundMessages(body = {}, phoneNumberId) {
   return messages;
 }
 function replyPayload(message = {}) { return message?.interactive?.button_reply?.id || message?.button?.payload || null; }
+function plainText(message = {}) { return message?.type === 'text' && typeof message?.text?.body === 'string' ? message.text.body.trim() : ''; }
+
+async function handleBillingDecision(prisma, message) {
+  const match = DECISION_PATTERN.exec(String(replyPayload(message) || '').trim());
+  if (!match) return false;
+  try {
+    await resolveLorrenAttendanceApproval(prisma, {
+      invoiceNumber: match[2].toUpperCase(),
+      decision: match[1].toLowerCase() === 'approve' ? 'APPROVE' : 'REJECT',
+      supervisorPhone: message.from || null
+    });
+  } catch (error) {
+    console.error('[LORREN_BILLING_WEBHOOK_FAILED]', { invoiceNumber: match[2], code: error?.message || 'unknown' });
+  }
+  return true;
+}
+
+async function handleSilentSupportTicket(prisma, message) {
+  const text = plainText(message);
+  if (!text || !message?.id || !message?.from) return;
+  try {
+    await createLorrenSupportTicketFromWhatsapp(prisma, {
+      messageId: message.id,
+      phone: message.from,
+      text
+    });
+  } catch (error) {
+    console.error('[LORREN_SUPPORT_TICKET_WEBHOOK_FAILED]', { messageId: message?.id || null, code: error?.message || 'unknown' });
+  }
+}
 
 export function lorrenWhatsappWebhookRouter(prisma) {
   const router = express.Router();
@@ -39,13 +70,9 @@ export function lorrenWhatsappWebhookRouter(prisma) {
     if (!payload || !config.phoneNumberId) return res.sendStatus(401);
     res.sendStatus(200);
     for (const message of inboundMessages(payload, config.phoneNumberId)) {
-      const match = DECISION_PATTERN.exec(String(replyPayload(message) || '').trim());
-      if (!match) continue;
-      try {
-        await resolveLorrenAttendanceApproval(prisma, { invoiceNumber: match[2].toUpperCase(), decision: match[1].toLowerCase() === 'approve' ? 'APPROVE' : 'REJECT', supervisorPhone: message.from || null });
-      } catch (error) {
-        console.error('[LORREN_BILLING_WEBHOOK_FAILED]', { invoiceNumber: match[2], code: error?.message || 'unknown' });
-      }
+      const handledBillingDecision = await handleBillingDecision(prisma, message);
+      if (handledBillingDecision) continue;
+      await handleSilentSupportTicket(prisma, message);
     }
     return undefined;
   });
