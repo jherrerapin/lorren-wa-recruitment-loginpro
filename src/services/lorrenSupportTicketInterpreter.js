@@ -62,6 +62,15 @@ function fallbackInterpretation(text, reason = 'manual_review_required') {
   };
 }
 
+async function reportUsage(options, model, usage) {
+  if (typeof options?.onUsage !== 'function' || !usage) return;
+  try {
+    await options.onUsage({ source: 'SUPPORT_TICKET_INTERPRETATION', model, usage });
+  } catch {
+    // La telemetría nunca debe bloquear la creación del ticket.
+  }
+}
+
 export async function interpretLorrenSupportTicket(text, options = {}) {
   const originalText = String(text || '').trim();
   if (!originalText) return fallbackInterpretation('', 'empty_text');
@@ -107,6 +116,7 @@ export async function interpretLorrenSupportTicket(text, options = {}) {
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       timeout: 15000
     });
+    await reportUsage(options, model, response?.data?.usage);
     const parsed = parseOutput(response.data);
     if (!parsed) return fallbackInterpretation(originalText, 'openai_unparsed');
     return { ...parsed, aiStatus: 'interpreted', aiModel: model };
