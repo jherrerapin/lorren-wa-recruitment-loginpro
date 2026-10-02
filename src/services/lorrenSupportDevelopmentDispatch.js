@@ -4,6 +4,8 @@ import axios from 'axios';
 const DEFAULT_REPOSITORY = 'jherrerapin/lorren-wa-recruitment-loginpro';
 const EVENT_TYPE = 'lorren_support_ticket_approved';
 const GITHUB_API = 'https://api.github.com';
+const DISPATCH_ENTITY_TYPE = 'LORREN_SUPPORT_DEVELOPMENT_DISPATCH';
+const DISPATCH_ACTION = 'LORREN_SUPPORT_DEVELOPMENT_DISPATCHED';
 
 function text(value, max = 6000) {
   if (typeof value !== 'string') return null;
@@ -14,6 +16,11 @@ function text(value, max = 6000) {
 function repositoryName(value) {
   const candidate = text(value, 220) || DEFAULT_REPOSITORY;
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(candidate) ? candidate : null;
+}
+
+function stableDispatchId(ticket) {
+  const source = `${ticket?.id || ''}:${ticket?.developmentRequestedAt || ''}`;
+  return crypto.createHash('sha256').update(source).digest('hex').slice(0, 24);
 }
 
 export function getLorrenSupportDevelopmentConfig(env = process.env) {
@@ -47,16 +54,55 @@ function interpretationPayload(value) {
   };
 }
 
-export async function dispatchLorrenSupportDevelopment(ticket, options = {}) {
+export async function loadLorrenSupportDevelopmentDispatch(prisma, ticketId) {
+  if (!ticketId || !prisma?.devAuditEvent?.findFirst) return null;
+  const row = await prisma.devAuditEvent.findFirst({
+    where: { entityType: DISPATCH_ENTITY_TYPE, entityId: ticketId, action: DISPATCH_ACTION },
+    orderBy: { createdAt: 'desc' }
+  });
+  const metadata = row?.metadata && typeof row.metadata === 'object' ? row.metadata : null;
+  return metadata ? { ...metadata, auditEventId: row.id, auditCreatedAt: row.createdAt } : null;
+}
+
+async function persistDispatch(prisma, ticket, result, actor = {}) {
+  if (!prisma?.devAuditEvent?.create) return;
+  const dispatchedAt = new Date().toISOString();
+  const metadata = {
+    ticketId: ticket.id,
+    publicCode: ticket.publicCode,
+    dispatchId: result.dispatchId,
+    repository: result.repository,
+    dispatchedAt
+  };
+  await prisma.devAuditEvent.create({
+    data: {
+      entityType: DISPATCH_ENTITY_TYPE,
+      entityId: ticket.id,
+      entityLabel: ticket.publicCode,
+      action: DISPATCH_ACTION,
+      actorUserId: text(actor.actorUserId, 160),
+      actorUsername: text(actor.actorUsername, 160),
+      actorRole: text(actor.actorRole, 80),
+      actorSource: text(actor.actorSource, 120) || 'lorren-support-development-dispatch',
+      metadata
+    }
+  });
+  return metadata;
+}
+
+export async function dispatchLorrenSupportDevelopment(prisma, ticket, options = {}) {
   if (!ticket?.id || !ticket?.publicCode || !ticket?.originalText) {
     throw new Error('lorren_support_development_ticket_invalid');
   }
-  if (ticket.developmentDispatchId) {
+
+  const existing = await loadLorrenSupportDevelopmentDispatch(prisma, ticket.id);
+  if (existing) {
     return {
       ok: true,
       duplicate: true,
-      dispatchId: ticket.developmentDispatchId,
-      repository: ticket.developmentRepository || null
+      dispatchId: existing.dispatchId,
+      repository: existing.repository,
+      dispatchedAt: existing.dispatchedAt
     };
   }
 
@@ -65,7 +111,7 @@ export async function dispatchLorrenSupportDevelopment(ticket, options = {}) {
   const readiness = lorrenSupportDevelopmentReadiness(env);
   if (!readiness.ready) return { ok: false, reason: 'not_configured', missing: readiness.missing };
 
-  const dispatchId = crypto.randomUUID();
+  const dispatchId = stableDispatchId(ticket);
   const axiosClient = options.axiosClient || axios;
   const payload = {
     event_type: config.eventType,
@@ -94,5 +140,12 @@ export async function dispatchLorrenSupportDevelopment(ticket, options = {}) {
     maxBodyLength: 256 * 1024
   });
 
-  return { ok: true, duplicate: false, dispatchId, repository: config.repository };
+  const metadata = await persistDispatch(prisma, ticket, { dispatchId, repository: config.repository }, options.actor || {});
+  return {
+    ok: true,
+    duplicate: false,
+    dispatchId,
+    repository: config.repository,
+    dispatchedAt: metadata?.dispatchedAt || null
+  };
 }
