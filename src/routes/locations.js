@@ -264,6 +264,17 @@ function isBogotaName(value) {
   return ['bogota', 'bogota d.c.', 'bogota dc'].includes(normalizeKey(value));
 }
 
+function isBogotaFamilyName(value) {
+  return isBogotaName(value) || isSiberiaName(value);
+}
+
+function sameBranchName(left, right) {
+  const leftKey = normalizeKey(left);
+  const rightKey = normalizeKey(right);
+  if (leftKey === rightKey) return true;
+  return isBogotaFamilyName(left) && isBogotaFamilyName(right);
+}
+
 function normalizeMany(value) {
   const values = Array.isArray(value) ? value : [value];
   return [...new Set(values.map(normalize).filter(Boolean))];
@@ -317,6 +328,47 @@ function parseScopeMetadata(value) {
     }
   }
   return { cities: [raw], vacancyIds: [] };
+}
+
+function requestBranchScope(req = {}) {
+  if (req.userRole === 'dev') return { accessScope: 'ALL', cities: [], vacancyIds: [] };
+  const inherited = supervisorInheritedScope(req);
+  const metadata = parseScopeMetadata(inherited.scopeCity);
+  return {
+    accessScope: inherited.accessScope,
+    cities: inherited.accessScope === 'ALL' ? [] : metadata.cities,
+    vacancyIds: normalizeMany([...(metadata.vacancyIds || []), inherited.scopeVacancyId])
+  };
+}
+
+function branchScopeAllowsCity(scope, cityName) {
+  if (scope.accessScope === 'ALL') return true;
+  return scope.cities.some((allowedCity) => sameBranchName(allowedCity, cityName));
+}
+
+function branchScopeCanCreateCity(scope) {
+  return scope.accessScope === 'ALL';
+}
+
+function branchScopeCanManageOperation(scope, cityName) {
+  return scope.accessScope !== 'VACANCY' && branchScopeAllowsCity(scope, cityName);
+}
+
+function filterCitiesForBranchScope(cities = [], scope = { accessScope: 'ALL', cities: [], vacancyIds: [] }) {
+  const visibleVacancyIds = new Set(scope.vacancyIds || []);
+  return cities
+    .filter((city) => branchScopeAllowsCity(scope, city?.name))
+    .map((city) => {
+      if (scope.accessScope !== 'VACANCY') return city;
+      const operations = (city.operations || [])
+        .map((operation) => ({
+          ...operation,
+          vacancies: (operation.vacancies || []).filter((vacancy) => visibleVacancyIds.has(vacancy.id))
+        }))
+        .filter((operation) => operation.vacancies.length > 0);
+      return { ...city, operations };
+    })
+    .filter((city) => scope.accessScope !== 'VACANCY' || city.operations.length > 0);
 }
 
 function territorialScopeForUser(user = {}) {
@@ -498,7 +550,7 @@ export function locationsRouter(prisma) {
   router.use(sessionAuth);
 
   router.get('/', async (req, res) => {
-    const cities = await prisma.city.findMany({
+    const allCities = await prisma.city.findMany({
       orderBy: [{ name: 'asc' }],
       include: {
         operations: {
@@ -518,12 +570,17 @@ export function locationsRouter(prisma) {
         }
       }
     });
+    const branchScope = requestBranchScope(req);
+    const cities = filterCitiesForBranchScope(allCities, branchScope);
     const { successMsg, errorMsg } = readFlash(req, res);
     res.render('locations', {
       cities,
       successMsg,
       errorMsg,
       role: req.userRole,
+      accessScope: branchScope.accessScope,
+      canCreateBranch: branchScopeCanCreateCity(branchScope),
+      canManageBranchStructure: branchScope.accessScope !== 'VACANCY',
       canAccessDispatch: Boolean(req.session?.canAccessDispatch)
     });
   });
@@ -649,19 +706,34 @@ export function locationsRouter(prisma) {
 
   router.get('/api/cities', async (req, res) => {
     if (!canManageRecruiterUsers(req)) return res.status(403).json({ error: 'forbidden' });
+    const branchScope = requestBranchScope(req);
     const cities = await loadUnifiedCityOptions(prisma);
-    res.json(cities.map((city) => ({ id: city.id, name: city.name })));
+    res.json(cities
+      .filter((city) => branchScopeAllowsCity(branchScope, city.name))
+      .map((city) => ({ id: city.id, name: city.name })));
   });
 
-  router.get('/api/operations', async (_req, res) => {
+  router.get('/api/operations', async (req, res) => {
+    const branchScope = requestBranchScope(req);
     const operations = await prisma.operation.findMany({
       orderBy: [{ city: { name: 'asc' } }, { name: 'asc' }],
-      include: { city: { select: { name: true } } }
+      include: {
+        city: { select: { name: true } },
+        vacancies: { select: { id: true } }
+      }
     });
-    res.json(operations);
+    const visibleVacancyIds = new Set(branchScope.vacancyIds || []);
+    res.json(operations
+      .filter((operation) => branchScopeAllowsCity(branchScope, operation.city?.name))
+      .filter((operation) => branchScope.accessScope !== 'VACANCY' || operation.vacancies.some((vacancy) => visibleVacancyIds.has(vacancy.id)))
+      .map(({ vacancies: _vacancies, ...operation }) => operation));
   });
 
   router.post('/cities', async (req, res) => {
+    const branchScope = requestBranchScope(req);
+    if (!branchScopeCanCreateCity(branchScope)) {
+      return operationError(req, res, 403, 'Tu alcance no permite crear nuevas sucursales.');
+    }
     const name = normalize(req.body.name);
     if (!name) {
       flash(res, 'error', 'El nombre de la sucursal no puede estar vacío.');
@@ -682,6 +754,10 @@ export function locationsRouter(prisma) {
   });
 
   router.post('/cities/:id/edit', async (req, res) => {
+    const branchScope = requestBranchScope(req);
+    if (!branchScopeCanCreateCity(branchScope)) {
+      return operationError(req, res, 403, 'Tu alcance no permite modificar la estructura de sucursales.');
+    }
     const name = normalize(req.body.name);
     if (!name) {
       flash(res, 'error', 'El nombre no puede estar vacío.');
@@ -716,6 +792,10 @@ export function locationsRouter(prisma) {
   });
 
   router.post('/cities/:id/delete', async (req, res) => {
+    const branchScope = requestBranchScope(req);
+    if (!branchScopeCanCreateCity(branchScope)) {
+      return operationError(req, res, 403, 'Tu alcance no permite eliminar sucursales.');
+    }
     try {
       const city = await prisma.city.findUnique({
         where: { id: req.params.id },
@@ -741,6 +821,10 @@ export function locationsRouter(prisma) {
     const name = normalize(req.body.name);
     const city = await prisma.city.findUnique({ where: { id: req.params.cityId }, select: { id: true, name: true } });
     if (!city) return operationError(req, res, 404, 'Sucursal no encontrada.');
+    const branchScope = requestBranchScope(req);
+    if (!branchScopeCanManageOperation(branchScope, city.name)) {
+      return operationError(req, res, 403, 'No tienes acceso para crear vacantes en esta sucursal.');
+    }
     if (!name) return operationError(req, res, 400, 'El nombre de la vacante no puede estar vacío.');
     if (isSiberiaName(name) && !isBogotaName(city.name)) return operationError(req, res, 400, 'La vacante Siberia solo puede pertenecer a la sucursal Bogotá.');
 
@@ -771,6 +855,10 @@ export function locationsRouter(prisma) {
       flash(res, 'error', 'Vacante no encontrada.');
       return res.redirect('/admin/locations');
     }
+    const branchScope = requestBranchScope(req);
+    if (!branchScopeCanManageOperation(branchScope, operation.city?.name)) {
+      return operationError(req, res, 403, 'No tienes acceso para modificar vacantes de esta sucursal.');
+    }
     if (isSiberiaName(name) && !isBogotaName(operation.city?.name)) {
       flash(res, 'error', 'La vacante Siberia solo puede pertenecer a la sucursal Bogotá.');
       return res.redirect('/admin/locations');
@@ -789,11 +877,18 @@ export function locationsRouter(prisma) {
     try {
       const operation = await prisma.operation.findUnique({
         where: { id: req.params.id },
-        include: { _count: { select: { vacancies: true } } }
+        include: {
+          city: { select: { name: true } },
+          _count: { select: { vacancies: true } }
+        }
       });
       if (!operation) {
         flash(res, 'error', 'Vacante no encontrada.');
         return res.redirect('/admin/locations');
+      }
+      const branchScope = requestBranchScope(req);
+      if (!branchScopeCanManageOperation(branchScope, operation.city?.name)) {
+        return operationError(req, res, 403, 'No tienes acceso para eliminar vacantes de esta sucursal.');
       }
       if (operation._count.vacancies > 0) {
         flash(res, 'error', `No se puede eliminar la vacante "${operation.name}" porque ya tiene configuración de reclutamiento asociada.`);
