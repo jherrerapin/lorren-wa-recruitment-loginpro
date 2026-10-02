@@ -53,6 +53,7 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: gpt-5.4-mini
+          codex-home: ${{ runner.temp }}/lorren-ticket-codex
           permission-profile: ':workspace'
           prompt: |
             You are implementing one explicitly DEV-approved internal ticket for the Lórren repository.
