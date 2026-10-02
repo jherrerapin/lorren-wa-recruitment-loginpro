@@ -207,7 +207,8 @@
     return {
       dispatch: Boolean(form.querySelector('input[name="canAccessDispatch"]')?.checked),
       attendance: Boolean(form.querySelector('input[name="canAccessAttendance"]')?.checked),
-      time: false
+      time: false,
+      tickets: false
     };
   }
 
@@ -221,12 +222,13 @@
     return {
       dispatch: value.dispatch === true || attendance,
       attendance,
-      time: value.time === true
+      time: value.time === true,
+      tickets: value.tickets === true
     };
   }
 
   function readModuleAccess(shell) {
-    const result = { dispatch: false, attendance: false, time: false };
+    const result = { dispatch: false, attendance: false, time: false, tickets: false };
     shell.capabilityHost.querySelectorAll('input[data-operational-module-access]').forEach((input) => {
       const key = input.dataset.operationalModuleAccess;
       if (key) result[key] = input.checked;
@@ -276,13 +278,16 @@
       const parent = document.createElement('input');
       parent.type = 'checkbox';
       parent.dataset.operationalModuleAccess = root.moduleAccessKey;
-      parent.checked = roots[root.moduleAccessKey] === true;
+      const hasPersistedRoot = Object.prototype.hasOwnProperty.call(moduleAccess || {}, root.moduleAccessKey);
+      parent.checked = hasPersistedRoot ? roots[root.moduleAccessKey] === true : effective.has(root.key);
       parent.disabled = !role;
       const parentText = document.createElement('span');
       const parentTitle = document.createElement('strong');
       parentTitle.textContent = `Permitir acceso a ${root.moduleLabel || moduleName}`;
       const parentHint = document.createElement('small');
-      parentHint.textContent = 'Al habilitar este módulo se muestran las funciones internas que puedes asignar.';
+      parentHint.textContent = root.moduleAccessKey === 'tickets'
+        ? 'Permite abrir el módulo y crear tickets internos. La eliminación permanece reservada a DEV.'
+        : 'Al habilitar este módulo se muestran las funciones internas que puedes asignar.';
       parentText.append(parentTitle, parentHint);
       parentLabel.append(parent, parentText);
       group.append(parentLabel);
