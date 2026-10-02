@@ -31,7 +31,9 @@ function operationalRole(req) { return String(req.session?.operationalRole || re
 function isDev(req) { return role(req) === 'dev'; }
 function isSupervisor(req) { return role(req) === 'admin' && operationalRole(req) === 'SUPERVISOR'; }
 function requireAccess(req, res, next) {
-  if (!isDev(req) && !isSupervisor(req)) return res.status(403).send('No tienes acceso a tickets internos.');
+  if (!isDev(req) && !isSupervisor(req) && !req.session?.canAccessSupportTickets) {
+    return res.status(403).send('No tienes acceso a tickets internos.');
+  }
   return next();
 }
 function requireDev(req, res, next) {

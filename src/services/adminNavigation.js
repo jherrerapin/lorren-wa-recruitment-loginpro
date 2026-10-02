@@ -80,6 +80,7 @@ function moduleAccess(req = {}) {
     users: accountUserManager || operationalUserManager,
     usersPath: accountUserManager ? USERS_PATH : SUPERVISOR_USERS_PATH,
     dispatchView,
+    supportTickets: isDev || requestCapability(req, 'canAccessSupportTickets'),
     clientsAccess: dispatchView
       || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE)
       || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE),
@@ -105,6 +106,7 @@ function recruitmentMenuItems(access) {
     menuLink(RECRUITMENT_PATH, 'Panel de candidatos'),
     menuLink(INTERVIEW_MANAGEMENT_PATH, 'Gestión de entrevistas')
   ];
+  if (access.supportTickets) items.push(menuLink('/admin/lorren-tickets', 'Tickets internos'));
   if (access.statistics) items.push(menuLink('/admin/estadisticas', 'Estadísticas'));
   if (access.isDev) {
     items.push(menuLink('/admin/monitor', 'Monitor bot'));
