@@ -25,6 +25,7 @@ import { dispatchMultiShiftRequestsRouter } from './routes/dispatchMultiShiftReq
 import { lorenV2Router } from './routes/lorenV2.js';
 import { lorenV2CvAnalysisRouter } from './routes/lorenV2CvAnalysis.js';
 import { lorrenBillingAdminRouter } from './routes/lorrenBillingAdmin.js';
+import { lorrenSupportTicketsAdminRouter } from './routes/lorrenSupportTicketsAdmin.js';
 import { lorrenWhatsappWebhookRouter } from './routes/lorrenWhatsappWebhook.js';
 import { adminHtmlBridgeMiddleware, dispatchAuditMiddleware } from './services/dispatchAuditMiddleware.js';
 import { attendanceBillingMutationGuard } from './modules/dispatch-attendance/application/attendanceBillingEligibility.js';
@@ -359,17 +360,25 @@ function injectLorenV2NavbarLink(html, req) {
   );
 }
 
-function injectLorrenBillingNavbarLink(html, req) {
+function injectLorrenAdminNavbarLinks(html, req) {
   if (typeof html !== 'string') return html;
-  if ((req.session?.userRole || req.userRole) !== 'dev') return html;
-  if (html.includes('href="/admin/lorren-billing"')) return html;
-  const styledLink = '<a class="admin-module-standalone-link" href="/admin/lorren-billing" data-standalone-link="lorren-billing"><span>Facturación Lórren</span></a>';
+  const currentRole = req.session?.userRole || req.userRole;
+  const currentOperationalRole = String(req.session?.operationalRole || req.operationalRole || '').toUpperCase();
+  const links = [];
+  if (currentRole === 'dev' && !html.includes('href="/admin/lorren-billing"')) {
+    links.push('<a class="admin-module-standalone-link" href="/admin/lorren-billing" data-standalone-link="lorren-billing"><span>Facturación Lórren</span></a>');
+  }
+  if ((currentRole === 'dev' || currentOperationalRole === 'SUPERVISOR') && !html.includes('href="/admin/lorren-tickets"')) {
+    links.push('<a class="admin-module-standalone-link" href="/admin/lorren-tickets" data-standalone-link="lorren-tickets"><span>Tickets</span></a>');
+  }
+  if (!links.length) return html;
+  const styledLinks = links.join('\n      ');
   const moduleNavMarker = '</div>\n    <span class="spacer"></span>';
   if (html.includes('data-primary-nav-group="true"') && html.includes(moduleNavMarker)) {
-    return html.replace(moduleNavMarker, `      ${styledLink}\n    </div>\n    <span class="spacer"></span>`);
+    return html.replace(moduleNavMarker, `      ${styledLinks}\n    </div>\n    <span class="spacer"></span>`);
   }
   if (!html.includes('<span class="spacer"></span>')) return html;
-  return html.replace('<span class="spacer"></span>', `  ${styledLink}\n  <span class="spacer"></span>`);
+  return html.replace('<span class="spacer"></span>', `  ${styledLinks}\n  <span class="spacer"></span>`);
 }
 
 function mapDbRoleToSessionRole(role) {
@@ -416,7 +425,7 @@ app.use((req, res, next) => {
     let output = body;
     if (shouldReplaceLorenV2UiLabel(output, res)) {
       output = replaceLorenV2UiLabel(output);
-      output = injectLorrenBillingNavbarLink(output, req);
+      output = injectLorrenAdminNavbarLinks(output, req);
     }
     return originalSend(output);
   };
@@ -434,7 +443,8 @@ app.use((req, res, next) => {
       const htmlWithDispatchScripts = shouldInjectDispatchScripts
         ? html.replace('</body>', '<script src="/public/assignment-confirm-dialog.js"></script><script src="/public/assignment-template-sync.js"></script></body>')
         : html;
-      const output = injectLorenV2NavbarLink(htmlWithDispatchScripts, req);
+      let output = injectLorenV2NavbarLink(htmlWithDispatchScripts, req);
+      output = injectLorrenAdminNavbarLinks(output, req);
       if (typeof callback === 'function') return callback(null, output);
       return res.send(output);
     });
@@ -721,6 +731,7 @@ app.use('/admin', (req, res, next) => {
   return next();
 });
 app.use('/admin/lorren-billing', wrapAsyncRouter(lorrenBillingAdminRouter(prisma)));
+app.use('/admin/lorren-tickets', wrapAsyncRouter(lorrenSupportTicketsAdminRouter(prisma)));
 app.use('/admin', wrapAsyncRouter(adminCandidateGlobalExportRouter(prisma)));
 app.use('/admin', wrapAsyncRouter(interviewOutreachManagementRouter(prisma)));
 app.use('/admin', adminRouter(prisma));
