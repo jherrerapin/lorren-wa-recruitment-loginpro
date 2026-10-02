@@ -48,11 +48,15 @@ function ticket() {
   };
 }
 
-test('readiness exige token pero conserva repositorio canónico por defecto', () => {
+test('readiness exige token y origen de callback pero conserva repositorio canónico por defecto', () => {
   const readiness = lorrenSupportDevelopmentReadiness({});
   assert.equal(readiness.ready, false);
-  assert.deepEqual(readiness.missing, ['LORREN_SUPPORT_GITHUB_TOKEN']);
+  assert.deepEqual(readiness.missing, [
+    'LORREN_SUPPORT_GITHUB_TOKEN',
+    'LORREN_PUBLIC_ORIGIN/RAILWAY_PUBLIC_DOMAIN'
+  ]);
   assert.equal(readiness.repository, 'jherrerapin/lorren-wa-recruitment-loginpro');
+  assert.equal(readiness.usageCallbackUrl, null);
 });
 
 test('sin configuración aprueba sin fingir que hubo dispatch', async () => {
@@ -133,6 +137,7 @@ test('workflow usa Codex aislado, reporta uso firmado y solo abre PR draft', () 
   assert.match(workflow, /Report Codex token usage/);
   assert.match(workflow, /total_token_usage/);
   assert.match(workflow, /x-lorren-usage-signature/);
+  assert.match(workflow, /AbortSignal\.timeout\(10000\)/);
   assert.match(workflow, /gh pr create/);
   assert.match(workflow, /--draft/);
   assert.match(workflow, /Protected path modified by automated ticket/);
