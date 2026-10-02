@@ -115,7 +115,7 @@ test('panel DEV conecta aprobación con dispatch sin confirm nativo ni outbound 
   assert.doesNotMatch(route, /send.*Whatsapp/i);
 });
 
-test('workflow usa Codex aislado y solo abre PR draft, sin merge ni deploy', () => {
+test('workflow usa Codex aislado y solo abre PR draft, sin merge ni comando de despliegue', () => {
   const workflow = fs.readFileSync(new URL('../.github/workflows/lorren-support-ticket-development.yml', import.meta.url), 'utf8');
   assert.match(workflow, /repository_dispatch:/);
   assert.match(workflow, /lorren_support_ticket_approved/);
@@ -125,6 +125,6 @@ test('workflow usa Codex aislado y solo abre PR draft, sin merge ni deploy', () 
   assert.match(workflow, /--draft/);
   assert.match(workflow, /Protected path modified by automated ticket/);
   assert.doesNotMatch(workflow, /gh pr merge/);
-  assert.doesNotMatch(workflow, /railway\s+up/i);
-  assert.doesNotMatch(workflow, /deploy\s+/i);
+  assert.doesNotMatch(workflow, /railway\s+(up|deploy)/i);
+  assert.doesNotMatch(workflow, /kubectl\s+(apply|rollout)/i);
 });
