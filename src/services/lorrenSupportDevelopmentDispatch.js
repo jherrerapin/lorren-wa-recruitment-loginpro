@@ -52,7 +52,14 @@ export function lorrenSupportDevelopmentReadiness(env = process.env) {
   const missing = [];
   if (!config.token) missing.push('LORREN_SUPPORT_GITHUB_TOKEN');
   if (!config.repository) missing.push('LORREN_SUPPORT_GITHUB_REPOSITORY');
-  return { ready: missing.length === 0, missing, repository: config.repository, eventType: config.eventType };
+  if (!config.usageCallbackUrl) missing.push('LORREN_PUBLIC_ORIGIN/RAILWAY_PUBLIC_DOMAIN');
+  return {
+    ready: missing.length === 0,
+    missing,
+    repository: config.repository,
+    eventType: config.eventType,
+    usageCallbackUrl: config.usageCallbackUrl
+  };
 }
 
 function interpretationPayload(value) {
