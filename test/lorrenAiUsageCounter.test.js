@@ -2,23 +2,15 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   loadLorrenAiUsageSummary,
+  persistLorrenBotUsage,
   recordLorrenTicketDevelopmentUsage,
   signLorrenTicketDevelopmentUsage
 } from '../src/services/lorrenAiUsageCounter.js';
 
 function fakePrisma() {
   const auditEvents = [];
-  return {
+  const client = {
     auditEvents,
-    message: {
-      async findMany() {
-        return [
-          { rawPayload: { debugTrace: { openai_input_tokens: 120, openai_output_tokens: 30, openai_total_tokens: 150 } } },
-          { rawPayload: { debugTrace: { model_usage: { input_tokens: 70, output_tokens: 20, total_tokens: 90 } } } },
-          { rawPayload: { source: 'manual' } }
-        ];
-      }
-    },
     cvAnalysisUsage: {
       async findMany() {
         return [
@@ -27,8 +19,8 @@ function fakePrisma() {
       }
     },
     devAuditEvent: {
-      async findMany() {
-        return auditEvents.filter((row) => row.entityType === 'LORREN_AI_USAGE' && row.action === 'TICKET_DEVELOPMENT_USAGE');
+      async findMany({ where }) {
+        return auditEvents.filter((row) => row.entityType === where.entityType && row.action === where.action);
       },
       async findFirst({ where }) {
         return auditEvents.find((row) => row.entityType === where.entityType && row.entityId === where.entityId && row.action === where.action) || null;
@@ -40,10 +32,22 @@ function fakePrisma() {
       }
     }
   };
+  client.$transaction = async (callback) => callback(client);
+  return client;
 }
 
-test('consolida BOT, CV y desarrollo de tickets sin estimar contenido', async () => {
+test('consolida BOT, CV y desarrollo de tickets usando telemetría provider-reported', async () => {
   const prisma = fakePrisma();
+  await persistLorrenBotUsage(prisma, {
+    source: 'CANDIDATE_EXTRACTION',
+    model: 'gpt-5.6-terra',
+    usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 }
+  });
+  await persistLorrenBotUsage(prisma, {
+    source: 'CONVERSATION_REPLY',
+    model: 'gpt-4o-mini',
+    usage: { input_tokens: 70, output_tokens: 20, total_tokens: 90 }
+  });
   prisma.auditEvents.push({
     entityType: 'LORREN_AI_USAGE',
     entityId: 'dispatch-1',
@@ -88,10 +92,9 @@ test('callback firmado persiste uso de Codex una sola vez y no guarda contenido 
     reasoning_tokens: 20,
     total_tokens: 1000
   };
-  const rawBody = Buffer.from(JSON.stringify(payload));
-  const signature = `sha256=${signLorrenTicketDevelopmentUsage(rawBody, env.LORREN_SUPPORT_GITHUB_TOKEN)}`;
+  const signature = `sha256=${signLorrenTicketDevelopmentUsage(payload, env.LORREN_SUPPORT_GITHUB_TOKEN)}`;
 
-  const first = await recordLorrenTicketDevelopmentUsage(prisma, { rawBody, signature, payload, env });
+  const first = await recordLorrenTicketDevelopmentUsage(prisma, { signature, payload, env });
   assert.equal(first.ok, true);
   assert.equal(first.duplicate, false);
   assert.equal(prisma.auditEvents.length, 1);
@@ -107,7 +110,7 @@ test('callback firmado persiste uso de Codex una sola vez y no guarda contenido 
     totalTokens: 1000
   });
 
-  const second = await recordLorrenTicketDevelopmentUsage(prisma, { rawBody, signature, payload, env });
+  const second = await recordLorrenTicketDevelopmentUsage(prisma, { signature, payload, env });
   assert.equal(second.duplicate, true);
   assert.equal(prisma.auditEvents.length, 1);
 });
@@ -115,10 +118,8 @@ test('callback firmado persiste uso de Codex una sola vez y no guarda contenido 
 test('rechaza callbacks sin firma válida', async () => {
   const prisma = fakePrisma();
   const payload = { dispatch_id: 'abc123', public_code: 'TCK-TEST0003', total_tokens: 100 };
-  const rawBody = Buffer.from(JSON.stringify(payload));
   await assert.rejects(
     recordLorrenTicketDevelopmentUsage(prisma, {
-      rawBody,
       signature: 'sha256=' + '0'.repeat(64),
       payload,
       env: { LORREN_SUPPORT_GITHUB_TOKEN: 'token-correcto' }
