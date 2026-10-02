@@ -18,16 +18,32 @@ function repositoryName(value) {
   return /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(candidate) ? candidate : null;
 }
 
+function publicOrigin(env = process.env) {
+  const explicit = text(env.LORREN_PUBLIC_ORIGIN, 500);
+  const railwayDomain = text(env.RAILWAY_PUBLIC_DOMAIN, 300);
+  const candidate = explicit || (railwayDomain ? `https://${railwayDomain}` : null);
+  if (!candidate) return null;
+  try {
+    const parsed = new URL(candidate);
+    if (parsed.protocol !== 'https:') return null;
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
 function stableDispatchId(ticket) {
   const source = `${ticket?.id || ''}:${ticket?.developmentRequestedAt || ''}`;
   return crypto.createHash('sha256').update(source).digest('hex').slice(0, 24);
 }
 
 export function getLorrenSupportDevelopmentConfig(env = process.env) {
+  const origin = publicOrigin(env);
   return {
     token: text(env.LORREN_SUPPORT_GITHUB_TOKEN, 1000),
     repository: repositoryName(env.LORREN_SUPPORT_GITHUB_REPOSITORY),
-    eventType: EVENT_TYPE
+    eventType: EVENT_TYPE,
+    usageCallbackUrl: origin ? `${origin}/admin/lorren-tickets/internal/development-usage` : null
   };
 }
 
@@ -124,7 +140,8 @@ export async function dispatchLorrenSupportDevelopment(prisma, ticket, options =
       original_text: String(ticket.originalText).slice(0, 6000),
       interpretation: interpretationPayload(ticket.interpretation),
       approved_at: text(ticket.developmentRequestedAt, 80),
-      approved_by: text(ticket.developmentRequestedBy, 160)
+      approved_by: text(ticket.developmentRequestedBy, 160),
+      usage_callback_url: config.usageCallbackUrl
     }
   };
 
