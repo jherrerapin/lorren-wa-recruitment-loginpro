@@ -34,6 +34,7 @@ export const OPERATIONAL_CAPABILITY = Object.freeze({
   TIME_COMPENSATION: 'TIME_COMPENSATION',
   TIME_IMPORT: 'TIME_IMPORT',
   TIME_IMPORT_REVERSE: 'TIME_IMPORT_REVERSE',
+  SUPPORT_TICKETS_ACCESS: 'SUPPORT_TICKETS_ACCESS',
   SUPERVISE_PERMISSIONS: 'SUPERVISE_PERMISSIONS'
 });
 
@@ -58,6 +59,7 @@ export const OPERATIONAL_CAPABILITY_DEFINITIONS = Object.freeze([
   { key: OPERATIONAL_CAPABILITY.TIME_COMPENSATION, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Gestionar compensatorios' },
   { key: OPERATIONAL_CAPABILITY.TIME_IMPORT, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Importar y aplicar datos de asistencia' },
   { key: OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Reversar importaciones', sensitive: true },
+  { key: OPERATIONAL_CAPABILITY.SUPPORT_TICKETS_ACCESS, module: 'Tickets', label: 'Acceder al módulo y crear tickets' },
   { key: OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS, module: 'Supervisión', label: 'Administrar módulos y funciones de otros usuarios', supervisorOnly: true }
 ]);
 
@@ -370,7 +372,9 @@ export function hasOperationalCapability(source = {}, capability) {
   const normalizedCapability = normalizeString(capability, 80)?.toUpperCase();
   if (!normalizedCapability || !CAPABILITY_SET.has(normalizedCapability)) return false;
   const configured = sourceValue(source, 'operationalAccessConfigured') ?? sourceValue(source, 'configured');
-  if (configured !== true) return true;
+  if (configured !== true) {
+    return normalizedCapability === OPERATIONAL_CAPABILITY.SUPPORT_TICKETS_ACCESS ? false : true;
+  }
   const permissions = sourceValue(source, 'operationalEffectivePermissions') || sourceValue(source, 'effectivePermissions') || [];
   return normalizeCapabilities(permissions).includes(normalizedCapability);
 }
