@@ -37,9 +37,9 @@ import { createAdminLogoutHandler, createAdminSessionMiddleware } from './servic
 import {
   assessWorkerFacePresence,
   assertWorkerFacePresenceAttemptAllowed,
-  issueWorkerFacePresenceChallenge,
-  workerFacePresenceStatus
+  issueWorkerFacePresenceChallenge
 } from './services/workerFacePresenceService.js';
+import { getWorkerBiometricEnrollment } from './services/workerBiometricService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -453,7 +453,7 @@ app.use((req, res, next) => {
 });
 app.use(morgan('combined'));
 const workerPortalFacePresenceOptions = {
-  getEnrollmentFn: async () => workerFacePresenceStatus(),
+  getEnrollmentFn: (workerId) => getWorkerBiometricEnrollment(prisma, workerId),
   assessBiometricFn: (input, assessmentOptions) => assessWorkerFacePresence(prisma, input, assessmentOptions),
   issueChallengeFn: issueWorkerFacePresenceChallenge,
   assertAttemptAllowedFn: assertWorkerFacePresenceAttemptAllowed

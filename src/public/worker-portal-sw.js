@@ -2,11 +2,12 @@
 
 const PORTAL_PATH = '/operaciones/portal';
 const PORTAL_CACHE_KEY = '/operaciones/portal';
-const CACHE_NAME = 'lorren-worker-portal-shell-v17';
+const CACHE_NAME = 'lorren-worker-portal-shell-v18';
 const NETWORK_FIRST_ASSETS = new Set([
   '/public/worker-biometric.js',
   '/public/worker-biometric-core.js',
   '/public/worker-biometric-mobile.js',
+  '/public/worker-biometric-presence-ux.js',
   '/public/worker-portal-biometric-flow.js',
   '/public/worker-portal-offline.js',
   '/public/worker-portal-offline-controller.js',
@@ -18,6 +19,7 @@ const STATIC_ASSETS = [
   '/public/worker-biometric.js',
   '/public/worker-biometric-core.js',
   '/public/worker-biometric-mobile.js',
+  '/public/worker-biometric-presence-ux.js',
   '/public/worker-portal-biometric-flow.js',
   '/public/worker-portal-offline.js',
   '/public/worker-portal-offline-controller.js',
