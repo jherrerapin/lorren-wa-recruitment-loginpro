@@ -7,6 +7,8 @@ const tickets = fs.readFileSync('src/services/lorrenSupportTickets.js', 'utf8');
 const admin = fs.readFileSync('src/routes/lorrenSupportTicketsAdmin.js', 'utf8');
 const server = fs.readFileSync('src/server.js', 'utf8');
 const whatsappClient = fs.readFileSync('src/services/lorrenWhatsappClient.js', 'utf8');
+const developmentDispatch = fs.readFileSync('src/services/lorrenSupportDevelopmentDispatch.js', 'utf8');
+const developmentWorkflow = fs.readFileSync('.github/workflows/lorren-support-ticket-development.yml', 'utf8');
 
 test('los tickets de WhatsApp son silenciosos y no invocan autoridades outbound', () => {
   assert.match(webhook, /createLorrenSupportTicketFromWhatsapp/);
@@ -54,9 +56,12 @@ test('DEV administra estados, prioridades, teléfonos y creación manual', () =>
 });
 
 test('aprobar desarrollo no implica merge ni deploy automático', () => {
-  assert.match(admin, /No se hizo merge ni deploy automático/);
-  assert.doesNotMatch(tickets, /git(hub)?\.com\/.*merge/i);
-  assert.doesNotMatch(tickets, /repository_dispatch|workflow_dispatch/);
+  assert.match(admin, /dispatchLorrenSupportDevelopment/);
+  assert.match(developmentDispatch, /repository_dispatch|\/dispatches/);
+  assert.match(developmentWorkflow, /--draft/);
+  assert.doesNotMatch(developmentWorkflow, /gh\s+pr\s+merge/i);
+  assert.doesNotMatch(developmentWorkflow, /railway\s+up/i);
+  assert.doesNotMatch(developmentWorkflow, /kubectl\s+apply|docker\s+push/i);
 });
 
 test('el panel de tickets está montado y visible para DEV o Supervisor', () => {
