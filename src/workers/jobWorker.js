@@ -24,6 +24,7 @@ import {
 import { runAutoCvMigration } from '../services/cvMigration.js';
 import { ensureSupervisorWindowOpen } from '../services/adminSupervisor.js';
 import { runDispatchWhatsappWindowReminderDispatcher } from '../services/dispatchWhatsappAdminAlerts.js';
+import { persistLorrenBotUsage } from '../services/lorrenAiUsageCounter.js';
 
 const prisma = new PrismaClient();
 const POLL_MS = Number.parseInt(process.env.JOB_WORKER_POLL_MS || '5000', 10);
@@ -179,6 +180,16 @@ function withInterpretation(payload, extractedInterpretation, activeVacancies = 
   };
 }
 
+function buildMeteredLlmService(baseService, onUsage) {
+  if (typeof baseService?.generateReply !== 'function') return baseService;
+  return {
+    ...baseService,
+    generateReply: (directive, parameters, context) => (
+      baseService.generateReply(directive, parameters, context, { onUsage })
+    )
+  };
+}
+
 export async function runJob(job, dependencies = {}) {
   const activePrisma = dependencies.prisma ?? prisma;
 
@@ -190,8 +201,12 @@ export async function runJob(job, dependencies = {}) {
     const calculate = dependencies.calculateConversationDecision ?? calculateConversationDecision;
     const execute = dependencies.executeConversationDecision ?? executeConversationDecision;
     const extractData = dependencies.extractCandidateData ?? extractCandidateData;
-    const llmService = dependencies.llmService ?? openaiAdapter;
+    const baseLlmService = dependencies.llmService ?? openaiAdapter;
     const outboundClient = dependencies.whatsappClient ?? whatsappClient;
+    const onUsage = async (event) => {
+      await persistLorrenBotUsage(activePrisma, event);
+    };
+    const llmService = buildMeteredLlmService(baseLlmService, onUsage);
 
     const acquired = await acquire(payload?.messageId, { prisma: activePrisma });
     if (!acquired) return;
@@ -209,7 +224,8 @@ export async function runJob(job, dependencies = {}) {
           const interpretation = await extractData(
             typeof enrichedPayload.text === 'string' ? enrichedPayload.text : '',
             pendingFields,
-            extractionContext
+            extractionContext,
+            { onUsage }
           );
           enrichedPayload = withInterpretation(
             enrichedPayload,
