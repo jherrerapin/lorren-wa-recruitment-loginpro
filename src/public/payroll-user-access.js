@@ -257,7 +257,23 @@
     for (const [moduleName, items] of groupCapabilities(catalog.capabilities || [])) {
       if (moduleName === 'Supervisión') continue;
       const root = moduleDefinition(items);
-      if (!root) continue;
+      if (!root) {
+        const group = document.createElement('fieldset');
+        group.style.border = '1px solid rgba(148,163,184,.35)';
+        group.style.borderRadius = '10px';
+        group.style.padding = '10px';
+        group.style.margin = '0';
+        const legend = document.createElement('legend');
+        legend.textContent = moduleName;
+        legend.style.fontWeight = '700';
+        group.append(legend);
+        for (const capability of items.filter((item) => item.supervisorOnly !== true)) {
+          const control = capabilityCheckbox(capability, effective.has(capability.key), !role);
+          group.append(control.label);
+        }
+        shell.capabilityHost.append(group);
+        continue;
+      }
       const group = document.createElement('fieldset');
       group.style.border = '1px solid rgba(148,163,184,.35)';
       group.style.borderRadius = '10px';

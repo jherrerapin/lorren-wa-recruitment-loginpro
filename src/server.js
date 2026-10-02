@@ -363,13 +363,9 @@ function injectLorenV2NavbarLink(html, req) {
 function injectLorrenAdminNavbarLinks(html, req) {
   if (typeof html !== 'string') return html;
   const currentRole = req.session?.userRole || req.userRole;
-  const currentOperationalRole = String(req.session?.operationalRole || req.operationalRole || '').toUpperCase();
   const links = [];
   if (currentRole === 'dev' && !html.includes('href="/admin/lorren-billing"')) {
     links.push('<a class="admin-module-standalone-link" href="/admin/lorren-billing" data-standalone-link="lorren-billing"><span>Facturación Lórren</span></a>');
-  }
-  if ((currentRole === 'dev' || currentOperationalRole === 'SUPERVISOR') && !html.includes('href="/admin/lorren-tickets"')) {
-    links.push('<a class="admin-module-standalone-link" href="/admin/lorren-tickets" data-standalone-link="lorren-tickets"><span>Tickets</span></a>');
   }
   if (!links.length) return html;
   const styledLinks = links.join('\n      ');
@@ -497,6 +493,8 @@ app.use((req, res, next) => {
   res.locals.canSeeLorenV2 = canSeeLorenV2(req);
   next();
 });
+
+app.use(cookieParser());
 
 app.get('/health', async (_req, res) => {
   await prisma.$queryRaw`SELECT 1`;
