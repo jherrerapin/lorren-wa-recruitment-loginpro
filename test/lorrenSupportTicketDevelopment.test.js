@@ -48,11 +48,15 @@ function ticket() {
   };
 }
 
-test('readiness exige token pero conserva repositorio canónico por defecto', () => {
+test('readiness exige token y origen de callback pero conserva repositorio canónico por defecto', () => {
   const readiness = lorrenSupportDevelopmentReadiness({});
   assert.equal(readiness.ready, false);
-  assert.deepEqual(readiness.missing, ['LORREN_SUPPORT_GITHUB_TOKEN']);
+  assert.deepEqual(readiness.missing, [
+    'LORREN_SUPPORT_GITHUB_TOKEN',
+    'LORREN_PUBLIC_ORIGIN/RAILWAY_PUBLIC_DOMAIN'
+  ]);
   assert.equal(readiness.repository, 'jherrerapin/lorren-wa-recruitment-loginpro');
+  assert.equal(readiness.usageCallbackUrl, null);
 });
 
 test('sin configuración aprueba sin fingir que hubo dispatch', async () => {
@@ -74,7 +78,8 @@ test('dispatch configurado envía solo el evento aprobado, audita e idempotentiz
   const options = {
     env: {
       LORREN_SUPPORT_GITHUB_TOKEN: 'token-de-prueba',
-      LORREN_SUPPORT_GITHUB_REPOSITORY: 'jherrerapin/lorren-wa-recruitment-loginpro'
+      LORREN_SUPPORT_GITHUB_REPOSITORY: 'jherrerapin/lorren-wa-recruitment-loginpro',
+      RAILWAY_PUBLIC_DOMAIN: 'lorren.example.up.railway.app'
     },
     actor: { actorUsername: 'dev-prueba', actorRole: 'dev' },
     axiosClient: {
@@ -94,6 +99,10 @@ test('dispatch configurado envía solo el evento aprobado, audita e idempotentiz
   assert.equal(calls[0].body.client_payload.ticket_id, 'ticket-test-1');
   assert.equal(calls[0].body.client_payload.original_text, ticket().originalText);
   assert.equal(calls[0].body.client_payload.interpretation.title, 'Reubicar botón de despacho');
+  assert.equal(
+    calls[0].body.client_payload.usage_callback_url,
+    'https://lorren.example.up.railway.app/admin/lorren-tickets/internal/development-usage'
+  );
   assert.match(calls[0].config.headers.Authorization, /^Bearer /);
 
   const persisted = await loadLorrenSupportDevelopmentDispatch(prisma, 'ticket-test-1');
@@ -107,20 +116,28 @@ test('dispatch configurado envía solo el evento aprobado, audita e idempotentiz
   assert.equal(calls.length, 1);
 });
 
-test('panel DEV conecta aprobación con dispatch sin confirm nativo ni outbound WhatsApp', () => {
+test('panel DEV conecta aprobación con dispatch, telemetría y sin confirm nativo ni outbound WhatsApp', () => {
   const route = fs.readFileSync(new URL('../src/routes/lorrenSupportTicketsAdmin.js', import.meta.url), 'utf8');
   assert.match(route, /dispatchLorrenSupportDevelopment\(prisma, ticket/);
+  assert.match(route, /loadLorrenAiUsageSummary\(prisma\)/);
+  assert.match(route, /internal\/development-usage/);
+  assert.match(route, /Consumo IA · corte diario UTC/);
   assert.match(route, /status: 'EN_PROCESO'/);
   assert.doesNotMatch(route, /\bconfirm\s*\(/);
   assert.doesNotMatch(route, /send.*Whatsapp/i);
 });
 
-test('workflow usa Codex aislado y solo abre PR draft, sin merge ni comando de despliegue', () => {
+test('workflow usa Codex aislado, reporta uso firmado y solo abre PR draft', () => {
   const workflow = fs.readFileSync(new URL('../.github/workflows/lorren-support-ticket-development.yml', import.meta.url), 'utf8');
   assert.match(workflow, /repository_dispatch:/);
   assert.match(workflow, /lorren_support_ticket_approved/);
   assert.match(workflow, /uses: openai\/codex-action@v1/);
+  assert.match(workflow, /codex-home: \$\{\{ runner\.temp \}\}\/lorren-ticket-codex/);
   assert.match(workflow, /permission-profile: ':workspace'/);
+  assert.match(workflow, /Report Codex token usage/);
+  assert.match(workflow, /total_token_usage/);
+  assert.match(workflow, /x-lorren-usage-signature/);
+  assert.match(workflow, /AbortSignal\.timeout\(10000\)/);
   assert.match(workflow, /gh pr create/);
   assert.match(workflow, /--draft/);
   assert.match(workflow, /Protected path modified by automated ticket/);

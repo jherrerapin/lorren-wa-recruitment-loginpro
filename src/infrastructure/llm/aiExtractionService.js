@@ -169,6 +169,15 @@ function validatedVacancyId(
   return selected.id;
 }
 
+async function reportUsage(dependencies, model, usage) {
+  if (typeof dependencies?.onUsage !== 'function' || !usage) return;
+  try {
+    await dependencies.onUsage({ source: 'CANDIDATE_EXTRACTION', model, usage });
+  } catch {
+    // La telemetría no debe bloquear la extracción ni el flujo conversacional.
+  }
+}
+
 /**
  * Extracts candidate-owned data and resolves an organic vacancy only when
  * semantic role matching and city matching identify one catalog entry.
@@ -220,6 +229,7 @@ export async function extractCandidateData(text, pendingFields, context = {}, de
       },
       timeout: 15000
     });
+    await reportUsage(dependencies, model, response?.data?.usage);
     const parsed = parseJsonContent(response);
     const sanitized = sanitizeCandidateFieldsForConversation({
       fields: asRecord(parsed.fields),

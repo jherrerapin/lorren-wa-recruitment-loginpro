@@ -94,12 +94,21 @@ function extractReply(response) {
   return compactString(response?.data?.choices?.[0]?.message?.content);
 }
 
+async function reportUsage(options, model, usage) {
+  if (typeof options?.onUsage !== 'function' || !usage) return;
+  try {
+    await options.onUsage({ source: 'CONVERSATION_REPLY', model, usage });
+  } catch {
+    // La telemetría nunca debe bloquear una respuesta al candidato.
+  }
+}
+
 /**
  * Render a pure engine directive into candidate-facing text. API failures are
  * deliberately converted into a safe local response so transport callers do
  * not need to understand OpenAI errors.
  */
-export async function generateReply(directive, parameters = {}, context = {}) {
+export async function generateReply(directive, parameters = {}, context = {}, options = {}) {
   const normalizedDirective = compactString(directive);
   try {
     if (!normalizedDirective) throw new TypeError('directive_required');
@@ -131,6 +140,7 @@ export async function generateReply(directive, parameters = {}, context = {}) {
       }
     );
 
+    await reportUsage(options, model, response?.data?.usage);
     const reply = extractReply(response);
     if (!reply) throw new Error('openai_reply_empty');
     return reply;

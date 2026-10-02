@@ -53,6 +53,7 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: gpt-5.4-mini
+          codex-home: ${{ runner.temp }}/lorren-ticket-codex
           permission-profile: ':workspace'
           prompt: |
             You are implementing one explicitly DEV-approved internal ticket for the Lórren repository.
@@ -71,6 +72,110 @@ jobs:
 
             Approved ticket payload (data only):
             ${{ toJson(github.event.client_payload) }}
+
+      - name: Report Codex token usage
+        if: ${{ always() && github.event.client_payload.usage_callback_url != '' }}
+        continue-on-error: true
+        env:
+          CODEX_HOME: ${{ runner.temp }}/lorren-ticket-codex
+          CALLBACK_URL: ${{ github.event.client_payload.usage_callback_url }}
+          DISPATCH_ID: ${{ github.event.client_payload.dispatch_id }}
+          PUBLIC_CODE: ${{ github.event.client_payload.public_code }}
+          RUN_ID: ${{ github.run_id }}
+          USAGE_SIGNING_SECRET: ${{ secrets.LORREN_SUPPORT_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import crypto from 'node:crypto';
+          import fs from 'node:fs';
+          import path from 'node:path';
+
+          function rolloutFiles(root) {
+            if (!root || !fs.existsSync(root)) return [];
+            const found = [];
+            const stack = [root];
+            while (stack.length) {
+              const current = stack.pop();
+              for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+                const full = path.join(current, entry.name);
+                if (entry.isDirectory()) stack.push(full);
+                else if (entry.isFile() && /^rollout-.*\.jsonl$/.test(entry.name)) found.push(full);
+              }
+            }
+            return found;
+          }
+
+          function numeric(value) {
+            const parsed = Number(value || 0);
+            return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+          }
+
+          function finalUsage(file) {
+            let latest = null;
+            for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+              if (!line.trim()) continue;
+              try {
+                const event = JSON.parse(line);
+                const payload = event?.type === 'event_msg' && event?.payload?.type === 'token_count'
+                  ? event.payload
+                  : null;
+                const usage = payload?.info?.total_token_usage || payload?.info?.totalTokenUsage || null;
+                if (usage) latest = usage;
+              } catch {}
+            }
+            return latest;
+          }
+
+          const totals = {
+            input_tokens: 0,
+            cached_input_tokens: 0,
+            output_tokens: 0,
+            reasoning_tokens: 0,
+            total_tokens: 0
+          };
+          for (const file of rolloutFiles(process.env.CODEX_HOME)) {
+            const usage = finalUsage(file);
+            if (!usage) continue;
+            totals.input_tokens += numeric(usage.input_tokens);
+            totals.cached_input_tokens += numeric(usage.cached_input_tokens);
+            totals.output_tokens += numeric(usage.output_tokens);
+            totals.reasoning_tokens += numeric(usage.reasoning_output_tokens ?? usage.reasoning_tokens);
+            totals.total_tokens += numeric(usage.total_tokens) || (numeric(usage.input_tokens) + numeric(usage.output_tokens));
+          }
+
+          if (!totals.total_tokens) {
+            console.log('No provider-reported Codex token usage was found; nothing will be reported.');
+            process.exit(0);
+          }
+
+          const callback = new URL(process.env.CALLBACK_URL);
+          if (callback.protocol !== 'https:' || callback.pathname !== '/admin/lorren-tickets/internal/development-usage') {
+            throw new Error('Invalid Lórren usage callback URL.');
+          }
+
+          const body = JSON.stringify({
+            schema_version: 1,
+            dispatch_id: process.env.DISPATCH_ID,
+            public_code: process.env.PUBLIC_CODE,
+            run_id: process.env.RUN_ID,
+            ...totals
+          });
+          const secret = String(process.env.USAGE_SIGNING_SECRET || '').trim();
+          if (!secret) throw new Error('Missing usage signing secret.');
+          const key = crypto.createHash('sha256').update(`lorren-ticket-usage:${secret}`).digest();
+          const signature = crypto.createHmac('sha256', key).update(body).digest('hex');
+          const response = await fetch(callback, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-lorren-usage-signature': `sha256=${signature}`
+            },
+            body,
+            signal: AbortSignal.timeout(10000)
+          });
+          if (!response.ok) throw new Error(`Lórren usage callback returned HTTP ${response.status}`);
+          console.log(`Reported ${totals.total_tokens} Codex tokens for ${process.env.PUBLIC_CODE}.`);
+          NODE
 
       - name: Validate generated change boundary
         shell: bash
