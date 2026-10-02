@@ -10,6 +10,8 @@ const CONFIG_ACTION = 'LORREN_SUPPORT_CONFIG_SAVED';
 const TICKET_ENTITY_TYPE = 'LORREN_SUPPORT_TICKET';
 const TICKET_CREATED = 'LORREN_SUPPORT_TICKET_CREATED';
 const TICKET_UPDATED = 'LORREN_SUPPORT_TICKET_UPDATED';
+const TICKET_DELETED = 'LORREN_SUPPORT_TICKET_DELETED';
+const TICKET_ACTIONS = Object.freeze([TICKET_CREATED, TICKET_UPDATED, TICKET_DELETED]);
 const INBOUND_ENTITY_TYPE = 'LORREN_SUPPORT_WHATSAPP_INBOUND';
 const INBOUND_ACTION = 'LORREN_SUPPORT_WHATSAPP_ACCEPTED';
 
@@ -129,25 +131,29 @@ function snapshotFromEvent(row) {
 export async function loadLorrenSupportTickets(prisma, { take = 500 } = {}) {
   if (!prisma?.devAuditEvent?.findMany) return [];
   const rows = await prisma.devAuditEvent.findMany({
-    where: { entityType: TICKET_ENTITY_TYPE, action: { in: [TICKET_CREATED, TICKET_UPDATED] } },
+    where: { entityType: TICKET_ENTITY_TYPE, action: { in: TICKET_ACTIONS } },
     orderBy: { createdAt: 'desc' },
     take: Math.max(50, Math.min(Number(take) || 500, 2000))
   });
-  const latest = new Map();
+  const seen = new Set();
+  const active = [];
   for (const row of rows) {
-    if (!row.entityId || latest.has(row.entityId)) continue;
+    if (!row.entityId || seen.has(row.entityId)) continue;
+    seen.add(row.entityId);
+    if (row.action === TICKET_DELETED) continue;
     const snapshot = snapshotFromEvent(row);
-    if (snapshot) latest.set(row.entityId, snapshot);
+    if (snapshot) active.push(snapshot);
   }
-  return [...latest.values()].sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+  return active.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
 }
 
 export async function loadLorrenSupportTicket(prisma, ticketId) {
   if (!ticketId || !prisma?.devAuditEvent?.findFirst) return null;
   const row = await prisma.devAuditEvent.findFirst({
-    where: { entityType: TICKET_ENTITY_TYPE, entityId: ticketId, action: { in: [TICKET_CREATED, TICKET_UPDATED] } },
+    where: { entityType: TICKET_ENTITY_TYPE, entityId: ticketId, action: { in: TICKET_ACTIONS } },
     orderBy: { createdAt: 'desc' }
   });
+  if (!row || row.action === TICKET_DELETED) return null;
   return snapshotFromEvent(row);
 }
 
@@ -241,6 +247,36 @@ export async function updateLorrenSupportTicket(prisma, ticketId, changes = {}, 
     snapshot.developmentRequestedBy = text(actor.actorUsername, 160) || text(actor.actorUserId, 160) || 'DEV';
   }
   return persistTicket(prisma, snapshot, { action: TICKET_UPDATED, previous, actor });
+}
+
+export async function deleteLorrenSupportTicket(prisma, ticketId, actor = {}) {
+  const previous = await loadLorrenSupportTicket(prisma, ticketId);
+  if (!previous) throw new Error('lorren_support_ticket_not_found');
+  const deletedAt = new Date().toISOString();
+  const tombstone = {
+    id: previous.id,
+    publicCode: previous.publicCode,
+    deleted: true,
+    deletedAt
+  };
+  const row = await prisma.devAuditEvent.create({
+    data: {
+      entityType: TICKET_ENTITY_TYPE,
+      entityId: previous.id,
+      entityLabel: previous.publicCode,
+      action: TICKET_DELETED,
+      actorUserId: text(actor.actorUserId, 160),
+      actorUsername: text(actor.actorUsername, 160),
+      actorRole: text(actor.actorRole, 80),
+      actorSource: text(actor.actorSource, 120) || 'lorren-support-admin',
+      ipAddress: text(actor.ipAddress, 120),
+      userAgent: text(actor.userAgent, 500),
+      fromValue: previous,
+      toValue: tombstone,
+      metadata: tombstone
+    }
+  });
+  return { ...tombstone, auditEventId: row.id, auditCreatedAt: row.createdAt };
 }
 
 export async function createLorrenSupportTicketFromWhatsapp(prisma, input = {}) {
