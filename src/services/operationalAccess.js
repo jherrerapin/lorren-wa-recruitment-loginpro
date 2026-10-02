@@ -10,7 +10,8 @@ export const OPERATIONAL_ROLE = Object.freeze({
 export const OPERATIONAL_MODULE_ACCESS = Object.freeze({
   DISPATCH: 'dispatch',
   ATTENDANCE: 'attendance',
-  TIME: 'time'
+  TIME: 'time',
+  TICKETS: 'tickets'
 });
 
 export const OPERATIONAL_CAPABILITY = Object.freeze({
@@ -34,6 +35,7 @@ export const OPERATIONAL_CAPABILITY = Object.freeze({
   TIME_COMPENSATION: 'TIME_COMPENSATION',
   TIME_IMPORT: 'TIME_IMPORT',
   TIME_IMPORT_REVERSE: 'TIME_IMPORT_REVERSE',
+  SUPPORT_TICKETS_VIEW: 'SUPPORT_TICKETS_VIEW',
   SUPERVISE_PERMISSIONS: 'SUPERVISE_PERMISSIONS'
 });
 
@@ -58,6 +60,7 @@ export const OPERATIONAL_CAPABILITY_DEFINITIONS = Object.freeze([
   { key: OPERATIONAL_CAPABILITY.TIME_COMPENSATION, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Gestionar compensatorios' },
   { key: OPERATIONAL_CAPABILITY.TIME_IMPORT, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Importar y aplicar datos de asistencia' },
   { key: OPERATIONAL_CAPABILITY.TIME_IMPORT_REVERSE, module: 'Gestión de Tiempo', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TIME, label: 'Reversar importaciones', sensitive: true },
+  { key: OPERATIONAL_CAPABILITY.SUPPORT_TICKETS_VIEW, module: 'Tickets', moduleAccessKey: OPERATIONAL_MODULE_ACCESS.TICKETS, moduleAccess: true, moduleLabel: 'Tickets', label: 'Ver y crear tickets' },
   { key: OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS, module: 'Supervisión', label: 'Administrar módulos y funciones de otros usuarios', supervisorOnly: true }
 ]);
 
@@ -65,7 +68,11 @@ const CAPABILITY_KEYS = Object.freeze(OPERATIONAL_CAPABILITY_DEFINITIONS.map((it
 const CAPABILITY_SET = new Set(CAPABILITY_KEYS);
 const ROLE_SET = new Set(Object.values(OPERATIONAL_ROLE));
 const ASSIGNABLE_ROLE_SET = new Set([OPERATIONAL_ROLE.CONSULTA, OPERATIONAL_ROLE.SUPERVISOR]);
-const MODULE_ACCESS_KEYS = Object.freeze(Object.values(OPERATIONAL_MODULE_ACCESS));
+const CORE_MODULE_ACCESS_KEYS = Object.freeze([
+  OPERATIONAL_MODULE_ACCESS.DISPATCH,
+  OPERATIONAL_MODULE_ACCESS.ATTENDANCE,
+  OPERATIONAL_MODULE_ACCESS.TIME
+]);
 const MODULE_VIEW_CAPABILITY_SET = new Set(
   OPERATIONAL_CAPABILITY_DEFINITIONS.filter((item) => item.moduleAccess === true).map((item) => item.key)
 );
@@ -109,6 +116,7 @@ const ROLE_BASE_PERMISSIONS = Object.freeze({
     OPERATIONAL_CAPABILITY.TIME_VIEW,
     OPERATIONAL_CAPABILITY.TIME_EXPORT,
     OPERATIONAL_CAPABILITY.TIME_COMPENSATION,
+    OPERATIONAL_CAPABILITY.SUPPORT_TICKETS_VIEW,
     OPERATIONAL_CAPABILITY.SUPERVISE_PERMISSIONS
   ])
 });
@@ -140,13 +148,17 @@ function normalizeCapabilities(values = []) {
 
 export function normalizeOperationalModuleAccess(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  if (!MODULE_ACCESS_KEYS.every((key) => typeof value[key] === 'boolean')) return null;
+  if (!CORE_MODULE_ACCESS_KEYS.every((key) => typeof value[key] === 'boolean')) return null;
   const attendance = value[OPERATIONAL_MODULE_ACCESS.ATTENDANCE] === true;
-  return {
+  const normalized = {
     [OPERATIONAL_MODULE_ACCESS.DISPATCH]: value[OPERATIONAL_MODULE_ACCESS.DISPATCH] === true || attendance,
     [OPERATIONAL_MODULE_ACCESS.ATTENDANCE]: attendance,
     [OPERATIONAL_MODULE_ACCESS.TIME]: value[OPERATIONAL_MODULE_ACCESS.TIME] === true
   };
+  if (typeof value[OPERATIONAL_MODULE_ACCESS.TICKETS] === 'boolean') {
+    normalized[OPERATIONAL_MODULE_ACCESS.TICKETS] = value[OPERATIONAL_MODULE_ACCESS.TICKETS] === true;
+  }
+  return normalized;
 }
 
 export function operationalRoleBasePermissions(role) {
@@ -171,6 +183,7 @@ function permissionStatesWithModuleAccess(permissionStates = {}, moduleAccess = 
   const states = Object.fromEntries(capabilityStateMap(permissionStates));
   for (const definition of OPERATIONAL_CAPABILITY_DEFINITIONS) {
     if (definition.moduleAccess !== true || !definition.moduleAccessKey) continue;
+    if (typeof normalizedModuleAccess[definition.moduleAccessKey] !== 'boolean') continue;
     states[definition.key] = normalizedModuleAccess[definition.moduleAccessKey] === true;
   }
   return states;
