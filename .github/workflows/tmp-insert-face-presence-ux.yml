@@ -1,0 +1,36 @@
+name: Temporary face presence UX wiring
+
+on:
+  push:
+    branches:
+      - fix/restore-face-registration-ux
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/restore-face-registration-ux
+      - name: Insert presence UX before portal biometric flow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/public/worker-biometric.js')
+          text = path.read_text()
+          old = "document.write(`<script src=\"/public/worker-biometric-mobile.js?v=${BIOMETRIC_ASSET_RELEASE}\"><\\/script>`);\ndocument.write(`<script src=\"/public/worker-portal-biometric-flow.js?v=${BIOMETRIC_ASSET_RELEASE}\"><\\/script>`);"
+          new = "document.write(`<script src=\"/public/worker-biometric-mobile.js?v=${BIOMETRIC_ASSET_RELEASE}\"><\\/script>`);\ndocument.write(`<script src=\"/public/worker-biometric-presence-ux.js?v=${BIOMETRIC_ASSET_RELEASE}\"><\\/script>`);\ndocument.write(`<script src=\"/public/worker-portal-biometric-flow.js?v=${BIOMETRIC_ASSET_RELEASE}\"><\\/script>`);"
+          if old not in text:
+              raise SystemExit('expected biometric loader sequence not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git rm .github/workflows/tmp-insert-face-presence-ux.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/public/worker-biometric.js
+          git commit -m "fix(attendance): wire silent face verification UX"
+          git push origin HEAD:fix/restore-face-registration-ux
