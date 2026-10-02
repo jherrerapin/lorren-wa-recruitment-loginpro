@@ -11,6 +11,7 @@ const PROFILE_PATH = '/account/profile';
 const BRANCHES_PATH = '/admin/locations';
 const USERS_PATH = '/admin/users';
 const SUPERVISOR_USERS_PATH = '/admin/locations/users';
+const TICKETS_PATH = '/admin/lorren-tickets';
 const OPERATIONS_PATH = '/admin/operaciones';
 const ATTENDANCE_PATH = '/admin/operaciones/asistencia';
 const PAYROLL_PATH = '/admin/operaciones/asistencia/gestion-tiempo';
@@ -55,6 +56,7 @@ function escapeHtml(value) {
 
 function activeModule(path) {
   if (path.startsWith(USERS_PATH) || path.startsWith(SUPERVISOR_USERS_PATH) || path.startsWith(BRANCHES_PATH)) return null;
+  if (path.startsWith(TICKETS_PATH)) return 'tickets';
   if (path.startsWith(PAYROLL_PATH) || path.startsWith(LEGACY_PAYROLL_PATH)) return 'payroll';
   if (path.startsWith(OPERATIONS_PATH)) return 'operations';
   return 'recruitment';
@@ -70,6 +72,10 @@ function moduleAccess(req = {}) {
   const dispatchView = operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_VIEW);
   const accountUserManager = canCreateRecruiterUsers(req);
   const operationalUserManager = canManageOperationalPermissions(req);
+  const supportTickets = isDev || (
+    requestCapability(req, 'operationalAccessConfigured')
+    && hasOperationalCapability(req, OPERATIONAL_CAPABILITY.SUPPORT_TICKETS_VIEW)
+  );
   return {
     isDev,
     dispatch,
@@ -80,7 +86,7 @@ function moduleAccess(req = {}) {
     users: accountUserManager || operationalUserManager,
     usersPath: accountUserManager ? USERS_PATH : SUPERVISOR_USERS_PATH,
     dispatchView,
-    supportTickets: isDev || requestCapability(req, 'canAccessSupportTickets'),
+    supportTickets,
     clientsAccess: dispatchView
       || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_MANAGE)
       || operational(dispatch, OPERATIONAL_CAPABILITY.DISPATCH_MASTERDATA_DELETE),
@@ -106,7 +112,6 @@ function recruitmentMenuItems(access) {
     menuLink(RECRUITMENT_PATH, 'Panel de candidatos'),
     menuLink(INTERVIEW_MANAGEMENT_PATH, 'Gestión de entrevistas')
   ];
-  if (access.supportTickets) items.push(menuLink('/admin/lorren-tickets', 'Tickets internos'));
   if (access.statistics) items.push(menuLink('/admin/estadisticas', 'Estadísticas'));
   if (access.isDev) {
     items.push(menuLink('/admin/monitor', 'Monitor bot'));
@@ -146,6 +151,13 @@ function moduleMenu({ key, label, icon, active, items = [], allowed = true }) {
 
 function standaloneIcon(icon) {
   return `<span class="admin-module-nav-icon" aria-hidden="true" style="background-image:url(${icon});background-repeat:no-repeat;background-position:center;background-size:16px 16px;"></span>`;
+}
+
+function standaloneTicketsLink(access, path) {
+  if (!access.supportTickets) return '';
+  const classes = ['admin-module-standalone-link'];
+  if (path.startsWith(TICKETS_PATH)) classes.push('is-active');
+  return `<a class="${classes.join(' ')}" href="${TICKETS_PATH}" data-standalone-link="tickets"><span>Tickets</span></a>`;
 }
 
 function standaloneBranchesLink(path) {
@@ -196,6 +208,7 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
     }),
     moduleMenu({ key: 'payroll', label: 'Gestión de Tiempo', icon: PAYROLL_ICON, active, items: payrollMenuItems(access), allowed: access.payroll })
   ].filter(Boolean).join('\n    ');
+  const ticketsLink = standaloneTicketsLink(access, path);
   const branchesLink = standaloneBranchesLink(path);
   const usersLink = standaloneUsersLink(access, path);
   const identity = sessionIdentity(req);
@@ -203,6 +216,7 @@ export function buildAdminModuleNavbar(req = {}, originalNav = '') {
   return `<nav class="navbar admin-module-navbar" data-module-navigation="true" aria-label="Módulos principales">
     <a class="brand admin-module-brand" href="${RECRUITMENT_PATH}" aria-label="LoginPro"><img src="/public/logo-loginpro.svg" alt="LoginPro" /></a>
     <div class="admin-module-nav-links" data-primary-nav-group="true">${modules}
+      ${ticketsLink}
       ${branchesLink}
       ${usersLink}
     </div>
@@ -399,6 +413,7 @@ export function injectAdminModuleNavigation(html, req = {}) {
 export const ADMIN_MODULE_PATHS = Object.freeze({
   recruitment: RECRUITMENT_PATH,
   interviewManagement: INTERVIEW_MANAGEMENT_PATH,
+  tickets: TICKETS_PATH,
   branches: BRANCHES_PATH,
   users: USERS_PATH,
   supervisorUsers: SUPERVISOR_USERS_PATH,
