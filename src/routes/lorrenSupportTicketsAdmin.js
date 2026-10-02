@@ -1,12 +1,13 @@
 import express from 'express';
 import {
+  LORREN_SUPPORT_PRIORITIES,
+  LORREN_SUPPORT_STATUSES,
   createLorrenSupportTicket,
   loadLorrenSupportAuthorizedPhones,
   loadLorrenSupportConfig,
   loadLorrenSupportTicket,
   loadLorrenSupportTickets,
   saveLorrenSupportConfig,
-  ticketVisibleToSupervisor,
   updateLorrenSupportTicket
 } from '../services/lorrenSupportTickets.js';
 import { dispatchLorrenSupportDevelopment } from '../services/lorrenSupportDevelopmentDispatch.js';
@@ -17,31 +18,53 @@ import {
 import { normalizeDispatchWhatsappPhone } from '../services/dispatchWhatsappCloudConfig.js';
 
 function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' })[char]);
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
-function normalizeString(value) { return typeof value === 'string' ? value.trim() : ''; }
-function array(value) { return Array.isArray(value) ? value : (value === undefined ? [] : [value]); }
-function isDev(req) { return req.session?.isDev === true || req.isDev === true; }
-function requireDev(req, res, next) { if (isDev(req)) return next(); return res.status(403).send('Solo DEV puede realizar esta acción.'); }
-function actor(req, source = 'lorren-support-panel') {
+
+function role(req) { return String(req.session?.userRole || req.userRole || '').toLowerCase(); }
+function operationalRole(req) { return String(req.session?.operationalRole || req.operationalRole || '').toUpperCase(); }
+function isDev(req) { return role(req) === 'dev'; }
+function isSupervisor(req) { return role(req) === 'admin' && operationalRole(req) === 'SUPERVISOR'; }
+function requireAccess(req, res, next) {
+  if (!isDev(req) && !isSupervisor(req)) return res.status(403).send('No tienes acceso a tickets internos.');
+  return next();
+}
+function requireDev(req, res, next) {
+  if (!isDev(req)) return res.status(403).send('Esta acción solo está disponible para DEV.');
+  return next();
+}
+function actor(req, source = 'lorren-support-admin') {
   return {
     actorUserId: req.session?.userId || req.userId || null,
     actorUsername: req.session?.username || req.username || null,
     actorRole: req.session?.userRole || req.userRole || null,
     actorSource: source,
-    ipAddress: req.ip,
-    userAgent: req.get('user-agent')
+    ipAddress: req.ip || null,
+    userAgent: req.get?.('user-agent') || null
   };
 }
-function priorityOptions(current) {
-  return ['BAJA', 'NORMAL', 'ALTA', 'URGENTE'].map((value) => `<option value="${value}" ${value === current ? 'selected' : ''}>${value}</option>`).join('');
+function array(value) { return Array.isArray(value) ? value : value === undefined ? [] : [value]; }
+function normalizeString(value) { return typeof value === 'string' && value.trim() ? value.trim() : null; }
+function statusLabel(value) {
+  return ({
+    RECIBIDO: 'Recibido',
+    EN_REVISION: 'En revisión',
+    APROBADO: 'Aprobado para desarrollo',
+    EN_PROCESO: 'En proceso',
+    EN_VALIDACION: 'En validación',
+    REALIZADO: 'Realizado',
+    RECHAZADO: 'Rechazado',
+    CANCELADO: 'Cancelado'
+  }[value] || value || 'Sin estado');
 }
-function statusOptions(current) {
-  return ['NUEVO', 'EN_PROCESO', 'RESUELTO', 'CERRADO'].map((value) => `<option value="${value}" ${value === current ? 'selected' : ''}>${value.replace('_', ' ')}</option>`).join('');
-}
+function priorityLabel(value) { return ({ BAJA: 'Baja', NORMAL: 'Normal', ALTA: 'Alta', URGENTE: 'Urgente' }[value] || value || 'Normal'); }
 function dateTime(value) {
-  if (!value) return '—';
-  const date = new Date(value);
+  const date = new Date(value || Number.NaN);
   if (Number.isNaN(date.getTime())) return '—';
   return new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).format(date);
 }
@@ -51,29 +74,39 @@ function tokenNumber(value) {
 
 async function supervisorIdentity(prisma, req) {
   const userId = req.session?.userId || req.userId || null;
-  const username = req.session?.username || req.username || null;
-  const phone = normalizeDispatchWhatsappPhone(req.session?.phone || req.phone || '');
-  let appUser = null;
-  if (userId && prisma?.appUser?.findUnique) {
-    appUser = await prisma.appUser.findUnique({ where: { id: userId }, select: { id: true, username: true, phone: true } });
-  }
-  return {
-    userId: appUser?.id || userId,
-    username: appUser?.username || username,
-    phone: normalizeDispatchWhatsappPhone(appUser?.phone || phone || '')
-  };
+  if (!userId || !prisma?.appUser?.findUnique) return { userId, phones: [] };
+  const user = await prisma.appUser.findUnique({
+    where: { id: userId },
+    select: { id: true, username: true, displayName: true, recoveryPhone: true, dispatchAlertPhone: true }
+  });
+  const phones = [user?.dispatchAlertPhone, user?.recoveryPhone]
+    .map((value) => normalizeDispatchWhatsappPhone(value))
+    .filter(Boolean);
+  return { userId, username: user?.username || null, displayName: user?.displayName || null, phones: [...new Set(phones)] };
+}
+
+function ticketVisibleToSupervisor(ticket, identity) {
+  if (!ticket || !identity) return false;
+  if (ticket.createdByUserId && ticket.createdByUserId === identity.userId) return true;
+  return Boolean(ticket.createdByPhone && identity.phones.includes(ticket.createdByPhone));
 }
 
 function renderTicketCard(ticket, devView) {
-  const interpretation = ticket.interpretation || {};
-  const createdBy = ticket.createdByDisplay || ticket.createdByUsername || ticket.createdByPhone || 'Sin identificar';
-  const developmentButton = devView && !['RESUELTO', 'CERRADO'].includes(ticket.status)
-    ? `<form method="post" action="/admin/lorren-tickets/${encodeURIComponent(ticket.id)}/approve-development"><button class="btn" type="submit">${ticket.developmentRequestedAt ? 'Reintentar desarrollo' : 'Aprobar para desarrollo'}</button></form>`
-    : '';
-  const controls = devView
-    ? `<form method="post" action="/admin/lorren-tickets/${encodeURIComponent(ticket.id)}/update" class="ticket-controls"><label>Estado<select name="status">${statusOptions(ticket.status)}</select></label><label>Prioridad<select name="priority">${priorityOptions(ticket.priority)}</select></label><button class="btn btn-primary" type="submit">Guardar</button></form>${developmentButton}`
-    : '';
-  return `<article class="ticket-card"><div class="ticket-head"><div><div class="code">${escapeHtml(ticket.publicCode)}</div><h2>${escapeHtml(interpretation.title || 'Solicitud interna')}</h2><p class="meta">${escapeHtml(createdBy)} · ${escapeHtml(dateTime(ticket.createdAt))}</p></div><div class="badges"><span>${escapeHtml(ticket.status)}</span><span>${escapeHtml(ticket.priority)}</span><span>${escapeHtml(interpretation.module || 'OTRO')}</span>${interpretation.confidence ? `<span>Confianza ${escapeHtml(interpretation.confidence)}</span>` : ''}</div></div><div class="grid"><section><strong>Solicitud original</strong><pre>${escapeHtml(ticket.originalText)}</pre></section><section><strong>Interpretación</strong><pre>${escapeHtml(interpretation.summary || 'Sin interpretación estructurada.')}</pre>${interpretation.suggestedScope ? `<p><strong>Alcance:</strong> ${escapeHtml(interpretation.suggestedScope)}</p>` : ''}</section></div>${ticket.developmentRequestedAt ? `<p class="meta">Desarrollo aprobado: ${escapeHtml(dateTime(ticket.developmentRequestedAt))}</p>` : ''}${controls}</article>`;
+  const i = ticket.interpretation || {};
+  const developmentButton = ticket.status === 'EN_PROCESO'
+    ? '<button class="btn btn-primary" type="button" disabled>Desarrollo iniciado</button>'
+    : `<form method="post" action="/admin/lorren-tickets/${encodeURIComponent(ticket.id)}/approve-development"><button class="btn btn-primary" type="submit">Aprobar para desarrollo</button></form>`;
+  const controls = devView ? `<form method="post" action="/admin/lorren-tickets/${encodeURIComponent(ticket.id)}/update" class="ticket-controls">
+    <label>Estado<select name="status">${LORREN_SUPPORT_STATUSES.map((item) => `<option value="${item}" ${ticket.status === item ? 'selected' : ''}>${escapeHtml(statusLabel(item))}</option>`).join('')}</select></label>
+    <label>Prioridad<select name="priority">${LORREN_SUPPORT_PRIORITIES.map((item) => `<option value="${item}" ${ticket.priority === item ? 'selected' : ''}>${escapeHtml(priorityLabel(item))}</option>`).join('')}</select></label>
+    <button class="btn" type="submit">Guardar estado</button>
+  </form>
+  ${developmentButton}` : '';
+  return `<article class="ticket-card" data-ticket-id="${escapeHtml(ticket.id)}">
+    <div class="ticket-head"><div><span class="code">${escapeHtml(ticket.publicCode)}</span><h2>${escapeHtml(i.title || ticket.originalText?.slice(0, 120) || 'Ticket')}</h2></div><div class="badges"><span>${escapeHtml(statusLabel(ticket.status))}</span><span>${escapeHtml(priorityLabel(ticket.priority))}</span></div></div>
+    <div class="meta">${escapeHtml(ticket.source || '—')} · ${escapeHtml(ticket.createdByName || ticket.createdByUsername || ticket.createdByPhone || 'Sin autor')} · ${escapeHtml(dateTime(ticket.createdAt))}</div>
+    <div class="grid"><section><h3>Interpretación IA</h3><p><strong>Módulo:</strong> ${escapeHtml(i.module || 'OTRO')} · <strong>Tipo:</strong> ${escapeHtml(i.type || 'SOLICITUD')} · <strong>Confianza:</strong> ${escapeHtml(i.confidence || 'BAJA')}</p><p>${escapeHtml(i.summary || '')}</p>${i.currentBehavior ? `<p><strong>Actual:</strong> ${escapeHtml(i.currentBehavior)}</p>` : ''}${i.expectedBehavior ? `<p><strong>Esperado:</strong> ${escapeHtml(i.expectedBehavior)}</p>` : ''}${i.suggestedScope ? `<p><strong>Alcance sugerido:</strong> ${escapeHtml(i.suggestedScope)}</p>` : ''}<small>IA: ${escapeHtml(i.aiStatus || '—')}</small></section><section><h3>Mensaje original</h3><pre>${escapeHtml(ticket.originalText || '')}</pre></section></div>${controls}
+  </article>`;
 }
 
 function renderAiUsage(aiUsage) {
@@ -98,9 +131,9 @@ function renderPage({ devView, tickets, config, authorizedPhones, aiUsage, messa
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Tickets Lórren</title><link rel="stylesheet" href="/public/operaciones-ui.css"><style>body{background:#f5f7fa}.page{max-width:1180px;margin:auto;padding:24px}.hero{display:flex;justify-content:space-between;gap:16px;align-items:center}.card,.ticket-card{background:white;border:1px solid #dfe6ec;border-radius:16px;padding:18px;margin-top:16px}.ticket-head{display:flex;justify-content:space-between;gap:14px}.ticket-head h2{margin:4px 0}.code{font-size:12px;color:#64748b}.badges{display:flex;gap:6px;flex-wrap:wrap;align-content:flex-start}.badges span{background:#eef2ff;border-radius:999px;padding:5px 8px;font-size:11px}.meta{color:#64748b;font-size:12px;margin:6px 0 14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid section{border:1px solid #eef2f7;border-radius:12px;padding:12px}.grid pre{white-space:pre-wrap;font-family:inherit;margin:0}.ticket-controls,.phone-row{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-top:12px}.ticket-controls label{display:grid;gap:4px}.ticket-controls select,.phone-row input,textarea{padding:10px;border:1px solid #cbd5e1;border-radius:9px}.phone-row input{min-width:220px}.remove-phone{border:0;background:#fee2e2;color:#991b1b;padding:9px;border-radius:8px}.authorized{margin:10px 0;padding:10px;background:#f8fafc;border-radius:8px}.notice{padding:12px;border-radius:10px;margin-top:12px}.ok{background:#ecfdf5;color:#166534}.bad{background:#fef2f2;color:#991b1b}.ai-usage{border-color:#c7d2fe}.usage-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.usage-head h2{margin:0}.usage-total{text-align:right;display:grid;gap:2px}.usage-total strong{font-size:26px}.usage-total span,.usage-item span{font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.04em}.usage-total small,.usage-item small{color:#64748b}.usage-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.usage-item{display:grid;gap:5px;padding:13px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc}.usage-item strong{font-size:21px}.usage-item.remaining{background:#eef2ff;border-color:#c7d2fe}textarea{width:100%;box-sizing:border-box;margin-bottom:10px}@media(max-width:760px){.hero,.ticket-head,.usage-head{flex-direction:column;align-items:flex-start}.grid,.usage-grid{grid-template-columns:1fr}.usage-total{text-align:left}.phone-row{display:grid}.phone-row input{min-width:0;width:100%}}</style></head><body><main class="page"><section class="hero"><div><div class="eyebrow">${devView ? 'DEV' : 'SUPERVISOR'} · Lórren</div><h1>Tickets internos</h1><p>${devView ? 'Recepción, interpretación y gestión de solicitudes internas.' : 'Seguimiento de los tickets que has generado.'}</p></div><a class="btn" href="/admin">Volver al panel</a></section>${message ? `<div class="notice ok">${escapeHtml(message)}</div>` : ''}${error ? `<div class="notice bad">${escapeHtml(error)}</div>` : ''}${usageHtml}${devConfig}${ticketHtml}</main>${devView ? `<script>var rows=document.getElementById('phoneRows');function reindex(){rows.querySelectorAll('.phone-row').forEach(function(row,index){var cb=row.querySelector('[name="phoneActive"]');if(cb)cb.value=String(index);});}function bind(){rows.querySelectorAll('.remove-phone').forEach(function(btn){btn.onclick=function(){if(rows.querySelectorAll('.phone-row').length>1){btn.closest('.phone-row').remove();reindex();}};});}bind();reindex();document.getElementById('addPhone').onclick=function(){var i=rows.querySelectorAll('.phone-row').length;rows.insertAdjacentHTML('beforeend','<div class="phone-row"><input name="phoneName" placeholder="Nombre"><input name="phoneNumber" placeholder="3001234567"><label><input type="checkbox" name="phoneActive" value="'+i+'" checked> Activo</label><button type="button" class="remove-phone">Quitar</button></div>');bind();reindex();};document.getElementById('phonesForm').addEventListener('submit',reindex);</script>` : ''}</body></html>`;
 }
 
-export function createLorrenSupportTicketsAdminRouter({ prisma }) {
+export function lorrenSupportTicketsAdminRouter(prisma) {
   const router = express.Router();
-  const form = express.urlencoded({ extended: false });
+  const form = express.urlencoded({ extended: true, limit: '64kb' });
 
   router.post('/internal/development-usage', async (req, res) => {
     try {
@@ -114,6 +147,8 @@ export function createLorrenSupportTicketsAdminRouter({ prisma }) {
       return res.status(401).end();
     }
   });
+
+  router.use(requireAccess);
 
   router.get('/', async (req, res) => {
     const [allTickets, config, authorizedPhones] = await Promise.all([
