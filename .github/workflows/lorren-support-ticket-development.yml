@@ -170,7 +170,8 @@ jobs:
               'content-type': 'application/json',
               'x-lorren-usage-signature': `sha256=${signature}`
             },
-            body
+            body,
+            signal: AbortSignal.timeout(10000)
           });
           if (!response.ok) throw new Error(`Lórren usage callback returned HTTP ${response.status}`);
           console.log(`Reported ${totals.total_tokens} Codex tokens for ${process.env.PUBLIC_CODE}.`);
