@@ -222,34 +222,73 @@ export async function updateLorrenSupportTicket(prisma, ticketId, changes = {}, 
   if (!LORREN_SUPPORT_STATUSES.includes(status)) throw new Error('lorren_support_ticket_status_invalid');
   if (!LORREN_SUPPORT_PRIORITIES.includes(priority)) throw new Error('lorren_support_ticket_priority_invalid');
   const now = new Date().toISOString();
+  const interpretation = {
+    ...(previous.interpretation || {}),
+    ...(changes.interpretation && typeof changes.interpretation === 'object' ? changes.interpretation : {})
+  };
   const snapshot = {
     ...previous,
+    interpretation,
     status,
     priority,
-    updatedAt: now,
-    developmentRequestedAt: changes.requestDevelopment === true ? now : previous.developmentRequestedAt,
-    developmentRequestedBy: changes.requestDevelopment === true ? (actor.actorUsername || actor.actorUserId || 'DEV') : previous.developmentRequestedBy
+    updatedAt: now
   };
+  delete snapshot.auditEventId;
+  delete snapshot.auditCreatedAt;
+  if (changes.requestDevelopment === true) {
+    snapshot.status = 'APROBADO';
+    snapshot.developmentRequestedAt = now;
+    snapshot.developmentRequestedBy = text(actor.actorUsername, 160) || text(actor.actorUserId, 160) || 'DEV';
+  }
   return persistTicket(prisma, snapshot, { action: TICKET_UPDATED, previous, actor });
 }
 
-export async function markLorrenSupportInboundAccepted(prisma, { messageId, phone, ticketId }) {
+export async function createLorrenSupportTicketFromWhatsapp(prisma, input = {}) {
+  const messageId = text(input.messageId, 240);
+  const phone = normalizePhone(input.phone);
+  const originalText = text(input.text, 6000);
+  if (!messageId || !phone || !originalText) return { accepted: false, reason: 'invalid_message' };
+
+  const authorized = await loadLorrenSupportAuthorizedPhones(prisma);
+  const owner = authorized.find((item) => item.phone === phone);
+  if (!owner) return { accepted: false, reason: 'unauthorized_phone' };
+
+  const duplicate = await prisma.devAuditEvent.findFirst({
+    where: { entityType: INBOUND_ENTITY_TYPE, entityId: messageId, action: INBOUND_ACTION },
+    orderBy: { createdAt: 'desc' }
+  });
+  if (duplicate) return { accepted: true, duplicate: true, ticketId: duplicate.metadata?.ticketId || null };
+
+  const ticket = await createLorrenSupportTicket(prisma, {
+    source: 'WHATSAPP',
+    sourceMessageId: messageId,
+    createdByPhone: phone,
+    createdByName: owner.name,
+    originalText,
+    actorRole: 'WHATSAPP_AUTHORIZED',
+    actor: { actorSource: 'lorren-whatsapp-support', actorUsername: owner.name, actorRole: 'WHATSAPP_AUTHORIZED' }
+  });
+
   await prisma.devAuditEvent.create({
     data: {
       entityType: INBOUND_ENTITY_TYPE,
       entityId: messageId,
-      entityLabel: phone || null,
+      entityLabel: ticket.publicCode,
       action: INBOUND_ACTION,
-      actorSource: 'lorren-whatsapp-webhook',
-      metadata: { messageId, phone: normalizePhone(phone), ticketId }
+      actorUsername: owner.name,
+      actorRole: 'WHATSAPP_AUTHORIZED',
+      actorSource: 'lorren-whatsapp-support',
+      metadata: { ticketId: ticket.id, publicCode: ticket.publicCode, phone }
     }
   });
+  return { accepted: true, duplicate: false, ticketId: ticket.id, publicCode: ticket.publicCode };
 }
 
-export async function lorrenSupportInboundAlreadyAccepted(prisma, messageId) {
-  if (!messageId || !prisma?.devAuditEvent?.findFirst) return false;
-  return Boolean(await prisma.devAuditEvent.findFirst({
-    where: { entityType: INBOUND_ENTITY_TYPE, entityId: messageId, action: INBOUND_ACTION },
-    select: { id: true }
-  }));
+export async function loadLorrenSupportTicketTimeline(prisma, ticketId, { take = 100 } = {}) {
+  if (!ticketId || !prisma?.devAuditEvent?.findMany) return [];
+  return prisma.devAuditEvent.findMany({
+    where: { entityType: TICKET_ENTITY_TYPE, entityId: ticketId },
+    orderBy: { createdAt: 'asc' },
+    take: Math.max(1, Math.min(Number(take) || 100, 500))
+  });
 }
