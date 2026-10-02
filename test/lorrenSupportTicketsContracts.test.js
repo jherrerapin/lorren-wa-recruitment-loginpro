@@ -8,6 +8,7 @@ const admin = fs.readFileSync('src/routes/lorrenSupportTicketsAdmin.js', 'utf8')
 const server = fs.readFileSync('src/server.js', 'utf8');
 const navigation = fs.readFileSync('src/services/adminNavigation.js', 'utf8');
 const operationalAccess = fs.readFileSync('src/services/operationalAccess.js', 'utf8');
+const userAccess = fs.readFileSync('src/public/payroll-user-access.js', 'utf8');
 const whatsappClient = fs.readFileSync('src/services/lorrenWhatsappClient.js', 'utf8');
 const developmentDispatch = fs.readFileSync('src/services/lorrenSupportDevelopmentDispatch.js', 'utf8');
 const developmentWorkflow = fs.readFileSync('.github/workflows/lorren-support-ticket-development.yml', 'utf8');
@@ -52,6 +53,8 @@ test('Tickets es un acceso independiente gobernado por permiso explícito', () =
   assert.match(operationalAccess, /SUPPORT_TICKETS_ACCESS:\s*'SUPPORT_TICKETS_ACCESS'/);
   assert.match(operationalAccess, /module:\s*'Tickets',\s*label:\s*'Acceder al módulo y crear tickets'/);
   assert.match(operationalAccess, /normalizedCapability === OPERATIONAL_CAPABILITY\.SUPPORT_TICKETS_ACCESS \? false : true/);
+  assert.match(userAccess, /if \(!root\) \{/);
+  assert.match(userAccess, /legend\.textContent = moduleName/);
   assert.match(navigation, /standaloneTicketsLink/);
   assert.match(navigation, /data-standalone-link="lorren-tickets"/);
   assert.doesNotMatch(navigation.match(/function recruitmentMenuItems[\s\S]*?function operationsMenuItems/)?.[0] || '', /lorren-tickets/);
