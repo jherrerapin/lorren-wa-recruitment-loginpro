@@ -5,10 +5,12 @@ import {
   createLorrenSupportTicket,
   loadLorrenSupportAuthorizedPhones,
   loadLorrenSupportConfig,
+  loadLorrenSupportTicket,
   loadLorrenSupportTickets,
   saveLorrenSupportConfig,
   updateLorrenSupportTicket
 } from '../services/lorrenSupportTickets.js';
+import { dispatchLorrenSupportDevelopment } from '../services/lorrenSupportDevelopmentDispatch.js';
 import { normalizeDispatchWhatsappPhone } from '../services/dispatchWhatsappCloudConfig.js';
 
 function escapeHtml(value) {
@@ -84,12 +86,15 @@ function ticketVisibleToSupervisor(ticket, identity) {
 
 function renderTicketCard(ticket, devView) {
   const i = ticket.interpretation || {};
+  const developmentButton = ticket.status === 'EN_PROCESO'
+    ? '<button class="btn btn-primary" type="button" disabled>Desarrollo iniciado</button>'
+    : `<form method="post" action="/admin/lorren-tickets/${encodeURIComponent(ticket.id)}/approve-development"><button class="btn btn-primary" type="submit">Aprobar para desarrollo</button></form>`;
   const controls = devView ? `<form method="post" action="/admin/lorren-tickets/${encodeURIComponent(ticket.id)}/update" class="ticket-controls">
     <label>Estado<select name="status">${LORREN_SUPPORT_STATUSES.map((item) => `<option value="${item}" ${ticket.status === item ? 'selected' : ''}>${escapeHtml(statusLabel(item))}</option>`).join('')}</select></label>
     <label>Prioridad<select name="priority">${LORREN_SUPPORT_PRIORITIES.map((item) => `<option value="${item}" ${ticket.priority === item ? 'selected' : ''}>${escapeHtml(priorityLabel(item))}</option>`).join('')}</select></label>
     <button class="btn" type="submit">Guardar estado</button>
   </form>
-  <form method="post" action="/admin/lorren-tickets/${encodeURIComponent(ticket.id)}/approve-development" onsubmit="return confirm('¿Aprobar este ticket para desarrollo? Esto no hace merge ni deploy automático.');"><button class="btn btn-primary" type="submit">Aprobar para desarrollo</button></form>` : '';
+  ${developmentButton}` : '';
   return `<article class="ticket-card" data-ticket-id="${escapeHtml(ticket.id)}">
     <div class="ticket-head"><div><span class="code">${escapeHtml(ticket.publicCode)}</span><h2>${escapeHtml(i.title || ticket.originalText?.slice(0, 120) || 'Ticket')}</h2></div><div class="badges"><span>${escapeHtml(statusLabel(ticket.status))}</span><span>${escapeHtml(priorityLabel(ticket.priority))}</span></div></div>
     <div class="meta">${escapeHtml(ticket.source || '—')} · ${escapeHtml(ticket.createdByName || ticket.createdByUsername || ticket.createdByPhone || 'Sin autor')} · ${escapeHtml(dateTime(ticket.createdAt))}</div>
@@ -164,9 +169,31 @@ export function lorrenSupportTicketsAdminRouter(prisma) {
   });
 
   router.post('/:ticketId/approve-development', requireDev, form, async (req, res) => {
+    const approvalActor = actor(req, 'lorren-support-dev-approval');
     try {
-      await updateLorrenSupportTicket(prisma, req.params.ticketId, { requestDevelopment: true }, actor(req, 'lorren-support-dev-approval'));
-      return res.redirect('/admin/lorren-tickets?message=' + encodeURIComponent('Ticket aprobado para desarrollo. No se hizo merge ni deploy automático.'));
+      let ticket = await loadLorrenSupportTicket(prisma, req.params.ticketId);
+      if (!ticket) throw new Error('lorren_support_ticket_not_found');
+      if (!ticket.developmentRequestedAt) {
+        ticket = await updateLorrenSupportTicket(prisma, req.params.ticketId, { requestDevelopment: true }, approvalActor);
+      }
+
+      const dispatch = await dispatchLorrenSupportDevelopment(prisma, ticket, {
+        actor: actor(req, 'lorren-support-development-dispatch')
+      });
+      if (!dispatch.ok) {
+        const pending = dispatch.reason === 'not_configured'
+          ? `Ticket aprobado. Desarrollo automático pendiente de configurar: ${dispatch.missing.join(', ')}.`
+          : 'Ticket aprobado, pero no fue posible iniciar el desarrollo automático.';
+        return res.redirect('/admin/lorren-tickets?error=' + encodeURIComponent(pending));
+      }
+
+      if (ticket.status !== 'EN_PROCESO') {
+        await updateLorrenSupportTicket(prisma, req.params.ticketId, { status: 'EN_PROCESO' }, actor(req, 'lorren-support-development-started'));
+      }
+      const message = dispatch.duplicate
+        ? 'El desarrollo de este ticket ya estaba iniciado. No se lanzó una ejecución duplicada.'
+        : 'Desarrollo automático iniciado en una rama aislada. Se generará un PR draft; no habrá merge ni deploy automático.';
+      return res.redirect('/admin/lorren-tickets?message=' + encodeURIComponent(message));
     } catch (error) {
       return res.redirect('/admin/lorren-tickets?error=' + encodeURIComponent(error?.message || 'No fue posible aprobar el ticket.'));
     }
