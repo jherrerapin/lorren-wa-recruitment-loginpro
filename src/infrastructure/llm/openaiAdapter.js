@@ -7,7 +7,7 @@ const DIRECTIVE_FALLBACKS = Object.freeze({
   ASK_CITY_AND_VACANCY: 'Hola, soy Lórren, del equipo de selección de LoginPro. Gracias por comunicarte. ¿En qué ciudad te encuentras y qué vacante viste en el anuncio?',
   ASK_VACANCY_FOR_CITY: 'Gracias. Ya tengo registrada tu ciudad. ¿Qué vacante o cargo viste en el anuncio?',
   ASK_CITY_FOR_ROLE: 'Gracias. Ya identifiqué el cargo que viste. ¿Desde qué ciudad nos escribes?',
-  ASK_WHICH_FLYER_SEEN: 'Hola, soy Lórren, del equipo de selección de LoginPro. Gracias por comunicarte. Para brindarte la información correcta, ¿me confirmas qué cargo viste en el anuncio?',
+  ASK_WHICH_FLYER_SEEN: 'Hola, soy Lórren, del equipo de selección de LoginPro. Gracias por comunicarte. Para brindarte la información correcta, ¿me confirmas qué cargo específico vio el candidato en el anuncio?',
   CLARIFY_VACANCY_SELECTION: 'Encontré más de una convocatoria que podría coincidir. ¿Me confirmas algún detalle adicional del anuncio, como el turno, la zona o el nombre exacto del cargo?'
 });
 const SYSTEM_PROMPT = `Eres Lórren, una asistente de reclutamiento. Redacta un mensaje único, conversacional y directo cumpliendo estrictamente con la directiva indicada. No inventes datos ni hagas preguntas que no estén en la directiva. Nunca preguntes el género, sexo o identidad de género del candidato, ni menciones que ese dato falta. Si aparece gender entre los parámetros, ignóralo al redactar.
@@ -94,12 +94,21 @@ function extractReply(response) {
   return compactString(response?.data?.choices?.[0]?.message?.content);
 }
 
+async function reportUsage(options, model, usage) {
+  if (typeof options?.onUsage !== 'function' || !usage) return;
+  try {
+    await options.onUsage({ source: 'CONVERSATION_REPLY', model, usage });
+  } catch {
+    // La telemetría nunca debe bloquear una respuesta al candidato.
+  }
+}
+
 /**
  * Render a pure engine directive into candidate-facing text. API failures are
  * deliberately converted into a safe local response so transport callers do
  * not need to understand OpenAI errors.
  */
-export async function generateReply(directive, parameters = {}, context = {}) {
+export async function generateReply(directive, parameters = {}, context = {}, options = {}) {
   const normalizedDirective = compactString(directive);
   try {
     if (!normalizedDirective) throw new TypeError('directive_required');
@@ -131,6 +140,7 @@ export async function generateReply(directive, parameters = {}, context = {}) {
       }
     );
 
+    await reportUsage(options, model, response?.data?.usage);
     const reply = extractReply(response);
     if (!reply) throw new Error('openai_reply_empty');
     return reply;
