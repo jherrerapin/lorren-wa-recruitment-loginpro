@@ -131,13 +131,14 @@ function renderTicketCard(ticket, devView) {
 function renderAiUsage(aiUsage) {
   if (!aiUsage) return '<section class="card"><h2>Consumo IA · hoy</h2><p class="meta">No fue posible leer la telemetría en este momento. El panel de tickets sigue disponible.</p></section>';
   const categories = [
-    ['Bot', aiUsage.bot, aiUsage.coverage?.bot],
-    ['CV', aiUsage.cv, aiUsage.coverage?.cv],
+    ['Bot de reclutamiento', aiUsage.bot, aiUsage.coverage?.bot],
+    ['Hojas de vida', aiUsage.cv, aiUsage.coverage?.cv],
+    ['Interpretación tickets', aiUsage.ticketInterpretation, aiUsage.coverage?.ticketInterpretation],
     ['Desarrollo tickets', aiUsage.ticketDevelopment, aiUsage.coverage?.ticketDevelopment]
   ];
   const rows = categories.map(([label, usage, observable]) => `<div class="usage-item"><span>${escapeHtml(label)}</span><strong>${observable ? tokenNumber(usage?.totalTokens) : 'No observable'}</strong><small>${observable ? `${tokenNumber(usage?.events)} eventos medidos` : 'Sin autoridad de medición disponible'}</small></div>`).join('');
   const percent = aiUsage.dailyBudget > 0 ? Math.min(100, Math.round((aiUsage.totalTokens / aiUsage.dailyBudget) * 1000) / 10) : 0;
-  return `<section class="card ai-usage"><div class="usage-head"><div><h2>Consumo IA · corte diario UTC</h2><p class="meta">Tokens reales reportados por las autoridades observables. No se estiman tokens por texto.</p></div><div class="usage-total"><span>Total</span><strong>${tokenNumber(aiUsage.totalTokens)}</strong><small>${percent}% de ${tokenNumber(aiUsage.dailyBudget)}</small></div></div><div class="usage-grid">${rows}<div class="usage-item remaining"><span>Restante estimado</span><strong>${tokenNumber(aiUsage.remainingTokens)}</strong><small>Respecto al presupuesto diario configurado</small></div></div></section>`;
+  return `<section class="card ai-usage"><div class="usage-head"><div><h2>Consumo IA · corte diario UTC</h2><p class="meta">Tokens reales reportados por las autoridades observables. No se estiman tokens por texto.</p></div><div class="usage-total"><span>Total</span><strong>${tokenNumber(aiUsage.totalTokens)}</strong><small>${percent}% de ${tokenNumber(aiUsage.dailyBudget)}</small></div></div><div class="usage-grid">${rows}<div class="usage-item remaining"><span>Restante estimado</span><strong>${tokenNumber(aiUsage.remainingTokens)}</strong><small>Se reinicia a las 00:00 UTC</small></div></div></section>`;
 }
 
 function renderPage({ devView, tickets, config, authorizedPhones, aiUsage, message, error, navbar }) {
