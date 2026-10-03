@@ -151,11 +151,9 @@ export function chatPolicy(input) {
     !Object.prototype.hasOwnProperty.call(fieldsToPersist, field)
   ));
   if (pendingFields.length) {
+    const text = buildPendingFieldsReply(pendingFields);
     return {
-      reply: {
-        directive: 'ASK_MISSING_FIELDS',
-        parameters: { missingFields: pendingFields }
-      },
+      reply: { text },
       ...(Object.keys(fieldsToPersist).length
         ? { mutations: { fieldsToPersist } }
         : {}),

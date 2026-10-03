@@ -343,19 +343,19 @@ export function vacancyPolicy(input) {
     return {};
   }
 
+  // --- AQUÍ ESTÁ NUESTRO NUEVO BLOQUE DE TEXTOS FIJOS ---
   if (input?.vacancy === null && !input?.candidate?.facts?.vacancyId) {
     const context = unresolvedRecruitmentContext(input);
     if (!context.city && !context.role) {
       return {
-        reply: { directive: 'ASK_CITY_AND_VACANCY' },
+        reply: { text: 'Hola, soy Lórren del equipo de selección de LoginPro. Para poder ayudarte mejor, ¿podrías decirme en qué ciudad te encuentras y cuál es el cargo específico que te interesa?' },
         transitions: { keepCurrentStep: true }
       };
     }
     if (context.city && !context.role) {
       return {
         reply: {
-          directive: 'ASK_VACANCY_FOR_CITY',
-          parameters: { city: context.city }
+          text: `Gracias por comunicarte desde ${context.city}. ¿Me podrías indicar qué cargo específico te interesa?`
         },
         transitions: { keepCurrentStep: true }
       };
@@ -363,20 +363,19 @@ export function vacancyPolicy(input) {
     if (!context.city && context.role) {
       return {
         reply: {
-          directive: 'ASK_CITY_FOR_ROLE',
-          parameters: { role: context.role }
+          text: `Ya tengo el cargo que buscas (${context.role}). Para ubicar la vacante correcta, dime en qué ciudad o zona quieres aplicar.`
         },
         transitions: { keepCurrentStep: true }
       };
     }
     return {
       reply: {
-        directive: 'CLARIFY_VACANCY_SELECTION',
-        parameters: { roleHint: context.role, cityHint: context.city }
+        text: 'Tengo la ciudad y el cargo, pero necesito ubicar la vacante exacta. ¿Recuerdas la operación o la empresa donde viste el anuncio?'
       },
       transitions: { keepCurrentStep: true }
     };
   }
+  // ------------------------------------------------------
 
   const vacancyActive = input?.vacancy?.isActive ?? input?.candidate?.facts?.vacancyActive;
   const accepting = input?.vacancy?.acceptingApplications
