@@ -32,7 +32,7 @@ const OPERATIONS_ICON = '';
 const PAYROLL_ICON = '';
 const BRANCHES_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAX0lEQVR42u2WWwoAIAgEU7r/le0CJSSWBbO/gov7iFoDABRDvKGZWRqRyJRLb5B7+7Tagp4lZVS9cgX+syA7nFhAC2gBFmikBasmeDMs2P4RZad99Yi9p8CJyz0lCCEYKGkkNOBBvQ4AAAAASUVORK5CYII=';
 const USERS_ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAlklEQVR42u1VwRaAIAhzPv//l+mSvZ5pgKB1YMfUsU2wlAKBjwHNZiKi6yCAbQLuhR8ERiHFO9JWLCcQs7H3vo+SehORVzmXruUlnX3CpQcAoDroOfldE3KRq6+AI6vrb0lMN6HUicaxeAwl86wpPEoB1sdE677lKrPKpfs5gbD8cDQv34g37xg1z7MmMtfCgUAgEPDCAQi2bAnBhNiuAAAAAElFTkSuQmCC';
-const TICKETS_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4.5h14A1.5 1.5 0 0 1 20.5 6v3a3 3 0 0 0 0 6v3a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18v-3a3 3 0 0 0 0-6V6A1.5 1.5 0 0 1 5 4.5Z"/><path d="M9 8.5h6M9 12h6M9 15.5h4"/></svg>';
+const TICKETS_ICON = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%230f766e%22 stroke-width=%221.8%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22%3E%3Cpath d=%22M5 4.5h14a1.5 1.5 0 0 1 1.5 1.5v3a3 3 0 0 0 0 6v3a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 18v-3a3 3 0 0 0 0-6V6A1.5 1.5 0 0 1 5 4.5Z%22/%3E%3Cpath d=%22M9 8.5h6M9 12h6M9 15.5h4%22/%3E%3C/svg%3E';
 
 function requestPath(req = {}) {
   return String(req.originalUrl || req.url || '').split('?')[0] || '/';
@@ -167,7 +167,7 @@ function standaloneTicketsLink(access, path) {
   if (!access.supportTickets) return '';
   const classes = ['admin-module-standalone-link'];
   if (path.startsWith(TICKETS_PATH)) classes.push('is-active');
-  return `<a class="${classes.join(' ')}" href="${TICKETS_PATH}" data-standalone-link="lorren-tickets" style="gap:7px;"><span class="admin-module-nav-icon" aria-hidden="true">${TICKETS_ICON}</span><span>Tickets</span></a>`;
+  return `<a class="${classes.join(' ')}" href="${TICKETS_PATH}" data-standalone-link="lorren-tickets" style="gap:7px;">${standaloneIcon(TICKETS_ICON)}<span>Tickets</span></a>`;
 }
 
 function sessionIdentity(req = {}) {
