@@ -32,7 +32,7 @@ function fakePrisma() {
         return auditEvents.find((row) => row.entityType === where.entityType && row.entityId === where.entityId && row.action === where.action) || null;
       },
       async create({ data }) {
-        const row = { id: `usage-${auditEvents.length + 1}`, createdAt: new Date('2026-10-02T12:00:00.000Z'), ...data };
+        const row = { id: `usage-${auditEvents.length + 1}`, createdAt: new Date('2026-10-03T16:00:00.000Z'), ...data };
         auditEvents.push(row);
         return row;
       }
@@ -70,7 +70,7 @@ test('consolida reclutamiento, CV, interpretación y desarrollo usando solo el d
     entityType: 'LORREN_AI_USAGE',
     entityId: 'dispatch-1',
     action: 'TICKET_DEVELOPMENT_USAGE',
-    createdAt: new Date('2026-10-02T12:00:00.000Z'),
+    createdAt: new Date('2026-10-03T16:00:00.000Z'),
     metadata: {
       inputTokens: 400,
       cachedInputTokens: 100,
@@ -81,7 +81,7 @@ test('consolida reclutamiento, CV, interpretación y desarrollo usando solo el d
   });
 
   const summary = await loadLorrenAiUsageSummary(prisma, {
-    now: new Date('2026-10-02T15:00:00.000Z'),
+    now: new Date('2026-10-03T17:00:00.000Z'),
     env: { OPENAI_SHARED_DAILY_TOKEN_BUDGET: '2500000' }
   });
 
@@ -96,8 +96,8 @@ test('consolida reclutamiento, CV, interpretación y desarrollo usando solo el d
   assert.equal(summary.remainingTokens, 2_498_990);
   assert.deepEqual(summary.coverage, { bot: true, cv: true, ticketInterpretation: true, ticketDevelopment: true });
   assert.equal(summary.period.timeZone, 'UTC');
-  assert.equal(summary.period.start, '2026-10-02T00:00:00.000Z');
-  assert.equal(summary.period.end, '2026-10-03T00:00:00.000Z');
+  assert.equal(summary.period.start, '2026-10-03T15:43:59.000Z');
+  assert.equal(summary.period.end, '2026-10-04T00:00:00.000Z');
 });
 
 test('callback firmado persiste uso de Codex una sola vez y no guarda contenido del ticket', async () => {
