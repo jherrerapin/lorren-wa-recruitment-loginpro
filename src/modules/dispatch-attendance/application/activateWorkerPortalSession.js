@@ -7,6 +7,7 @@ import {
 } from '../domain/deviceActivationPolicy.js';
 import {
   buildWorkerPortalSessionCookie,
+  buildWorkerPortalSessionContinuityExpiry,
   buildWorkerPortalSessionExpiry,
   generateWorkerPortalSessionToken,
   hashWorkerPortalSessionToken,
@@ -108,5 +109,43 @@ export async function resolveWorkerPortalSession({
     deviceId: session.deviceId,
     sessionId: session.sessionId,
     expiresAt: session.expiresAt
+  };
+}
+
+
+export async function recoverWorkerPortalSessionForInstallation({
+  repository,
+  installationId,
+  installationPepper,
+  now = new Date(),
+  randomBytesFn,
+  userAgent = null,
+  platform = null,
+  ipAddress = null
+}) {
+  requireRepositoryMethod(repository, 'recoverActiveSessionByInstallation');
+
+  const normalizedInstallationId = normalizeInstallationId(installationId);
+  const rawSessionToken = generateWorkerPortalSessionToken(randomBytesFn);
+  const expiresAt = buildWorkerPortalSessionContinuityExpiry(now);
+  const result = requireSessionResult(
+    await repository.recoverActiveSessionByInstallation({
+      installationIdHash: hashInstallationId(normalizedInstallationId, installationPepper),
+      nextSessionTokenHash: hashWorkerPortalSessionToken(rawSessionToken),
+      expiresAt,
+      now,
+      userAgent: normalizeOptionalText(userAgent, 500),
+      platform: normalizeOptionalText(platform, 120),
+      ipAddress: normalizeOptionalText(ipAddress, 120)
+    })
+  );
+
+  return {
+    workerId: result.workerId,
+    deviceId: result.deviceId,
+    sessionId: result.sessionId,
+    expiresAt: result.expiresAt,
+    rawSessionToken,
+    cookie: buildWorkerPortalSessionCookie(result.expiresAt, now)
   };
 }
