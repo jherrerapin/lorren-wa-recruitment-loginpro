@@ -150,3 +150,25 @@ test('rechaza callbacks sin firma válida', async () => {
   );
   assert.equal(prisma.auditEvents.length, 0);
 });
+
+
+test('el cutover de corrección excluye consumo previo del mismo día sin borrar auditoría', async () => {
+  const prisma = fakePrisma();
+  prisma.auditEvents.push({
+    entityType: 'LORREN_AI_USAGE',
+    entityId: 'before-cutover',
+    action: 'BOT_RUNTIME_USAGE',
+    createdAt: new Date('2026-10-03T15:43:58.999Z'),
+    metadata: { inputTokens: 2_000_000, outputTokens: 0, totalTokens: 2_000_000 }
+  });
+
+  const summary = await loadLorrenAiUsageSummary(prisma, {
+    now: new Date('2026-10-03T15:44:00.000Z'),
+    dailyBudget: 2_500_000
+  });
+
+  assert.equal(summary.totalTokens, 0);
+  assert.equal(summary.remainingTokens, 2_500_000);
+  assert.equal(summary.period.start, '2026-10-03T15:43:59.000Z');
+  assert.equal(prisma.auditEvents.length, 1);
+});
