@@ -3,6 +3,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 const DEFAULT_DAILY_BUDGET = 2_500_000;
 const USAGE_ENTITY_TYPE = 'LORREN_AI_USAGE';
+// Telemetry before this correction mixed ticket interpretation with recruitment-bot usage.
+// Keep it for audit, but do not use it as the opening balance of the corrected counter.
+const CORRECTED_USAGE_COUNTER_START = new Date('2026-10-03T15:43:59.000Z');
 const BOT_RUNTIME_ACTION = 'BOT_RUNTIME_USAGE';
 const TICKET_INTERPRETATION_ACTION = 'TICKET_INTERPRETATION_USAGE';
 const TICKET_DEVELOPMENT_ACTION = 'TICKET_DEVELOPMENT_USAGE';
@@ -82,6 +85,9 @@ async function loadCvUsage(prisma, range) {
 
 export async function loadLorrenAiUsageSummary(prisma, options = {}) {
   const range = utcDayRange(options.now || new Date());
+  if (CORRECTED_USAGE_COUNTER_START > range.start && CORRECTED_USAGE_COUNTER_START < range.end) {
+    range.start = CORRECTED_USAGE_COUNTER_START;
+  }
   const [bot, cv, ticketInterpretation, ticketDevelopment] = await Promise.all([
     loadAuditUsage(prisma, range, BOT_RUNTIME_ACTION),
     loadCvUsage(prisma, range),
