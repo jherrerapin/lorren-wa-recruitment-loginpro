@@ -61,6 +61,13 @@ test('consolida reclutamiento, CV, interpretación y desarrollo usando solo el d
   });
   prisma.auditEvents.push({
     entityType: 'LORREN_AI_USAGE',
+    entityId: 'pre-correction-today',
+    action: 'BOT_RUNTIME_USAGE',
+    createdAt: new Date('2026-10-03T15:43:58.999Z'),
+    metadata: { inputTokens: 1800000, outputTokens: 200000, totalTokens: 2000000 }
+  });
+  prisma.auditEvents.push({
+    entityType: 'LORREN_AI_USAGE',
     entityId: 'yesterday-bot',
     action: 'BOT_RUNTIME_USAGE',
     createdAt: new Date('2026-10-01T23:59:59.999Z'),
