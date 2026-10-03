@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extractCandidateData } from '../src/infrastructure/llm/aiExtractionService.js';
+import { interpretLorrenSupportTicket } from '../src/services/lorrenSupportTicketInterpreter.js';
 
 const vacancies = [
   { id: 'vac-ibague', role: 'Cargue y Descargue', title: 'Auxiliar de bodega', city: 'Ibagué' },
@@ -159,4 +160,12 @@ test('no invoca NLU cuando no hay texto o campos pendientes', async () => {
   assert.equal(await extractCandidateData('', ['age'], {}, dependencies), null);
   assert.equal(await extractCandidateData('Tengo 27', [], {}, dependencies), null);
   assert.equal(calls, 0);
+});
+
+ test('la interpretación de tickets restringe el módulo a las pestañas existentes', async () => {
+  const result = await interpretLorrenSupportTicket('El informe inventó un módulo nuevo', {
+    apiKey: null
+  });
+
+  assert.equal(result.module, 'RECLUTAMIENTO');
 });

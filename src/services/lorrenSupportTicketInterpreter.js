@@ -22,7 +22,7 @@ const TICKET_SCHEMA = {
     ],
     properties: {
       title: { type: 'string', minLength: 1, maxLength: 140 },
-      module: { type: 'string', enum: ['RECLUTAMIENTO', 'DESPACHO', 'ASISTENCIA', 'GESTION_TIEMPO', 'FACTURACION', 'OTRO'] },
+      module: { type: 'string', enum: ['RECLUTAMIENTO', 'DESPACHO', 'GESTION_TIEMPO', 'SUCURSALES'] },
       type: { type: 'string', enum: ['ERROR', 'MEJORA', 'UX', 'SOLICITUD', 'CONSULTA'] },
       summary: { type: 'string', minLength: 1, maxLength: 1200 },
       currentBehavior: { type: ['string', 'null'], maxLength: 1200 },
@@ -50,7 +50,7 @@ function fallbackInterpretation(text, reason = 'manual_review_required') {
   const clean = String(text || '').trim();
   return {
     title: clean.slice(0, 120) || 'Ticket sin título',
-    module: 'OTRO',
+    module: 'RECLUTAMIENTO',
     type: 'SOLICITUD',
     summary: clean || 'Sin descripción.',
     currentBehavior: null,
