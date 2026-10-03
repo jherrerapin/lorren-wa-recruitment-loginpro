@@ -16,6 +16,7 @@ import {
 } from '../modules/dispatch-attendance/domain/workerPortalSessionPolicy.js';
 import {
   activateWorkerPortalSession,
+  recoverWorkerPortalSessionForInstallation,
   resolveWorkerPortalSession
 } from '../modules/dispatch-attendance/application/activateWorkerPortalSession.js';
 import { registerDispatchArrival } from '../modules/dispatch-attendance/application/registerArrival.js';
@@ -490,6 +491,7 @@ export function workerPortalRouter(prisma, options = {}) {
   let repository = options.repository || null;
   const activateSessionFn = options.activateSessionFn || activateWorkerPortalSession;
   const resolveSessionFn = options.resolveSessionFn || resolveWorkerPortalSession;
+  const recoverSessionFn = options.recoverSessionFn || recoverWorkerPortalSessionForInstallation;
   const loadAssignmentsFn = options.loadAssignmentsFn || loadWorkerPortalAssignments;
   const loadAssignmentForArrivalFn = options.loadAssignmentForArrivalFn || loadWorkerPortalAssignmentForArrival;
   const loadAssignmentForDepartureFn = options.loadAssignmentForDepartureFn || loadWorkerPortalAssignmentForMark;
@@ -525,10 +527,57 @@ export function workerPortalRouter(prisma, options = {}) {
     return repository;
   }
 
-  async function resolveRequestSession(req, now) {
+  function isIosPortalRequest(req) {
+    const userAgent = requestUserAgent(req) || '';
+    return /(?:iPhone|iPad|iPod)/i.test(userAgent)
+      || (/Macintosh/i.test(userAgent) && /Mobile\//i.test(userAgent));
+  }
+
+  async function recoverIosRequestSession(req, res, now) {
+    if (!isIosPortalRequest(req)) return null;
+    const installationId = req.cookies?.[WORKER_PORTAL_INSTALLATION_COOKIE_NAME];
+    if (!installationId) return null;
+
+    let normalizedInstallationId;
+    try {
+      normalizedInstallationId = normalizeInstallationId(installationId);
+    } catch {
+      return null;
+    }
+
+    const recovered = await recoverSessionFn({
+      repository: getRepository(),
+      installationId: normalizedInstallationId,
+      installationPepper,
+      now,
+      randomBytesFn: randomSessionBytesFn,
+      userAgent: requestUserAgent(req),
+      platform: requestPlatform(req),
+      ipAddress: requestIp(req)
+    });
+    if (!recovered) return null;
+
+    res.cookie(recovered.cookie.name, recovered.rawSessionToken, recovered.cookie.options);
+    setWorkerPortalInstallationCookie(res, normalizedInstallationId);
+    return {
+      workerId: recovered.workerId,
+      deviceId: recovered.deviceId,
+      sessionId: recovered.sessionId,
+      expiresAt: recovered.expiresAt
+    };
+  }
+
+  async function resolveRequestSession(req, res, now) {
     const rawSessionToken = req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME];
-    if (!rawSessionToken) return null;
-    return resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
+    if (rawSessionToken) {
+      try {
+        const session = await resolveSessionFn({ repository: getRepository(), rawSessionToken, now });
+        if (session) return session;
+      } catch (error) {
+        if (!isIosPortalRequest(req) || !INVALID_SESSION_COOKIE_CODES.has(errorCode(error))) throw error;
+      }
+    }
+    return recoverIosRequestSession(req, res, now);
   }
 
   async function handleMark(req, res, markType) {
@@ -549,7 +598,7 @@ export function workerPortalRouter(prisma, options = {}) {
     try {
       const now = nowFn();
       if (!validDate(now)) throw new Error('worker_portal_mark_now_invalid');
-      const portalSession = await resolveRequestSession(req, now);
+      const portalSession = await resolveRequestSession(req, res, now);
       if (!portalSession) {
         clearWorkerPortalSessionCookie(res);
         return res.status(401).json({ ok: false, error: 'portal_session_required' });
@@ -776,7 +825,7 @@ export function workerPortalRouter(prisma, options = {}) {
     try {
       const now = nowFn();
       if (!validDate(now)) throw new Error('worker_portal_activation_now_invalid');
-      const portalSession = await resolveRequestSession(req, now);
+      const portalSession = await resolveRequestSession(req, res, now);
       if (portalSession) {
         renewWorkerPortalPersistence(req, res, now);
         return res.redirect(WORKER_PORTAL_HOME_PATH);
@@ -850,7 +899,7 @@ export function workerPortalRouter(prisma, options = {}) {
     try {
       const now = nowFn();
       if (!validDate(now)) throw new Error('worker_portal_resolution_now_invalid');
-      const portalSession = await resolveRequestSession(req, now);
+      const portalSession = await resolveRequestSession(req, res, now);
       if (!portalSession) {
         if (req.cookies?.[WORKER_PORTAL_SESSION_COOKIE_NAME]) clearWorkerPortalSessionCookie(res);
         return renderPortal(res, 'inactive', nonce);
