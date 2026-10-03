@@ -207,6 +207,86 @@ test('la activación exitosa consume, transfiere el principal y crea una nueva s
   assert.equal(calls[6][1].data.consumedByDeviceId, 'device-2');
 });
 
+test('recoverActiveSessionByInstallation exige principal activo y rota la sesión sin token crudo', async () => {
+  const calls = [];
+  const tx = {
+    dispatchWorkerPortalSession: {
+      findFirst: async (input) => {
+        calls.push(['find-session', input]);
+        return { id: 'session-ios', workerId: 'worker-ios', workerDeviceId: 'device-ios' };
+      },
+      updateMany: async (input) => {
+        calls.push(['rotate-session', input]);
+        return { count: 1 };
+      }
+    },
+    dispatchWorkerDevice: {
+      updateMany: async (input) => {
+        calls.push(['touch-device', input]);
+        return { count: 1 };
+      }
+    }
+  };
+  const repository = createPrismaWorkerPortalSessionRepository(rootPrisma({
+    transaction: async (operation, options) => {
+      assert.equal(options.isolationLevel, 'Serializable');
+      return operation(tx);
+    }
+  }));
+  const expiresAt = new Date(NOW.getTime() + 365 * 24 * 60 * 60 * 1000);
+  const result = await repository.recoverActiveSessionByInstallation({
+    installationIdHash: 'i'.repeat(64),
+    nextSessionTokenHash: 'n'.repeat(64),
+    expiresAt,
+    now: NOW,
+    userAgent: 'iPhone',
+    platform: null,
+    ipAddress: '203.0.113.20'
+  });
+
+  assert.deepEqual(result, {
+    workerId: 'worker-ios',
+    deviceId: 'device-ios',
+    sessionId: 'session-ios',
+    expiresAt
+  });
+  const query = calls[0][1];
+  assert.equal(query.where.status, 'ACTIVE');
+  assert.equal(query.where.revokedAt, null);
+  assert.deepEqual(query.where.worker.is.operationalStatus.in, ['ACTIVE', 'CONTRATADO']);
+  assert.equal(query.where.workerDevice.is.authorizationType, 'PRIMARY');
+  assert.equal(query.where.workerDevice.is.status, 'ACTIVE');
+  assert.equal(query.where.workerDevice.is.revokedAt, null);
+  assert.equal(query.where.workerDevice.is.installationIdHash, 'i'.repeat(64));
+  const rotation = calls[1][1];
+  assert.equal(rotation.data.sessionTokenHash, 'n'.repeat(64));
+  assert.equal(rotation.data.expiresAt, expiresAt);
+  assert.equal(JSON.stringify(rotation).includes('rawSessionToken'), false);
+  assert.equal(calls[2][1].where.id, 'device-ios');
+});
+
+test('recoverActiveSessionByInstallation no recupera instalación revocada o desconocida', async () => {
+  let writes = 0;
+  const tx = {
+    dispatchWorkerPortalSession: { findFirst: async () => null, updateMany: async () => { writes += 1; } },
+    dispatchWorkerDevice: { updateMany: async () => { writes += 1; } }
+  };
+  const repository = createPrismaWorkerPortalSessionRepository(rootPrisma({
+    transaction: async (operation) => operation(tx)
+  }));
+  const result = await repository.recoverActiveSessionByInstallation({
+    installationIdHash: 'i'.repeat(64),
+    nextSessionTokenHash: 'n'.repeat(64),
+    expiresAt: new Date(NOW.getTime() + 60_000),
+    now: NOW,
+    userAgent: 'iPhone',
+    platform: null,
+    ipAddress: null
+  });
+  assert.equal(result, null);
+  assert.equal(writes, 0);
+});
+
 test('resolveActiveSession exige sesión, auxiliar y dispositivo activos', async () => {
   let query;
   let touch;
