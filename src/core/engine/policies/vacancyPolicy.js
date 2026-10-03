@@ -310,12 +310,6 @@ export function buildVacancyPolicyReply(vacancy = {}, rawText = '') {
   return 'Ese detalle no aparece en la información disponible de esta vacante.';
 }
 
-/**
- * Pure vacancy-context policy.
- *
- * @param {import('../../contracts/ConversationTurnInputSchema.js').ConversationTurnInput} input
- * @returns {Promise<object>} Partial<ConversationDecision>
- */
 export function vacancyPolicy(input) {
   const intent = String(input?.interpretation?.intent || '').trim().toUpperCase();
   if (['INACTIVITY_REMINDER', 'INTERVIEW_REMINDER'].includes(intent)) return {};
@@ -343,7 +337,6 @@ export function vacancyPolicy(input) {
     return {};
   }
 
-  // --- AQUÍ ESTÁ NUESTRO NUEVO BLOQUE DE TEXTOS FIJOS ---
   if (input?.vacancy === null && !input?.candidate?.facts?.vacancyId) {
     const context = unresolvedRecruitmentContext(input);
     if (!context.city && !context.role) {
@@ -375,7 +368,6 @@ export function vacancyPolicy(input) {
       transitions: { keepCurrentStep: true }
     };
   }
-  // ------------------------------------------------------
 
   const vacancyActive = input?.vacancy?.isActive ?? input?.candidate?.facts?.vacancyActive;
   const accepting = input?.vacancy?.acceptingApplications
