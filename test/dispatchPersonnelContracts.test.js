@@ -93,3 +93,16 @@ test('assignment list remains limited to contracted workers', () => {
   assert.match(extrasSource, /const baseWorkerWhere = \{ operationalStatus: 'CONTRATADO'/);
   assert.doesNotMatch(assignmentView, /name="status"/);
 });
+
+
+test('cambio administrativo a CONTRATADO resuelve la autoridad de sincronización operativa', () => {
+  const adminSource = readSource('src/routes/admin.js');
+  assert.match(
+    adminSource,
+    /import\s*{\s*upsertDispatchWorkerFromCandidate\s*}\s*from\s*['"]\.\.\/services\/dispatchWorkerSync\.js['"]/
+  );
+  assert.match(
+    adminSource,
+    /if\s*\(status\s*===\s*['"]CONTRATADO['"]\)\s*await\s+upsertDispatchWorkerFromCandidate\(prisma,\s*id\)/
+  );
+});
