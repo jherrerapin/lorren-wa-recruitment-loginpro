@@ -216,6 +216,77 @@ export function createPrismaWorkerPortalSessionRepository(
       }, { maxRetries: retryLimit });
     },
 
+    async recoverActiveSessionByInstallation(input) {
+      if (!validDate(input.now) || !validDate(input.expiresAt)) {
+        throw new Error('worker_portal_session_recovery_time_invalid');
+      }
+
+      return runSerializableActivationTransaction(prisma, async (tx) => {
+        const session = await tx.dispatchWorkerPortalSession.findFirst({
+          where: {
+            status: ACTIVE_SESSION_STATUS,
+            revokedAt: null,
+            worker: {
+              is: {
+                operationalStatus: { in: [...ACTIVE_WORKER_STATUSES] }
+              }
+            },
+            workerDevice: {
+              is: {
+                ...activeDeviceFilter(input.now),
+                installationIdHash: input.installationIdHash
+              }
+            }
+          },
+          select: {
+            id: true,
+            workerId: true,
+            workerDeviceId: true
+          },
+          orderBy: { issuedAt: 'desc' }
+        });
+        if (!session) return null;
+
+        const rotated = await tx.dispatchWorkerPortalSession.updateMany({
+          where: {
+            id: session.id,
+            status: ACTIVE_SESSION_STATUS,
+            revokedAt: null,
+            workerDeviceId: session.workerDeviceId
+          },
+          data: {
+            sessionTokenHash: input.nextSessionTokenHash,
+            lastSeenAt: input.now,
+            expiresAt: input.expiresAt,
+            ipAddress: input.ipAddress,
+            userAgent: input.userAgent,
+            platform: input.platform
+          }
+        });
+        if (rotated.count !== 1) return null;
+
+        await tx.dispatchWorkerDevice.updateMany({
+          where: {
+            id: session.workerDeviceId,
+            ...activeDeviceFilter(input.now),
+            installationIdHash: input.installationIdHash
+          },
+          data: {
+            lastSeenAt: input.now,
+            userAgent: input.userAgent,
+            platform: input.platform
+          }
+        });
+
+        return {
+          workerId: session.workerId,
+          deviceId: session.workerDeviceId,
+          sessionId: session.id,
+          expiresAt: input.expiresAt
+        };
+      }, { maxRetries: retryLimit });
+    },
+
     async resolveActiveSession(input) {
       if (!validDate(input.now)) throw new Error('worker_portal_session_now_invalid');
 

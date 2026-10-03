@@ -270,6 +270,71 @@ test('la portada activa carga asignaciones y renueva las mismas cookies de sesi�
   assert.equal(installationCookie.value, INSTALLATION_ID);
 });
 
+test('iPhone recupera una sesión perdida únicamente desde la instalación principal autorizada', async () => {
+  let recoveryCalls = 0;
+  const recoveredToken = 'R'.repeat(43);
+  const router = buildRouter({
+    recoverSessionFn: async (input) => {
+      recoveryCalls += 1;
+      assert.equal(input.installationId, INSTALLATION_ID);
+      assert.equal(input.installationPepper, PEPPER);
+      return {
+        workerId: 'worker-ios',
+        deviceId: 'device-ios',
+        sessionId: 'session-ios',
+        expiresAt: new Date(NOW.getTime() + WORKER_PORTAL_SESSION_CONTINUITY_MAX_AGE_MS),
+        rawSessionToken: recoveredToken,
+        cookie: {
+          name: WORKER_PORTAL_SESSION_COOKIE_NAME,
+          options: {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'lax',
+            path: '/',
+            maxAge: WORKER_PORTAL_SESSION_CONTINUITY_MAX_AGE_MS
+          }
+        }
+      };
+    }
+  });
+  const { res, state } = responseDouble();
+
+  await routeHandler(router, '/', 'get')(
+    requestDouble({
+      cookies: { [WORKER_PORTAL_INSTALLATION_COOKIE_NAME]: INSTALLATION_ID },
+      headers: { 'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148' }
+    }),
+    res
+  );
+
+  assert.equal(recoveryCalls, 1);
+  assert.equal(state.render.locals.mode, 'active');
+  assert.equal(state.cookies.find((item) => item.name === WORKER_PORTAL_SESSION_COOKIE_NAME)?.value, recoveredToken);
+  assert.equal(state.cookies.find((item) => item.name === WORKER_PORTAL_INSTALLATION_COOKIE_NAME)?.value, INSTALLATION_ID);
+});
+
+test('el fallback de instalación no autentica navegadores que no sean iOS', async () => {
+  let recoveryCalls = 0;
+  const router = buildRouter({
+    recoverSessionFn: async () => {
+      recoveryCalls += 1;
+      throw new Error('must_not_recover_non_ios');
+    }
+  });
+  const { res, state } = responseDouble();
+
+  await routeHandler(router, '/', 'get')(
+    requestDouble({
+      cookies: { [WORKER_PORTAL_INSTALLATION_COOKIE_NAME]: INSTALLATION_ID },
+      headers: { 'user-agent': 'Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 Chrome/140 Mobile Safari/537.36' }
+    }),
+    res
+  );
+
+  assert.equal(recoveryCalls, 0);
+  assert.equal(state.render.locals.mode, 'inactive');
+});
+
 test('la resolución normal nunca inventa otra instalación si la cookie de instalación falta', async () => {
   let randomUuidCalls = 0;
   const router = buildRouter({
