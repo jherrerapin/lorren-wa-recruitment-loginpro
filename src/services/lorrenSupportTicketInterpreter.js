@@ -17,6 +17,8 @@ const TICKET_SCHEMA = {
       'currentBehavior',
       'expectedBehavior',
       'suggestedScope',
+      'functionalImplications',
+      'businessUnknowns',
       'confidence',
       'suggestedPriority'
     ],
@@ -27,7 +29,17 @@ const TICKET_SCHEMA = {
       summary: { type: 'string', minLength: 1, maxLength: 1200 },
       currentBehavior: { type: ['string', 'null'], maxLength: 1200 },
       expectedBehavior: { type: ['string', 'null'], maxLength: 1200 },
-      suggestedScope: { type: ['string', 'null'], maxLength: 1200 },
+      suggestedScope: { type: ['string', 'null'], maxLength: 1800 },
+      functionalImplications: {
+        type: 'array',
+        maxItems: 10,
+        items: { type: 'string', minLength: 1, maxLength: 500 }
+      },
+      businessUnknowns: {
+        type: 'array',
+        maxItems: 8,
+        items: { type: 'string', minLength: 1, maxLength: 500 }
+      },
       confidence: { type: 'string', enum: ['ALTA', 'MEDIA', 'BAJA'] },
       suggestedPriority: { type: 'string', enum: ['BAJA', 'NORMAL', 'ALTA', 'URGENTE'] }
     }
@@ -56,6 +68,8 @@ function fallbackInterpretation(text, reason = 'manual_review_required') {
     currentBehavior: null,
     expectedBehavior: null,
     suggestedScope: null,
+    functionalImplications: [],
+    businessUnknowns: [],
     confidence: 'BAJA',
     suggestedPriority: 'NORMAL',
     aiStatus: reason
@@ -88,10 +102,14 @@ export async function interpretLorrenSupportTicket(text, options = {}) {
           type: 'input_text',
           text: [
             'Eres el analista interno de tickets de Lórren.',
-            'Convierte el mensaje en una especificación breve y fiel para un desarrollador.',
-            'No inventes requisitos, causas, archivos, endpoints ni soluciones.',
+            'Convierte el mensaje en una especificación funcional fiel para un desarrollador.',
+            'No inventes preferencias de negocio, causas técnicas, archivos, endpoints ni soluciones.',
+            'No te limites a repetir literalmente la petición: deriva en functionalImplications las condiciones funcionales necesarias para que lo solicitado sea coherente y utilizable.',
+            'Ejemplo de razonamiento permitido: si una tarifa depende de modalidades distintas, señalar que la modalidad debe representarse y validarse; no inventar cuáles modalidades existen si el usuario no las indicó.',
+            'Distingue implicaciones necesarias de decisiones opcionales. Coloca en businessUnknowns únicamente decisiones de negocio con dos o más resultados plausibles que no puedan resolverse inspeccionando el sistema.',
+            'No conviertas detalles técnicos desconocidos en preguntas para el usuario: el agente de desarrollo debe inspeccionar primero el repositorio.',
             'Conserva la intención del usuario y distingue claramente lo observado de lo esperado.',
-            'Si falta información, usa null donde corresponda y confidence BAJA o MEDIA.',
+            'Si persiste una ambigüedad real de negocio, usa confidence BAJA o MEDIA.',
             'La prioridad es solo una sugerencia; URGENTE únicamente cuando el texto describe una caída, bloqueo general, pérdida/corrupción de datos o riesgo operativo inmediato.'
           ].join(' ')
         }]
