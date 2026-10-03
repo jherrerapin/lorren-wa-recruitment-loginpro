@@ -3,9 +3,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 const DEFAULT_DAILY_BUDGET = 2_500_000;
 const USAGE_ENTITY_TYPE = 'LORREN_AI_USAGE';
-// Counter correction cutover: preserve earlier telemetry for audit without using it as today's opening balance.
-const CORRECTED_USAGE_COUNTER_START = new Date('2026-10-03T15:43:59.000Z');
 const BOT_RUNTIME_ACTION = 'BOT_RUNTIME_USAGE';
+const BOT_SOURCES = new Set(['CONVERSATION_REPLY', 'CANDIDATE_EXTRACTION']);
 const TICKET_INTERPRETATION_ACTION = 'TICKET_INTERPRETATION_USAGE';
 const TICKET_DEVELOPMENT_ACTION = 'TICKET_DEVELOPMENT_USAGE';
 const usageRecorderStorage = new AsyncLocalStorage();
@@ -20,10 +19,11 @@ function dailyBudget(env = process.env) {
   return Number.isFinite(configured) && configured > 0 ? Math.floor(configured) : DEFAULT_DAILY_BUDGET;
 }
 
-function utcDayRange(now = new Date()) {
+function bogotaDayRange(now = new Date()) {
   const current = now instanceof Date ? now : new Date(now);
   if (Number.isNaN(current.getTime())) throw new Error('lorren_ai_usage_invalid_date');
-  const start = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate(), 0, 0, 0, 0));
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(current).map((part) => [part.type, part.value]));
+  const start = new Date(`${parts.year}-${parts.month}-${parts.day}T05:00:00.000Z`);
   return { start, end: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
 }
 
@@ -61,10 +61,11 @@ async function loadAuditUsage(prisma, range, action) {
   if (!prisma?.devAuditEvent?.findMany) return { usage: emptyUsage(), observable: false };
   const rows = await prisma.devAuditEvent.findMany({
     where: { entityType: USAGE_ENTITY_TYPE, action, createdAt: { gte: range.start, lt: range.end } },
-    select: { metadata: true }
+    select: { metadata: true, actorSource: true }
   });
   const usage = emptyUsage();
   for (const row of rows) {
+    if (action === BOT_RUNTIME_ACTION && (row.actorSource !== 'lorren-recruitment-bot-runtime' || !BOT_SOURCES.has(row.metadata?.source))) continue;
     const observed = usageFromAudit(row);
     if (observed) addUsage(usage, observed);
   }
@@ -83,10 +84,7 @@ async function loadCvUsage(prisma, range) {
 }
 
 export async function loadLorrenAiUsageSummary(prisma, options = {}) {
-  const range = utcDayRange(options.now || new Date());
-  if (CORRECTED_USAGE_COUNTER_START > range.start && CORRECTED_USAGE_COUNTER_START < range.end) {
-    range.start = CORRECTED_USAGE_COUNTER_START;
-  }
+  const range = bogotaDayRange(options.now || new Date());
   const [bot, cv, ticketInterpretation, ticketDevelopment] = await Promise.all([
     loadAuditUsage(prisma, range, BOT_RUNTIME_ACTION),
     loadCvUsage(prisma, range),
@@ -96,7 +94,7 @@ export async function loadLorrenAiUsageSummary(prisma, options = {}) {
   const totalTokens = bot.usage.totalTokens + cv.usage.totalTokens + ticketInterpretation.usage.totalTokens + ticketDevelopment.usage.totalTokens;
   const budget = dailyBudget(options.env || process.env);
   return {
-    period: { start: range.start.toISOString(), end: range.end.toISOString(), timeZone: 'UTC' },
+    period: { start: range.start.toISOString(), end: range.end.toISOString(), timeZone: 'America/Bogota' },
     bot: bot.usage,
     cv: cv.usage,
     ticketInterpretation: ticketInterpretation.usage,
@@ -114,6 +112,7 @@ export function runWithLorrenAiUsageRecorder(recorder, callback) {
 }
 
 export async function recordCurrentLorrenBotUsage(event = {}) {
+  if (!BOT_SOURCES.has(event.source)) return { recorded: false, reason: 'not_recruitment_bot' };
   const recorder = usageRecorderStorage.getStore();
   if (typeof recorder !== 'function') return { recorded: false, reason: 'no_recorder' };
   try {
@@ -144,6 +143,7 @@ async function persistAuditUsage(prisma, event, action, actorSource) {
 }
 
 export async function persistLorrenBotUsage(prisma, event = {}) {
+  if (!BOT_SOURCES.has(event.source)) return { recorded: false, reason: 'not_recruitment_bot' };
   return persistAuditUsage(prisma, event, BOT_RUNTIME_ACTION, 'lorren-recruitment-bot-runtime');
 }
 

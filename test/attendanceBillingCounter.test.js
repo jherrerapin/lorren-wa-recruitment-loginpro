@@ -146,6 +146,14 @@ test('antes de la fecha oficial el contador queda en cero y no consulta asignaci
   assert.equal(prisma.calls.length, 0);
 });
 
+test('la vista previa cuenta elegibles reales sin crear snapshots', async () => {
+  const prisma = prismaWithAssignments([assignment({ id: 'preview-1', workerId: 'worker-1', fullName: 'Prueba', documentNumber: '100', serviceDate: '2026-10-02' })]);
+  const before = prisma.auditEvents.length;
+  const counter = await loadAttendanceBillingCounter(prisma, { billingStartDate: BILLING_START, now: new Date('2026-10-03T15:00:00.000Z'), readOnly: true, env: {} });
+  assert.equal(counter.count, 1);
+  assert.equal(prisma.auditEvents.length, before);
+});
+
 test('sin fecha persistida ni variable de entorno no inventa un inicio contractual', async () => {
   const prisma = prismaWithAssignments([]);
   const counters = await loadAttendanceBillingCounters(prisma, { now: new Date('2026-09-30T20:00:00.000Z'), env: {} });

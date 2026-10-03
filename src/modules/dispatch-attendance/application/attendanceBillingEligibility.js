@@ -197,6 +197,7 @@ export async function ensureAttendanceBillingEligibilityForAssignment(prisma, as
   if (existing) return { locked: false, existing: true, reason: 'already_locked', snapshot: publicSnapshot(existing) };
 
   const snapshot = assignmentSnapshotData(assignment, now, input);
+  if (input.readOnly) return { locked: false, reason: 'preview_only', snapshot };
   const event = await prisma.devAuditEvent.create({
     data: {
       entityType: ATTENDANCE_BILLING_ELIGIBILITY_ENTITY_TYPE,
