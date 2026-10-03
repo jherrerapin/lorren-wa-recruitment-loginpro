@@ -112,3 +112,12 @@ test('Tickets conserva header canónico, icono propio y color tenue por estado',
   assert.match(admin, /status-cancelled/);
   assert.match(admin, /data-ticket-status/);
 });
+
+
+test('desarrollo automatizado analiza impacto antes de editar y aborta soluciones parciales', () => {
+  assert.match(developmentWorkflow, /Before editing, perform a requirement-impact pass/);
+  assert.match(developmentWorkflow, /persistence\/UI\/API consequences/);
+  assert.match(developmentWorkflow, /two or more materially different BUSINESS behaviors/);
+  assert.match(developmentWorkflow, /LEAVE THE WORKSPACE COMPLETELY UNCHANGED/);
+  assert.match(developmentWorkflow, /Never implement schema\/runtime\/UI partially when a required migration is protected/);
+});
