@@ -685,6 +685,7 @@ model DispatchClientService {
   client            DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   name              String
   description       String?
+  billingRates      Json?
   isActive          Boolean                  @default(true)
   createdByUsername String?
   createdAt         DateTime                 @default(now())

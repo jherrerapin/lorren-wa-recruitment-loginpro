@@ -184,6 +184,7 @@
               <div class="field full"><label for="serviceName">Nombre del servicio</label><input id="serviceName" name="name" required placeholder="Ej: Cargue y descargue" /></div>
               <div class="field"><label for="serviceActive">Estado</label><select id="serviceActive" name="isActive"><option value="true">Activo</option><option value="false">Inactivo</option></select></div>
               <div class="field full"><label for="serviceDescription">Descripción</label><textarea id="serviceDescription" name="description" placeholder="Detalles, alcance o condiciones del servicio"></textarea></div>
+              <div class="field full"><label for="serviceBillingRates">Tarifas</label><textarea id="serviceBillingRates" name="billingRates" placeholder='Una tarifa por línea o JSON como ["Tarifa base", "Tarifa nocturna"]'></textarea><small class="muted">Los servicios de producción pueden registrar más de una tarifa.</small></div>
             </div>
             <div class="form-actions"><button class="btn btn-primary" type="submit">Crear servicio</button></div>
           </form>
@@ -200,6 +201,7 @@
                   <h3><%= service.name %></h3>
                   <div class="item-meta">
                     <span><strong>Descripción:</strong> <%= service.description || '—' %></span>
+                    <span><strong>Tarifas:</strong> <%= Array.isArray(service.billingRates) && service.billingRates.length ? service.billingRates.join(' · ') : '—' %></span>
                     <span><strong>Estado:</strong> <span class="pill <%= service.isActive ? 'pill-green' : 'pill-amber' %>"><%= service.isActive ? 'Activo' : 'Inactivo' %></span></span>
                   </div>
                   <details class="crud-details"><summary>Editar servicio</summary>
@@ -207,6 +209,7 @@
                       <div class="field full"><label>Nombre</label><input name="name" required value="<%= service.name %>" /></div>
                       <div class="field"><label>Estado</label><select name="isActive"><option value="true" <%= service.isActive ? 'selected' : '' %>>Activo</option><option value="false" <%= !service.isActive ? 'selected' : '' %>>Inactivo</option></select></div>
                       <div class="field full"><label>Descripción</label><textarea name="description"><%= service.description || '' %></textarea></div>
+                      <div class="field full"><label>Tarifas</label><textarea name="billingRates"><%= Array.isArray(service.billingRates) ? JSON.stringify(service.billingRates, null, 2) : '' %></textarea><small class="muted">Usa JSON si necesitas más de una tarifa.</small></div>
                       <div class="form-actions full"><button class="btn btn-primary" type="submit">Guardar servicio</button></div>
                     </form>
                   </details>
