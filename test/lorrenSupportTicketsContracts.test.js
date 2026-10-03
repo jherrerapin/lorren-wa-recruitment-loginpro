@@ -95,3 +95,20 @@ test('el panel de tickets continúa montado sin autoridad paralela por rol Super
   assert.match(server, /\/admin\/lorren-tickets/);
   assert.doesNotMatch(admin, /operationalRole\(req\) === 'SUPERVISOR'/);
 });
+
+test('Tickets conserva header canónico, icono propio y color tenue por estado', () => {
+  assert.match(navigation, /TICKETS_ICON/);
+  assert.match(navigation, /standaloneIcon\(TICKETS_ICON\)/);
+  assert.match(admin, /buildAdminModuleNavbar/);
+  assert.match(admin, /navbar: buildAdminModuleNavbar\(req\)/);
+  assert.match(admin, /admin-module-navigation\.css/);
+  assert.match(admin, /status-received/);
+  assert.match(admin, /status-review/);
+  assert.match(admin, /status-approved/);
+  assert.match(admin, /status-progress/);
+  assert.match(admin, /status-validation/);
+  assert.match(admin, /status-done/);
+  assert.match(admin, /status-rejected/);
+  assert.match(admin, /status-cancelled/);
+  assert.match(admin, /data-ticket-status/);
+});
