@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   loadLorrenAiUsageSummary,
   persistLorrenBotUsage,
+  persistLorrenTicketInterpretationUsage,
   recordLorrenTicketDevelopmentUsage,
   signLorrenTicketDevelopmentUsage
 } from '../src/services/lorrenAiUsageCounter.js';
@@ -20,7 +21,12 @@ function fakePrisma() {
     },
     devAuditEvent: {
       async findMany({ where }) {
-        return auditEvents.filter((row) => row.entityType === where.entityType && row.action === where.action);
+        return auditEvents.filter((row) => (
+          row.entityType === where.entityType
+          && row.action === where.action
+          && (!where.createdAt?.gte || row.createdAt >= where.createdAt.gte)
+          && (!where.createdAt?.lt || row.createdAt < where.createdAt.lt)
+        ));
       },
       async findFirst({ where }) {
         return auditEvents.find((row) => row.entityType === where.entityType && row.entityId === where.entityId && row.action === where.action) || null;
@@ -36,7 +42,7 @@ function fakePrisma() {
   return client;
 }
 
-test('consolida BOT, CV y desarrollo de tickets usando telemetría provider-reported', async () => {
+test('consolida reclutamiento, CV, interpretación y desarrollo usando solo el día UTC actual', async () => {
   const prisma = fakePrisma();
   await persistLorrenBotUsage(prisma, {
     source: 'CANDIDATE_EXTRACTION',
@@ -47,6 +53,18 @@ test('consolida BOT, CV y desarrollo de tickets usando telemetría provider-repo
     source: 'CONVERSATION_REPLY',
     model: 'gpt-4o-mini',
     usage: { input_tokens: 70, output_tokens: 20, total_tokens: 90 }
+  });
+  await persistLorrenTicketInterpretationUsage(prisma, {
+    source: 'SUPPORT_TICKET_INTERPRETATION',
+    model: 'gpt-5.4-mini',
+    usage: { input_tokens: 40, output_tokens: 10, total_tokens: 50 }
+  });
+  prisma.auditEvents.push({
+    entityType: 'LORREN_AI_USAGE',
+    entityId: 'yesterday-bot',
+    action: 'BOT_RUNTIME_USAGE',
+    createdAt: new Date('2026-10-01T23:59:59.999Z'),
+    metadata: { inputTokens: 900000, outputTokens: 100000, totalTokens: 1000000 }
   });
   prisma.auditEvents.push({
     entityType: 'LORREN_AI_USAGE',
@@ -71,11 +89,15 @@ test('consolida BOT, CV y desarrollo de tickets usando telemetría provider-repo
   assert.equal(summary.bot.events, 2);
   assert.equal(summary.cv.totalTokens, 240);
   assert.equal(summary.cv.cachedInputTokens, 50);
+  assert.equal(summary.ticketInterpretation.totalTokens, 50);
+  assert.equal(summary.ticketInterpretation.events, 1);
   assert.equal(summary.ticketDevelopment.totalTokens, 480);
-  assert.equal(summary.totalTokens, 960);
-  assert.equal(summary.remainingTokens, 2_499_040);
-  assert.deepEqual(summary.coverage, { bot: true, cv: true, ticketDevelopment: true });
+  assert.equal(summary.totalTokens, 1010);
+  assert.equal(summary.remainingTokens, 2_498_990);
+  assert.deepEqual(summary.coverage, { bot: true, cv: true, ticketInterpretation: true, ticketDevelopment: true });
   assert.equal(summary.period.timeZone, 'UTC');
+  assert.equal(summary.period.start, '2026-10-02T00:00:00.000Z');
+  assert.equal(summary.period.end, '2026-10-03T00:00:00.000Z');
 });
 
 test('callback firmado persiste uso de Codex una sola vez y no guarda contenido del ticket', async () => {
