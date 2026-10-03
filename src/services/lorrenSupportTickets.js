@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { loadLorrenBillingConfig } from './lorrenBillingConfig.js';
 import { normalizeDispatchWhatsappPhone } from './dispatchWhatsappCloudConfig.js';
 import { interpretLorrenSupportTicket } from './lorrenSupportTicketInterpreter.js';
-import { persistLorrenBotUsage } from './lorrenAiUsageCounter.js';
+import { persistLorrenTicketInterpretationUsage } from './lorrenAiUsageCounter.js';
 
 const CONFIG_ENTITY_TYPE = 'LORREN_SUPPORT_CONFIG';
 const CONFIG_ENTITY_ID = 'singleton';
@@ -184,7 +184,7 @@ export async function createLorrenSupportTicket(prisma, input = {}) {
   const id = input.id || randomUUID();
   const now = new Date().toISOString();
   const interpretation = input.interpretation || await interpretLorrenSupportTicket(originalText, {
-    onUsage: async (event) => persistLorrenBotUsage(prisma, event)
+    onUsage: async (event) => persistLorrenTicketInterpretationUsage(prisma, event)
   });
   const suggestedPriority = LORREN_SUPPORT_PRIORITIES.includes(interpretation?.suggestedPriority)
     ? interpretation.suggestedPriority
