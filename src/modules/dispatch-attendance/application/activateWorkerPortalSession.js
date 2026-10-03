@@ -128,17 +128,17 @@ export async function recoverWorkerPortalSessionForInstallation({
   const normalizedInstallationId = normalizeInstallationId(installationId);
   const rawSessionToken = generateWorkerPortalSessionToken(randomBytesFn);
   const expiresAt = buildWorkerPortalSessionContinuityExpiry(now);
-  const result = requireSessionResult(
-    await repository.recoverActiveSessionByInstallation({
-      installationIdHash: hashInstallationId(normalizedInstallationId, installationPepper),
-      nextSessionTokenHash: hashWorkerPortalSessionToken(rawSessionToken),
-      expiresAt,
-      now,
-      userAgent: normalizeOptionalText(userAgent, 500),
-      platform: normalizeOptionalText(platform, 120),
-      ipAddress: normalizeOptionalText(ipAddress, 120)
-    })
-  );
+  const recovered = await repository.recoverActiveSessionByInstallation({
+    installationIdHash: hashInstallationId(normalizedInstallationId, installationPepper),
+    nextSessionTokenHash: hashWorkerPortalSessionToken(rawSessionToken),
+    expiresAt,
+    now,
+    userAgent: normalizeOptionalText(userAgent, 500),
+    platform: normalizeOptionalText(platform, 120),
+    ipAddress: normalizeOptionalText(ipAddress, 120)
+  });
+  if (!recovered) return null;
+  const result = requireSessionResult(recovered);
 
   return {
     workerId: result.workerId,
