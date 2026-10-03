@@ -141,6 +141,11 @@ enum DispatchContractType {
   CONTRATISTA
 }
 
+enum DispatchBillingMode {
+  PERSON
+  PRODUCTION
+}
+
 model City {
   id                 String               @id @default(cuid())
   name               String               @unique
@@ -685,6 +690,7 @@ model DispatchClientService {
   client            DispatchClient           @relation(fields: [clientId], references: [id], onDelete: Cascade)
   name              String
   description       String?
+  billingMode       DispatchBillingMode?
   billingRates      Json?
   isActive          Boolean                  @default(true)
   createdByUsername String?
