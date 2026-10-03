@@ -62,6 +62,11 @@ export function lorrenSupportDevelopmentReadiness(env = process.env) {
   };
 }
 
+function textList(value, maxItems = 10, maxLength = 500) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => text(item, maxLength)).filter(Boolean).slice(0, maxItems);
+}
+
 function interpretationPayload(value) {
   const source = value && typeof value === 'object' ? value : {};
   return {
@@ -72,6 +77,8 @@ function interpretationPayload(value) {
     currentBehavior: text(source.currentBehavior, 1600),
     expectedBehavior: text(source.expectedBehavior, 1600),
     suggestedScope: text(source.suggestedScope, 2000),
+    functionalImplications: textList(source.functionalImplications, 10, 500),
+    businessUnknowns: textList(source.businessUnknowns, 8, 500),
     confidence: text(source.confidence, 40),
     suggestedPriority: text(source.suggestedPriority, 40)
   };

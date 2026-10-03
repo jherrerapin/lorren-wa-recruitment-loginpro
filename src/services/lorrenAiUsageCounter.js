@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 const DEFAULT_DAILY_BUDGET = 2_500_000;
 const USAGE_ENTITY_TYPE = 'LORREN_AI_USAGE';
 const BOT_RUNTIME_ACTION = 'BOT_RUNTIME_USAGE';
+const TICKET_INTERPRETATION_ACTION = 'TICKET_INTERPRETATION_USAGE';
 const TICKET_DEVELOPMENT_ACTION = 'TICKET_DEVELOPMENT_USAGE';
 const usageRecorderStorage = new AsyncLocalStorage();
 
@@ -81,22 +82,24 @@ async function loadCvUsage(prisma, range) {
 
 export async function loadLorrenAiUsageSummary(prisma, options = {}) {
   const range = utcDayRange(options.now || new Date());
-  const [bot, cv, ticketDevelopment] = await Promise.all([
+  const [bot, cv, ticketInterpretation, ticketDevelopment] = await Promise.all([
     loadAuditUsage(prisma, range, BOT_RUNTIME_ACTION),
     loadCvUsage(prisma, range),
+    loadAuditUsage(prisma, range, TICKET_INTERPRETATION_ACTION),
     loadAuditUsage(prisma, range, TICKET_DEVELOPMENT_ACTION)
   ]);
-  const totalTokens = bot.usage.totalTokens + cv.usage.totalTokens + ticketDevelopment.usage.totalTokens;
+  const totalTokens = bot.usage.totalTokens + cv.usage.totalTokens + ticketInterpretation.usage.totalTokens + ticketDevelopment.usage.totalTokens;
   const budget = dailyBudget(options.env || process.env);
   return {
     period: { start: range.start.toISOString(), end: range.end.toISOString(), timeZone: 'UTC' },
     bot: bot.usage,
     cv: cv.usage,
+    ticketInterpretation: ticketInterpretation.usage,
     ticketDevelopment: ticketDevelopment.usage,
     totalTokens,
     dailyBudget: budget,
     remainingTokens: Math.max(0, budget - totalTokens),
-    coverage: { bot: bot.observable, cv: cv.observable, ticketDevelopment: ticketDevelopment.observable }
+    coverage: { bot: bot.observable, cv: cv.observable, ticketInterpretation: ticketInterpretation.observable, ticketDevelopment: ticketDevelopment.observable }
   };
 }
 
@@ -116,23 +119,31 @@ export async function recordCurrentLorrenBotUsage(event = {}) {
   }
 }
 
-export async function persistLorrenBotUsage(prisma, event = {}) {
+async function persistAuditUsage(prisma, event, action, actorSource) {
   if (!prisma?.devAuditEvent?.create) return { recorded: false, reason: 'persistence_unavailable' };
   const usage = normalizeUsage(event.usage);
   if (!usage.totalTokens) return { recorded: false, reason: 'usage_missing' };
-  const source = String(event.source || 'BOT').trim().slice(0, 80) || 'BOT';
+  const source = String(event.source || 'UNKNOWN').trim().slice(0, 80) || 'UNKNOWN';
   const model = String(event.model || '').trim().slice(0, 120) || null;
   await prisma.devAuditEvent.create({
     data: {
       entityType: USAGE_ENTITY_TYPE,
       entityId: crypto.randomUUID(),
       entityLabel: source,
-      action: BOT_RUNTIME_ACTION,
-      actorSource: 'lorren-bot-runtime',
+      action,
+      actorSource,
       metadata: { source, model, ...usage }
     }
   });
   return { recorded: true };
+}
+
+export async function persistLorrenBotUsage(prisma, event = {}) {
+  return persistAuditUsage(prisma, event, BOT_RUNTIME_ACTION, 'lorren-recruitment-bot-runtime');
+}
+
+export async function persistLorrenTicketInterpretationUsage(prisma, event = {}) {
+  return persistAuditUsage(prisma, event, TICKET_INTERPRETATION_ACTION, 'lorren-support-ticket-interpreter');
 }
 
 function usageSigningKey(token) {

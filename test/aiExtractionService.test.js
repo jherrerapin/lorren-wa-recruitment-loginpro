@@ -169,3 +169,37 @@ test('no invoca NLU cuando no hay texto o campos pendientes', async () => {
 
   assert.equal(result.module, 'RECLUTAMIENTO');
 });
+
+
+test('intérprete de tickets pide implicaciones necesarias y separa incógnitas de negocio', async () => {
+  let requestBody;
+  const parsed = {
+    title: 'Configurar tarifas de producción',
+    module: 'DESPACHO',
+    type: 'MEJORA',
+    summary: 'Configurar tarifas según modalidad.',
+    currentBehavior: null,
+    expectedBehavior: 'La configuración debe ser coherente con la modalidad.',
+    suggestedScope: 'Modelar la modalidad y sus tarifas.',
+    functionalImplications: ['La modalidad debe persistirse y validarse antes de aplicar tarifas.'],
+    businessUnknowns: [],
+    confidence: 'ALTA',
+    suggestedPriority: 'NORMAL'
+  };
+  const result = await interpretLorrenSupportTicket('Si es producción debe permitir concepto y tarifa.', {
+    apiKey: 'test-key',
+    httpClient: {
+      async post(_url, body) {
+        requestBody = body;
+        return { data: { output: [{ content: [{ parsed }] }], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15 } } };
+      }
+    }
+  });
+
+  assert.deepEqual(result.functionalImplications, parsed.functionalImplications);
+  assert.deepEqual(result.businessUnknowns, []);
+  const systemText = requestBody.input[0].content[0].text;
+  assert.match(systemText, /condiciones funcionales necesarias/i);
+  assert.match(systemText, /inspeccionando el sistema/i);
+  assert.match(systemText, /dos o más resultados plausibles/i);
+});
