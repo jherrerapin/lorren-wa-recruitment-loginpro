@@ -184,7 +184,28 @@
               <div class="field full"><label for="serviceName">Nombre del servicio</label><input id="serviceName" name="name" required placeholder="Ej: Cargue y descargue" /></div>
               <div class="field"><label for="serviceActive">Estado</label><select id="serviceActive" name="isActive"><option value="true">Activo</option><option value="false">Inactivo</option></select></div>
               <div class="field full"><label for="serviceDescription">Descripción</label><textarea id="serviceDescription" name="description" placeholder="Detalles, alcance o condiciones del servicio"></textarea></div>
-              <div class="field full"><label for="serviceBillingRates">Tarifas</label><textarea id="serviceBillingRates" name="billingRates" placeholder='Una tarifa por línea o JSON como ["Tarifa base", "Tarifa nocturna"]'></textarea><small class="muted">Los servicios de producción pueden registrar más de una tarifa.</small></div>
+              <div class="field full service-billing" data-service-billing>
+                <label>Modalidad de cobro</label>
+                <div class="actions">
+                  <label><input type="radio" name="billingMode" value="PERSON" checked /> Por persona</label>
+                  <label><input type="radio" name="billingMode" value="PRODUCTION" /> Por producción</label>
+                </div>
+                <div data-person-billing>
+                  <label>Tarifa por persona</label>
+                  <input name="personRate" inputmode="decimal" required placeholder="Ej: 65000" />
+                  <small class="muted">El total se calculará con esta tarifa por la cantidad de personas asignadas.</small>
+                </div>
+                <div data-production-billing hidden>
+                  <label>Tarifas de producción</label>
+                  <div data-production-rates>
+                    <div class="form-grid" data-production-rate-row>
+                      <div class="field"><label>Concepto</label><input name="productionConcept" placeholder="Ej: Caja, tonelada, viaje..." /></div>
+                      <div class="field"><label>Tarifa</label><input name="productionRate" inputmode="decimal" placeholder="Valor" /></div>
+                    </div>
+                  </div>
+                  <button class="btn" type="button" data-add-production-rate>Agregar tarifa</button>
+                </div>
+              </div>
             </div>
             <div class="form-actions"><button class="btn btn-primary" type="submit">Crear servicio</button></div>
           </form>
@@ -201,7 +222,8 @@
                   <h3><%= service.name %></h3>
                   <div class="item-meta">
                     <span><strong>Descripción:</strong> <%= service.description || '—' %></span>
-                    <span><strong>Tarifas:</strong> <%= Array.isArray(service.billingRates) && service.billingRates.length ? service.billingRates.join(' · ') : '—' %></span>
+                    <span><strong>Modalidad:</strong> <%= service.billingMode === 'PERSON' ? 'Por persona' : service.billingMode === 'PRODUCTION' ? 'Por producción' : 'Legacy / sin clasificar' %></span>
+                    <span><strong>Tarifas:</strong> <% if (service.billingMode === 'PERSON' && Array.isArray(service.billingRates) && service.billingRates[0]?.rate) { %>$<%= Number(service.billingRates[0].rate).toLocaleString('es-CO') %> por persona<% } else if (service.billingMode === 'PRODUCTION' && Array.isArray(service.billingRates)) { %><%= service.billingRates.map((item) => `${item.concept}: ${Number(item.rate).toLocaleString('es-CO')}`).join(' · ') || '—' %><% } else { %><%= Array.isArray(service.billingRates) ? service.billingRates.map((item) => typeof item === 'string' ? item : JSON.stringify(item)).join(' · ') : '—' %><% } %></span>
                     <span><strong>Estado:</strong> <span class="pill <%= service.isActive ? 'pill-green' : 'pill-amber' %>"><%= service.isActive ? 'Activo' : 'Inactivo' %></span></span>
                   </div>
                   <details class="crud-details"><summary>Editar servicio</summary>
@@ -209,7 +231,32 @@
                       <div class="field full"><label>Nombre</label><input name="name" required value="<%= service.name %>" /></div>
                       <div class="field"><label>Estado</label><select name="isActive"><option value="true" <%= service.isActive ? 'selected' : '' %>>Activo</option><option value="false" <%= !service.isActive ? 'selected' : '' %>>Inactivo</option></select></div>
                       <div class="field full"><label>Descripción</label><textarea name="description"><%= service.description || '' %></textarea></div>
-                      <div class="field full"><label>Tarifas</label><textarea name="billingRates"><%= Array.isArray(service.billingRates) ? JSON.stringify(service.billingRates, null, 2) : '' %></textarea><small class="muted">Usa JSON si necesitas más de una tarifa.</small></div>
+                      <div class="field full service-billing" data-service-billing>
+                        <label>Modalidad de cobro</label>
+                        <div class="actions">
+                          <label><input type="radio" name="billingMode" value="PERSON" <%= service.billingMode === 'PERSON' ? 'checked' : '' %> /> Por persona</label>
+                          <label><input type="radio" name="billingMode" value="PRODUCTION" <%= service.billingMode === 'PRODUCTION' ? 'checked' : '' %> /> Por producción</label>
+                        </div>
+                        <% const structuredRates = Array.isArray(service.billingRates) ? service.billingRates : []; %>
+                        <div data-person-billing <%= service.billingMode === 'PRODUCTION' ? 'hidden' : '' %>>
+                          <label>Tarifa por persona</label>
+                          <input name="personRate" inputmode="decimal" value="<%= service.billingMode === 'PERSON' ? (structuredRates[0]?.rate || '') : '' %>" <%= service.billingMode === 'PERSON' ? 'required' : '' %> />
+                        </div>
+                        <div data-production-billing <%= service.billingMode === 'PRODUCTION' ? '' : 'hidden' %>>
+                          <label>Tarifas de producción</label>
+                          <div data-production-rates>
+                            <% const productionRates = service.billingMode === 'PRODUCTION' && structuredRates.length ? structuredRates : [{ concept: '', rate: '' }]; %>
+                            <% productionRates.forEach((rate) => { %>
+                              <div class="form-grid" data-production-rate-row>
+                                <div class="field"><label>Concepto</label><input name="productionConcept" value="<%= rate.concept || '' %>" /></div>
+                                <div class="field"><label>Tarifa</label><input name="productionRate" inputmode="decimal" value="<%= rate.rate || '' %>" /></div>
+                              </div>
+                            <% }) %>
+                          </div>
+                          <button class="btn" type="button" data-add-production-rate>Agregar tarifa</button>
+                        </div>
+                        <% if (!service.billingMode && structuredRates.length) { %><small class="muted">Este servicio conserva tarifas anteriores. Selecciona una modalidad para convertirlas al nuevo formato al guardar.</small><% } %>
+                      </div>
                       <div class="form-actions full"><button class="btn btn-primary" type="submit">Guardar servicio</button></div>
                     </form>
                   </details>
@@ -237,6 +284,33 @@
     const DEFAULT_ATTENDANCE_MAP_CENTER = [4.0, -73.5];
     const DEFAULT_ATTENDANCE_MAP_ZOOM = 5;
     const attendanceMaps = new WeakMap();
+
+    function initializeServiceBilling(container) {
+      const modeInputs = Array.from(container.querySelectorAll('input[name="billingMode"]'));
+      const personSection = container.querySelector('[data-person-billing]');
+      const productionSection = container.querySelector('[data-production-billing]');
+      const ratesContainer = container.querySelector('[data-production-rates]');
+      const addButton = container.querySelector('[data-add-production-rate]');
+      const sync = () => {
+        const mode = modeInputs.find((input) => input.checked)?.value || '';
+        const person = mode === 'PERSON';
+        const production = mode === 'PRODUCTION';
+        personSection.hidden = !person;
+        productionSection.hidden = !production;
+        personSection.querySelectorAll('input').forEach((input) => { input.required = person; input.disabled = !person; });
+        productionSection.querySelectorAll('input').forEach((input) => { input.required = production; input.disabled = !production; });
+      };
+      modeInputs.forEach((input) => input.addEventListener('change', sync));
+      addButton?.addEventListener('click', () => {
+        const row = document.createElement('div');
+        row.className = 'form-grid';
+        row.dataset.productionRateRow = '';
+        row.innerHTML = '<div class="field"><label>Concepto</label><input name="productionConcept" required placeholder="Concepto" /></div><div class="field"><label>Tarifa</label><input name="productionRate" inputmode="decimal" required placeholder="Valor" /></div>';
+        ratesContainer.appendChild(row);
+      });
+      sync();
+    }
+    document.querySelectorAll('[data-service-billing]').forEach(initializeServiceBilling);
 
     function refreshSelectState(select) { select.classList.toggle('has-selection', Boolean(select.value)); }
 
