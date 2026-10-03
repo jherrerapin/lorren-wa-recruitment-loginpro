@@ -55,6 +55,7 @@ import { getReminderMissingItems } from '../services/reminder.js';
 import { clearCandidateCvStorage, resolveCandidateCvBuffer, storeCandidateCv } from '../services/cvStorage.js';
 import { isStorageConfigured } from '../services/storage.js';
 import { loadPendingCvMigrationCount, migrateCandidateCvBatch } from '../services/cvMigration.js';
+import { upsertDispatchWorkerFromCandidate } from '../services/dispatchWorkerSync.js';
 import { normalizeKnowledgeContent, normalizeKnowledgeScope } from '../services/botKnowledge.js';
 import {
   buildCandidateAccessWhere,
