@@ -42,7 +42,7 @@ function fakePrisma() {
   return client;
 }
 
-test('consolida reclutamiento, CV, interpretación y desarrollo usando solo el día UTC actual', async () => {
+test('consolida reclutamiento, CV, interpretación y desarrollo usando el día de Bogotá', async () => {
   const prisma = fakePrisma();
   await persistLorrenBotUsage(prisma, {
     source: 'CANDIDATE_EXTRACTION',
@@ -95,9 +95,9 @@ test('consolida reclutamiento, CV, interpretación y desarrollo usando solo el d
   assert.equal(summary.totalTokens, 1010);
   assert.equal(summary.remainingTokens, 2_498_990);
   assert.deepEqual(summary.coverage, { bot: true, cv: true, ticketInterpretation: true, ticketDevelopment: true });
-  assert.equal(summary.period.timeZone, 'UTC');
-  assert.equal(summary.period.start, '2026-10-02T00:00:00.000Z');
-  assert.equal(summary.period.end, '2026-10-03T00:00:00.000Z');
+  assert.equal(summary.period.timeZone, 'America/Bogota');
+  assert.equal(summary.period.start, '2026-10-02T05:00:00.000Z');
+  assert.equal(summary.period.end, '2026-10-03T05:00:00.000Z');
 });
 
 test('callback firmado persiste uso de Codex una sola vez y no guarda contenido del ticket', async () => {
@@ -152,7 +152,7 @@ test('rechaza callbacks sin firma válida', async () => {
 });
 
 
-test('el cutover de corrección excluye consumo previo del mismo día sin borrar auditoría', async () => {
+test('eventos legacy ajenos no contaminan el bot y el día local no incluye la noche anterior', async () => {
   const prisma = fakePrisma();
   prisma.auditEvents.push({
     entityType: 'LORREN_AI_USAGE',
@@ -161,14 +161,18 @@ test('el cutover de corrección excluye consumo previo del mismo día sin borrar
     createdAt: new Date('2026-10-03T15:43:58.999Z'),
     metadata: { inputTokens: 2_000_000, outputTokens: 0, totalTokens: 2_000_000 }
   });
+  prisma.auditEvents.push({ entityType: 'LORREN_AI_USAGE', action: 'BOT_RUNTIME_USAGE', actorSource: 'lorren-recruitment-bot-runtime', createdAt: new Date('2026-10-03T04:59:59.999Z'), metadata: { source: 'CONVERSATION_REPLY', totalTokens: 77 } });
+  const rejected = await persistLorrenBotUsage(prisma, { source: 'SUPPORT_TICKET_INTERPRETATION', usage: { totalTokens: 99 } });
+  assert.equal(rejected.recorded, false);
 
   const summary = await loadLorrenAiUsageSummary(prisma, {
     now: new Date('2026-10-03T15:44:00.000Z'),
     dailyBudget: 2_500_000
   });
 
-  assert.equal(summary.totalTokens, 0);
-  assert.equal(summary.remainingTokens, 2_500_000);
-  assert.equal(summary.period.start, '2026-10-03T15:43:59.000Z');
-  assert.equal(prisma.auditEvents.length, 1);
+  assert.equal(summary.bot.totalTokens, 0);
+  assert.equal(summary.totalTokens, 240);
+  assert.equal(summary.remainingTokens, 2_499_760);
+  assert.equal(summary.period.start, '2026-10-03T05:00:00.000Z');
+  assert.equal(prisma.auditEvents.length, 2);
 });

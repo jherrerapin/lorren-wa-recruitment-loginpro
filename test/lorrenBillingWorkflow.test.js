@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   LORREN_ACCOUNT_ENTITY_TYPE,
   ensureLorrenAccountCharge,
+  previewLorrenAccountCharge,
   loadLorrenAccountForInvoice,
   loadLorrenApprovalState,
   resolveLorrenAttendanceApproval
@@ -15,7 +16,10 @@ import {
 } from '../src/services/lorrenBillingConfig.js';
 import {
   ATTENDANCE_BILLING_INVOICE_ACTION,
-  ATTENDANCE_BILLING_INVOICE_ENTITY_TYPE
+  ATTENDANCE_BILLING_INVOICE_ENTITY_TYPE,
+  ATTENDANCE_BILLING_CONFIG_ACTION,
+  ATTENDANCE_BILLING_CONFIG_ENTITY_ID,
+  ATTENDANCE_BILLING_CONFIG_ENTITY_TYPE
 } from '../src/modules/dispatch-attendance/application/attendanceBillingCounter.js';
 
 function configMetadata() {
@@ -80,4 +84,15 @@ test('ensure de cuenta usa snapshot y es idempotente por factura', async () => {
   const first = await ensureLorrenAccountCharge(prisma, invoice, configMetadata(), { supervisorName: 'Supervisor', supervisorPhone: '573004445566' });
   const second = await ensureLorrenAccountCharge(prisma, invoice, configMetadata(), { supervisorName: 'Supervisor', supervisorPhone: '573004445566' });
   assert.equal(first.created, true); assert.equal(second.created, false); assert.equal(second.account.total, 1715000); const state = await loadLorrenApprovalState(prisma, 'ASIS-202610'); assert.equal(state.status, 'UNSENT');
+});
+
+test('la cuenta de prueba usa el acumulado a hoy y no escribe ni aprueba', async () => {
+  const prisma = makePrisma();
+  prisma.events.push({ entityType: ATTENDANCE_BILLING_CONFIG_ENTITY_TYPE, entityId: ATTENDANCE_BILLING_CONFIG_ENTITY_ID, action: ATTENDANCE_BILLING_CONFIG_ACTION, metadata: { billingStartDate: '2026-10-01' }, createdAt: new Date('2026-09-30T20:00:00.000Z') });
+  prisma.dispatchAssignment = { async findMany() { return [{ id: 'a1', workerId: 'w1', serviceRequestId: 'r1', status: 'CONFIRMED', worker: { id: 'w1', fullName: 'Auxiliar de prueba', documentNumber: '100', isTestProfile: false }, serviceRequest: { id: 'r1', serviceDate: new Date('2026-10-02T00:00:00.000Z'), startTime: '08:00', operationPointId: 'p1', operationPointName: 'Prueba', operationPoint: { id: 'p1', attendanceEnabled: true } } }]; } };
+  const countBefore = prisma.events.length;
+  const account = await previewLorrenAccountCharge(prisma, new Date('2026-10-03T15:00:00.000Z'));
+  assert.equal(account.total, 1_407_500);
+  assert.equal(account.cycleEnd, '2026-10-03');
+  assert.equal(prisma.events.length, countBefore);
 });

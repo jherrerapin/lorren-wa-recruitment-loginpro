@@ -388,8 +388,9 @@ export async function loadAttendanceBillingCounter(prisma, input = {}) {
     return Boolean(serviceDate && serviceDate >= cycle.start && serviceDate <= cycle.effectiveTo);
   });
 
-  await ensureAttendanceBillingEligibilitySnapshots(prisma, relevantAssignments, {
+  const eligibility = await ensureAttendanceBillingEligibilitySnapshots(prisma, relevantAssignments, {
     now: input.now || new Date(),
+    readOnly: input.readOnly === true,
     actorSource: 'attendance-billing-counter'
   });
 
@@ -397,6 +398,12 @@ export async function loadAttendanceBillingCounter(prisma, input = {}) {
     cycleStart: cycle.start,
     cycleEndExclusive: cycle.endExclusive
   });
+  if (input.readOnly) {
+    const persistedIds = new Set(snapshots.map((snapshot) => snapshot.assignmentId));
+    for (const result of eligibility) {
+      if (result.reason === 'preview_only' && result.snapshot && !persistedIds.has(result.snapshot.assignmentId)) snapshots.push(result.snapshot);
+    }
+  }
 
   const byIdentity = new Map();
   for (const snapshot of snapshots) {

@@ -1,4 +1,4 @@
-import { loadAttendanceBillingInvoices } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
+import { attendanceBillingPriceForCount, loadAttendanceBillingCounter, loadAttendanceBillingInvoices } from '../modules/dispatch-attendance/application/attendanceBillingCounter.js';
 import { loadLorrenBillingConfig } from './lorrenBillingConfig.js';
 import { buildAccountChargePdfBuffer, buildAttendanceInvoicePdfBuffer } from './lorrenBillingPdf.js';
 import { getLorrenWhatsappConfig, sendLorrenAccountCharge, sendLorrenAttendanceApproval, sendLorrenDevAlert } from './lorrenWhatsappClient.js';
@@ -37,14 +37,25 @@ export async function loadLorrenAccountForInvoice(prisma, invoiceNumber) {
 }
 export async function ensureLorrenAccountCharge(prisma, invoice, config, input = {}) {
   const existing = await loadLorrenAccountForInvoice(prisma, invoice.invoiceNumber); if (existing) return { created: false, account: existing, reason: 'already_created' };
-  const fixedItems = (config.modules || []).filter((item) => item?.active !== false && Number(item?.value) >= 0).map((item) => ({ name: text(item.name, 160) || 'Módulo', value: Math.max(0, Number(item.value) || 0), source: 'FIXED' }));
-  const items = [...fixedItems, { name: 'Módulo de Asistencia y Gestión de Tiempo', value: Math.max(0, Number(invoice.total) || 0), source: 'ATTENDANCE', invoiceNumber: invoice.invoiceNumber }];
-  const total = items.reduce((sum, item) => sum + item.value, 0); const generatedAt = new Date().toISOString();
-  const account = { accountNumber: `COBRO-${String(invoice.cycleStart || '').slice(0, 7).replace('-', '')}`, generatedAt, attendanceInvoiceNumber: invoice.invoiceNumber, cycleStart: invoice.cycleStart, cycleEnd: invoice.cycleEnd, items, total, currency: 'COP', recipients: (config.recipients || []).filter((item) => item?.active !== false).map((item) => ({ ...item })), accountHeading: config.accountHeading || config.recipients?.[0]?.name || null, approvedBy: { name: text(input.supervisorName, 160) || config.supervisor?.name || null, phone: text(input.supervisorPhone, 32) || config.supervisor?.phone || null, approvedAt: generatedAt } };
+  const account = buildLorrenAccountCharge(invoice, config, input);
   try {
     const event = await prisma.devAuditEvent.create({ data: { id: `lorren-billing-account:${invoice.invoiceNumber}`, entityType: LORREN_ACCOUNT_ENTITY_TYPE, entityId: invoice.invoiceNumber, entityLabel: `Cuenta de cobro ${account.accountNumber}`, action: LORREN_ACCOUNT_ACTION, actorSource: 'lorren-billing-approval', metadata: account } });
     return { created: true, account: accountFromEvent(event), reason: 'created' };
   } catch (error) { if (error?.code !== 'P2002') throw error; return { created: false, account: await loadLorrenAccountForInvoice(prisma, invoice.invoiceNumber), reason: 'already_created' }; }
+}
+export function buildLorrenAccountCharge(invoice, config, input = {}) {
+  const fixedItems = (config.modules || []).filter((item) => item?.active !== false && Number(item?.value) >= 0).map((item) => ({ name: text(item.name, 160) || 'Módulo', value: Math.max(0, Number(item.value) || 0), source: 'FIXED' }));
+  const items = [...fixedItems, { name: 'Módulo de Asistencia y Gestión de Tiempo', value: Math.max(0, Number(invoice.total) || 0), source: 'ATTENDANCE', invoiceNumber: invoice.invoiceNumber }];
+  const total = items.reduce((sum, item) => sum + item.value, 0); const generatedAt = (input.generatedAt || new Date()).toISOString();
+  const account = { accountNumber: `COBRO-${String(invoice.cycleStart || '').slice(0, 7).replace('-', '')}`, generatedAt, attendanceInvoiceNumber: invoice.invoiceNumber, cycleStart: invoice.cycleStart, cycleEnd: invoice.cycleEnd, items, total, currency: 'COP', recipients: (config.recipients || []).filter((item) => item?.active !== false).map((item) => ({ ...item })), accountHeading: config.accountHeading || config.recipients?.[0]?.name || null, approvedBy: { name: text(input.supervisorName, 160) || config.supervisor?.name || null, phone: text(input.supervisorPhone, 32) || config.supervisor?.phone || null, approvedAt: generatedAt } };
+  return account;
+}
+export async function previewLorrenAccountCharge(prisma, now = new Date()) {
+  const [config, counter] = await Promise.all([loadLorrenBillingConfig(prisma), loadAttendanceBillingCounter(prisma, { now, readOnly: true })]);
+  if (!counter) return null;
+  const price = attendanceBillingPriceForCount(counter.count);
+  const invoice = { invoiceNumber: `ASIS-${counter.start.slice(0, 7).replace('-', '')}`, cycleStart: counter.start, cycleEnd: counter.effectiveTo || counter.end, total: price.total };
+  return buildLorrenAccountCharge(invoice, config, { supervisorName: config.supervisor?.name, supervisorPhone: config.supervisor?.phone, generatedAt: now });
 }
 async function deliveryAlreadySent(prisma, key) { const event = await prisma.devAuditEvent.findFirst({ where: { entityType: LORREN_DELIVERY_ENTITY_TYPE, entityId: key, action: LORREN_DELIVERY_ACTION }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] }); return Boolean(event); }
 async function recordDelivery(prisma, key, metadata) {
